@@ -15,6 +15,7 @@ Launch evidence reports observations only and never grants execution.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -25,11 +26,14 @@ from typing import Any
 from ..hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY
 from ..native_daemon_route import EXACT_ACTION_ASK_SLOTS, _decide
 from ..native_resident_decision import ResidentOperation
+from ..native_runtime import native_runtime_status
 from ..runtime.extension_control_runtime import current_extension_control_binding_digest
 from .hook_native_review_binding import native_review_policy_binding
 from .hook_request_parsing import pre_tool_command, pre_tool_input
 
-NATIVE_EXACT_ACTION_FEATURE = "native-exact-action-v5"
+NATIVE_EXACT_ACTION_FEATURE = "native-exact-action-v4"
+# The combined review-evidence ask; residents advertise it beside v4.
+NATIVE_REVIEW_EVIDENCE_FEATURE = "native-exact-action-v5"
 UNPROVEN_LAUNCH = "unproven_launch"
 _LOGGER = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 6.0
@@ -84,6 +88,19 @@ _OPERATION = ResidentOperation(
     timeout_seconds=_TIMEOUT_SECONDS,
     error=NativeExactActionError,
 )
+_EVIDENCE_OPERATION = ResidentOperation(
+    operation="native_exact_action",
+    feature=NATIVE_REVIEW_EVIDENCE_FEATURE,
+    prefix="native_exact_action",
+    request_schema="guard-native-exact-action-request.v1",
+    request_id_prefix="native-exact-action",
+    result_schema="guard-native-exact-action-result.v1",
+    timeout_seconds=_TIMEOUT_SECONDS,
+    error=NativeExactActionError,
+)
+# Room for the resident envelope around the query: operation, request id,
+# schema and deadline budget.
+_ENVELOPE_HEADROOM_BYTES = 4 * 1024
 
 
 def launch_cwd(payload: Mapping[str, object], workspace: Path | None) -> Path | None:
@@ -315,13 +332,16 @@ def native_review_evidence(
 
     The resident answers each half exactly as ``native_review_binding`` and
     ``native_exact_action`` would, so this saves a round trip without changing
-    either answer. The combined envelope carries both halves under one size
-    cap and one deadline, so when it fails the halves are asked separately and
-    each fails closed on its own, as they did before they were combined.
+    either answer. A resident without the combined ask, a review whose two
+    halves would not fit one envelope, or a half that cannot be built is asked
+    each half separately, so one half never costs the other its answer. Once the combined ask is sent, a
+    failure fails both halves closed rather than spending two more deadlines
+    on a resident that has already timed out.
     """
 
+    failures = (NativeExactActionError, OSError, RuntimeError, TypeError, ValueError)
     try:
-        query: dict[str, object] = {
+        query: dict[str, object] | None = {
             "kind": "review_evidence",
             "binding": _binding_query(harness, payload, native_result, native_receipt, workspace),
             "action": _exact_query(
@@ -334,9 +354,10 @@ def native_review_evidence(
                 home_dir=home_dir,
             ),
         }
-        reply = _answer(query, guard_home)
-    except (NativeExactActionError, OSError, RuntimeError, TypeError, ValueError) as error:
-        _LOGGER.warning("native review-evidence ask failed, asking separately: %s", type(error).__name__)
+        combined = _resident_offers_review_evidence() and _fits_one_envelope(query)
+    except failures:
+        query, combined = None, False
+    if query is None or not combined:
         binding = native_review_binding(harness, payload, native_result, native_receipt, workspace, guard_home)
         token, reason = native_exact_action(
             harness=harness,
@@ -349,10 +370,25 @@ def native_review_evidence(
             guard_home=guard_home,
         )
         return binding, token, reason
+    try:
+        reply = _answer(query, guard_home)
+    except failures as error:
+        _LOGGER.warning("native review-evidence ask failed closed: %s", type(error).__name__)
+        return None, None, UNPROVEN_LAUNCH
     token, reason = reply["token"], reply["once_only_reason"]
     if (token is None) == (reason is None):
         return reply["binding"], None, UNPROVEN_LAUNCH
     return reply["binding"], token, reason
+
+
+def _resident_offers_review_evidence() -> bool:
+    capabilities = native_runtime_status().capabilities
+    return capabilities is not None and NATIVE_REVIEW_EVIDENCE_FEATURE in capabilities.features
+
+
+def _fits_one_envelope(query: Mapping[str, object]) -> bool:
+    encoded = json.dumps(query, separators=(",", ":"))
+    return len(encoded.encode("utf-8")) + _ENVELOPE_HEADROOM_BYTES <= _MAX_REQUEST_BYTES
 
 
 def _validate_exact_action(payload: dict[str, Any]) -> None:
@@ -372,6 +408,7 @@ def _answer(query: Mapping[str, object], guard_home: Path | None) -> dict[str, A
             max_request_bytes=_MAX_REQUEST_BYTES,
             slots=EXACT_ACTION_ASK_SLOTS,
         )
+    operation = _EVIDENCE_OPERATION if query["kind"] == "review_evidence" else _OPERATION
     fields: dict[str, Any] = {}
     if query["kind"] in {"review_binding", "review_evidence"}:
         fields["binding"] = (str, type(None))
@@ -382,7 +419,7 @@ def _answer(query: Mapping[str, object], guard_home: Path | None) -> dict[str, A
         guard_home,
         fields,
         _validate_exact_action if "token" in fields else None,
-        operation=_OPERATION,
+        operation=operation,
         max_request_bytes=_MAX_REQUEST_BYTES,
         slots=EXACT_ACTION_ASK_SLOTS,
     )
@@ -417,6 +454,7 @@ def _validate_launch_evidence(payload: dict[str, Any]) -> None:
 __all__ = [
     "GUARD_CONTROL_ACTION_TYPES",
     "NATIVE_EXACT_ACTION_FEATURE",
+    "NATIVE_REVIEW_EVIDENCE_FEATURE",
     "UNPROVEN_LAUNCH",
     "NativeExactActionError",
     "launch_cwd",
