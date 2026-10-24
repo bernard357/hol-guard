@@ -12842,6 +12842,9 @@ function HiMiniFunnel(props) {
 function HiMiniFolder(props) {
   return GenIcon({ "attr": { "viewBox": "0 0 20 20", "fill": "currentColor", "aria-hidden": "true" }, "child": [{ "tag": "path", "attr": { "d": "M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" }, "child": [] }] })(props);
 }
+function HiMiniFolderOpen(props) {
+  return GenIcon({ "attr": { "viewBox": "0 0 20 20", "fill": "currentColor", "aria-hidden": "true" }, "child": [{ "tag": "path", "attr": { "d": "M4.75 3A1.75 1.75 0 0 0 3 4.75v2.752l.104-.002h13.792c.035 0 .07 0 .104.002V6.75A1.75 1.75 0 0 0 15.25 5h-3.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H4.75ZM3.104 9a1.75 1.75 0 0 0-1.673 2.265l1.385 4.5A1.75 1.75 0 0 0 4.488 17h11.023a1.75 1.75 0 0 0 1.673-1.235l1.384-4.5A1.75 1.75 0 0 0 16.896 9H3.104Z" }, "child": [] }] })(props);
+}
 function HiMiniEye(props) {
   return GenIcon({ "attr": { "viewBox": "0 0 20 20", "fill": "currentColor", "aria-hidden": "true" }, "child": [{ "tag": "path", "attr": { "d": "M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" }, "child": [] }, { "tag": "path", "attr": { "fillRule": "evenodd", "d": "M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z", "clipRule": "evenodd" }, "child": [] }] })(props);
 }
@@ -21861,7 +21864,7 @@ const NAVIGATION_GROUPS = [
 ];
 function canonicalNavigationView(view) {
   if (view === "app-detail") return "fleet";
-  if (view === "audit" || view === "feed-health") return "supply-chain";
+  if (view === "audit" || view === "feed-health" || view === "workspaces") return "supply-chain";
   if (view === "protection-repair") return "extensions";
   return view;
 }
@@ -36784,7 +36787,7 @@ function renderViewContent(props) {
   if (props.view === "policy") {
     return props.policyContent ?? null;
   }
-  if (props.view === "supply-chain" || props.view === "audit" || props.view === "feed-health") {
+  if (props.view === "supply-chain" || props.view === "audit" || props.view === "feed-health" || props.view === "workspaces") {
     return props.supplyChainHubContent ?? null;
   }
   if (props.view === "inbox") {
@@ -37099,7 +37102,7 @@ const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePre
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));
 const SupplyChainHubWorkspace = lazyWorkspace(
   "supply-chain-hub-workspace",
-  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-CD_YIGvv.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
+  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-NsGjKnwz.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
 );
 const PolicyWorkspacePage = lazyWorkspace(
   "policy-workspace-page",
@@ -37155,6 +37158,7 @@ function viewTitle(view) {
   if (view === "audit") return "Audit";
   if (view === "policy") return "Rules & exceptions";
   if (view === "feed-health") return "Feed Health";
+  if (view === "workspaces") return "Workspaces";
   if (view === "about") return "About";
   if (view === "releases") return "Releases";
   if (view === "extensions") return "Extensions";
@@ -37205,6 +37209,9 @@ function resolveView(pathname) {
   }
   if (pathname === "/feed-health") {
     return "feed-health";
+  }
+  if (pathname === "/workspaces") {
+    return "workspaces";
   }
   if (pathname === "/about") {
     return "about";
@@ -38315,7 +38322,8 @@ export {
   HiMiniArrowDown as ee,
   HiMiniArrowUp as ef,
   runAuditRemediation as eg,
-  HiMiniSignal as eh,
+  HiMiniFolderOpen as eh,
+  HiMiniSignal as ei,
   formatRelativeTime as f,
   HiMiniNoSymbol as g,
   harnessDisplayName as h,

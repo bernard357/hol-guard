@@ -226,6 +226,25 @@ def test_latest_assessed_runs_skip_failed_runs(tmp_path: Path) -> None:
     assert "findings" not in history[first.run_id]
 
 
+def test_latest_runs_keep_every_worktree_when_history_is_capped(tmp_path: Path) -> None:
+    store = admitted(tmp_path, KEYS, OTHER)
+    enqueue(store, "manual", keys=OTHER)
+    busy = assessments.claim_next(store, owner="w", now_ms=T0)
+    assert busy is not None and busy.keys == OTHER
+    for step in range(3):
+        enqueue(store, "manual", at=T0 + 1 + step * 2, keys=KEYS)
+        claimed = assessments.claim_next(store, owner="w", now_ms=T0 + 1 + step * 2)
+        assert claimed is not None and claimed.keys == KEYS
+        assert assessments.finish(store, claimed, completed(), now_ms=T0 + 2 + step * 2)
+    capped = assessments.recent_runs(store, limit=1)
+    assert {run["worktree_key"] for run in capped} == {KEYS.worktree_key}
+    latest = {run["worktree_key"]: run for run in assessments.latest_runs(store)}
+    assert set(latest) == {KEYS.worktree_key, OTHER.worktree_key}
+    assert latest[OTHER.worktree_key]["state"] == "running"
+    assert latest[KEYS.worktree_key]["run_id"] == capped[0]["run_id"]
+    assert "findings" not in latest[OTHER.worktree_key]
+
+
 def test_oversized_result_is_rejected_before_storage(tmp_path: Path) -> None:
     store = admitted(tmp_path)
     enqueue(store, "manual")

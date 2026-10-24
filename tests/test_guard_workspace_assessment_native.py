@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -133,3 +134,36 @@ def test_daemon_routes_require_dashboard_auth_and_admit_a_worktree(tmp_path: Pat
     assert listed_status == findings_status == 200
     [worktree] = listing["worktrees"]
     assert worktree["worktree_key"] == admitted["worktree_key"]
+
+
+def test_findings_route_resolves_the_suggested_folder_like_a_tracked_root(tmp_path: Path, native_binary: None) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "package.json").write_text('{"dependencies":{}}', encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(workspace, target_is_directory=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    store = GuardStore(tmp_path / "guard-home")
+    daemon = GuardDaemonServer(store, host="127.0.0.1", port=0)
+    daemon.start()
+    try:
+        path = "/v1/supply-chain/workspace-assessments"
+        token = _dashboard_token_for(store)
+        _read_json_response(_request(daemon.port, path, token=token, payload={"root": str(workspace)}))
+
+        def tracked(root: str | None) -> object:
+            suffix = "" if root is None else "?root=" + urllib.parse.quote(root, safe="")
+            _, body = _read_json_response(
+                _request(daemon.port, "/v1/supply-chain/workspace-findings" + suffix, method="GET", token=token)
+            )
+            return body.get("suggested_root_tracked", "absent")
+
+        assert tracked(None) == "absent"
+        assert tracked(str(workspace)) is True
+        assert tracked(str(alias) + "/") is True
+        assert tracked(f"{workspace}/../workspace") is True
+        assert tracked(str(other)) is False
+        assert tracked("relative/path") is False
+    finally:
+        daemon.stop()
