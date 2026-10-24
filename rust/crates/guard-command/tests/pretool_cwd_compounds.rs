@@ -60,6 +60,29 @@ fn cwd_compounds_validate_reads_and_one_bounded_write() {
             ("&& cat one.txt &", false),
             ("&& cat $(echo one.txt)", false),
             ("&& cat one.txt && gh auth token", false),
+            // A reader the standalone proof admits in the verified directory
+            // keeps that proof behind the `cd`. Each of these allows on its
+            // own from inside `project`, so reviewing the compound only taught
+            // callers to split it in two.
+            ("&& pip list", true),
+            ("&& pip freeze", true),
+            ("&& pip show requests", true),
+            ("&& brew list", true),
+            ("&& kubectl get pods", true),
+            ("&& awk 'NR<2' one.txt", true),
+            ("&& file one.txt", true),
+            ("&& basename one.txt", true),
+            ("&& realpath one.txt", true),
+            // The standalone proof still decides. A reader it rejects in that
+            // directory is rejected behind the `cd` too.
+            ("&& pip install requests", false),
+            ("&& brew install jq", false),
+            ("&& kubectl delete pod web", false),
+            // Programs whose own proof can authorize an effect stay out of the
+            // generic branch: a write belongs to the bounded two-segment form
+            // above, and a process stop has no bounded form at all.
+            ("&& pkill -f server", false),
+            ("&& rustfmt one.txt", false),
         ] {
             let command = format!("cd {} {suffix}", project.display());
             let result = evaluate_pre_tool_envelope_with_context(
