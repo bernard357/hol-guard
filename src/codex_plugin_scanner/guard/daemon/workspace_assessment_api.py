@@ -10,6 +10,7 @@ applying is the user's explicit action and edits one manifest, never more.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final, Protocol, cast
 from urllib.parse import parse_qs
@@ -182,7 +183,7 @@ def _apply_fix(handler: WorkspaceAssessmentHandler, proposal_id: str) -> None:
     handler._write_json(applied)
 
 
-def _keys(payload: dict[str, object]) -> assessments.WorktreeKeys | None:
+def _keys(payload: Mapping[str, object]) -> assessments.WorktreeKeys | None:
     codebase_key = payload.get("codebase_key")
     worktree_key = payload.get("worktree_key")
     if not (_is_key(codebase_key) and _is_key(worktree_key)):
