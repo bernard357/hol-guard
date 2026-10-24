@@ -18,7 +18,10 @@ Only a successful backport and regression check can generate the OpenVEX record.
 The security workflow applies that record solely to the MCPB tool directory;
 the rest of the repository is scanned separately without it. Other advisories
 remain blocking. The lock retains the upstream version, so registry-only audits
-cannot infer that the local source has been patched.
+cannot infer that the local source has been patched. Each OpenVEX statement
+names this tool directory as its product and the registry package as a
+subcomponent of it, so a scanner cannot read the `fixed` status as a claim
+about any other install of that version.
 
 Remove the backport after a corrected upstream release is pinned and the same
 negative verification cases pass against it. A version change fails the current

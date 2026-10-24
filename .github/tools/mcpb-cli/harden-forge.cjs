@@ -18,6 +18,12 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 const lockedZodVersion = "3.25.76";
 const zodAdvisory = "CVE-2023-54404";
+// The product these statements speak for is this build tool's own patched
+// dependency tree, not the published package. The registry release is still
+// vulnerable, so naming its purl as the product would tell a scanner to
+// suppress the advisory for every other install of that version.
+const patchedToolTree =
+  "https://github.com/hashgraph-online/hol-guard/tree/main/.github/tools/mcpb-cli";
 
 // MCPB and the Pi SDK call this package's classic v3 parser, not zod/v4.
 // harden-zod.cjs patches that parser before use. The bundled v4 core stays
@@ -81,12 +87,12 @@ if (require.main === module) {
       version: 1,
       statements: [{
         vulnerability: { name: "CVE-2026-85393" },
-        products: [{ "@id": "pkg:npm/node-forge@1.4.0" }],
+        products: [{ "@id": patchedToolTree, subcomponents: [{ "@id": "pkg:npm/node-forge@1.4.0" }] }],
         status: "fixed",
         impact_statement: `The locked MCPB build tool applies and tests a strict AlgorithmIdentifier backport before CLI use. Patched rsa.js SHA-256: ${patchedSha256}.`,
       }, {
         vulnerability: { name: zodAdvisory },
-        products: [{ "@id": `pkg:npm/zod@${verifiedZodVersion}` }],
+        products: [{ "@id": patchedToolTree, subcomponents: [{ "@id": `pkg:npm/zod@${verifiedZodVersion}` }] }],
         status: "fixed",
         impact_statement: `The locked MCPB tool patches the zod ${verifiedZodVersion} v3 array and set parsers before CLI use. An upper bound returns before any element is parsed, and a failing collection stops after 32 issues. Patched v3/types.js SHA-256: ${zodParserSha256}.`,
       }],

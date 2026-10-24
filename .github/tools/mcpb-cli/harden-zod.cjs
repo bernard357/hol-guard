@@ -54,19 +54,14 @@ const setWalkFrom = `        const elements = [...ctx.data.values()].map((item, 
 const setWalkTo = `        const values = [...ctx.data.values()];
         if (ctx.common.async) {
             const elements = [];
-            let chain = Promise.resolve();
-            for (let index = 0; index < values.length; index++) {
-                const item = values[index];
-                const pathIndex = index;
-                chain = chain.then((stop) => {
-                    if (stop || ctx.common.issues.length >= ${issueBudget}) return true;
-                    return Promise.resolve(valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, pathIndex))).then((element) => {
-                        elements.push(element);
-                        return false;
-                    });
+            const step = (index) => {
+                if (index >= values.length || ctx.common.issues.length >= ${issueBudget}) return finalizeSet(elements);
+                return Promise.resolve(valueType._parse(new ParseInputLazyPath(ctx, values[index], ctx.path, index))).then((element) => {
+                    elements.push(element);
+                    return step(index + 1);
                 });
-            }
-            return chain.then(() => finalizeSet(elements));
+            };
+            return Promise.resolve(step(0));
         }
         const elements = [];
         for (let index = 0; index < values.length; index++) {
@@ -119,25 +114,23 @@ function arrayFrom(mergeArray) {
 
 function arrayTo(invalidToken, mergeArray) {
   return `        if (ctx.common.async) {
+            const items = [...ctx.data];
             const parsed = [];
-            let chain = Promise.resolve();
-            for (let index = 0; index < ctx.data.length; index++) {
-                const item = ctx.data[index];
-                const pathIndex = index;
-                chain = chain.then((stop) => {
-                    if (stop || ctx.common.issues.length >= ${issueBudget}) return true;
-                    return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, pathIndex)).then((parsedItem) => {
-                        parsed.push(parsedItem);
-                        return false;
-                    });
+            const step = (index) => {
+                if (index >= items.length) return ${mergeArray}(status, parsed);
+                if (ctx.common.issues.length >= ${issueBudget}) return ${invalidToken};
+                return def.type._parseAsync(new ParseInputLazyPath(ctx, items[index], ctx.path, index)).then((parsedItem) => {
+                    parsed.push(parsedItem);
+                    return step(index + 1);
                 });
-            }
-            return chain.then((stop) => (stop ? ${invalidToken} : ${mergeArray}(status, parsed)));
+            };
+            return Promise.resolve(step(0));
         }
+        const items = [...ctx.data];
         const result = [];
-        for (let index = 0; index < ctx.data.length; index++) {
+        for (let index = 0; index < items.length; index++) {
             if (ctx.common.issues.length >= ${issueBudget}) return ${invalidToken};
-            result.push(def.type._parseSync(new ParseInputLazyPath(ctx, ctx.data[index], ctx.path, index)));
+            result.push(def.type._parseSync(new ParseInputLazyPath(ctx, items[index], ctx.path, index)));
         }
         return ${mergeArray}(status, result);`;
 }
@@ -192,19 +185,38 @@ function hardenZod(root = __dirname) {
   return digests;
 }
 
+/// Restores the locked zod parser in `root`, so a tree that was already
+/// hardened can be exercised from its unpatched state. The restored text must
+/// match the pinned digest; anything else is refused rather than overwritten.
+function restoreZod(root = __dirname) {
+  const packageRoot = path.join(root, "node_modules", "zod");
+  for (const [relativePath, parser] of Object.entries(parsers)) {
+    const target = path.join(packageRoot, relativePath);
+    const original = restoreOriginal(fs.readFileSync(target, "utf8"), replacements(parser));
+    assert.equal(sha256(original), parser.sha256, `Refuse a different or modified zod parser: ${relativePath}.`);
+    fs.writeFileSync(target, original);
+  }
+}
+
+// Attests the digest of a parser this run can reconstruct: the pinned locked
+// text with exactly this file's replacements applied. A marker line alone
+// would attest any file that happens to contain it.
 function patchedParserSha256(root = __dirname) {
   const packageRoot = path.join(root, "node_modules", "zod");
-  const esm = fs.readFileSync(path.join(packageRoot, "v3", "types.js"), "utf8");
-  const cjs = fs.readFileSync(path.join(packageRoot, "v3", "types.cjs"), "utf8");
-  assert(
-    esm.includes(`if (ctx.common.issues.length >= ${issueBudget}) return INVALID;`),
-    "Refuse to attest: the zod v3 array parser is not patched.",
-  );
-  assert(
-    cjs.includes(`if (ctx.common.issues.length >= ${issueBudget}) return parseUtil_js_1.INVALID;`),
-    "Refuse to attest: the zod v3 CommonJS array parser is not patched.",
-  );
-  return sha256(esm);
+  const digests = {};
+  for (const [relativePath, parser] of Object.entries(parsers)) {
+    const current = fs.readFileSync(path.join(packageRoot, relativePath), "utf8");
+    const pairs = replacements(parser);
+    const original = restoreOriginal(current, pairs);
+    assert.equal(sha256(original), parser.sha256, `Refuse to attest: ${relativePath} is not the locked zod parser.`);
+    assert.equal(
+      current,
+      applyPairs(original, pairs),
+      `Refuse to attest: the zod v3 parser ${relativePath} is not patched.`,
+    );
+    digests[relativePath] = sha256(current);
+  }
+  return digests["v3/types.js"];
 }
 
 if (require.main === module) {
@@ -216,4 +228,5 @@ if (require.main === module) {
 
 module.exports = hardenZod;
 module.exports.patchedParserSha256 = patchedParserSha256;
+module.exports.restoreZod = restoreZod;
 module.exports.issueBudget = issueBudget;

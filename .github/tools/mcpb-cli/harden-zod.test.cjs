@@ -8,12 +8,15 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const test = require("node:test");
 
-const { issueBudget, patchedParserSha256 } = require("./harden-zod.cjs");
+const { issueBudget, patchedParserSha256, restoreZod } = require("./harden-zod.cjs");
 
 function copyZod(root) {
   const source = path.join(__dirname, "node_modules", "zod");
   assert.equal(fs.existsSync(source), true, "npm ci --ignore-scripts --prefix .github/tools/mcpb-cli first");
   fs.cpSync(source, path.join(root, "node_modules", "zod"), { recursive: true });
+  // The source tree may already be hardened, because the MCPB CLI patches it
+  // in place. Every test here starts from the locked parser.
+  restoreZod(root);
 }
 
 function run(root) {
@@ -70,7 +73,7 @@ test("patch the locked zod v3 parsers and stop a failing collection", () => {
     copyZod(root);
     assert.throws(
       () => patchedParserSha256(root),
-      (error) => error instanceof Error && error.message.includes("zod v3 array parser is not patched"),
+      (error) => error instanceof Error && error.message.includes("is not patched"),
     );
     const first = run(root);
     assert.equal(first.status, 0, first.stderr);
