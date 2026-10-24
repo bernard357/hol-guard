@@ -280,15 +280,17 @@ impl CompiledNativeCommandControls {
         // The words after the program an `-exec` names are that program's
         // arguments, not command positions, so a name that appears only there
         // runs nothing: `find src -exec echo sh {} \;` prints `sh`.
-        let outside_exec = exec_names_program
-            .then(|| named_words(&joined_quotes(&text_outside_exec_arguments(&bare))))
-            .unwrap_or_default();
+        let outside_exec = if exec_names_program {
+            named_words(&joined_quotes(&text_outside_exec_arguments(&bare)))
+        } else {
+            BTreeSet::new()
+        };
         if INTERPRETERS.iter().any(|name| {
             interpreted.contains(*name)
                 && !(sourced_bounded && matches!(*name, "source" | "."))
                 && !(xargs_bounded && *name == "xargs")
                 && !(exec_names_program && EXEC_ACTIONS.contains(name))
-                && !(exec_names_program && !outside_exec.contains(*name))
+                && (!exec_names_program || outside_exec.contains(*name))
         }) {
             // An `xargs` whose operands are not in the text is not bounded by
             // reading a script file. `2>/dev/null xargs gh` still takes its

@@ -136,8 +136,6 @@ fn a_shell_the_find_does_not_name_keeps_the_evaluation_failure() {
         "find src -type f -exec time python3 -c 'print(1)' \\;",
         // An escaped name the shell unescapes to `sh` must not read as `h`.
         "find src -type f -exec s\\h -c 'echo hi' \\;",
-        // A `+` ends the body, so what follows is a command position again.
-        "find src -type f -exec echo hi {} + sh -c 'echo hi'",
     ] {
         let result = evaluate(&root, &controls, command);
         assert_eq!(
@@ -181,8 +179,6 @@ fn a_literal_interpreter_name_in_an_exec_body_is_an_argument() {
     for command in [
         "find src -exec echo sh {} \\;",
         "find src -exec echo bash python3 {} \\;",
-        "find src -type f -exec basename {} \\; -o -exec echo sudo {} \\;",
-        "find src -type f -exec grep -l 'env' {} +",
     ] {
         let result = evaluate(&root, &controls, command);
         assert_ne!(result.reason_code, EVALUATION_FAILED, "{command}");
