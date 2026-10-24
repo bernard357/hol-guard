@@ -106,6 +106,24 @@ def test_native_reply_round_trips(native_hook_force: Path) -> None:
             "result": {
                 "schema": runtime_identity.RUNTIME_IDENTITY_SCHEMA,
                 "scope_complete": True,
+                "artifacts": [],
+                "advisories": [
+                    {
+                        "advisory_id": "a",
+                        "verdict": ["safe"],
+                        "reasons": [],
+                        "affected_artifact_ids": [],
+                        "affected_instance_ids": [],
+                        "replacement_instance_ids": [],
+                    }
+                ],
+            },
+        },
+        {
+            "ok": True,
+            "result": {
+                "schema": runtime_identity.RUNTIME_IDENTITY_SCHEMA,
+                "scope_complete": True,
                 "artifacts": [{}],
                 "advisories": [],
             },

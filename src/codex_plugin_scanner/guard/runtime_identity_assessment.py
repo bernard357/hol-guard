@@ -151,7 +151,7 @@ def _parse_verdict(row: object) -> RuntimeAdvisoryVerdict:
         raise RuntimeIdentityError("runtime_identity_failed")
     advisory_id = row.get("advisory_id")
     verdict = row.get("verdict")
-    if not isinstance(advisory_id, str) or verdict not in _VERDICTS:
+    if not isinstance(advisory_id, str) or not isinstance(verdict, str) or verdict not in _VERDICTS:
         raise RuntimeIdentityError("runtime_identity_failed")
     reasons, artifact_ids, instance_ids, replacement_ids = (_text_tuple(row.get(key)) for key in _VERDICT_LISTS)
     return RuntimeAdvisoryVerdict(
