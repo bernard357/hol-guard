@@ -61,6 +61,32 @@ def recent_runs(store: Any, keys: WorktreeKeys | None = None, *, limit: int = 20
     return runs
 
 
+def latest_runs(store: Any) -> list[dict[str, object]]:
+    """The newest run of every worktree in any state, independent of history limits."""
+
+    with store._connect() as connection:
+        rows = connection.execute(
+            """
+            select run_id, codebase_key, worktree_key, snapshot_digest, kind, trigger_kind, state,
+                   dirty_generation, coverage_json, findings_json, error_code,
+                   created_at_ms, started_at_ms, finished_at_ms
+            from workspace_assessment_runs r
+            where r.run_id = (
+              select newest.run_id from workspace_assessment_runs newest
+              where newest.codebase_key = r.codebase_key and newest.worktree_key = r.worktree_key
+              order by newest.created_at_ms desc, newest.run_id desc
+              limit 1
+            )
+            order by created_at_ms desc, run_id desc
+            """
+        ).fetchall()
+    runs = [_run_payload(row) for row in rows]
+    for run in runs:
+        findings = run.pop("findings")
+        run["finding_count"] = len(findings) if isinstance(findings, list) else 0
+    return runs
+
+
 def get_run(store: Any, run_id: str) -> dict[str, object] | None:
     with store._connect() as connection:
         row = connection.execute(
@@ -122,4 +148,4 @@ def _key_tuple(keys: WorktreeKeys | None) -> tuple[str, str]:
     return (keys.codebase_key, keys.worktree_key)
 
 
-__all__ = ["get_run", "latest_assessed_runs", "list_worktrees", "recent_runs"]
+__all__ = ["get_run", "latest_assessed_runs", "latest_runs", "list_worktrees", "recent_runs"]

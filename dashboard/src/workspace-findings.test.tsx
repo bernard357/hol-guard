@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { normalizeWorkspaceFindingsState, workspaceErrorMessage } from "./workspace-findings-api";
+import { createLatestRefresh } from "./workspace-findings-refresh";
 import { WorktreeRow, worktreeStatus } from "./workspace-findings-workspace";
 
 const CODEBASE = "c".repeat(64);
@@ -16,6 +17,7 @@ const state = normalizeWorkspaceFindingsState(
       { ...ids, run_id: "run-1", state: "partial", trigger_kind: "workspace_open", finding_count: 1 },
       { ...ids, run_id: "bad", state: "exploded" },
     ],
+    latest_runs: [{ ...ids, run_id: "run-2", state: "running", trigger_kind: "manual" }],
   },
   {
     worktrees: [
@@ -50,6 +52,16 @@ const state = normalizeWorkspaceFindingsState(
   },
 );
 
+assert.deepEqual(
+  state.latestRuns.map((run) => [run.runId, run.state]),
+  [["run-2", "running"]],
+  "the newest run of each worktree is read apart from the bounded history",
+);
+assert.equal(state.suggestedRootTracked, null, "no answer about a suggested folder unless one was asked about");
+assert.equal(
+  normalizeWorkspaceFindingsState({}, { worktrees: [], suggested_root_tracked: true }).suggestedRootTracked,
+  true,
+);
 assert.equal(state.worktrees.length, 1, "worktrees without both keys are dropped");
 assert.deepEqual(
   state.runs.map((run) => run.runId),
@@ -82,7 +94,7 @@ const [onlyNotRun] = normalizeWorkspaceFindingsState(
     ],
   },
 ).assessments;
-assert.equal(onlyNotRun.partial, false, "a detector outside the check is listed, not counted as a coverage gap");
+assert.equal(onlyNotRun.partial, true, "a detector that did not run keeps the daemon's partial classification");
 assert.deepEqual(onlyNotRun.notRun, ["secrets"]);
 
 const [failedRun, partialRun] = state.runs;
@@ -93,11 +105,8 @@ assert.equal(worktreeStatus({ ...worktree, stale: true }, partialRun, assessment
 assert.equal(worktreeStatus({ ...worktree, paused: true }, partialRun, assessment).label, "Paused");
 assert.equal(worktreeStatus(worktree, { ...partialRun, state: "running" }, assessment).label, "Assessing");
 assert.equal(worktreeStatus(worktree, undefined, undefined).label, "Not assessed yet");
-assert.equal(
-  worktreeStatus(worktree, partialRun, { ...assessment, partial: false, reasons: [] }).label,
-  "Up to date",
-  "a detector that has not run does not make coverage partial on its own",
-);
+assert.equal(worktreeStatus(worktree, partialRun, onlyNotRun).label, "Partial coverage", "never shown as up to date");
+assert.equal(worktreeStatus(worktree, partialRun, { ...assessment, partial: false, reasons: [] }).label, "Up to date");
 assert.equal(
   worktreeStatus(worktree, { ...failedRun, errorCode: "lease_expired" }, assessment).label,
   "Partial coverage",
@@ -137,5 +146,40 @@ assert.match(paused, /<button[^>]*disabled=""[^>]*>.*?Assess now/s, "paused rows
 assert.equal(workspaceErrorMessage("workspace_root_missing"), "That folder no longer exists. Choose it again.");
 assert.match(workspaceErrorMessage("anything_else"), /Check that Guard is running/);
 assert.match(workspaceErrorMessage(null), /Check that Guard is running/);
+
+async function checkOverlappingRefreshes() {
+  const pending: Array<{ resolve: (value: string) => void; reject: (error: Error) => void }> = [];
+  const applied: string[] = [];
+  const failed: string[] = [];
+  const refresh = createLatestRefresh(
+    () => new Promise<string>((resolve, reject) => pending.push({ resolve, reject })),
+    { onData: (value) => applied.push(value), onError: (error) => failed.push((error as Error).message) },
+  );
+  // An interval poll starts, then an action's refresh starts. The newer one
+  // finishes first and the older one finishes last.
+  const poll = refresh();
+  const afterAction = refresh();
+  pending[1].resolve("after-action");
+  await afterAction;
+  pending[0].resolve("stale-poll");
+  await poll;
+  assert.deepEqual(applied, ["after-action"], "an older response never replaces a newer one");
+
+  const failingPoll = refresh();
+  const afterPause = refresh();
+  pending[3].resolve("after-pause");
+  await afterPause;
+  pending[2].reject(new Error("obsolete load error"));
+  await failingPoll;
+  assert.deepEqual(applied, ["after-action", "after-pause"]);
+  assert.deepEqual(failed, [], "an older failure does not raise a stale load error");
+
+  const lone = refresh();
+  pending[4].reject(new Error("current failure"));
+  await lone;
+  assert.deepEqual(failed, ["current failure"], "the latest request still reports its own failure");
+}
+
+await checkOverlappingRefreshes();
 
 console.log("workspace findings tests passed");

@@ -45,7 +45,11 @@ export type WorkspaceAssessment = WorktreeKeys & {
 export type WorkspaceFindingsState = {
   worktrees: WorkspaceWorktree[];
   runs: WorkspaceRun[];
+  /** The newest run of each worktree, independent of the bounded history in `runs`. */
+  latestRuns: WorkspaceRun[];
   assessments: WorkspaceAssessment[];
+  /** Whether the daemon already tracks the folder asked about; null when none was asked about. */
+  suggestedRootTracked: boolean | null;
 };
 
 const RUN_STATES = new Set<string>(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -101,6 +105,12 @@ function normalizeRun(value: unknown): WorkspaceRun | null {
   };
 }
 
+function normalizeRuns(value: unknown): WorkspaceRun[] {
+  return list(value)
+    .map(normalizeRun)
+    .filter((entry): entry is WorkspaceRun => entry !== null);
+}
+
 function normalizeFinding(value: unknown): WorkspaceFinding | null {
   const item = record(value);
   const findingId = text(item.finding_id);
@@ -131,13 +141,13 @@ function normalizeAssessment(value: unknown): WorkspaceAssessment | null {
   const notRun = Object.entries(detectors)
     .filter(([, status]) => status === "not_run")
     .map(([name]) => name);
-  // A detector that is not part of the check yet is listed on its own; it does
-  // not make every assessment read as partial coverage of what was checked.
+  // Detectors that did not run stay in their own list, but the daemon's partial
+  // classification is kept so an incomplete result is never shown as up to date.
   const reportedPartial = item.state === "partial" || coverage.status === "partial";
   return {
     ...ids,
     runId,
-    partial: reasons.length > 0 || (reportedPartial && notRun.length === 0),
+    partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
     finishedAtMs: count(item.finished_at_ms),
@@ -154,12 +164,12 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
     worktrees: list(findings.worktrees ?? history.worktrees)
       .map(normalizeWorktree)
       .filter((entry): entry is WorkspaceWorktree => entry !== null),
-    runs: list(history.runs)
-      .map(normalizeRun)
-      .filter((entry): entry is WorkspaceRun => entry !== null),
+    runs: normalizeRuns(history.runs),
+    latestRuns: normalizeRuns(history.latest_runs),
     assessments: list(findings.assessments)
       .map(normalizeAssessment)
       .filter((entry): entry is WorkspaceAssessment => entry !== null),
+    suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null,
   };
 }
 
@@ -172,10 +182,14 @@ async function readPayload(path: string, init?: RequestInit): Promise<{ status: 
   return { status: response.status, body };
 }
 
-export async function fetchWorkspaceFindings(signal?: AbortSignal): Promise<WorkspaceFindingsState> {
+export async function fetchWorkspaceFindings(options: { signal?: AbortSignal; suggestedRoot?: string } = {}): Promise<WorkspaceFindingsState> {
+  const { signal, suggestedRoot } = options;
+  // The daemon resolves the suggested folder the way it resolves tracked ones,
+  // so a symlinked or differently written path is not offered again.
+  const findingsPath = suggestedRoot ? `${FINDINGS_PATH}?root=${encodeURIComponent(suggestedRoot)}` : FINDINGS_PATH;
   const [history, findings] = await Promise.all([
     readPayload(ASSESSMENTS_PATH, { signal }),
-    readPayload(FINDINGS_PATH, { signal }),
+    readPayload(findingsPath, { signal }),
   ]);
   return normalizeWorkspaceFindingsState(history.body, findings.body);
 }

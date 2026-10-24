@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HiMiniArrowPath, HiMiniExclamationTriangle, HiMiniFolderOpen } from "react-icons/hi2";
 import { ActionButton, EmptyState, Tag, type TagTone } from "./approval-center-primitives";
 import { formatRelativeTime } from "./approval-center-utils";
@@ -13,6 +13,7 @@ import {
   type WorkspaceRun,
   type WorkspaceWorktree,
 } from "./workspace-findings-api";
+import { createLatestRefresh } from "./workspace-findings-refresh";
 
 const REFRESH_MS = 15_000;
 
@@ -65,6 +66,11 @@ export function worktreeStatus(
   return { label: "Up to date", tone: "green", detail: null };
 }
 
+function trimTrailingSeparators(root: string): string {
+  const trimmed = root.replace(/[\\/]+$/, "");
+  return trimmed === "" ? root : trimmed;
+}
+
 function folderName(root: string): string {
   const parts = root.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? root;
@@ -87,17 +93,24 @@ export function WorkspaceFindingsWorkspace(props: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const mounted = useRef(true);
+  const suggestedRoot = props.suggestedRoot.trim();
+  const suggestedRootRef = useRef(suggestedRoot);
+  suggestedRootRef.current = suggestedRoot;
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await fetchWorkspaceFindings();
-      if (!mounted.current) return;
-      setState(next);
-      setLoadError(null);
-    } catch (error) {
-      if (mounted.current) setLoadError(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
+  const refresh = useMemo(
+    () =>
+      createLatestRefresh(() => fetchWorkspaceFindings({ suggestedRoot: suggestedRootRef.current }), {
+        onData: (next) => {
+          if (!mounted.current) return;
+          setState(next);
+          setLoadError(null);
+        },
+        onError: (error) => {
+          if (mounted.current) setLoadError(error instanceof Error ? error.message : String(error));
+        },
+      }),
+    [],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -107,7 +120,7 @@ export function WorkspaceFindingsWorkspace(props: {
       mounted.current = false;
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [refresh, suggestedRoot]);
 
   const perform = useCallback(
     async (key: string, operation: () => Promise<void>) => {
@@ -130,7 +143,6 @@ export function WorkspaceFindingsWorkspace(props: {
       void perform(`${action}:${worktree.worktreeKey}`, () => runWorkspaceAction(action, worktree)),
     [perform],
   );
-  const suggestedRoot = props.suggestedRoot.trim();
   const handleAdd = useCallback(
     () => void perform("add", () => addWorkspaceForAssessment(suggestedRoot)),
     [perform, suggestedRoot],
@@ -144,8 +156,11 @@ export function WorkspaceFindingsWorkspace(props: {
     );
   }
 
-  const tracked = new Set(state.worktrees.map((worktree) => worktree.root));
-  const canAddSuggested = suggestedRoot !== "" && !tracked.has(suggestedRoot);
+  // The daemon resolves the suggested folder like a tracked root; the local
+  // comparison only covers the moment before its answer arrives.
+  const tracked = new Set(state.worktrees.map((worktree) => trimTrailingSeparators(worktree.root)));
+  const canAddSuggested =
+    suggestedRoot !== "" && state.suggestedRootTracked !== true && !tracked.has(trimTrailingSeparators(suggestedRoot));
 
   return (
     <div className="space-y-5">
@@ -189,7 +204,7 @@ export function WorkspaceFindingsWorkspace(props: {
             <WorktreeRow
               key={`${worktree.codebaseKey}:${worktree.worktreeKey}`}
               worktree={worktree}
-              newestRun={state.runs.find((run) => sameWorktree(worktree, run))}
+              newestRun={state.latestRuns.find((run) => sameWorktree(worktree, run))}
               assessment={state.assessments.find((item) => sameWorktree(worktree, item))}
               busyKey={busyKey}
               onAction={handleAction}

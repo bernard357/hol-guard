@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from .store_workspace_assessment_schema import MAX_COVERAGE_JSON_BYTES, MAX_FINDINGS_JSON_BYTES
-from .workspace_assessment_reads import get_run, latest_assessed_runs, list_worktrees, recent_runs
+from .workspace_assessment_reads import get_run, latest_assessed_runs, latest_runs, list_worktrees, recent_runs
 
 DEBOUNCE_MS: Final = 5_000
 # Edits that never pause for the debounce still get assessed this often.
@@ -402,6 +402,7 @@ __all__ = [
     "finish",
     "get_run",
     "latest_assessed_runs",
+    "latest_runs",
     "list_worktrees",
     "recent_runs",
     "record_observation",

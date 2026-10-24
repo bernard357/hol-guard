@@ -46,6 +46,9 @@ function normalizeRun(value) {
     finishedAtMs: count(item.finished_at_ms)
   };
 }
+function normalizeRuns(value) {
+  return list(value).map(normalizeRun).filter((entry) => entry !== null);
+}
 function normalizeFinding(value) {
   const item = record(value);
   const findingId = text(item.finding_id);
@@ -77,7 +80,7 @@ function normalizeAssessment(value) {
   return {
     ...ids,
     runId,
-    partial: reasons.length > 0 || reportedPartial && notRun.length === 0,
+    partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
     finishedAtMs: count(item.finished_at_ms),
@@ -89,8 +92,10 @@ function normalizeWorkspaceFindingsState(assessmentsPayload, findingsPayload) {
   const findings = record(findingsPayload);
   return {
     worktrees: list(findings.worktrees ?? history.worktrees).map(normalizeWorktree).filter((entry) => entry !== null),
-    runs: list(history.runs).map(normalizeRun).filter((entry) => entry !== null),
-    assessments: list(findings.assessments).map(normalizeAssessment).filter((entry) => entry !== null)
+    runs: normalizeRuns(history.runs),
+    latestRuns: normalizeRuns(history.latest_runs),
+    assessments: list(findings.assessments).map(normalizeAssessment).filter((entry) => entry !== null),
+    suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null
   };
 }
 async function readPayload(path, init) {
@@ -101,10 +106,12 @@ async function readPayload(path, init) {
   }
   return { status: response.status, body };
 }
-async function fetchWorkspaceFindings(signal) {
+async function fetchWorkspaceFindings(options = {}) {
+  const { signal, suggestedRoot } = options;
+  const findingsPath = suggestedRoot ? `${FINDINGS_PATH}?root=${encodeURIComponent(suggestedRoot)}` : FINDINGS_PATH;
   const [history, findings] = await Promise.all([
     readPayload(ASSESSMENTS_PATH, { signal }),
-    readPayload(FINDINGS_PATH, { signal })
+    readPayload(findingsPath, { signal })
   ]);
   return normalizeWorkspaceFindingsState(history.body, findings.body);
 }
@@ -133,6 +140,19 @@ const ERROR_MESSAGES = {
 };
 function workspaceErrorMessage(code) {
   return (code && ERROR_MESSAGES[code]) ?? "Guard could not update workspace assessments. Check that Guard is running, then retry.";
+}
+function createLatestRefresh(load, apply) {
+  let latest = 0;
+  return async () => {
+    latest += 1;
+    const request = latest;
+    try {
+      const value = await load();
+      if (request === latest) apply.onData(value);
+    } catch (error) {
+      if (request === latest) apply.onError(error);
+    }
+  };
 }
 const REFRESH_MS = 15e3;
 const COVERAGE_REASONS = {
@@ -173,6 +193,10 @@ function worktreeStatus(worktree, newestRun, assessment) {
   if (assessment.partial) return { label: "Partial coverage", tone: "attention", detail: null };
   return { label: "Up to date", tone: "green", detail: null };
 }
+function trimTrailingSeparators(root) {
+  const trimmed = root.replace(/[\\/]+$/, "");
+  return trimmed === "" ? root : trimmed;
+}
 function folderName(root) {
   const parts = root.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? root;
@@ -189,16 +213,22 @@ function WorkspaceFindingsWorkspace(props) {
   const [actionError, setActionError] = reactExports.useState(null);
   const [busyKey, setBusyKey] = reactExports.useState(null);
   const mounted = reactExports.useRef(true);
-  const refresh = reactExports.useCallback(async () => {
-    try {
-      const next = await fetchWorkspaceFindings();
-      if (!mounted.current) return;
-      setState(next);
-      setLoadError(null);
-    } catch (error) {
-      if (mounted.current) setLoadError(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
+  const suggestedRoot = props.suggestedRoot.trim();
+  const suggestedRootRef = reactExports.useRef(suggestedRoot);
+  suggestedRootRef.current = suggestedRoot;
+  const refresh = reactExports.useMemo(
+    () => createLatestRefresh(() => fetchWorkspaceFindings({ suggestedRoot: suggestedRootRef.current }), {
+      onData: (next) => {
+        if (!mounted.current) return;
+        setState(next);
+        setLoadError(null);
+      },
+      onError: (error) => {
+        if (mounted.current) setLoadError(error instanceof Error ? error.message : String(error));
+      }
+    }),
+    []
+  );
   reactExports.useEffect(() => {
     mounted.current = true;
     void refresh();
@@ -207,7 +237,7 @@ function WorkspaceFindingsWorkspace(props) {
       mounted.current = false;
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [refresh, suggestedRoot]);
   const perform = reactExports.useCallback(
     async (key, operation) => {
       setBusyKey(key);
@@ -227,7 +257,6 @@ function WorkspaceFindingsWorkspace(props) {
     (action, worktree) => void perform(`${action}:${worktree.worktreeKey}`, () => runWorkspaceAction(action, worktree)),
     [perform]
   );
-  const suggestedRoot = props.suggestedRoot.trim();
   const handleAdd = reactExports.useCallback(
     () => void perform("add", () => addWorkspaceForAssessment(suggestedRoot)),
     [perform, suggestedRoot]
@@ -235,8 +264,8 @@ function WorkspaceFindingsWorkspace(props) {
   if (state === null) {
     return loadError ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorNotice, { message: loadError, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "guard-skeleton h-32 w-full rounded-2xl", "aria-label": "Loading workspaces" });
   }
-  const tracked = new Set(state.worktrees.map((worktree) => worktree.root));
-  const canAddSuggested = suggestedRoot !== "" && !tracked.has(suggestedRoot);
+  const tracked = new Set(state.worktrees.map((worktree) => trimTrailingSeparators(worktree.root)));
+  const canAddSuggested = suggestedRoot !== "" && state.suggestedRootTracked !== true && !tracked.has(trimTrailingSeparators(suggestedRoot));
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-start justify-between gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "max-w-2xl text-sm text-slate-600", children: "Guard re-checks these folders in the background when files or threat intel change, including files you have not committed. Checks run on this device and use no credits." }),
@@ -264,7 +293,7 @@ function WorkspaceFindingsWorkspace(props) {
       WorktreeRow,
       {
         worktree,
-        newestRun: state.runs.find((run) => sameWorktree(worktree, run)),
+        newestRun: state.latestRuns.find((run) => sameWorktree(worktree, run)),
         assessment: state.assessments.find((item) => sameWorktree(worktree, item)),
         busyKey,
         onAction: handleAction
