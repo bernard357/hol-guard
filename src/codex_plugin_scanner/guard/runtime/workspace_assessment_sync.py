@@ -131,8 +131,8 @@ def _worktree_entry(
         "codebaseKey": keyed_digest(hash_key, "guard.workspace.codebase\0" + str(worktree["codebase_key"])),
         "worktreeKey": keyed_digest(hash_key, "guard.workspace.worktree\0" + str(worktree["worktree_key"])),
         "status": worktree_status(worktree, latest_run, assessed_run),
-        "dirtyGeneration": int(worktree["dirty_generation"]),  # type: ignore[call-overload]
-        "lastCompletedGeneration": int(worktree["last_completed_generation"]),  # type: ignore[call-overload]
+        "dirtyGeneration": _generation(worktree.get("dirty_generation")),
+        "lastCompletedGeneration": _generation(worktree.get("last_completed_generation")),
         "assessment": None,
         "findings": [],
         "findingsTruncated": False,
@@ -184,13 +184,18 @@ def _fit_budget(entries: list[dict[str, object]]) -> None:
         return len(json.dumps(entries, separators=(",", ":")).encode("utf-8"))
 
     while size() > MAX_SUMMARY_BYTES:
-        largest = max(entries, key=lambda entry: len(entry["findings"]))  # type: ignore[arg-type]
-        findings = largest["findings"]
-        if not isinstance(findings, list) or not findings:
+        largest = max(entries, key=lambda entry: len(_findings(entry)))
+        findings = _findings(largest)
+        if not findings:
             break
         drop = max(1, len(findings) // 4)
         del findings[-drop:]
         largest["findingsTruncated"] = True
+
+
+def _findings(entry: dict[str, object]) -> list[object]:
+    findings = entry["findings"]
+    return findings if isinstance(findings, list) else []
 
 
 def _due(store: GuardStore, digest: str, now: str) -> bool:
@@ -220,6 +225,10 @@ def _iso(value: object) -> str | None:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _generation(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def _list(value: object) -> list[object]:
