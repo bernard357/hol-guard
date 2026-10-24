@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, forwardRef, useImperativeHandle, useR
 import type { ChangeEvent, MutableRefObject } from "react";
 import { HiMiniArrowPath, HiMiniExclamationTriangle } from "react-icons/hi2";
 import { ApprovalProofModal } from "./approval-proof-modal";
-import { SectionLabel, ActionButton } from "./approval-center-primitives";
+import { ActionButton } from "./approval-center-primitives";
 import type {
   GuardApprovalGatePublicConfig,
   PackageFirewallStatusResponse,
@@ -105,7 +105,7 @@ function LoadingRow({ width }: LoadingRowProps) {
 function LoadingSkeleton() {
   return (
     <div
-      className="space-y-3 px-4 py-5"
+      className="space-y-3 py-2"
       aria-label="Loading package firewall status"
       aria-busy="true"
     >
@@ -124,13 +124,13 @@ type ErrorBannerProps = {
 
 function ErrorBanner({ message, onRetry, retryLabel = "Retry" }: ErrorBannerProps) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4" role="status">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-attention/20 bg-brand-attention/[0.04] px-4 py-3" role="status">
       <div className="flex items-start gap-2">
         <HiMiniExclamationTriangle
           className="mt-0.5 h-4 w-4 shrink-0 text-brand-attention"
           aria-hidden="true"
         />
-        <p className="text-sm text-brand-attention">{message}</p>
+        <p className="text-sm text-brand-attention-text">{message}</p>
       </div>
       <ActionButton variant="outline" onClick={onRetry}>
         {retryLabel}
@@ -202,7 +202,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
     onFixAllStateChange,
     runAuditRef,
   } = props;
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
   const recoveryConnectHandledRef = useRef(false);
   const repairNeedsCloudConnectRef = useRef(false);
   const repairNeedsCloudAccessRef = useRef(false);
@@ -997,12 +997,18 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
 
   const anyPending = pendingOp !== null;
   return (
-    <div ref={rootRef} className="rounded-2xl border border-slate-100 bg-white shadow-sm" data-testid="package-firewall-panel">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-        <div>
-          <SectionLabel>Package manager firewall</SectionLabel>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Install Guard shims, activate PATH routing, and verify protection on this machine.
+    <section
+      ref={rootRef}
+      aria-labelledby="package-firewall-heading"
+      data-testid="package-firewall-panel"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="package-firewall-heading" className="text-lg font-semibold tracking-tight text-brand-dark">
+            Package managers
+          </h2>
+          <p className="mt-0.5 max-w-[68ch] text-sm leading-6 text-slate-600">
+            Guard puts a shim in front of each tool so an install is checked before it runs.
           </p>
         </div>
         {panelLoad.phase === "loaded" && (
@@ -1010,6 +1016,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
         )}
       </div>
 
+      <div className="mt-4 space-y-4">
       {panelLoad.phase === "loading" && <LoadingSkeleton />}
 
       {panelLoad.phase === "error" && (
@@ -1025,7 +1032,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             <ErrorBanner message={sharedRefreshError} onRetry={() => void refreshSharedState()} retryLabel="Check again" />
           )}
           {!panelLoad.data.entitlement.allowed && (
-            <div className="border-b border-slate-100">
+            <div className="rounded-2xl border border-slate-200 bg-white">
               <EntitlementNotice
                 connectError={connectError}
                 connectPurpose={auditConnectGateActive ? "audit" : "package_firewall"}
@@ -1066,6 +1073,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           />
         </>
       )}
+      </div>
 
       {pendingApprovalOp !== null && (
         <ApprovalProofModal
@@ -1123,6 +1131,6 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           onApprovalBack={handleRecoveryApprovalBack}
         />
       ) : null}
-    </div>
+    </section>
   );
 });

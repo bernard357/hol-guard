@@ -1,3 +1,5 @@
+const ABOUT_HERO_TITLE = "About HOL Guard";
+const ABOUT_HERO_BODY = "A local-first safety layer for AI harnesses, built by HOL as part of open trust infrastructure for the agent internet.";
 const ABOUT_LOCAL_SECTION_TITLE = "What stays local";
 const ABOUT_LOCAL_SECTION_BODY = "Your approvals, receipts, and runtime snapshots stay on this device. Guard Cloud sync is optional and off by default. You control what leaves your machine.";
 const ABOUT_PARTNER_SECTION_TITLE = "Standards partner program";
@@ -189,20 +191,22 @@ const ALLOWED_LINKS = {
 export {
   ABOUT_LOCAL_SECTION_TITLE as A,
   ABOUT_LOCAL_SECTION_BODY as a,
-  ABOUT_TRUST_CONTRACT_CLAIMS as b,
-  ALLOWED_LINKS as c,
-  ABOUT_DATA_BOUNDARY_ROWS as d,
-  ABOUT_STANDARDS_NODES as e,
-  ABOUT_PATH_CARDS as f,
-  ABOUT_PARTNER_SECTION_BODY as g,
-  ABOUT_PARTNER_SECTION_TITLE as h,
-  ABOUT_PARTNER_LEVELS as i,
-  ABOUT_PARTNER_CTA as j,
-  ABOUT_PARTNER_CTA_HREF as k,
-  ABOUT_AFFILIATE_SECTION_BODY as l,
-  ABOUT_AFFILIATE_SECTION_TITLE as m,
-  ABOUT_AFFILIATE_TERMS as n,
-  ABOUT_AFFILIATE_CTA as o,
-  ABOUT_AFFILIATE_CTA_HREF as p,
-  ABOUT_AFFILIATE_DISCLOSURE as q
+  ALLOWED_LINKS as b,
+  ABOUT_HERO_TITLE as c,
+  ABOUT_HERO_BODY as d,
+  ABOUT_TRUST_CONTRACT_CLAIMS as e,
+  ABOUT_DATA_BOUNDARY_ROWS as f,
+  ABOUT_STANDARDS_NODES as g,
+  ABOUT_PATH_CARDS as h,
+  ABOUT_PARTNER_SECTION_BODY as i,
+  ABOUT_PARTNER_SECTION_TITLE as j,
+  ABOUT_PARTNER_LEVELS as k,
+  ABOUT_PARTNER_CTA as l,
+  ABOUT_PARTNER_CTA_HREF as m,
+  ABOUT_AFFILIATE_SECTION_BODY as n,
+  ABOUT_AFFILIATE_SECTION_TITLE as o,
+  ABOUT_AFFILIATE_TERMS as p,
+  ABOUT_AFFILIATE_CTA as q,
+  ABOUT_AFFILIATE_CTA_HREF as r,
+  ABOUT_AFFILIATE_DISCLOSURE as s
 };

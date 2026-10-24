@@ -1491,6 +1491,14 @@
    "body": "8a70fafed4dc"
   },
   {
+   "verdict": "windows-permissive",
+   "note": "Windows has no `O_NOFOLLOW`, so the open cannot refuse a path that became a symlink after it was resolved. Everything the rung rejects before that point is platform-neutral: the parent walk and the leaf check run on both platforms and `is_symlink` sees a junction or a reparse point, and `fs::canonicalize` resolves one. What is left off Unix is only the window between canonicalizing and opening, which the Python scanner left open on every platform.",
+   "file": "rust/crates/guard-runtime/src/skill_document_evidence.rs",
+   "item": "fn open_without_following(path: &Path) -> std::io::Result<fs::File>",
+   "cfg": "not(unix)",
+   "body": "532a900bb473"
+  },
+  {
    "file": "rust/crates/guard-runtime/src/workspace_review_business_budget.rs",
    "item": "fn ensure_durable_platform -- non-Unix block",
    "verdict": "windows-unsupported",

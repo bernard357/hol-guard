@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-DCO_88rL.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/feed-health-workspace-D2ViXtFt.js","assets/chunks/home-protection-module-Du65PsUR.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/audit-workspace-DwBATHpx.js"])))=>i.map(i=>d[i]);
-import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, s as HiMiniCheckCircle, d as HiMiniArrowPath, a4 as HiMiniExclamationTriangle, T as Tag, f as formatRelativeTime, ct as HiMiniClock, dj as IconActionButton, aC as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, N as EmptyState, A as ActionButton, dn as HiMiniBugAnt, _ as HiMiniXMark, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dp as ConnectFlowCard, dq as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, dr as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, ds as fetchPackageFirewallStatus, dt as runPackageAudit, du as resolveSupplyChainAuditFailure, dv as runPackageSync, dw as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dx as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dy as repairSupplyChainProtection, dz as runPackageFirewallAction, dA as parseInterceptProofSnapshot, dB as activatePackageFirewallRuntime, S as SectionLabel, dC as EntitlementNotice, aG as ApprovalProofModal, dD as chooseSupplyChainAuditFolder, dE as fetchReceipts, ba as WorkspacePageHeader, dF as lazyWorkspace, dG as __vitePreload } from "../guard-dashboard.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-D2aYnuzt.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-hFGaGr34.js","assets/chunks/feed-health-workspace-CdF42t_-.js","assets/chunks/home-protection-module-Du65PsUR.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/supply-chain-workspace-details-ttp5kE0v.js","assets/chunks/audit-workspace-D3lEtwNq.js"])))=>i.map(i=>d[i]);
+import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dj as IconActionButton, aC as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dn as HiMiniBugAnt, s as HiMiniCheckCircle, _ as HiMiniXMark, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dp as ConnectFlowCard, dq as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, dr as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, ds as fetchPackageFirewallStatus, dt as runPackageAudit, du as resolveSupplyChainAuditFailure, dv as runPackageSync, dw as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dx as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dy as repairSupplyChainProtection, dz as runPackageFirewallAction, dA as parseInterceptProofSnapshot, dB as activatePackageFirewallRuntime, dC as EntitlementNotice, aG as ApprovalProofModal, dD as chooseSupplyChainAuditFolder, dE as fetchReceipts, ba as WorkspacePageHeader, dF as lazyWorkspace, dG as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
   high: 3,
@@ -773,8 +773,13 @@ function resolveShimStatus(shim) {
 function actionIsAvailable$1(state) {
   return state === "available";
 }
+const STATUS_MARK_CLASS = {
+  green: "bg-brand-green",
+  blue: "bg-brand-blue",
+  attention: "bg-brand-attention",
+  slate: "bg-slate-300"
+};
 function ManagerRow({
-  layout = "row",
   manager,
   shim,
   actions,
@@ -791,14 +796,10 @@ function ManagerRow({
   onOpenDetails
 }) {
   const status = resolveShimStatus(shim);
-  const installState = actions.install ?? "disabled";
-  const repairState = actions.repair ?? "disabled";
-  const testState = actions.test ?? "disabled";
-  const removeState = actions.remove ?? "disabled";
-  const installAvailable = actionIsAvailable$1(installState);
-  const repairAvailable = actionIsAvailable$1(repairState);
-  const testAvailable = actionIsAvailable$1(testState);
-  const removeAvailable = actionIsAvailable$1(removeState);
+  const installAvailable = actionIsAvailable$1(actions.install ?? "disabled");
+  const repairAvailable = actionIsAvailable$1(actions.repair ?? "disabled");
+  const testAvailable = actionIsAvailable$1(actions.test ?? "disabled");
+  const removeAvailable = actionIsAvailable$1(actions.remove ?? "disabled");
   const showInstall = (!shim || !shim.installed) && installAvailable;
   const showRepair = shim?.installed && (shim.activation_state === "repair_required" || shim.path_broken) && repairAvailable;
   const showTest = shim?.installed && shim.activation_state === "protected" && testAvailable;
@@ -809,116 +810,126 @@ function ManagerRow({
   const handleRemoveRequest = reactExports.useCallback(() => onRemoveRequest(manager), [onRemoveRequest, manager]);
   const handleRemoveConfirm = reactExports.useCallback(() => onRemoveConfirm(manager), [onRemoveConfirm, manager]);
   const handleOpenDetails = reactExports.useCallback(() => onOpenDetails(manager), [onOpenDetails, manager]);
-  const cardLayout = layout === "card";
-  const outerClass = cardLayout ? "min-w-0 rounded-xl border border-slate-100 bg-white p-4 shadow-sm" : "border-b border-slate-100 last:border-b-0";
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: outerClass, role: cardLayout ? "listitem" : "row", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: cardLayout ? "flex flex-col gap-3" : "flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex min-w-0 flex-col gap-1 ${cardLayout ? "" : "sm:flex-1"}`, role: "cell", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-wrap items-center gap-2", children: [
-          status.icon === "check" ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniCheckCircle, { className: "h-4 w-4 shrink-0 text-brand-green", "aria-hidden": "true" }) : status.icon === "restart" ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowPath, { className: "h-4 w-4 shrink-0 text-brand-blue", "aria-hidden": "true" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "h-4 w-4 shrink-0 text-brand-attention", "aria-hidden": "true" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              onClick: handleOpenDetails,
-              className: "truncate text-left font-mono text-sm font-semibold text-brand-dark hover:text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 rounded",
-              "aria-label": `Open ${manager} manager details`,
-              children: manager
-            }
-          ),
-          shim?.detected && /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "green", children: "Detected" }),
-          isMine && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            HiMiniArrowPath,
-            {
-              className: "h-3.5 w-3.5 shrink-0 animate-spin text-brand-blue",
-              "aria-label": "Running…"
-            }
-          )
-        ] }),
-        shim?.path_summary !== null && shim?.path_summary !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: `break-all font-mono text-[11px] leading-relaxed text-slate-500 ${cardLayout ? "" : "sm:pl-6"}`, children: [
-          "Shell path: ",
-          shim.path_summary
-        ] }),
-        shim?.last_intercept_proof_at !== null && shim?.last_intercept_proof_at !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: `flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 ${cardLayout ? "" : "sm:pl-6"}`, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniCheckCircle, { className: "h-3.5 w-3.5 shrink-0 text-brand-green", "aria-hidden": "true" }),
-          "Last protection test ",
-          formatRelativeTime(shim.last_intercept_proof_at)
-        ] }) : shim?.installed ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: `flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 ${cardLayout ? "" : "sm:pl-6"}`, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniClock, { className: "h-3.5 w-3.5 shrink-0", "aria-hidden": "true" }),
-          "No protection test recorded yet"
-        ] }) : null
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "grid min-w-0 gap-x-6 gap-y-2 py-3.5 md:grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] md:items-start", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-col gap-0.5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex min-w-0 items-center gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", className: `size-2 shrink-0 rounded-full ${STATUS_MARK_CLASS[status.tone]}` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: handleOpenDetails,
+            className: "inline-flex min-h-11 min-w-0 items-center truncate rounded text-left font-mono text-sm font-semibold text-brand-dark hover:text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 md:min-h-0",
+            "aria-label": `Open ${manager} manager details`,
+            children: manager
+          }
+        ),
+        isMine && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          HiMiniArrowPath,
+          {
+            className: "h-3.5 w-3.5 shrink-0 animate-spin text-brand-blue",
+            "aria-label": "Running…"
+          }
+        )
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `flex flex-wrap items-center gap-2 ${cardLayout ? "justify-between" : "sm:gap-3"}`, role: "cell", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: status.tone, children: status.label }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shrink-0 [&_button]:min-h-11 [&_button]:h-11", children: isConfirmingRemove ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "ghost",
-              label: "Cancel",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniXCircle, { className: "h-4 w-4" }),
-              onClick: onRemoveCancel,
-              disabled: anyPending
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "danger",
-              label: "Confirm",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniTrash, { className: "h-4 w-4" }),
-              onClick: handleRemoveConfirm,
-              disabled: anyPending
-            }
-          )
-        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-1.5", children: [
-          showInstall && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "primary",
-              label: "Protect",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniShieldCheck, { className: "h-4 w-4" }),
-              onClick: handleInstall,
-              disabled: anyPending
-            }
-          ),
-          showRepair && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "primary",
-              label: "Fix PATH",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniWrenchScrewdriver, { className: "h-4 w-4" }),
-              onClick: handleRepair,
-              disabled: anyPending || repairAwaitingRefresh
-            }
-          ),
-          showTest && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "outline",
-              label: "Test",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniBeaker, { className: "h-4 w-4" }),
-              onClick: handleTest,
-              disabled: anyPending
-            }
-          ),
-          showRemove && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            IconActionButton,
-            {
-              variant: "danger",
-              label: "Remove",
-              icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniTrash, { className: "h-4 w-4" }),
-              onClick: handleRemoveRequest,
-              disabled: anyPending
-            }
-          )
-        ] }) })
-      ] })
+      shim?.detected && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "pl-4 text-xs text-slate-500", children: "Detected" })
     ] }),
-    shim?.activation_state === "restart_required" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cardLayout ? "mt-2" : "px-4 pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500", children: "Guard updated your shell profile. Open a new shell or restart AI apps to activate this shim." }) }),
-    shim?.activation_state === "repair_required" && !shim.path_broken && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cardLayout ? "mt-2" : "px-4 pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500", children: "Guard can add the shim directory to your shell profile automatically, then this manager will be ready after a restart." }) }),
-    shim?.path_broken && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: cardLayout ? "mt-2" : "px-4 pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-brand-attention", children: "Restart your shell after repair so PATH exports reload." }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-col gap-1 pl-4 md:pl-0", children: [
+      shim?.path_summary !== null && shim?.path_summary !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "break-words font-mono text-[11px] leading-relaxed text-slate-600", children: [
+        "Shell path: ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx(PathText, { value: shim.path_summary })
+      ] }),
+      shim?.last_intercept_proof_at !== null && shim?.last_intercept_proof_at !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-slate-500", children: [
+        "Last protection test ",
+        formatRelativeTime(shim.last_intercept_proof_at)
+      ] }) : shim?.installed ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-500", children: "No protection test recorded yet" }) : null,
+      shim?.activation_state === "restart_required" && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600", children: "Guard updated your shell profile. Open a new shell or restart AI apps to activate this shim." }),
+      shim?.activation_state === "repair_required" && !shim.path_broken && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600", children: "Guard can add the shim directory to your shell profile automatically, then this manager will be ready after a restart." }),
+      shim?.path_broken && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-slate-700", children: "Restart your shell after repair so PATH exports reload." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2 pl-4 md:justify-end md:pl-0 [&_button]:h-11 md:[&_button]:h-9 md:[&_button]:min-h-9", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: status.tone, children: status.label }),
+      isConfirmingRemove ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "ghost",
+            label: "Cancel",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniXCircle, { className: "h-4 w-4" }),
+            onClick: onRemoveCancel,
+            disabled: anyPending
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "danger",
+            label: "Confirm",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniTrash, { className: "h-4 w-4" }),
+            onClick: handleRemoveConfirm,
+            disabled: anyPending
+          }
+        )
+      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        showInstall && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "primary",
+            label: "Protect",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniShieldCheck, { className: "h-4 w-4" }),
+            onClick: handleInstall,
+            disabled: anyPending
+          }
+        ),
+        showRepair && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "primary",
+            label: "Fix PATH",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniWrenchScrewdriver, { className: "h-4 w-4" }),
+            onClick: handleRepair,
+            disabled: anyPending || repairAwaitingRefresh
+          }
+        ),
+        showTest && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "outline",
+            label: "Test",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniBeaker, { className: "h-4 w-4" }),
+            onClick: handleTest,
+            disabled: anyPending
+          }
+        ),
+        showRemove && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          IconActionButton,
+          {
+            showLabel: true,
+            variant: "ghost",
+            label: "Remove",
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniTrash, { className: "h-4 w-4" }),
+            onClick: handleRemoveRequest,
+            disabled: anyPending
+          }
+        )
+      ] })
+    ] })
   ] });
+}
+function PathText({ value }) {
+  const parts = value.split("/");
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: parts.map((part, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
+    index > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      "/",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("wbr", {})
+    ] }) : null,
+    part
+  ] }, index)) });
 }
 function GlobalActionsBar({ anyPending, pendingOp, onAudit, onSync }) {
   const auditRunning = pendingOp?.op === "audit";
@@ -1017,22 +1028,7 @@ function FirewallControlsView({
     }
     return managers;
   }, [data, managerFilter, noDetectedManagers, statusFilter]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4 px-4 py-4", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-brand-dark", children: "Package tools on this device" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-xs leading-relaxed text-slate-500", children: "Detect, protect, test, and repair each package manager Guard can watch." })
-      ] }),
-      showGlobalActions && /* @__PURE__ */ jsxRuntimeExports.jsx(
-        GlobalActionsBar,
-        {
-          anyPending,
-          pendingOp,
-          onAudit,
-          onSync
-        }
-      )
-    ] }),
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       ActivationSummary,
       {
@@ -1046,8 +1042,8 @@ function FirewallControlsView({
     ),
     lastFailed !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(FailureBanner, { failed: lastFailed }),
     lastCompleted !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ActionResultPanel, { completed: lastCompleted, onDismiss: onDismissResult }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-wrap items-center gap-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 sm:flex-none sm:w-44", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 sm:min-h-9 sm:w-48 sm:shrink-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniMagnifyingGlass, { className: "h-3.5 w-3.5 shrink-0 text-slate-400", "aria-hidden": "true" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "input",
@@ -1061,49 +1057,63 @@ function FirewallControlsView({
           }
         )
       ] }),
-      ["all", "protected", "actionable", "unprotected"].map((s) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 py-0.5", children: ["all", "protected", "actionable", "unprotected"].map((s) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
           onClick: () => onStatusFilterChange(s),
           "aria-pressed": statusFilter === s,
-          className: `rounded-full px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-blue/30 ${statusFilter === s ? "bg-brand-blue text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`,
+          className: `inline-flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-xs font-medium transition-colors sm:min-h-8 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 ${statusFilter === s ? "bg-brand-blue text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`,
           children: s === "all" ? "All" : s === "protected" ? "Protected" : s === "actionable" ? "Needs action" : "Unprotected"
         },
         s
-      ))
+      )) })
     ] }),
-    filteredManagers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      EmptyState,
-      {
-        title: noDetectedManagers && managerFilter.length === 0 && statusFilter === "all" ? "No package managers detected" : "No package managers found",
-        body: noDetectedManagers && managerFilter.length === 0 && statusFilter === "all" ? "Guard did not find npm, pip, pnpm, or other supported managers on this PATH. Install a package manager, open a new shell, then refresh status." : "No package managers match the current filter, or Guard has not detected any on this machine.",
-        tone: "teach"
-      }
-    ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3", role: "list", "aria-label": "Package manager controls", children: filteredManagers.map((manager) => {
-      const shim = data.package_shims.find((s) => s.manager === manager);
-      return /* @__PURE__ */ jsxRuntimeExports.jsx(
-        ManagerRow,
+    filteredManagers.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-y border-slate-200 py-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-sm font-semibold text-brand-dark", children: noDetectedManagers && managerFilter.length === 0 && statusFilter === "all" ? "No package managers detected" : "No package managers found" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 max-w-[68ch] text-sm leading-6 text-slate-600", children: noDetectedManagers && managerFilter.length === 0 && statusFilter === "all" ? "Guard did not find npm, pip, pnpm, or other supported managers on this PATH. Install a package manager, open a new shell, then refresh status." : "No package managers match the current filter, or Guard has not detected any on this machine." })
+    ] }) : (
+      // One ruled row per manager, read as a ledger rather than a card grid.
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "ul",
         {
-          layout: "card",
-          manager,
-          shim,
-          actions: data.actions,
-          anyPending,
-          repairAwaitingRefresh: repairAwaitingRefresh === manager,
-          isMine: pendingOp?.manager === manager,
-          isConfirmingRemove: confirmRemoveManager === manager,
-          onInstall,
-          onRepair,
-          onTest,
-          onRemoveRequest,
-          onRemoveConfirm,
-          onRemoveCancel,
-          onOpenDetails: onOpenManagerDetails
-        },
-        manager
-      );
-    }) })
+          className: "min-w-0 divide-y divide-slate-200 border-y border-slate-200",
+          "aria-label": "Package manager controls",
+          children: filteredManagers.map((manager) => {
+            const shim = data.package_shims.find((s) => s.manager === manager);
+            return /* @__PURE__ */ jsxRuntimeExports.jsx(
+              ManagerRow,
+              {
+                manager,
+                shim,
+                actions: data.actions,
+                anyPending,
+                repairAwaitingRefresh: repairAwaitingRefresh === manager,
+                isMine: pendingOp?.manager === manager,
+                isConfirmingRemove: confirmRemoveManager === manager,
+                onInstall,
+                onRepair,
+                onTest,
+                onRemoveRequest,
+                onRemoveConfirm,
+                onRemoveCancel,
+                onOpenDetails: onOpenManagerDetails
+              },
+              manager
+            );
+          })
+        }
+      )
+    ),
+    showGlobalActions && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+      GlobalActionsBar,
+      {
+        anyPending,
+        pendingOp,
+        onAudit,
+        onSync
+      }
+    ) })
   ] });
 }
 function ManagerProofRow({
@@ -1611,7 +1621,7 @@ function LoadingSkeleton() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
-      className: "space-y-3 px-4 py-5",
+      className: "space-y-3 py-2",
       "aria-label": "Loading package firewall status",
       "aria-busy": "true",
       children: [
@@ -1623,7 +1633,7 @@ function LoadingSkeleton() {
   );
 }
 function ErrorBanner({ message, onRetry, retryLabel = "Retry" }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3 px-4 py-4", role: "status", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-attention/20 bg-brand-attention/[0.04] px-4 py-3", role: "status", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         HiMiniExclamationTriangle,
@@ -1632,7 +1642,7 @@ function ErrorBanner({ message, onRetry, retryLabel = "Retry" }) {
           "aria-hidden": "true"
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-brand-attention", children: message })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-brand-attention-text", children: message })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: onRetry, children: retryLabel })
   ] });
@@ -2395,113 +2405,123 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
   const managerDrawerShim = panelLoad.phase === "loaded" && managerDrawerTarget !== null ? panelLoad.data.package_shims.find((entry) => entry.manager === managerDrawerTarget) : void 0;
   const auditConnectGate = panelLoad.phase === "loaded" && auditConnectGateActive ? resolveSupplyChainAuditConnectGate(panelLoad.data, { resumeAfterConnect: resumeAuditAfterConnect }) : null;
   const anyPending = pendingOp !== null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { ref: rootRef, className: "rounded-2xl border border-slate-100 bg-white shadow-sm", "data-testid": "package-firewall-panel", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(SectionLabel, { children: "Package manager firewall" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-sm text-slate-500", children: "Install Guard shims, activate PATH routing, and verify protection on this machine." })
-      ] }),
-      panelLoad.phase === "loaded" && /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshButton, { disabled: anyPending, spinning: anyPending, onRefresh: handleRetry })
-    ] }),
-    panelLoad.phase === "loading" && /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingSkeleton, {}),
-    panelLoad.phase === "error" && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: panelLoad.message, onRetry: handleRetry }),
-    panelLoad.phase === "loaded" && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      refreshError !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: refreshError, onRetry: handleRetry, retryLabel: "Check again" }),
-      sharedRefreshError !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: sharedRefreshError, onRetry: () => void refreshSharedState(), retryLabel: "Check again" }),
-      !panelLoad.data.entitlement.allowed && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-b border-slate-100", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        EntitlementNotice,
-        {
-          connectError,
-          connectPurpose: auditConnectGateActive ? "audit" : "package_firewall",
-          connectStarting: startingConnect,
-          data: panelLoad.data,
-          headline: auditConnectGate?.headline,
-          detail: auditConnectGate?.detail,
-          onStartConnect: handleStartConnect
-        }
-      ) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        FirewallControlsView,
-        {
-          data: panelLoad.data,
-          pendingOp,
-          repairAwaitingRefresh,
-          lastCompleted,
-          lastFailed,
-          confirmRemoveManager,
-          showGlobalActions: panelLoad.data.entitlement.allowed,
-          statusFilter,
-          managerFilter,
-          onStatusFilterChange: handleStatusFilterChange,
-          onManagerFilterChange: handleManagerFilterChange,
-          onInstall: handleInstall,
-          onRepair: handleRepair,
-          onTest: handleTest,
-          onRemoveRequest: handleRemoveRequest,
-          onRemoveConfirm: handleRemoveConfirm,
-          onRemoveCancel: handleRemoveCancel,
-          onAudit: handleAudit,
-          onSync: handleSync,
-          onDismissResult: handleDismissResult,
-          onActivateRuntime: handleActivateRuntime,
-          onRefreshStatus: handleRetry,
-          onOpenManagerDetails: handleOpenManagerDetails,
-          activatingRuntime,
-          activationAssistError
-        }
-      )
-    ] }),
-    pendingApprovalOp !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ApprovalProofModal,
-      {
-        title: pendingApprovalOp.op === "fix_all" ? "Restore package protection" : `${actionLabel(pendingApprovalOp.op)} ${pendingApprovalOp.manager}`,
-        detail: "Enter local approval proof before Guard changes package-manager protection on this device.",
-        confirmLabel: pendingApprovalOp.op === "fix_all" ? "Restore protection" : actionLabel(pendingApprovalOp.op),
-        approvalGate: resolvedApprovalGate,
-        onCancel: handleApprovalCancel,
-        onConfirm: handleApprovalConfirm
-      }
-    ),
-    panelLoad.phase === "loaded" && managerDrawerTarget !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      SupplyChainManagerDrawer,
-      {
-        manager: managerDrawerTarget,
-        shim: managerDrawerShim,
-        actions: panelLoad.data.actions,
-        anyPending,
-        repairAwaitingRefresh: repairAwaitingRefresh === managerDrawerTarget,
-        isMine: pendingOp?.manager === managerDrawerTarget,
-        actionHandlers: {
-          install: handleInstall,
-          repair: handleRepair,
-          test: handleTest,
-          removeRequest: handleRemoveRequest
-        },
-        onClose: handleCloseManagerDrawer
-      }
-    ),
-    interceptProof !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(InterceptProofModal, { proof: interceptProof, onClose: handleCloseInterceptProof }),
-    auditRecoveryGate !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      AuditRecoveryModal,
-      {
-        gate: auditRecoveryGate,
-        phase: auditRecoveryPhase,
-        error: auditRecoveryError,
-        connectError,
-        connectStarting: startingConnect,
-        connectFlow: panelLoad.phase === "loaded" ? panelLoad.data.connect_flow : null,
-        approvalGate: resolvedApprovalGate,
-        onClose: closeAuditRecovery,
-        onPrimaryAction: handleRecoveryPrimary,
-        onStartConnect: () => {
-          setAuditRecoveryPhase("connecting");
-          void handleStartConnect();
-        },
-        onApprovalSubmit: handleRecoveryApprovalSubmit,
-        onApprovalBack: handleRecoveryApprovalBack
-      }
-    ) : null
-  ] });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "section",
+    {
+      ref: rootRef,
+      "aria-labelledby": "package-firewall-heading",
+      "data-testid": "package-firewall-panel",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "package-firewall-heading", className: "text-lg font-semibold tracking-tight text-brand-dark", children: "Package managers" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 max-w-[68ch] text-sm leading-6 text-slate-600", children: "Guard puts a shim in front of each tool so an install is checked before it runs." })
+          ] }),
+          panelLoad.phase === "loaded" && /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshButton, { disabled: anyPending, spinning: anyPending, onRefresh: handleRetry })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 space-y-4", children: [
+          panelLoad.phase === "loading" && /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingSkeleton, {}),
+          panelLoad.phase === "error" && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: panelLoad.message, onRetry: handleRetry }),
+          panelLoad.phase === "loaded" && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            refreshError !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: refreshError, onRetry: handleRetry, retryLabel: "Check again" }),
+            sharedRefreshError !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBanner, { message: sharedRefreshError, onRetry: () => void refreshSharedState(), retryLabel: "Check again" }),
+            !panelLoad.data.entitlement.allowed && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-2xl border border-slate-200 bg-white", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+              EntitlementNotice,
+              {
+                connectError,
+                connectPurpose: auditConnectGateActive ? "audit" : "package_firewall",
+                connectStarting: startingConnect,
+                data: panelLoad.data,
+                headline: auditConnectGate?.headline,
+                detail: auditConnectGate?.detail,
+                onStartConnect: handleStartConnect
+              }
+            ) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              FirewallControlsView,
+              {
+                data: panelLoad.data,
+                pendingOp,
+                repairAwaitingRefresh,
+                lastCompleted,
+                lastFailed,
+                confirmRemoveManager,
+                showGlobalActions: panelLoad.data.entitlement.allowed,
+                statusFilter,
+                managerFilter,
+                onStatusFilterChange: handleStatusFilterChange,
+                onManagerFilterChange: handleManagerFilterChange,
+                onInstall: handleInstall,
+                onRepair: handleRepair,
+                onTest: handleTest,
+                onRemoveRequest: handleRemoveRequest,
+                onRemoveConfirm: handleRemoveConfirm,
+                onRemoveCancel: handleRemoveCancel,
+                onAudit: handleAudit,
+                onSync: handleSync,
+                onDismissResult: handleDismissResult,
+                onActivateRuntime: handleActivateRuntime,
+                onRefreshStatus: handleRetry,
+                onOpenManagerDetails: handleOpenManagerDetails,
+                activatingRuntime,
+                activationAssistError
+              }
+            )
+          ] })
+        ] }),
+        pendingApprovalOp !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          ApprovalProofModal,
+          {
+            title: pendingApprovalOp.op === "fix_all" ? "Restore package protection" : `${actionLabel(pendingApprovalOp.op)} ${pendingApprovalOp.manager}`,
+            detail: "Enter local approval proof before Guard changes package-manager protection on this device.",
+            confirmLabel: pendingApprovalOp.op === "fix_all" ? "Restore protection" : actionLabel(pendingApprovalOp.op),
+            approvalGate: resolvedApprovalGate,
+            onCancel: handleApprovalCancel,
+            onConfirm: handleApprovalConfirm
+          }
+        ),
+        panelLoad.phase === "loaded" && managerDrawerTarget !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SupplyChainManagerDrawer,
+          {
+            manager: managerDrawerTarget,
+            shim: managerDrawerShim,
+            actions: panelLoad.data.actions,
+            anyPending,
+            repairAwaitingRefresh: repairAwaitingRefresh === managerDrawerTarget,
+            isMine: pendingOp?.manager === managerDrawerTarget,
+            actionHandlers: {
+              install: handleInstall,
+              repair: handleRepair,
+              test: handleTest,
+              removeRequest: handleRemoveRequest
+            },
+            onClose: handleCloseManagerDrawer
+          }
+        ),
+        interceptProof !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(InterceptProofModal, { proof: interceptProof, onClose: handleCloseInterceptProof }),
+        auditRecoveryGate !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          AuditRecoveryModal,
+          {
+            gate: auditRecoveryGate,
+            phase: auditRecoveryPhase,
+            error: auditRecoveryError,
+            connectError,
+            connectStarting: startingConnect,
+            connectFlow: panelLoad.phase === "loaded" ? panelLoad.data.connect_flow : null,
+            approvalGate: resolvedApprovalGate,
+            onClose: closeAuditRecovery,
+            onPrimaryAction: handleRecoveryPrimary,
+            onStartConnect: () => {
+              setAuditRecoveryPhase("connecting");
+              void handleStartConnect();
+            },
+            onApprovalSubmit: handleRecoveryApprovalSubmit,
+            onApprovalBack: handleRecoveryApprovalBack
+          }
+        ) : null
+      ]
+    }
+  );
 });
 function useSupplyChainAuditSession({
   snapshot,
@@ -2674,15 +2694,19 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-DCO_88rL.js"), true ? __vite__mapDeps([0,1,2,3,4,5]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-D2aYnuzt.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+);
+const SupplyChainWorkspaceDetails = lazyWorkspace(
+  "supply-chain-workspace-details",
+  () => __vitePreload(() => import("./supply-chain-workspace-details-ttp5kE0v.js"), true ? __vite__mapDeps([7,1,2,3,4,5,6]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-DwBATHpx.js"), true ? __vite__mapDeps([6,1,2,5]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-D3lEtwNq.js"), true ? __vite__mapDeps([8,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",
-  () => __vitePreload(() => import("./feed-health-workspace-D2ViXtFt.js"), true ? __vite__mapDeps([3,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
+  () => __vitePreload(() => import("./feed-health-workspace-CdF42t_-.js"), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
 );
 const hubTabs = [
   { value: "supply-chain", label: "Supply Chain" },
@@ -2722,6 +2746,9 @@ function SupplyChainHubWorkspace(props) {
     },
     [props.onNavigate]
   );
+  const handleAuditNavigate = reactExports.useCallback(() => {
+    props.onNavigate("/audit");
+  }, [props.onNavigate]);
   const handleFixAll = reactExports.useCallback(() => {
     firewallPanelRef.current?.fixAll();
   }, []);
@@ -2741,10 +2768,6 @@ function SupplyChainHubWorkspace(props) {
         SupplyChainWorkspace,
         {
           snapshot: props.snapshot,
-          onGoHome: props.onGoHome,
-          onAuditNavigate: () => props.onNavigate("/audit"),
-          auditSnapshot: auditSession.auditSnapshot,
-          auditRunning: auditSession.auditRunning,
           fixAllState,
           onFixAll: handleFixAll
         }
@@ -2778,6 +2801,16 @@ function SupplyChainHubWorkspace(props) {
         onFixAllStateChange: setFixAllState,
         runAuditRef: auditSession.runAuditRef
       }
+    ) }),
+    tab === "supply-chain" && /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.Suspense, { fallback: null, children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+      SupplyChainWorkspaceDetails,
+      {
+        snapshot: props.snapshot,
+        onGoHome: props.onGoHome,
+        onAuditNavigate: handleAuditNavigate,
+        auditSnapshot: auditSession.auditSnapshot,
+        auditRunning: auditSession.auditRunning
+      }
     ) })
   ] });
 }
@@ -2790,7 +2823,6 @@ const supplyChainHubWorkspace = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Ob
   hubTitleForTab
 }, Symbol.toStringTag, { value: "Module" }));
 export {
-  SUPPLY_CHAIN_WORKSPACE_SHELL_CLASS as S,
   supplyChainFixAllNeedsCloudConnect as a,
   supplyChainFixAllButtonLabel as b,
   sortPackageWorkbenchFindings as c,
