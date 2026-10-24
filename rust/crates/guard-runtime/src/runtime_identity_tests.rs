@@ -334,3 +334,104 @@ fn invalid_requests_are_refused() {
     huge["advisories"] = Value::Array(vec![node_advisory(); 1_025]);
     assert_eq!(error(huge), "runtime_identity_request_too_large");
 }
+
+#[test]
+fn vendorless_advisory_flags_but_never_clears() {
+    let mut advisory = node_advisory();
+    advisory["vendor"] = Value::Null;
+    let result = assess(json!({
+        "artifacts": [
+            artifact("a-old", "node", "22.3.0", Some(OLD_HASH), "vendor_verified"),
+            artifact("b-new", "node", "22.4.1", Some(NEW_HASH), "vendor_verified"),
+        ],
+        "advisories": [advisory],
+    }));
+    assert_eq!(match_status(&result, 0), ("affected", "in_range"));
+    assert_eq!(
+        match_status(&result, 1),
+        ("unknown", "advisory_vendor_unspecified")
+    );
+}
+
+#[test]
+fn unidentified_or_uncertain_locations_block_a_verified_fix() {
+    let mut unidentified = replacement_request("exited", true, "bound_launch");
+    unidentified["locations"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"location_id": "loc-2", "artifact_id": null, "state": "present"}));
+    assert_eq!(
+        verdict(&assess(unidentified)),
+        ("fix_unverified", vec!["location_unidentified"])
+    );
+
+    let mut uncertain = replacement_request("exited", true, "bound_launch");
+    uncertain["locations"] =
+        json!([{"location_id": "loc-1", "artifact_id": "old", "state": "unknown"}]);
+    assert_eq!(
+        verdict(&assess(uncertain)),
+        ("unknown", vec!["affected_location_state_unknown"])
+    );
+}
+
+#[test]
+fn restart_is_not_enough_while_an_affected_build_remains() {
+    let mut installed = replacement_request("running", true, "bound_launch");
+    installed["locations"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"location_id": "loc-2", "artifact_id": "old", "state": "present"}));
+    assert_eq!(
+        verdict(&assess(installed)),
+        (
+            "affected",
+            vec![
+                "affected_instance_running_after_replacement",
+                "affected_artifact_installed"
+            ]
+        )
+    );
+
+    let mut uncertain_peer = replacement_request("running", true, "bound_launch");
+    uncertain_peer["instances"]
+        .as_array_mut()
+        .unwrap()
+        .push(instance("i-old-2", "old", 43, "unknown", "observed_only"));
+    assert_eq!(
+        verdict(&assess(uncertain_peer)),
+        (
+            "restart_required",
+            vec![
+                "affected_instance_running_after_replacement",
+                "affected_instance_state_unknown"
+            ]
+        )
+    );
+}
+
+#[test]
+fn malformed_build_metadata_and_inverted_ranges_are_refused() {
+    assert!(SemVer::parse("22.5.0+bad space").is_none());
+    assert!(SemVer::parse("22.5.0+").is_none());
+    assert!(SemVer::parse("22.5.0+build.1-x").is_some());
+
+    let invert = |range: Value| {
+        let mut request = replacement_request("running", true, "bound_launch");
+        request["advisories"][0]["ranges"] = json!([range]);
+        request
+    };
+    for range in [
+        json!({"introduced": "2.0.0", "fixed": "1.0.0"}),
+        json!({"introduced": "2.0.0", "fixed": "2.0.0"}),
+        json!({"introduced": "2.0.0", "last_affected": "1.9.9"}),
+    ] {
+        assert_eq!(error(invert(range)), "runtime_identity_advisory_invalid");
+    }
+    assess(invert(
+        json!({"introduced": "2.0.0", "last_affected": "2.0.0"}),
+    ));
+
+    let mut pairs = json!({"advisories": vec![node_advisory(); 128]});
+    pairs["artifacts"] = Value::Array(vec![artifact("a", "node", "1.0.0", None, "unknown"); 129]);
+    assert_eq!(error(pairs), "runtime_identity_request_too_large");
+}

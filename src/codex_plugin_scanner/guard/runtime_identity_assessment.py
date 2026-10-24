@@ -66,7 +66,7 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
     import os
 
     from .codex_hook_launch_runtime import run_isolated_hook_process
-    from .native_runtime import native_runtime_status
+    from .native_runtime import _windows_native_dll_directories, native_runtime_status
 
     status = native_runtime_status()
     if (
@@ -79,6 +79,12 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
         raise RuntimeIdentityError("runtime_identity_native_unavailable")
     runtime = status.identity.path
     environment = {key: value for key in _CHILD_ENVIRONMENT_KEYS if (value := os.environ.get(key))}
+    if os.name == "nt":
+        # Same loader path the capability probe used, so a runtime whose CRT
+        # sits beside the base interpreter starts here too.
+        dll_path = os.pathsep.join(_windows_native_dll_directories())
+        if dll_path:
+            environment["PATH"] = dll_path
     completed = run_isolated_hook_process(
         (str(runtime), RUNTIME_IDENTITY_COMMAND, "--stdin"),
         input_text=json.dumps(request, sort_keys=True, separators=(",", ":")),
@@ -111,12 +117,31 @@ def _parse_result(result: object) -> RuntimeIdentityAssessment:
     scope_complete = result.get("scope_complete")
     if not isinstance(artifacts, list) or not isinstance(advisories, list) or not isinstance(scope_complete, bool):
         raise RuntimeIdentityError("runtime_identity_failed")
-    if not all(isinstance(row, dict) for row in artifacts):
+    if not all(_artifact_row_ok(row) for row in artifacts):
         raise RuntimeIdentityError("runtime_identity_failed")
     return RuntimeIdentityAssessment(
         scope_complete=scope_complete,
         artifacts=tuple(artifacts),
         advisories=tuple(_parse_verdict(row) for row in advisories),
+    )
+
+
+def _artifact_row_ok(row: object) -> bool:
+    if not isinstance(row, dict):
+        return False
+    fingerprint = row.get("identity_fingerprint")
+    matches = row.get("matches")
+    return (
+        isinstance(row.get("artifact_id"), str)
+        and isinstance(fingerprint, str)
+        and len(fingerprint) == 64
+        and all(char in "0123456789abcdef" for char in fingerprint)
+        and isinstance(row.get("identity_assurance"), str)
+        and isinstance(matches, list)
+        and all(
+            isinstance(match, dict) and all(isinstance(match.get(key), str) for key in ("advisory_id", "status", "reason"))
+            for match in matches
+        )
     )
 
 

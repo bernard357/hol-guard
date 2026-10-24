@@ -32,6 +32,9 @@ const MAX_INSTANCES: usize = 4_096;
 const MAX_ADVISORIES: usize = 1_024;
 const MAX_RANGES: usize = 64;
 const MAX_TEXT: usize = 256;
+/// Every artifact can produce one row per advisory; this keeps the reply well
+/// inside the bridge's output limit and the work inside its timeout.
+const MAX_ARTIFACT_ADVISORY_PAIRS: usize = 16_384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -195,14 +198,14 @@ pub(crate) fn assess(request: &Request) -> Result<Value, String> {
     }
 
     let mut artifact_rows = Vec::with_capacity(artifacts.len());
-    let mut matches: BTreeMap<(&str, &str), Match> = BTreeMap::new();
+    let mut matches: Vec<BTreeMap<&str, Match>> = vec![BTreeMap::new(); advisories.len()];
     for (id, artifact) in &artifacts {
         let mut rows = Vec::new();
-        for (advisory, intervals) in &advisories {
+        for (index, (advisory, intervals)) in advisories.iter().enumerate() {
             let Some(found) = match_artifact(artifact, advisory, intervals) else {
                 continue;
             };
-            matches.insert((advisory.advisory_id.as_str(), id), found);
+            matches[index].insert(id, found);
             let (status, reason) = match found {
                 Match::Affected(reason) => ("affected", reason),
                 Match::NotAffected(reason) => ("not_affected", reason),
@@ -223,18 +226,14 @@ pub(crate) fn assess(request: &Request) -> Result<Value, String> {
 
     let advisory_rows = advisories
         .iter()
-        .map(|(advisory, _)| {
-            let by_artifact: BTreeMap<&str, Match> = matches
-                .iter()
-                .filter(|((advisory_id, _), _)| *advisory_id == advisory.advisory_id)
-                .map(|((_, artifact_id), found)| (*artifact_id, *found))
-                .collect();
+        .zip(&matches)
+        .map(|((advisory, _), by_artifact)| {
             advisory_verdict(
                 request,
                 &artifacts,
                 &locations,
                 &advisory.advisory_id,
-                &by_artifact,
+                by_artifact,
             )
         })
         .collect::<Vec<_>>();
@@ -252,6 +251,7 @@ fn validate_bounds(request: &Request) -> Result<(), String> {
         || request.locations.len() > MAX_LOCATIONS
         || request.instances.len() > MAX_INSTANCES
         || request.advisories.len() > MAX_ADVISORIES
+        || request.artifacts.len() * request.advisories.len() > MAX_ARTIFACT_ADVISORY_PAIRS
         || request
             .advisories
             .iter()
@@ -443,10 +443,14 @@ fn parse_intervals(advisory: &AdvisoryInput) -> Result<Vec<Interval>, String> {
                 (None, Some(last)) => Upper::LastAffected(last),
                 (None, None) => Upper::Unbounded,
             };
-            Ok(Interval {
+            let interval = Interval {
                 introduced: parse(&range.introduced)?,
                 upper,
-            })
+            };
+            if !interval.is_ordered() {
+                return Err(invalid());
+            }
+            Ok(interval)
         })
         .collect()
 }

@@ -22,7 +22,19 @@ enum Identifier {
 impl SemVer {
     pub(crate) fn parse(raw: &str) -> Option<Self> {
         let text = raw.strip_prefix('v').unwrap_or(raw);
-        let text = text.split_once('+').map_or(text, |(version, _)| version);
+        let text = match text.split_once('+') {
+            Some((version, build)) => {
+                // Build metadata never orders versions, but a malformed tail
+                // means the whole string is not semver.
+                if !build.split('.').all(|part| {
+                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                }) {
+                    return None;
+                }
+                version
+            }
+            None => text,
+        };
         let (core_text, prerelease_text) = match text.split_once('-') {
             Some((core, pre)) => (core, Some(pre)),
             None => (text, None),
@@ -121,6 +133,19 @@ pub(crate) enum Upper {
 }
 
 impl Interval {
+    /// An interval whose upper bound sits at or below its lower bound matches
+    /// nothing, which would read as "not affected"; such ranges are refused.
+    pub(crate) fn is_ordered(&self) -> bool {
+        let Some(low) = &self.introduced else {
+            return true;
+        };
+        match &self.upper {
+            Upper::Unbounded => true,
+            Upper::Fixed(fixed) => low < fixed,
+            Upper::LastAffected(last) => low <= last,
+        }
+    }
+
     pub(crate) fn contains(&self, version: &SemVer) -> bool {
         if self.introduced.as_ref().is_some_and(|low| version < low) {
             return false;

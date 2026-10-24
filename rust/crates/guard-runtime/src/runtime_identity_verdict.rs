@@ -27,6 +27,10 @@ pub(super) fn match_artifact(
             Some(_) => {}
         }
     }
+    // An advisory that names no vendor still flags every in-range build of
+    // the family, but its ranges cannot clear a build: another vendor's
+    // versions and backports follow their own numbering.
+    let can_clear = advisory.vendor.is_some() && artifact.assurance.trusted();
     if advisory.version_scheme != "semver" {
         return Some(Match::Unknown("version_scheme_unsupported"));
     }
@@ -47,11 +51,14 @@ pub(super) fn match_artifact(
         .build_id
         .as_ref()
         .is_some_and(|build| advisory.backport_build_ids.contains(build));
-    Some(match (in_range, backported, artifact.assurance.trusted()) {
+    Some(match (in_range, backported, can_clear) {
         (true, true, true) => Match::NotAffected("vendor_backport"),
         (true, true, false) => Match::Unknown("backport_unverified"),
         (true, false, _) => Match::Affected("in_range"),
         (false, _, true) => Match::NotAffected("outside_ranges"),
+        (false, _, false) if advisory.vendor.is_none() => {
+            Match::Unknown("advisory_vendor_unspecified")
+        }
         (false, _, false) => Match::Unknown("outside_ranges_untrusted"),
     })
 }
@@ -102,13 +109,24 @@ pub(super) fn advisory_verdict(
         })
         .map(|instance| instance.instance_id.as_str())
         .collect();
-    let installed_affected = locations.values().any(|location| {
-        location.state != LocationState::Missing
-            && location
-                .artifact_id
-                .as_deref()
-                .is_some_and(|id| affected.contains(id))
-    });
+    let holds_affected = |location: &&&LocationInput| {
+        location
+            .artifact_id
+            .as_deref()
+            .is_some_and(|id| affected.contains(id))
+    };
+    let installed_affected = locations
+        .values()
+        .filter(holds_affected)
+        .any(|location| location.state == LocationState::Present);
+    let affected_location_unknown = locations
+        .values()
+        .filter(holds_affected)
+        .any(|location| location.state == LocationState::Unknown);
+    // A file Guard saw but could not identify may still be the affected build.
+    let unidentified_location = locations
+        .values()
+        .any(|location| location.state != LocationState::Missing && location.artifact_id.is_none());
     // The file at an affected process's location has already been replaced by
     // a cleared build: the process still runs the old one.
     let replaced_on_disk = |instance: &&InstanceInput| {
@@ -136,22 +154,44 @@ pub(super) fn advisory_verdict(
             "not_affected"
         }
     } else if !running_affected.is_empty() {
-        if running_affected.iter().all(replaced_on_disk) {
-            reasons.push("affected_instance_running_after_replacement");
+        let all_replaced = running_affected.iter().all(replaced_on_disk);
+        reasons.push(if all_replaced {
+            "affected_instance_running_after_replacement"
+        } else {
+            "affected_instance_running"
+        });
+        if live_affected.len() > running_affected.len() {
+            reasons.push("affected_instance_state_unknown");
+        }
+        // A restart only clears the risk when no affected build is left to
+        // relaunch; otherwise the advisory is still plainly affected.
+        if installed_affected {
+            reasons.push("affected_artifact_installed");
+        }
+        if all_replaced && !installed_affected {
             "restart_required"
         } else {
-            reasons.push("affected_instance_running");
             "affected"
         }
-    } else if !live_affected.is_empty() {
-        reasons.push("affected_instance_state_unknown");
-        "unknown"
     } else if installed_affected {
         reasons.push("affected_artifact_installed");
+        if !live_affected.is_empty() {
+            reasons.push("affected_instance_state_unknown");
+        }
         "affected"
+    } else if !live_affected.is_empty() || affected_location_unknown {
+        reasons.push(if live_affected.is_empty() {
+            "affected_location_state_unknown"
+        } else {
+            "affected_instance_state_unknown"
+        });
+        "unknown"
     } else {
         if !request.scope_complete {
             reasons.push("scope_incomplete");
+        }
+        if unidentified_location {
+            reasons.push("location_unidentified");
         }
         if replacements.is_empty() {
             reasons.push("no_bound_trusted_replacement");

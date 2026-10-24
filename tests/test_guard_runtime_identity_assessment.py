@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard import native_runtime_identity as runtime_identity
+from codex_plugin_scanner.guard import runtime_identity_assessment as runtime_identity
 
 OLD_HASH = "1" * 64
 NEW_HASH = "2" * 64
@@ -101,6 +101,15 @@ def test_native_reply_round_trips(native_hook_force: Path) -> None:
             },
         },
         {"ok": False},
+        {
+            "ok": True,
+            "result": {
+                "schema": runtime_identity.RUNTIME_IDENTITY_SCHEMA,
+                "scope_complete": True,
+                "artifacts": [{}],
+                "advisories": [],
+            },
+        },
     ],
 )
 def test_malformed_reply_is_not_a_verdict(monkeypatch: pytest.MonkeyPatch, reply: dict[str, object]) -> None:
