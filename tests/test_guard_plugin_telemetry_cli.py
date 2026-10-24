@@ -207,3 +207,16 @@ def test_report_builds_when_the_full_index_is_larger_than_one_native_request(
     entries = report["entries"]
     assert isinstance(entries, list)
     assert [entry["slug"] for entry in entries] == ["acme/notes-kit"]
+
+
+def test_index_urls_that_are_not_normalized_still_match(
+    guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index: list[dict[str, object]] = [
+        {"slug": "acme/notes-kit", "repository": "git+https://www.GitHub.com/Acme/Notes-Kit.git/"}
+    ]
+    monkeypatch.setattr(telemetry_report, "fetch_index", lambda: index)
+    assert telemetry_report.installed_index(index) == index
+    result = telemetry_report.build_report("ab" * 32, week="2026-W43", index=index)
+    entries = result["report"]["entries"]
+    assert [entry["slug"] for entry in entries] == ["acme/notes-kit"]

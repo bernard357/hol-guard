@@ -139,12 +139,28 @@ def installed_index(index: list[dict[str, object]]) -> list[dict[str, object]]:
 
     Matching needs a repository, so the rest of the index is never needed on
     the device. The repository list is used here and is not sent anywhere.
+
+    The native runtime returns normalized URLs (``https://host/owner/repo``).
+    Normalizing only lower-cases and strips a prefix or suffix, so any index
+    URL that normalizes to one of them contains its ``host/owner/repo`` part.
+    The filter keeps those entries and may keep a few extra ones; the native
+    matcher still decides exactly which listing a plugin belongs to.
     """
 
     result = _native_request({"command": "repositories", "homes": runtime_homes()})
     repositories = result.get("repositories")
-    installed = {item for item in repositories if isinstance(item, str)} if isinstance(repositories, list) else set()
-    return [entry for entry in index if entry.get("repository") in installed]
+    keys = (
+        {item.removeprefix("https://") for item in repositories if isinstance(item, str)}
+        if isinstance(repositories, list)
+        else set()
+    )
+    if not keys:
+        return []
+    return [
+        entry
+        for entry in index
+        if isinstance(entry.get("repository"), str) and any(key in str(entry["repository"]).lower() for key in keys)
+    ]
 
 
 def build_report(secret: str, *, week: str, index: list[dict[str, object]] | None = None) -> dict[str, Any]:
