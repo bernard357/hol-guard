@@ -87,6 +87,7 @@ pub(super) fn evaluate(
     request: &[u8],
     store: Option<&PolicySnapshotStore>,
 ) -> Result<Vec<u8>, String> {
+    guard_command::native_command_program::work_stats::begin_request();
     let response = evaluate_request(pending, request, store);
     crate::resident_diagnostics::note_command_work();
     response

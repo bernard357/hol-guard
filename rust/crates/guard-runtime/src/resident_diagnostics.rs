@@ -368,7 +368,9 @@ pub(crate) fn note_command_work() {
         return;
     }
     let stats = guard_command::native_command_program::work_stats::snapshot();
-    note("command_active_extensions", stats.active_extensions);
+    if let Some(active) = stats.active_extensions {
+        note("command_active_extensions", active);
+    }
     note("command_candidates_last", stats.last_candidates);
     note("command_matchers_evaluated_last", stats.last_evaluated);
     note("command_candidates_max", stats.max_candidates);

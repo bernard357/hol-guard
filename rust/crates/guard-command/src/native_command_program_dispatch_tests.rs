@@ -169,3 +169,23 @@ fn work_stats_report_the_candidates_a_pass_considered_and_ran() {
     assert_eq!(stats.last_candidates, program.rules.len());
     assert!(stats.last_candidates > candidates.len());
 }
+
+/// A request that compiles no controls and runs no declarative pass must
+/// report its own absence of work. Without the reset it inherits the counts
+/// an earlier request left on the same worker thread.
+#[test]
+fn a_request_with_no_pass_reports_no_candidates_of_its_own() {
+    work_stats::record_active(7);
+    work_stats::record_pass(42, 11);
+    let carried = work_stats::snapshot();
+    assert_eq!(carried.active_extensions, Some(7));
+    assert_eq!(carried.last_candidates, 42);
+
+    work_stats::begin_request();
+    let fresh = work_stats::snapshot();
+    assert_eq!(fresh.active_extensions, None);
+    assert_eq!(fresh.last_candidates, 0);
+    assert_eq!(fresh.last_evaluated, 0);
+    // The process-wide maximum is deliberately not per request.
+    assert!(fresh.max_candidates >= 42);
+}
