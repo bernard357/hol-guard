@@ -69,7 +69,15 @@ pub(crate) fn unwrap(command: &str) -> Option<String> {
     // its group. A group that opens the command, or holds a single command
     // behind one of those operators, means the same either way.
     let first = inner.iter().position(|c| !c.is_whitespace())?;
-    let body_is_a_list = holds_a_list_operator(&inner[first..last]);
+    // A `;` terminator is blanked along with the braces, so it is not part of
+    // the body. A newline one stays where it is, and the character before it
+    // is the body's own last character: `{ make &` + newline ends its command
+    // with the operator this scan is looking for.
+    let body = match terminator {
+        Some(_) => &inner[first..last],
+        None => &inner[first..=last],
+    };
+    let body_is_a_list = holds_a_list_operator(body);
     if follows_a_conditional(&chars, open) && body_is_a_list {
         return None;
     }
@@ -81,6 +89,23 @@ pub(crate) fn unwrap(command: &str) -> Option<String> {
     if (trailed || piped_into) && body_is_a_list {
         return None;
     }
+    // A newline terminator is not blanked, so it survives into the flattened
+    // text and separates the body from whatever followed the group:
+    // `{ make` + newline + `} && rm -rf build` would leave the `&&` at the
+    // start of its own line, which is not the command that was submitted.
+    if terminator.is_none() && (trailed || piped_into) {
+        return None;
+    }
+    // A redirection applied to the group is applied to the body once the
+    // braces are blanked. That is the same redirection while the body has none
+    // of its own, and a different one as soon as it has: in
+    // `{ printf x > inner; } > outer` the group's `> outer` collects nothing
+    // while the flattened text sends `printf` there instead, so the decision
+    // and the sandbox shape would be bound to a different output target than
+    // the one the request writes to.
+    if redirects(&chars[close + 1..]) && redirects(inner) {
+        return None;
+    }
     let mut ungrouped = chars;
     ungrouped[open] = ' ';
     ungrouped[close] = ' ';
@@ -90,6 +115,44 @@ pub(crate) fn unwrap(command: &str) -> Option<String> {
     let ungrouped: String = ungrouped.into_iter().collect();
     let ungrouped = ungrouped.trim();
     (!ungrouped.is_empty()).then(|| ungrouped.to_owned())
+}
+
+/// Whether the text holds an unquoted `<` or `>`.
+fn redirects(text: &[char]) -> bool {
+    let mut single = false;
+    let mut double = false;
+    let mut escaped = false;
+    let mut comment = false;
+    let mut in_word = false;
+    for &c in text {
+        if comment {
+            comment = c != '\n';
+            continue;
+        }
+        if escaped {
+            escaped = false;
+            in_word = true;
+            continue;
+        }
+        if single {
+            single = c != '\'';
+            in_word = true;
+            continue;
+        }
+        match c {
+            '\\' => escaped = true,
+            '"' => double = !double,
+            '\'' if !double => single = true,
+            '#' if !double && !in_word => {
+                comment = true;
+                continue;
+            }
+            '<' | '>' if !double => return true,
+            _ => {}
+        }
+        in_word = double || !starts_a_word_position(c);
+    }
+    false
 }
 
 /// The positions of the only unquoted `{` and `}`, in that order.
