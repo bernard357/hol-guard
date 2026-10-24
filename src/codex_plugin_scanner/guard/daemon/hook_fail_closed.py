@@ -45,6 +45,9 @@ def _load_contract() -> dict[str, Any]:
     for key in ("defaults", "events", "event_prefixes"):
         if not isinstance(document.get(key), dict):
             raise ValueError(f"hook_fail_closed_envelopes_contract_invalid: {key}")
+    for key in ("events", "event_prefixes"):
+        if any(kind not in _ENVELOPE_KINDS for kind in document[key].values()):
+            raise ValueError(f"hook_fail_closed_envelopes_contract_invalid: {key}")
     return document
 
 

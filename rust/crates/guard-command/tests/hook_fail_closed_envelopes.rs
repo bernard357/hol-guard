@@ -142,16 +142,17 @@ fn pre_tool_envelopes_deny_the_way_the_renderer_does() {
             "{harness} must read as a block"
         );
         if rendered.contains_key("decision") {
-            let decision = fixed.get("decision").and_then(Value::as_str);
             assert!(
-                matches!(decision, Some("deny" | "block")),
+                fixed.contains_key("decision"),
                 "{harness} drops the decision the renderer sends"
             );
-        } else if !fixed.contains_key("decision") {
-            assert_eq!(
-                fixed["hookSpecificOutput"], rendered["hookSpecificOutput"],
-                "{harness} differs from the rendered hook output"
-            );
+        }
+        // The fixed reply may omit renderer fields, but every field it does
+        // send must carry the renderer's value.
+        for (key, value) in &fixed {
+            if let Some(expected) = rendered.get(key) {
+                assert_eq!(value, expected, "pre_tool/{harness} {key}");
+            }
         }
     }
 }
@@ -178,6 +179,73 @@ fn prompt_envelopes_keep_what_the_renderer_sends() {
             } else {
                 assert_eq!(Some(value), rendered.get(key), "prompt/{harness} {key}");
             }
+        }
+    }
+}
+
+fn values(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(text) => found.push(text.to_ascii_lowercase()),
+        Value::Bool(flag) => found.push(flag.to_string()),
+        Value::Object(map) => map.values().for_each(|item| values(item, found)),
+        Value::Array(items) => items.iter().for_each(|item| values(item, found)),
+        _ => {}
+    }
+}
+
+#[test]
+fn permission_envelopes_always_deny() {
+    let values_in = [("$reason", REASON), ("$reason_code", REASON_CODE)];
+    let table = envelopes("permission");
+    for harness in table.keys() {
+        let fixed = envelope("permission", harness, &values_in);
+        let behavior = fixed
+            .get("behavior")
+            .or_else(|| {
+                fixed
+                    .get("hookSpecificOutput")
+                    .and_then(|output| output["decision"].get("behavior"))
+            })
+            .and_then(Value::as_str);
+        let decision = fixed.get("decision").and_then(Value::as_str);
+        assert!(
+            behavior == Some("deny") || matches!(decision, Some("deny" | "block")),
+            "permission/{harness} must deny"
+        );
+        assert_eq!(fixed["reason_code"], REASON_CODE, "permission/{harness}");
+        let mut found = Vec::new();
+        values(&Value::Object(fixed.clone()), &mut found);
+        assert!(
+            found.contains(&REASON.to_ascii_lowercase()),
+            "permission/{harness} drops the reason"
+        );
+        assert!(
+            !found.iter().any(|value| value == "allow"),
+            "permission/{harness} allows"
+        );
+    }
+}
+
+#[test]
+fn lifecycle_and_unmanaged_envelopes_never_stop_the_harness() {
+    let values_in = [
+        ("$reason", REASON),
+        ("$reason_code", REASON_CODE),
+        ("$event_name", "SessionStart"),
+    ];
+    for kind in ["lifecycle", "unmanaged"] {
+        for harness in envelopes(kind).keys() {
+            let mut found = Vec::new();
+            values(
+                &Value::Object(envelope(kind, harness, &values_in)),
+                &mut found,
+            );
+            assert!(
+                !found
+                    .iter()
+                    .any(|value| matches!(value.as_str(), "deny" | "block" | "ask" | "false")),
+                "{kind}/{harness} stops the harness"
+            );
         }
     }
 }
