@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-CIvf7Cf7.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-SLRLqDqQ.js","assets/chunks/feed-health-workspace-DTRdWcmw.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Duw-HjzP.js","assets/chunks/audit-workspace-vinKtImU.js"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-2MYuhV93.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-SLRLqDqQ.js","assets/chunks/feed-health-workspace-DTRdWcmw.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Duw-HjzP.js","assets/chunks/audit-workspace-BvehEjZY.js"])))=>i.map(i=>d[i]);
 import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dj as IconActionButton, aA as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dn as HiMiniBugAnt, s as HiMiniCheckCircle, _ as HiMiniXMark, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dp as ConnectFlowCard, dq as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, dr as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, ds as fetchPackageFirewallStatus, dt as runPackageAudit, du as resolveSupplyChainAuditFailure, dv as runPackageSync, dw as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dx as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dy as repairSupplyChainProtection, dz as runPackageFirewallAction, dA as parseInterceptProofSnapshot, dB as activatePackageFirewallRuntime, dC as EntitlementNotice, aG as ApprovalProofModal, dD as chooseSupplyChainAuditFolder, dE as fetchReceipts, ba as WorkspacePageHeader, dF as lazyWorkspace, dG as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
@@ -1344,6 +1344,64 @@ function SupplyChainManagerDrawer({
     }
   );
 }
+const UNVERIFIED_BUNDLE = /payload\s*hash|canonical payload|signature|verification key|bundle (?:is )?(?:invalid|unverified)/i;
+const UNREACHABLE = /lost connection|failed to fetch|network|unreachable|timed out|timeout|temporarily unavailable|could not be reached/i;
+function describeSupplyChainSyncFailure(message, options) {
+  const technicalDetail = message.trim();
+  if (UNVERIFIED_BUNDLE.test(technicalDetail)) {
+    return {
+      kind: "unverified_bundle",
+      title: "Guard could not verify the downloaded intel",
+      summary: "The bundle did not match its signed fingerprint, so Guard did not install it. Intel already on this device is unchanged.",
+      nextStep: "Update Guard to the latest version, then sync again. If it still fails, share the technical detail with support.",
+      technicalDetail
+    };
+  }
+  if (UNREACHABLE.test(technicalDetail)) {
+    return {
+      kind: "unreachable",
+      title: "Guard could not finish the sync",
+      summary: "Guard lost contact with the intel service or the local daemon before the bundle arrived.",
+      nextStep: "Check your connection and that Guard is still running, then sync again.",
+      technicalDetail
+    };
+  }
+  if (options?.approvalStep === true) {
+    return {
+      kind: "approval_step",
+      title: "The sync did not finish",
+      summary: technicalDetail === "" ? "Guard stopped before the sync completed." : technicalDetail,
+      nextStep: "If your approval proof was rejected, enter it again and sync. Otherwise go back and review the steps.",
+      technicalDetail: ""
+    };
+  }
+  return {
+    kind: "generic",
+    title: "The sync did not finish",
+    summary: technicalDetail === "" ? "Guard stopped before the sync completed." : technicalDetail,
+    nextStep: "Try again. If it keeps failing, update Guard and sync once more.",
+    technicalDetail: ""
+  };
+}
+function SupplyChainAuditFailureNotice(props) {
+  const failure = describeSupplyChainSyncFailure(props.message, { approvalStep: props.approvalStep });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      role: "alert",
+      className: "flex items-start gap-3 rounded-xl border border-brand-attention/30 bg-brand-attention-bg px-4 py-3.5",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "mt-0.5 h-5 w-5 shrink-0 text-brand-attention-text", "aria-hidden": "true" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 space-y-1.5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: failure.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm leading-relaxed text-brand-dark/75", children: failure.summary }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold leading-relaxed text-brand-attention-text", children: failure.nextStep }),
+          failure.technicalDetail !== "" ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "break-words font-mono text-xs leading-5 text-brand-dark/75", children: failure.technicalDetail }) : null
+        ] })
+      ]
+    }
+  );
+}
 function resolvePhaseLabel(phase) {
   if (phase === "syncing") {
     return "Syncing intel";
@@ -1496,7 +1554,7 @@ function AuditRecoveryModal({
         approvalGate,
         approvalPassword,
         approvalTotpCode,
-        error,
+        error: error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, approvalStep: true }) : null,
         submitLabel: "Sync supply-chain intel",
         submitBusy: approvalSubmitting,
         onApprovalPasswordChange: handleApprovalPasswordChange,
@@ -1526,7 +1584,7 @@ function AuditRecoveryModal({
           step.title
         );
       }) }),
-      error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-brand-attention", role: "alert", children: error }) : null,
+      error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error }) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "primary", onClick: handlePrimaryClick, disabled: primaryBusy, children: [
           primaryBusy ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowPath, { className: "mr-1.5 h-4 w-4 animate-spin", "aria-hidden": "true" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(PrimaryIcon, { className: "mr-1.5 h-4 w-4", "aria-hidden": "true" }),
@@ -2694,7 +2752,7 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-CIvf7Cf7.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-2MYuhV93.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
 );
 const SupplyChainWorkspaceDetails = lazyWorkspace(
   "supply-chain-workspace-details",
@@ -2702,7 +2760,7 @@ const SupplyChainWorkspaceDetails = lazyWorkspace(
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-vinKtImU.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-BvehEjZY.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",

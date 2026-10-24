@@ -11,6 +11,7 @@ import { ApprovalProofInline, buildApprovalProofCredentials } from "./approval-p
 import { ActionButton, Tag } from "./approval-center-primitives";
 import { GuardModalLayer } from "./guard-modal-layer";
 import type { GuardApprovalGatePublicConfig, PackageFirewallStatusResponse } from "./guard-types";
+import { SupplyChainAuditFailureNotice } from "./supply-chain-audit-failure-notice";
 import { ConnectFlowCard } from "./supply-chain-firewall-views";
 import type { SupplyChainAuditRecoveryGate } from "./supply-chain-audit-recovery";
 
@@ -220,7 +221,7 @@ export function AuditRecoveryModal({
               approvalGate={approvalGate}
               approvalPassword={approvalPassword}
               approvalTotpCode={approvalTotpCode}
-              error={error}
+              error={error !== null ? <SupplyChainAuditFailureNotice message={error} approvalStep /> : null}
               submitLabel="Sync supply-chain intel"
               submitBusy={approvalSubmitting}
               onApprovalPasswordChange={handleApprovalPasswordChange}
@@ -258,11 +259,7 @@ export function AuditRecoveryModal({
               })}
             </ol>
 
-            {error !== null ? (
-              <p className="text-sm text-brand-attention" role="alert">
-                {error}
-              </p>
-            ) : null}
+            {error !== null ? <SupplyChainAuditFailureNotice message={error} /> : null}
 
             <div className="flex flex-wrap items-center gap-2">
               <ActionButton variant="primary" onClick={handlePrimaryClick} disabled={primaryBusy}>
