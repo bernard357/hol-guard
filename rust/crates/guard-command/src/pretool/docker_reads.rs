@@ -288,7 +288,13 @@ fn listing_options_safe(listing: Listing, words: &[&str]) -> bool {
                     None => return false,
                 },
             };
-            if !option_value_safe(name, value) || !format_fields_safe(listing, value) {
+            if !option_value_safe(name, value) {
+                return false;
+            }
+            // Only a `--format` value is a template evaluated over the record
+            // behind a row. A filter value selects rows and prints nothing of
+            // its own, so the named-field rule does not apply to it.
+            if name == "--format" && !format_fields_safe(listing, value) {
                 return false;
             }
             continue;

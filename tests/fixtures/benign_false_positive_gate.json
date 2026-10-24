@@ -25753,6 +25753,23 @@
       "expect": "allow"
     },
     {
+      "id": "docker-network-ls-filter",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "docker network ls --filter=driver=bridge"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "docker-system-df",
       "fix_area": "shell",
       "harnesses": [
