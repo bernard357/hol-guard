@@ -656,3 +656,44 @@ def test_render_notes_condenses_only_when_bare_entries_exceed_the_budget(monkeyp
     assert "## Changes by category" in notes
     assert "- **Fixes**: 30" in notes
     assert "too many changes to list" in notes
+
+
+def _crowded_changes(count: int) -> list[Change]:
+    changes = _many_changes(count)
+    for index, change in enumerate(changes):
+        change.author = f"Contributor Number {index}"
+    return changes
+
+
+def test_render_notes_keeps_the_whole_body_within_the_github_limit() -> None:
+    notes = _render_stable(_crowded_changes(4_000))
+
+    assert len(notes) <= generate_release_notes.MAX_BODY_CHARS - generate_release_notes.RESERVED_BODY_CHARS
+    assert "Thanks Contributor Number 0," in notes
+
+
+def test_render_notes_shrinks_the_change_list_when_the_credits_are_wide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    changes = _many_changes(30)
+    for index, change in enumerate(changes):
+        change.author = f"Contributor Number {index}"
+    full = generate_release_notes.render_sections(changes, REPO)
+    bare = generate_release_notes.render_sections(changes, REPO, with_bullets=False)
+    without_list = len(_render_stable(changes)) - len(full)
+    monkeypatch.setattr(generate_release_notes, "MAX_BODY_CHARS", without_list + len(bare))
+    monkeypatch.setattr(generate_release_notes, "RESERVED_BODY_CHARS", 0)
+
+    notes = _render_stable(changes)
+
+    assert "Explains case" not in notes
+    assert f"[#1029](https://github.com/{REPO}/pull/1029)" in notes
+    assert len(notes) <= generate_release_notes.MAX_BODY_CHARS
+
+
+def test_render_notes_credits_a_wide_contributor_list_by_count() -> None:
+    notes = _render_stable(_crowded_changes(generate_release_notes.MAX_CREDITED_CONTRIBUTORS + 7))
+
+    assert "Contributor Number 0," in notes
+    assert f"Contributor Number {generate_release_notes.MAX_CREDITED_CONTRIBUTORS}" not in notes
+    assert "and 7 more!" in notes

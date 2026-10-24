@@ -49,6 +49,14 @@ MAX_BULLET_CHARS = 220
 # most of that; the rest leaves room for the install block, the readiness notes
 # appended after generation and the contributor thanks.
 MAX_CHANGE_LIST_CHARS = 100_000
+MAX_BODY_CHARS = 125_000
+# The publication workflow appends a readiness paragraph to the generated body,
+# so the generator spends less than the whole limit.
+RESERVED_BODY_CHARS = 1_000
+# A release with an unusually wide contributor list still credits people, but
+# the thanks paragraph cannot grow without bound at the change list's expense.
+MAX_CREDITED_CONTRIBUTORS = 100
+_CHANGE_LIST_SLOT = "\x00change-list\x00"
 
 
 @dataclass
@@ -453,20 +461,32 @@ def render_condensed_sections(changes: Sequence[Change], repo: str) -> str:
     return "\n".join(lines)
 
 
-def render_change_list(changes: Sequence[Change], repo: str) -> str:
+def render_change_list(changes: Sequence[Change], repo: str, available: int | None = None) -> str:
     """List every change, shedding detail only when the list would not fit.
 
     A large release still names each change: the PR summary bullets go first,
     and the list falls back to per-section counts only when the bare entries
-    alone exceed ``MAX_CHANGE_LIST_CHARS``.
+    alone exceed the budget. ``available`` is what the rest of the body leaves
+    for the list; the list never spends more than ``MAX_CHANGE_LIST_CHARS``
+    either way.
     """
+    budget = MAX_CHANGE_LIST_CHARS if available is None else min(available, MAX_CHANGE_LIST_CHARS)
     full = render_sections(changes, repo)
-    if len(full) <= MAX_CHANGE_LIST_CHARS:
+    if len(full) <= budget:
         return full
     bare = render_sections(changes, repo, with_bullets=False)
-    if len(bare) <= MAX_CHANGE_LIST_CHARS:
+    if len(bare) <= budget:
         return bare
     return render_condensed_sections(changes, repo)
+
+
+def render_thanks(contributors: Sequence[tuple[str, bool]]) -> str:
+    """Credit contributors by name, naming the rest by count once the list is wide."""
+    credited = [f"@{name}" if is_login else name for name, is_login in contributors[:MAX_CREDITED_CONTRIBUTORS]]
+    remainder = len(contributors) - len(credited)
+    if remainder:
+        credited.append(f"and {remainder} more")
+    return f"Thanks {', '.join(credited)}!"
 
 
 def render_notes(
@@ -528,11 +548,7 @@ def render_notes(
         lines.append(f"**{' • '.join(heading_stats)}**{scope_note}.")
     lines.append("")
 
-    sections = render_change_list(changes, repo)
-    if sections:
-        lines.append(sections)
-    else:
-        lines.append("This release ships no user-facing changes; it refreshes release artifacts only.")
+    lines.append(_CHANGE_LIST_SLOT)
     lines.append("")
 
     lines.append("## Install")
@@ -581,10 +597,17 @@ def render_notes(
             )
         lines.append("")
     if contributors:
-        credited = [f"@{name}" if is_login else name for name, is_login in contributors]
-        lines.append(f"Thanks {', '.join(credited)}!")
+        lines.append(render_thanks(contributors))
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    body = "\n".join(lines).rstrip() + "\n"
+
+    # Everything but the change list is already rendered, so what is left of the
+    # body limit is exactly what the list may spend.
+    available = MAX_BODY_CHARS - RESERVED_BODY_CHARS - (len(body) - len(_CHANGE_LIST_SLOT))
+    sections = render_change_list(changes, repo, available) if changes else ""
+    if not sections:
+        sections = "This release ships no user-facing changes; it refreshes release artifacts only."
+    return body.replace(_CHANGE_LIST_SLOT, sections)
 
 
 def main() -> int:
