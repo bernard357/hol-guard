@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ...version import __version__
+from ..mdm.network import ManagedNetworkError, managed_urlopen
 from .state import TelemetryState, ensure_secret, read_secret, read_state, write_state
 
 PLUGIN_TELEMETRY_COMMAND = "plugin-telemetry"
@@ -63,9 +64,9 @@ def _request(url: str, *, body: bytes | None = None) -> urllib.request.Request:
 
 def fetch_index() -> list[dict[str, object]]:
     try:
-        with urllib.request.urlopen(_request(INDEX_URL), timeout=_TIMEOUT_SECONDS) as response:
+        with managed_urlopen(_request(INDEX_URL), timeout=_TIMEOUT_SECONDS) as response:
             raw = response.read(_INDEX_LIMIT_BYTES + 1)
-    except (urllib.error.URLError, OSError) as error:
+    except (ManagedNetworkError, urllib.error.URLError, OSError) as error:
         raise PluginTelemetryError("The HOL plugin index could not be downloaded.") from error
     if len(raw) > _INDEX_LIMIT_BYTES:
         raise PluginTelemetryError("The HOL plugin index is larger than expected.")
@@ -140,11 +141,11 @@ def build_report(secret: str, *, week: str, index: list[dict[str, object]] | Non
 def post_report(report: Mapping[str, object]) -> int:
     body = json.dumps(dict(report), sort_keys=True, separators=(",", ":")).encode("utf-8")
     try:
-        with urllib.request.urlopen(_request(REPORT_URL, body=body), timeout=_TIMEOUT_SECONDS) as response:
+        with managed_urlopen(_request(REPORT_URL, body=body), timeout=_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read(64 * 1024) or b"{}")
     except urllib.error.HTTPError as error:
         raise PluginTelemetryError(f"HOL did not accept the report (HTTP {error.code}).") from error
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (ManagedNetworkError, urllib.error.URLError, OSError, ValueError) as error:
         raise PluginTelemetryError("The report could not be sent.") from error
     accepted = payload.get("accepted") if isinstance(payload, dict) else None
     return accepted if isinstance(accepted, int) else 0
