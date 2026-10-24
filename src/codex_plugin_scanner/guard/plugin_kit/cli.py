@@ -39,13 +39,23 @@ _ERRORS = {
             "agent-skills",
         )
     ),
+    "plugin_kit_runtime_unsupported": (
+        "A requested runtime cannot load this plugin. Run check to see what each runtime takes."
+    ),
     "plugin_kit_output_not_empty": "The output folder is not empty. Pass --force to write into it.",
     "plugin_kit_output_path_invalid": "The output path is invalid.",
     "plugin_kit_output_path_blocked": "Something other than a folder is in the way of the output path.",
+    "plugin_kit_output_exists": "A file the Kit would write already exists.",
+    "plugin_kit_output_inside_source": (
+        "The output folder is inside a folder the Kit reads the plugin from. Choose one outside it."
+    ),
     "plugin_kit_output_unwritable": "The output folder could not be written.",
     "plugin_kit_package_too_large": "The plugin is too large to package.",
     "plugin_kit_init_needs_name": "This folder has no plugin yet. Pass --name to scaffold one.",
     "plugin_kit_init_name_invalid": "Use a kebab-case --name of at most 64 characters, such as my-plugin.",
+    "plugin_kit_init_folder_not_empty": (
+        "init scaffolds a plugin only in a new folder: one holding nothing but a README, a LICENSE or dotfiles."
+    ),
     "plugin_kit_init_would_overwrite": "init never overwrites files, and one it would write already exists.",
 }
 
@@ -110,6 +120,15 @@ def _call(request: Mapping[str, object]) -> dict[str, Any] | None:
     return result if isinstance(result, dict) else {}
 
 
+def _runtime_list(value: str) -> list[str]:
+    """``--runtimes`` names, rejecting a list that names none."""
+
+    names = [item.strip() for item in value.split(",") if item.strip()]
+    if not names:
+        raise argparse.ArgumentTypeError("name at least one runtime, such as claude-code,codex")
+    return names
+
+
 def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=program_name,
@@ -134,9 +153,14 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
     package.add_argument("--out", help="Output folder (default: hol.json's out, else dist/hol-plugin).")
     package.add_argument(
         "--runtimes",
+        type=_runtime_list,
         help="Comma-separated runtimes (default: hol.json's list, else every supported runtime).",
     )
-    package.add_argument("--force", action="store_true", help="Write into a non-empty output folder.")
+    package.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild into a non-empty output folder, replacing the files the last package wrote.",
+    )
     package.add_argument("--strict", action="store_true", help="Refuse to package when there are warnings.")
     add("links", "Print install commands for each runtime and where to list the plugin.")
     return parser
@@ -152,7 +176,7 @@ def _request(args: argparse.Namespace) -> dict[str, object]:
         if args.out:
             request["out_dir"] = str(Path(args.out).resolve())
         if args.runtimes:
-            request["runtimes"] = [item.strip() for item in args.runtimes.split(",") if item.strip()]
+            request["runtimes"] = args.runtimes
         request["force"] = bool(args.force)
     return request
 

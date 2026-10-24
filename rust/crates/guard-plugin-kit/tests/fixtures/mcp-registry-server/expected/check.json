@@ -19,7 +19,7 @@
     "hooks": null,
     "keywords": [],
     "license": null,
-    "marketplace": null,
+    "marketplaces": [],
     "mcp_servers": {
       "notes": {
         "args": [
@@ -27,9 +27,9 @@
           "@acme/notes-mcp@2.0.1"
         ],
         "command": "npx",
-        "env": [
-          "NOTES_TOKEN"
-        ]
+        "env": {
+          "NOTES_TOKEN": "NOTES_TOKEN"
+        }
       }
     },
     "name": "notes",

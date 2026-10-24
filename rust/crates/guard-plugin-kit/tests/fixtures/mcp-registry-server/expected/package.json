@@ -69,6 +69,14 @@
       }
     },
     "name": "notes",
+    "settings": [
+      {
+        "description": "NOTES_TOKEN for the notes MCP server.",
+        "envVar": "NOTES_TOKEN",
+        "name": "NOTES_TOKEN",
+        "sensitive": true
+      }
+    ],
     "version": "2.0.1"
   },
   "hol.provenance.json": {
@@ -95,7 +103,7 @@
       },
       {
         "path": "gemini-cli/gemini-extension.json",
-        "sha256": "41ab62f2895027868ad2d61dbb40c23106b1fed35e59c314726901ae045f4bd9"
+        "sha256": "9b0a8b346a436ee9bcbf0516e14f10d77e12655c969a03b37aab9e3d9f3b4a4c"
       },
       {
         "path": "mcp-registry/server.json",

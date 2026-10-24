@@ -1,5 +1,5 @@
 //! `hol-guard plugin init`: a Kit config for an existing plugin, or a minimal
-//! Claude Code plugin with one skill in an empty folder. Never overwrites.
+//! Claude Code plugin with one skill in a new folder. Never overwrites.
 
 use std::path::Path;
 
@@ -16,6 +16,9 @@ pub const DEFAULT_OUT_DIR: &str = "dist/hol-plugin";
 pub fn plan(root: &Path, detection: &Detection, name: Option<&str>) -> Result<Vec<Output>, String> {
     let mut outputs = Vec::new();
     let runtimes: Vec<&str> = if detection.sources.is_empty() {
+        if !is_new_folder(root)? {
+            return Err("plugin_kit_init_folder_not_empty".to_owned());
+        }
         let name = name.ok_or("plugin_kit_init_needs_name")?;
         if !is_kebab(name) || name.len() > 64 {
             return Err("plugin_kit_init_name_invalid".to_owned());
@@ -45,6 +48,24 @@ pub fn plan(root: &Path, detection: &Detection, name: Option<&str>) -> Result<Ve
     Ok(outputs)
 }
 
+/// A folder holds nothing but what a new repository starts with: dotfiles
+/// such as `.git`, a README and a license.
+fn is_new_folder(root: &Path) -> Result<bool, String> {
+    let entries = std::fs::read_dir(root).map_err(|_| "plugin_kit_root_unreadable")?;
+    for entry in entries {
+        let entry = entry.map_err(|_| "plugin_kit_root_unreadable")?;
+        let name = entry.file_name().to_string_lossy().to_ascii_uppercase();
+        let starter = name.starts_with('.')
+            || name.starts_with("README")
+            || name.starts_with("LICENSE")
+            || name.starts_with("LICENCE");
+        if !starter {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn scaffold(name: &str, outputs: &mut Vec<Output>) {
     let description = format!("Describe what {name} does in one sentence.");
     let plugin: Value = json!({
@@ -72,43 +93,4 @@ fn scaffold(name: &str, outputs: &mut Vec<Output>) {
         )
         .into_bytes(),
     });
-}
-
-/// Writes `outputs` under `out`. Every directory below `out` is created
-/// fresh or must already be a real directory, and no existing symlink is
-/// written through.
-pub fn write(out: &Path, outputs: &[Output]) -> Result<Vec<String>, String> {
-    std::fs::create_dir_all(out).map_err(|_| "plugin_kit_output_unwritable")?;
-    let mut written = Vec::new();
-    for output in outputs {
-        let relative = Path::new(&output.path);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|component| !matches!(component, std::path::Component::Normal(_)))
-        {
-            return Err("plugin_kit_output_path_invalid".to_owned());
-        }
-        let mut directory = out.to_path_buf();
-        if let Some(parent) = relative.parent() {
-            for component in parent.components() {
-                directory.push(component);
-                match std::fs::symlink_metadata(&directory) {
-                    Ok(metadata) if metadata.is_dir() => {}
-                    Ok(_) => return Err("plugin_kit_output_path_blocked".to_owned()),
-                    Err(_) => std::fs::create_dir(&directory)
-                        .map_err(|_| "plugin_kit_output_unwritable")?,
-                }
-            }
-        }
-        let target = out.join(relative);
-        if let Ok(metadata) = std::fs::symlink_metadata(&target) {
-            if !metadata.is_file() {
-                return Err("plugin_kit_output_path_blocked".to_owned());
-            }
-        }
-        std::fs::write(&target, &output.content).map_err(|_| "plugin_kit_output_unwritable")?;
-        written.push(output.path.clone());
-    }
-    Ok(written)
 }

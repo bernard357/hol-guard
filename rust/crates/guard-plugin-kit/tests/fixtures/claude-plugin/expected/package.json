@@ -126,6 +126,14 @@
       }
     },
     "name": "pdf-tools",
+    "settings": [
+      {
+        "description": "PDF_API_KEY for the pdf MCP server.",
+        "envVar": "PDF_API_KEY",
+        "name": "PDF_API_KEY",
+        "sensitive": true
+      }
+    ],
     "version": "1.4.0"
   },
   "hol.provenance.json": {
@@ -192,7 +200,7 @@
       },
       {
         "path": "gemini-cli/gemini-extension.json",
-        "sha256": "b970c329e29797eaa1875b786113c310ebf8017ab2190619a57631c5d9d1ec9b"
+        "sha256": "c2f8e8b48999880c240aa4905bb045e2d164bb9ed4133a593607bc2ef5871cd5"
       },
       {
         "path": "opencode/opencode.json",
@@ -222,7 +230,7 @@
       "agent-skills"
     ],
     "schema": "hol.plugin-kit.provenance.v1",
-    "source_digest": "sha256:b1fe3fe0cb29c993b410a3ab077e9dece70914e1f2d397fa96a6564791feecf5"
+    "source_digest": "sha256:bd336a7ce363e6b9e46b39c96376063c4107628f2b3692124d3de17f88b215cd"
   },
   "opencode/opencode.json": {
     "$schema": "https://opencode.ai/config.json",

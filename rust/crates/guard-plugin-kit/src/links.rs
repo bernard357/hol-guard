@@ -44,40 +44,34 @@ pub struct HolLinks {
 pub fn links(detection: &Detection) -> Links {
     let plugin = &detection.plugin;
     let repository = plugin.github_repository();
-    let has = |kind: SourceKind| detection.sources.iter().any(|source| source.kind == kind);
     let mut install = Vec::new();
     if let Some(repository) = &repository {
-        let marketplace = plugin
-            .marketplace
-            .as_ref()
-            .and_then(|marketplace| marketplace.name.clone());
-        let listed = plugin.name.as_ref().filter(|name| {
-            plugin
-                .marketplace
-                .as_ref()
-                .is_some_and(|marketplace| marketplace.plugins.contains(name))
-        });
-        if let (Some(marketplace), Some(name)) = (&marketplace, listed) {
-            if has(SourceKind::ClaudeMarketplace) {
-                install.push(Install {
-                    runtime: Runtime::ClaudeCode,
-                    commands: vec![
-                        format!("/plugin marketplace add {repository}"),
-                        format!("/plugin install {name}@{marketplace}"),
-                    ],
-                    verify: Some("claude plugin list".to_owned()),
-                });
-            }
-            if has(SourceKind::CodexMarketplace) {
-                install.push(Install {
-                    runtime: Runtime::Codex,
-                    commands: vec![
-                        format!("codex plugin marketplace add {repository}"),
-                        format!("codex plugin add {name}@{marketplace}"),
-                    ],
-                    verify: None,
-                });
-            }
+        // Each runtime installs from its own marketplace, which can have a
+        // different name from the other.
+        let listing = |kind: SourceKind| {
+            let marketplace = plugin.marketplace(kind)?.name.clone()?;
+            let name = plugin.name.clone().filter(|_| plugin.listed_in(kind))?;
+            Some((marketplace, name))
+        };
+        if let Some((marketplace, name)) = listing(SourceKind::ClaudeMarketplace) {
+            install.push(Install {
+                runtime: Runtime::ClaudeCode,
+                commands: vec![
+                    format!("/plugin marketplace add {repository}"),
+                    format!("/plugin install {name}@{marketplace}"),
+                ],
+                verify: Some("claude plugin list".to_owned()),
+            });
+        }
+        if let Some((marketplace, name)) = listing(SourceKind::CodexMarketplace) {
+            install.push(Install {
+                runtime: Runtime::Codex,
+                commands: vec![
+                    format!("codex plugin marketplace add {repository}"),
+                    format!("codex plugin add {name}@{marketplace}"),
+                ],
+                verify: None,
+            });
         }
         if detection.sources.iter().any(|source| {
             source.kind == SourceKind::GeminiExtension && source.path == "gemini-extension.json"
@@ -115,12 +109,6 @@ pub fn links(detection: &Detection) -> Links {
 
 fn checklist(detection: &Detection, plugin: &Plugin, on_github: bool) -> Vec<Step> {
     let has = |kind: SourceKind| detection.sources.iter().any(|source| source.kind == kind);
-    let listed = plugin.name.as_ref().is_some_and(|name| {
-        plugin
-            .marketplace
-            .as_ref()
-            .is_some_and(|marketplace| marketplace.plugins.contains(name))
-    });
     vec![
         Step {
             id: "github_repository",
@@ -129,21 +117,27 @@ fn checklist(detection: &Detection, plugin: &Plugin, on_github: bool) -> Vec<Ste
         },
         Step {
             id: "claude_marketplace",
-            done: has(SourceKind::ClaudeMarketplace) && listed,
+            done: plugin.listed_in(SourceKind::ClaudeMarketplace),
             message: "List the plugin in .claude-plugin/marketplace.json so Claude Code can install it from the repository."
                 .to_owned(),
         },
         Step {
             id: "codex_marketplace",
-            done: has(SourceKind::CodexMarketplace) && listed,
+            done: plugin.listed_in(SourceKind::CodexMarketplace),
             message: "List the plugin in .agents/plugins/marketplace.json so Codex can install it from the repository."
                 .to_owned(),
         },
+        // A local server.json is not a publication; the Registry needs an
+        // authenticated publish the Kit cannot see, so this stays open.
         Step {
             id: "mcp_registry",
-            done: has(SourceKind::McpServer),
-            message: "Publish MCP servers to the MCP Registry with server.json (https://github.com/modelcontextprotocol/registry)."
-                .to_owned(),
+            done: false,
+            message: if has(SourceKind::McpServer) {
+                "Publish server.json to the MCP Registry with mcp-publisher (https://github.com/modelcontextprotocol/registry)."
+            } else {
+                "Publish MCP servers to the MCP Registry with server.json (https://github.com/modelcontextprotocol/registry)."
+            }
+            .to_owned(),
         },
         Step {
             id: "hol_listing",

@@ -43,6 +43,12 @@
       "path": ".claude-plugin/plugin.json"
     },
     {
+      "code": "mcp_env_literal_not_carried",
+      "level": "warning",
+      "message": "Packages never carry literal values, so they read LOG_LEVEL from the user's environment. Document it, or set the default in the server.",
+      "path": "mcpServers.api.env.LOG_LEVEL"
+    },
+    {
       "code": "mcp_env_literal_secret",
       "level": "warning",
       "message": "This variable holds a literal value. Reference it from the user's environment instead of shipping it.",
@@ -61,17 +67,17 @@
     "hooks": null,
     "keywords": [],
     "license": null,
-    "marketplace": null,
+    "marketplaces": [],
     "mcp_servers": {
       "api": {
         "args": [
           "server.js"
         ],
         "command": "node",
-        "env": [
-          "LOG_LEVEL",
-          "SERVICE_API_KEY"
-        ]
+        "env": {
+          "LOG_LEVEL": "LOG_LEVEL",
+          "SERVICE_API_KEY": "SERVICE_API_KEY"
+        }
       },
       "empty": {}
     },
@@ -169,6 +175,6 @@
     "errors": 4,
     "mcp_servers": 2,
     "skills": 2,
-    "warnings": 4
+    "warnings": 5
   }
 }

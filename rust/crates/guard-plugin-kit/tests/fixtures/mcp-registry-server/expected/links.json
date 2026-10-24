@@ -16,9 +16,9 @@
       "message": "List the plugin in .agents/plugins/marketplace.json so Codex can install it from the repository."
     },
     {
-      "done": true,
+      "done": false,
       "id": "mcp_registry",
-      "message": "Publish MCP servers to the MCP Registry with server.json (https://github.com/modelcontextprotocol/registry)."
+      "message": "Publish server.json to the MCP Registry with mcp-publisher (https://github.com/modelcontextprotocol/registry)."
     },
     {
       "done": false,

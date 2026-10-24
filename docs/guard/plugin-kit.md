@@ -9,9 +9,9 @@ The Kit runs inside the HOL Guard native runtime. It reads only the folder you n
 | Command | What it does | Exit code |
 | :--- | :--- | :--- |
 | `hol-guard plugin check [path] [--strict]` | Detects the plugin, lists its skills, MCP servers, commands and agents, and reports problems. `--strict` fails on warnings too. | 0 passed, 1 failed, 2 could not run |
-| `hol-guard plugin package [path] [--out DIR] [--runtimes a,b] [--force] [--strict]` | Runs `check`, then writes one folder per runtime. Writes nothing when the check fails. Refuses a non-empty output folder unless `--force`. | 0 packaged, 1 check failed, 2 could not run |
+| `hol-guard plugin package [path] [--out DIR] [--runtimes a,b] [--force] [--strict]` | Runs `check`, then writes one folder per runtime. Writes nothing when the check fails. Refuses a non-empty output folder unless `--force`, which first removes the files the previous package recorded in its `hol.provenance.json` and leaves every other file alone. The output folder may not be the repository root or overlap a folder the Kit reads, and a path through a symlink is refused. A runtime named in `--runtimes` that cannot load the plugin is an error; runtimes listed in `hol.json` are packaged where supported. | 0 packaged, 1 check failed, 2 could not run |
 | `hol-guard plugin links [path]` | Prints the install command for each runtime the repository already supports, and what is left to list it everywhere. | 0, or 2 could not run |
-| `hol-guard plugin init [path] [--name NAME]` | In a plugin repository, writes `hol.json`. In an empty folder with `--name`, scaffolds a minimal Claude Code plugin with one skill. Never overwrites a file. | 0, or 2 could not run |
+| `hol-guard plugin init [path] [--name NAME]` | In a plugin repository, writes `hol.json`. In a new folder (empty, or holding only a README, a LICENSE or dotfiles) with `--name`, scaffolds a minimal Claude Code plugin with one skill. Never overwrites a file. | 0, or 2 could not run |
 
 Every command accepts `--json` for the full machine-readable result.
 
@@ -42,9 +42,9 @@ When several manifests describe the same plugin, the shallowest one wins and the
 | `mcp-registry` | `server.json` | the repository's own `server.json`, or one generated for a single remote MCP server on GitHub |
 | `agent-skills` | `skills/<name>/` | skills |
 
-`check` lists, for each runtime, whether it is supported and which components it drops. MCP environment variables are written as references in each runtime's own syntax (`${NAME}`, `$NAME`, `${env:NAME}` or `{env:NAME}`). The Kit never copies a variable's value; `check` warns when a config ships a literal value for a variable whose name looks secret.
+`check` lists, for each runtime, whether it is supported and which components it drops. MCP environment variables are written as references in each runtime's own syntax (`${NAME}`, `$NAME`, `${env:NAME}` or `{env:NAME}`). The Kit never copies a variable's value: a literal in an MCP config or in a `server.json` `environmentVariables` entry is dropped, and `check` warns about it (`mcp_env_literal_secret` for a name that looks secret, `mcp_env_literal_not_carried` otherwise). A variable renamed in the config (`"GITHUB_TOKEN": "${GH_PAT}"`) keeps the rename. HTTP headers that reference a variable (`Authorization: Bearer ${API_TOKEN}`) are rewritten in each runtime's syntax; a header with a literal value is dropped and `check` reports `mcp_header_literal`. SSE servers stay SSE in every runtime that supports them. Gemini CLI reaches an MCP server only with the variables its manifest declares, so the generated `gemini-extension.json` lists each one in `settings`.
 
-`package` also writes `hol.provenance.json`: the generator version, the plugin name and version, a SHA-256 digest of the source files it read, and the digest of every file it wrote. It has no timestamps, so the same source always produces the same package.
+`package` also writes `hol.provenance.json`: the generator version, the plugin name and version, a SHA-256 digest of the source files it read, and the digest of every file it wrote. It has no timestamps, so the same Kit version packaging the same source for the same runtimes writes the same files; a different Kit version or runtime selection may not.
 
 ## hol.json
 

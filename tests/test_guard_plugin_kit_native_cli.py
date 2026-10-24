@@ -115,6 +115,33 @@ def test_package_limits_to_requested_runtimes_and_rejects_unknown(tmp_path: Path
     assert "Unknown runtime" in error
 
 
+def test_package_rejects_an_empty_runtime_list_and_an_unsupported_runtime(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_plugin(source)
+    with pytest.raises(SystemExit) as raised:
+        _run(["plugin", "package", str(source), "--runtimes", " , "])
+    assert raised.value.code == 2
+    skills_only = tmp_path / "skills-only"
+    (skills_only / "skills" / "notes").mkdir(parents=True)
+    (skills_only / "skills" / "notes" / "SKILL.md").write_text(
+        "---\nname: notes\ndescription: Use for notes.\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    exit_code, _output, error = _run(["plugin", "package", str(skills_only), "--runtimes", "cursor"])
+    assert exit_code == 2
+    assert "cannot load this plugin" in error
+    assert not (skills_only / "dist").exists()
+
+
+def test_init_refuses_a_folder_that_already_holds_work(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# New\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("print()\n", encoding="utf-8")
+    exit_code, _output, error = _run(["plugin", "init", str(tmp_path), "--name", "hello-kit"])
+    assert exit_code == 2
+    assert "new folder" in error
+    assert not (tmp_path / ".claude-plugin").exists()
+
+
 def test_init_scaffolds_then_links_print_install_commands(tmp_path: Path) -> None:
     exit_code, output, error = _run(["plugin", "init", str(tmp_path), "--name", "hello-kit"])
     assert (exit_code, error) == (0, "")

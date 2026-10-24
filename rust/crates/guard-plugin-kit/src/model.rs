@@ -51,13 +51,41 @@ pub struct McpServer {
     pub args: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    /// Environment variable names only; values are never carried.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub env: Vec<String>,
+    /// The remote transport: `http` (streamable HTTP) or `sse`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+    /// Each environment variable and the user variable its value is read
+    /// from. A reference such as `${GH_PAT}` keeps its source name; a literal
+    /// becomes a reference to the variable's own name. Values are never
+    /// carried.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    /// Remote headers whose values reference environment variables, written
+    /// as templates with `${NAME}` references. Literal header values are
+    /// never carried.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    /// Headers left out because their values were literals.
+    #[serde(skip)]
+    pub literal_headers: Vec<String>,
+}
+
+impl McpServer {
+    /// Every user environment variable the server reads, sorted.
+    pub fn referenced_variables(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.env.values().cloned().collect();
+        for value in self.headers.values() {
+            names.extend(crate::reference::template_variables(value));
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Marketplace {
+    pub kind: SourceKind,
     pub name: Option<String>,
     pub path: String,
     pub plugins: Vec<String>,
@@ -80,8 +108,10 @@ pub struct Plugin {
     pub commands: Vec<String>,
     pub agents: Vec<String>,
     pub hooks: Option<String>,
+    /// The Gemini context file, relative to the repository root.
     pub context_file: Option<String>,
-    pub marketplace: Option<Marketplace>,
+    /// The first Claude Code and the first Codex marketplace, in that order.
+    pub marketplaces: Vec<Marketplace>,
     #[serde(skip)]
     pub registry_server: Option<Value>,
 }
@@ -90,6 +120,21 @@ impl Plugin {
     /// `owner/name` when the repository is on GitHub.
     pub fn github_repository(&self) -> Option<String> {
         self.repository.as_deref().and_then(github_full_name)
+    }
+
+    /// The marketplace of one kind, when the repository has one.
+    pub fn marketplace(&self, kind: SourceKind) -> Option<&Marketplace> {
+        self.marketplaces
+            .iter()
+            .find(|marketplace| marketplace.kind == kind)
+    }
+
+    /// Whether the plugin is listed in the marketplace of `kind`.
+    pub fn listed_in(&self, kind: SourceKind) -> bool {
+        self.name.as_ref().is_some_and(|name| {
+            self.marketplace(kind)
+                .is_some_and(|marketplace| marketplace.plugins.contains(name))
+        })
     }
 }
 

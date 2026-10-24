@@ -4,16 +4,17 @@
 //! The markers match the scanner's ecosystem adapters
 //! (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
 //! `gemini-extension.json`, marketplace manifests, `SKILL.md`) and add the MCP
-//! Registry `server.json`. MCP server entries read `command`, `args`, `env`
-//! and the remote aliases `url`, `httpUrl` and `serverUrl`, as the host
-//! adapter detection does.
+//! Registry `server.json`.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+mod servers;
+mod skill;
 
-use serde_json::{Map, Value};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
 
-use crate::model::{Diagnostic, Marketplace, McpServer, Plugin, Skill, Source, SourceKind};
+use serde_json::Value;
+
+use crate::model::{Diagnostic, Marketplace, Plugin, Source, SourceKind};
 use crate::walk;
 
 pub struct Detection {
@@ -82,7 +83,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
             if source.kind == SourceKind::AgentSkill {
                 plugin
                     .skills
-                    .push(read_skill(root, source, &mut diagnostics));
+                    .push(skill::read_skill(root, source, &mut diagnostics));
             }
             continue;
         };
@@ -90,18 +91,21 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
             SourceKind::McpConfig | SourceKind::ClaudePlugin | SourceKind::GeminiExtension
                 if source_base(source) == base =>
             {
-                collect_servers(
+                servers::collect_servers(
                     &mut plugin.mcp_servers,
                     &mut raw_env,
                     document.get("mcpServers"),
+                    source.kind == SourceKind::GeminiExtension,
                 );
             }
             SourceKind::McpServer if source_base(source) == base => {
-                registry_server(&mut plugin, document);
+                servers::registry_server(&mut plugin, document);
             }
             SourceKind::ClaudeMarketplace | SourceKind::CodexMarketplace => {
-                if plugin.marketplace.is_none() {
-                    plugin.marketplace = Some(marketplace(source, document, &mut diagnostics));
+                if plugin.marketplace(source.kind).is_none() {
+                    plugin
+                        .marketplaces
+                        .push(marketplace(source, document, &mut diagnostics));
                 }
             }
             _ => {}
@@ -118,15 +122,30 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
             format!("{base}/{name}")
         }
     };
+    let known: BTreeSet<String> = files.iter().map(|file| walk::display(file)).collect();
+    if let Some(context) = plugin.context_file.take() {
+        match context_path(&base, &context).filter(|path| known.contains(path)) {
+            Some(path) => {
+                inputs.push(PathBuf::from(&path));
+                plugin.context_file = Some(path);
+            }
+            None => diagnostics.push(Diagnostic::warning(
+                "context_file_invalid",
+                &join("gemini-extension.json"),
+                "contextFileName must name a file inside the extension folder.",
+            )),
+        }
+    }
     for file in &files {
         let path = walk::display(file);
-        if let Some(rest) = path.strip_prefix(&join("commands/")) {
-            if !rest.contains('/') && rest.ends_with(".md") {
+        // Claude Code namespaces commands and agents by subfolder.
+        if path.starts_with(&join("commands/")) {
+            if path.ends_with(".md") {
                 plugin.commands.push(path.clone());
                 inputs.push(file.clone());
             }
-        } else if let Some(rest) = path.strip_prefix(&join("agents/")) {
-            if !rest.contains('/') && rest.ends_with(".md") {
+        } else if path.starts_with(&join("agents/")) {
+            if path.ends_with(".md") {
                 plugin.agents.push(path.clone());
                 inputs.push(file.clone());
             }
@@ -222,7 +241,22 @@ fn plugin_base(sources: &[Source]) -> String {
         .unwrap_or_default()
 }
 
-fn text(document: &Value, key: &str) -> Option<String> {
+/// A Gemini `contextFileName`, resolved under the extension folder. Only a
+/// relative path of plain components is accepted, so a manifest cannot point
+/// the package at a file outside the folder.
+fn context_path(base: &str, context: &str) -> Option<String> {
+    let relative = Path::new(context);
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(walk::display(&Path::new(base).join(relative)))
+}
+
+pub(super) fn text(document: &Value, key: &str) -> Option<String> {
     document
         .get(key)
         .and_then(Value::as_str)
@@ -290,136 +324,6 @@ fn merge_metadata(plugin: &mut Plugin, kind: SourceKind, document: &Value) {
     }
 }
 
-fn collect_servers(
-    servers: &mut BTreeMap<String, McpServer>,
-    raw_env: &mut Vec<(String, String, bool)>,
-    value: Option<&Value>,
-) {
-    let Some(Value::Object(entries)) = value else {
-        return;
-    };
-    for (name, config) in entries {
-        let Value::Object(config) = config else {
-            continue;
-        };
-        if let Some(Value::Object(env)) = config.get("env") {
-            for (key, value) in env {
-                let literal = value.as_str().map(str::trim).is_some_and(|value| {
-                    !value.is_empty() && !value.starts_with('$') && !value.starts_with('<')
-                });
-                raw_env.push((name.clone(), key.clone(), literal));
-            }
-        }
-        servers
-            .entry(name.clone())
-            .or_insert_with(|| server_entry(config));
-    }
-}
-
-fn server_entry(config: &Map<String, Value>) -> McpServer {
-    let string = |key: &str| {
-        config
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-    };
-    let mut env: Vec<String> = match config.get("env") {
-        Some(Value::Object(env)) => env.keys().cloned().collect(),
-        _ => Vec::new(),
-    };
-    env.sort();
-    McpServer {
-        command: string("command"),
-        args: match config.get("args") {
-            Some(Value::Array(args)) => args
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect(),
-            _ => Vec::new(),
-        },
-        url: string("url")
-            .or_else(|| string("httpUrl"))
-            .or_else(|| string("serverUrl")),
-        env,
-    }
-}
-
-/// An MCP Registry `server.json` becomes one server: its first package as a
-/// local command, else its first remote.
-fn registry_server(plugin: &mut Plugin, document: &Value) {
-    plugin.registry_server = Some(document.clone());
-    let Some(name) = plugin.name.clone().or_else(|| text(document, "name")) else {
-        return;
-    };
-    let package = document
-        .get("packages")
-        .and_then(Value::as_array)
-        .and_then(|packages| packages.first());
-    let remote = document
-        .get("remotes")
-        .and_then(Value::as_array)
-        .and_then(|remotes| remotes.first());
-    let server = if let Some(package) = package {
-        let identifier = text(package, "identifier").unwrap_or_default();
-        let version = text(package, "version");
-        let (command, args) = match text(package, "registryType").as_deref() {
-            Some("npm") => (
-                "npx",
-                vec![
-                    "-y".to_owned(),
-                    version.map_or(identifier.clone(), |version| {
-                        format!("{identifier}@{version}")
-                    }),
-                ],
-            ),
-            Some("pypi") => (
-                "uvx",
-                vec![version.map_or(identifier.clone(), |version| {
-                    format!("{identifier}=={version}")
-                })],
-            ),
-            Some("oci") => (
-                "docker",
-                vec![
-                    "run".to_owned(),
-                    "-i".to_owned(),
-                    "--rm".to_owned(),
-                    identifier.clone(),
-                ],
-            ),
-            _ => return,
-        };
-        let mut env: Vec<String> = package
-            .get("environmentVariables")
-            .and_then(Value::as_array)
-            .map(|variables| {
-                variables
-                    .iter()
-                    .filter_map(|variable| text(variable, "name"))
-                    .collect()
-            })
-            .unwrap_or_default();
-        env.sort();
-        McpServer {
-            command: Some(command.to_owned()),
-            args,
-            url: None,
-            env,
-        }
-    } else if let Some(url) = remote.and_then(|remote| text(remote, "url")) {
-        McpServer {
-            url: Some(url),
-            ..McpServer::default()
-        }
-    } else {
-        return;
-    };
-    plugin.mcp_servers.entry(name).or_insert(server);
-}
-
 fn marketplace(
     source: &Source,
     document: &Value,
@@ -439,89 +343,11 @@ fn marketplace(
         }
     }
     Marketplace {
+        kind: source.kind,
         name: text(document, "name"),
         path: source.path.clone(),
         plugins,
     }
-}
-
-fn read_skill(root: &Path, source: &Source, diagnostics: &mut Vec<Diagnostic>) -> Skill {
-    let dir = Path::new(&source.path)
-        .parent()
-        .map(walk::display)
-        .unwrap_or_default();
-    let fields = walk::read_text(&root.join(&source.path))
-        .map(|text| frontmatter(&text))
-        .unwrap_or_default();
-    if fields.is_empty() {
-        diagnostics.push(Diagnostic::error(
-            "skill_frontmatter_missing",
-            &source.path,
-            "SKILL.md needs YAML frontmatter with name and description.",
-        ));
-    }
-    Skill {
-        name: fields.get("name").cloned(),
-        description: fields.get("description").cloned(),
-        dir,
-    }
-}
-
-/// The scalar `key: value` fields of a leading `---` block. Folded (`>`) and
-/// literal (`|`) scalars are joined into one line.
-pub(crate) fn frontmatter(text: &str) -> BTreeMap<String, String> {
-    let mut fields = BTreeMap::new();
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let Some(body) = text
-        .strip_prefix("---\n")
-        .or_else(|| text.strip_prefix("---\r\n"))
-    else {
-        return fields;
-    };
-    let mut lines = body.lines().peekable();
-    while let Some(line) = lines.next() {
-        if line.trim_end() == "---" {
-            return fields;
-        }
-        if line.starts_with([' ', '\t']) {
-            continue;
-        }
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let key = key.trim().to_owned();
-        let mut value = value.trim().to_owned();
-        if matches!(value.as_str(), ">" | "|" | ">-" | "|-" | ">+" | "|+") {
-            let mut parts = Vec::new();
-            while let Some(next) = lines.peek() {
-                if !next.starts_with([' ', '\t']) && !next.trim().is_empty() {
-                    break;
-                }
-                parts.push(next.trim().to_owned());
-                lines.next();
-            }
-            value = parts
-                .into_iter()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-        }
-        let unquoted = value
-            .strip_prefix('"')
-            .and_then(|inner| inner.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|inner| inner.strip_suffix('\''))
-            })
-            .map(str::to_owned)
-            .unwrap_or(value);
-        if !key.is_empty() && !unquoted.is_empty() {
-            fields.insert(key, unquoted);
-        }
-    }
-    // An unterminated block is not frontmatter.
-    BTreeMap::new()
 }
 
 /// The `repository` of a `package.json` beside the plugin root, which npm
@@ -557,25 +383,4 @@ fn git_origin(root: &Path) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::frontmatter;
-
-    #[test]
-    fn frontmatter_reads_scalars_and_folded_text() {
-        let fields = frontmatter(
-            "---\nname: pdf-tools\ndescription: >\n  Fill PDF forms\n  and extract text.\nlicense: \"MIT\"\n---\n# Body\n",
-        );
-        assert_eq!(fields["name"], "pdf-tools");
-        assert_eq!(fields["description"], "Fill PDF forms and extract text.");
-        assert_eq!(fields["license"], "MIT");
-    }
-
-    #[test]
-    fn frontmatter_requires_a_closed_block() {
-        assert!(frontmatter("---\nname: x\n").is_empty());
-        assert!(frontmatter("name: x\n---\n").is_empty());
-    }
 }

@@ -19,15 +19,19 @@
       "forms"
     ],
     "license": "MIT",
-    "marketplace": {
-      "name": "acme",
-      "path": ".claude-plugin/marketplace.json",
-      "plugins": [
-        "pdf-tools"
-      ]
-    },
+    "marketplaces": [
+      {
+        "kind": "claude-marketplace",
+        "name": "acme",
+        "path": ".claude-plugin/marketplace.json",
+        "plugins": [
+          "pdf-tools"
+        ]
+      }
+    ],
     "mcp_servers": {
       "docs": {
+        "transport": "http",
         "url": "https://mcp.acme.example/docs"
       },
       "pdf": {
@@ -36,9 +40,9 @@
           "@acme/pdf-mcp@1.4.0"
         ],
         "command": "npx",
-        "env": [
-          "PDF_API_KEY"
-        ]
+        "env": {
+          "PDF_API_KEY": "PDF_API_KEY"
+        }
       }
     },
     "name": "pdf-tools",

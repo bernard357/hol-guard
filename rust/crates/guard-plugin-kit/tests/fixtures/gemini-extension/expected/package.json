@@ -109,7 +109,7 @@
       "mcp-registry"
     ],
     "schema": "hol.plugin-kit.provenance.v1",
-    "source_digest": "sha256:439c9812737c2614a7b56872efa09f44cb462711c2854b8ebc92e3885da3f016"
+    "source_digest": "sha256:0bd1d0dc8893fa7d8a8dcb2b95ccd1c6c76c1a0f8c9bc11e69db3855db55e3bc"
   },
   "mcp-registry/server.json": {
     "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",

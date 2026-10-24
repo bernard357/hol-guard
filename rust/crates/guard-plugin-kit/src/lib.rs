@@ -12,9 +12,12 @@ mod emit;
 mod init;
 mod links;
 mod model;
+mod output;
+mod reference;
 mod walk;
 
-use std::path::{Component, Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -82,7 +85,7 @@ fn handle(request: Request) -> Result<Value, String> {
             let root = resolve_root(&root)?;
             let detection = detect::detect(&root)?;
             let outputs = init::plan(&root, &detection, name.as_deref())?;
-            let written = init::write(&root, &outputs)?;
+            let written = output::write(&root, &outputs, output::Mode::Exclusive)?;
             Ok(json!({"written": written, "scaffolded": detection.sources.is_empty()}))
         }
         Request::Package {
@@ -130,7 +133,11 @@ fn check_report(root: &Path, strict: bool) -> Result<Value, String> {
 pub fn package_plan(root: &Path, requested: &[String]) -> Result<Vec<Output>, String> {
     let detection = detect::detect(root)?;
     let runtimes = select_runtimes(root, &detection.plugin, requested)?;
-    let mut outputs = emit::plan(root, &detection.plugin, &runtimes)?;
+    let mut copied = BTreeSet::new();
+    let mut outputs = emit::plan(root, &detection.plugin, &runtimes, &mut copied)?;
+    let mut inputs: BTreeSet<PathBuf> = detection.inputs.iter().cloned().collect();
+    inputs.extend(copied);
+    let inputs: Vec<PathBuf> = inputs.into_iter().collect();
     let files: Vec<Value> = outputs
         .iter()
         .map(|output| {
@@ -150,7 +157,7 @@ pub fn package_plan(root: &Path, requested: &[String]) -> Result<Vec<Output>, St
         "generator": {"name": "hol-guard plugin-kit", "version": env!("CARGO_PKG_VERSION")},
         "plugin": {"name": detection.plugin.name, "version": detection.plugin.version},
         "repository": detection.plugin.github_repository().map(|full_name| format!("https://github.com/{full_name}")),
-        "source_digest": emit::source_digest(root, &detection.inputs),
+        "source_digest": emit::source_digest(root, &inputs),
         "runtimes": emitted,
         "files": files,
     });
@@ -189,6 +196,15 @@ fn select_runtimes(
         .collect::<Result<Vec<_>, _>>()?;
     runtimes.sort();
     runtimes.dedup();
+    // A runtime named on the command line must be packaged; one from
+    // hol.json stays best effort, so a shared config can list them all.
+    if !requested.is_empty()
+        && runtimes
+            .iter()
+            .any(|runtime| !emit::supports(*runtime, plugin))
+    {
+        return Err("plugin_kit_runtime_unsupported".to_owned());
+    }
     Ok(runtimes)
 }
 
@@ -216,26 +232,25 @@ fn package(
             let configured = config(root)
                 .and_then(|config| config.get("out").and_then(Value::as_str).map(str::to_owned))
                 .unwrap_or_else(|| init::DEFAULT_OUT_DIR.to_owned());
-            let relative = Path::new(&configured);
-            if relative
-                .components()
-                .any(|component| !matches!(component, Component::Normal(_)))
-            {
-                return Err("plugin_kit_output_path_invalid".to_owned());
-            }
-            root.join(relative)
+            output::inside_root(root, &configured)?
         }
     };
-    if !force {
-        if let Ok(mut entries) = std::fs::read_dir(&out) {
-            if entries.next().is_some() {
-                return Err("plugin_kit_output_not_empty".to_owned());
-            }
-        }
-    }
+    let detection = detect::detect(root)?;
+    output::reject_source_overlap(root, &out, &detection.plugin)?;
     let outputs = package_plan(root, requested)?;
-    let written = init::write(&out, &outputs)?;
-    let runtimes = check::runtimes(&detect::detect(root)?.plugin);
+    let mode = if force {
+        output::clear_previous(&out)?;
+        output::Mode::Replace
+    } else {
+        output::require_empty(&out)?;
+        output::Mode::Exclusive
+    };
+    let written = output::write(&out, &outputs, mode)?;
+    let emitted = select_runtimes(root, &detection.plugin, requested)?;
+    let runtimes: Vec<_> = check::runtimes(&detection.plugin)
+        .into_iter()
+        .filter(|support| support.supported && emitted.contains(&support.runtime))
+        .collect();
     Ok(json!({
         "packaged": true,
         "out_dir": out.to_string_lossy(),

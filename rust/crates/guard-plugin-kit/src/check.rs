@@ -78,7 +78,14 @@ pub fn diagnostics(detection: &Detection) -> Vec<Diagnostic> {
         )),
         Some(_) => {}
     }
+    // A skills-only repository has no manifest to hold a plugin description;
+    // each skill carries its own, checked below.
+    let has_manifest = detection
+        .sources
+        .iter()
+        .any(|source| source.kind.is_plugin_root());
     match plugin.description.as_deref() {
+        None if !has_manifest => {}
         None => found.push(Diagnostic::error(
             "description_missing",
             &manifest,
@@ -107,10 +114,20 @@ pub fn diagnostics(detection: &Detection) -> Vec<Diagnostic> {
             "Add a repository URL so users and registries can trace the source.",
         ));
     }
+    let mut slugs = std::collections::BTreeMap::new();
     for skill in &plugin.skills {
         let path = format!("{}/SKILL.md", skill.dir)
             .trim_start_matches('/')
             .to_owned();
+        if let Some(slug) = emit::skill_slug(skill) {
+            if let Some(first) = slugs.insert(slug.clone(), path.clone()) {
+                found.push(Diagnostic::error(
+                    "skill_name_duplicate",
+                    &path,
+                    format!("Another skill ({first}) is also named {slug}; packages give each skill its own folder by name."),
+                ));
+            }
+        }
         if detection
             .diagnostics
             .iter()
@@ -158,14 +175,30 @@ pub fn diagnostics(detection: &Detection) -> Vec<Diagnostic> {
                 "An MCP server needs a command or a url.",
             ));
         }
-        for key in &server.env {
-            if looks_secret(key) && env_has_literal(detection, name, key) {
-                found.push(Diagnostic::warning(
+        for key in server.env.keys() {
+            if !env_has_literal(detection, name, key) {
+                continue;
+            }
+            found.push(if looks_secret(key) {
+                Diagnostic::warning(
                     "mcp_env_literal_secret",
                     &format!("{path}.env.{key}"),
                     "This variable holds a literal value. Reference it from the user's environment instead of shipping it.",
-                ));
-            }
+                )
+            } else {
+                Diagnostic::warning(
+                    "mcp_env_literal_not_carried",
+                    &format!("{path}.env.{key}"),
+                    format!("Packages never carry literal values, so they read {key} from the user's environment. Document it, or set the default in the server."),
+                )
+            });
+        }
+        for header in &server.literal_headers {
+            found.push(Diagnostic::warning(
+                "mcp_header_literal",
+                &format!("{path}.headers.{header}"),
+                "This header holds a literal value, so packages leave it out. Reference an environment variable instead, such as Bearer ${API_TOKEN}.",
+            ));
         }
     }
     if let Some(document) = &plugin.registry_server {
