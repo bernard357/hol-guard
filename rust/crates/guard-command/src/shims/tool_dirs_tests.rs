@@ -153,6 +153,23 @@ fn every_nvm_node_version_counts() {
 }
 
 #[test]
+fn the_newest_node_versions_are_searched_when_there_are_many() {
+    let machine = machine();
+    for major in 1..=12 {
+        install_tool(
+            &machine
+                .home
+                .join(format!(".nvm/versions/node/v{major}.0.0/bin")),
+            &format!("tool{major}"),
+        );
+    }
+    let path = context(&machine, Some("1")).search_path(None);
+    assert!(path.contains("/v12.0.0/bin"), "{path}");
+    assert!(path.contains("/v9.0.0/bin"), "{path}");
+    assert!(!path.contains("/v4.0.0/bin"), "{path}");
+}
+
+#[test]
 fn an_explicit_path_is_searched_alone() {
     let machine = machine();
     install_home_tools(&machine);
@@ -189,4 +206,33 @@ fn the_real_binary_is_reported_from_the_discovered_directory() {
     );
     let without = get_path_order_status(&context(&machine, None), "bun", None).expect("path order");
     assert_eq!(without.get("real_binary_found"), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn widening_the_search_does_not_change_whether_the_shim_leads() {
+    let machine = machine();
+    let shim_dir = machine.guard_home.join("package-shims").join("bin");
+    fs::create_dir_all(&shim_dir).expect("shim dir");
+    let launcher_path = format!(
+        "{}:{}",
+        shim_dir.to_string_lossy(),
+        machine.launcher_bin.to_string_lossy()
+    );
+    install_tool(&machine.home.join(".bun/bin"), "bun");
+    let before = path_order(&machine, None, &launcher_path);
+    let after = path_order(&machine, Some("1"), &launcher_path);
+    assert_eq!(after.get("real_binary_found"), Some(&Value::Bool(true)));
+    assert_eq!(before.get("real_binary_found"), Some(&Value::Bool(false)));
+    for key in ["shim_precedes_real", "path_broken"] {
+        assert_eq!(after.get(key), before.get(key), "{key}");
+    }
+}
+
+fn path_order(machine: &Machine, marker: Option<&str>, path: &str) -> Map<String, Value> {
+    let mut context = context(machine, marker);
+    context
+        .facts
+        .environ
+        .insert("PATH".to_owned(), path.to_owned());
+    get_path_order_status(&context, "bun", None).expect("path order")
 }

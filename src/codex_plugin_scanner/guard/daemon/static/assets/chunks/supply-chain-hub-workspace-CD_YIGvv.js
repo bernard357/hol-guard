@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-2MYuhV93.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-SLRLqDqQ.js","assets/chunks/feed-health-workspace-DTRdWcmw.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Duw-HjzP.js","assets/chunks/audit-workspace-BvehEjZY.js"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-CQYmDV-z.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-SLRLqDqQ.js","assets/chunks/feed-health-workspace-DTRdWcmw.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Duw-HjzP.js","assets/chunks/audit-workspace-DSjiGaSO.js"])))=>i.map(i=>d[i]);
 import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dj as IconActionButton, aA as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dn as HiMiniBugAnt, s as HiMiniCheckCircle, _ as HiMiniXMark, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dp as ConnectFlowCard, dq as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, dr as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, ds as fetchPackageFirewallStatus, dt as runPackageAudit, du as resolveSupplyChainAuditFailure, dv as runPackageSync, dw as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dx as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dy as repairSupplyChainProtection, dz as runPackageFirewallAction, dA as parseInterceptProofSnapshot, dB as activatePackageFirewallRuntime, dC as EntitlementNotice, aG as ApprovalProofModal, dD as chooseSupplyChainAuditFolder, dE as fetchReceipts, ba as WorkspacePageHeader, dF as lazyWorkspace, dG as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
@@ -1344,33 +1344,64 @@ function SupplyChainManagerDrawer({
     }
   );
 }
-const UNVERIFIED_BUNDLE = /payload\s*hash|canonical payload|signature|verification key|bundle (?:is )?(?:invalid|unverified)/i;
-const UNREACHABLE = /lost connection|failed to fetch|network|unreachable|timed out|timeout|temporarily unavailable|could not be reached/i;
-function describeSupplyChainSyncFailure(message, options) {
+const UNVERIFIED_BUNDLE = /payload\s*hash|canonical payload|signature|verification key|keyring|key\s*id/i;
+const REJECTED_BUNDLE = /bundle expired|exceeds maximum allowed age|generatedAt .* in the future|older than cached version/i;
+const LOCAL_CONNECTION = /lost connection|failed to fetch|networkerror|load failed/i;
+const SERVICE_UNAVAILABLE = /temporarily unavailable|is unavailable|remote endpoint could not be reached|unreachable|timed out|timeout|try syncing again/i;
+const EMPTY_SUMMARY = "Guard stopped before the operation completed.";
+function describeSupplyChainRecoveryFailure(message, options) {
   const technicalDetail = message.trim();
-  if (UNVERIFIED_BUNDLE.test(technicalDetail)) {
+  const operation = options?.operation ?? "sync";
+  if (operation === "sync" && UNVERIFIED_BUNDLE.test(technicalDetail)) {
     return {
       kind: "unverified_bundle",
       title: "Guard could not verify the downloaded intel",
-      summary: "The bundle did not match its signed fingerprint, so Guard did not install it. Intel already on this device is unchanged.",
+      summary: "The bundle did not pass Guard's signature checks, so Guard did not install it. Intel already on this device is unchanged.",
       nextStep: "Update Guard to the latest version, then sync again. If it still fails, share the technical detail with support.",
       technicalDetail
     };
   }
-  if (UNREACHABLE.test(technicalDetail)) {
+  if (operation === "sync" && REJECTED_BUNDLE.test(technicalDetail)) {
     return {
-      kind: "unreachable",
-      title: "Guard could not finish the sync",
-      summary: "Guard lost contact with the intel service or the local daemon before the bundle arrived.",
-      nextStep: "Check your connection and that Guard is still running, then sync again.",
+      kind: "rejected_bundle",
+      title: "Guard turned down the downloaded intel",
+      summary: "The bundle is expired, too old, or dated in the future compared with this device, so Guard did not install it. Intel already on this device is unchanged.",
+      nextStep: "Check that this device's date and time are correct, then sync again.",
       technicalDetail
+    };
+  }
+  if (LOCAL_CONNECTION.test(technicalDetail)) {
+    return {
+      kind: "local_connection",
+      title: "Guard lost contact with the local daemon",
+      summary: "The daemon stopped answering before the operation finished.",
+      nextStep: "Confirm Guard is still running on this device, then try again.",
+      technicalDetail
+    };
+  }
+  if (SERVICE_UNAVAILABLE.test(technicalDetail)) {
+    return {
+      kind: "service_unavailable",
+      title: "Guard Cloud is not answering right now",
+      summary: "Guard could not reach Guard Cloud. Protection on this device keeps working.",
+      nextStep: "Wait a few minutes, then try again. If it keeps happening, check this device's internet connection.",
+      technicalDetail
+    };
+  }
+  if (operation === "audit") {
+    return {
+      kind: "audit",
+      title: "The workspace audit did not finish",
+      summary: technicalDetail === "" ? EMPTY_SUMMARY : technicalDetail,
+      nextStep: "Try again. If it keeps failing, check the workspace folder Guard is auditing.",
+      technicalDetail: ""
     };
   }
   if (options?.approvalStep === true) {
     return {
       kind: "approval_step",
       title: "The sync did not finish",
-      summary: technicalDetail === "" ? "Guard stopped before the sync completed." : technicalDetail,
+      summary: technicalDetail === "" ? EMPTY_SUMMARY : technicalDetail,
       nextStep: "If your approval proof was rejected, enter it again and sync. Otherwise go back and review the steps.",
       technicalDetail: ""
     };
@@ -1378,13 +1409,16 @@ function describeSupplyChainSyncFailure(message, options) {
   return {
     kind: "generic",
     title: "The sync did not finish",
-    summary: technicalDetail === "" ? "Guard stopped before the sync completed." : technicalDetail,
+    summary: technicalDetail === "" ? EMPTY_SUMMARY : technicalDetail,
     nextStep: "Try again. If it keeps failing, update Guard and sync once more.",
     technicalDetail: ""
   };
 }
 function SupplyChainAuditFailureNotice(props) {
-  const failure = describeSupplyChainSyncFailure(props.message, { approvalStep: props.approvalStep });
+  const failure = describeSupplyChainRecoveryFailure(props.message, {
+    approvalStep: props.approvalStep,
+    operation: props.operation
+  });
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
@@ -1469,6 +1503,7 @@ function AuditRecoveryModal({
   gate,
   phase,
   error,
+  errorOperation = "sync",
   connectError,
   connectStarting,
   connectFlow,
@@ -1554,7 +1589,7 @@ function AuditRecoveryModal({
         approvalGate,
         approvalPassword,
         approvalTotpCode,
-        error: error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, approvalStep: true }) : null,
+        error: error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, approvalStep: true, operation: errorOperation }) : null,
         submitLabel: "Sync supply-chain intel",
         submitBusy: approvalSubmitting,
         onApprovalPasswordChange: handleApprovalPasswordChange,
@@ -1584,7 +1619,7 @@ function AuditRecoveryModal({
           step.title
         );
       }) }),
-      error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error }) : null,
+      error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, operation: errorOperation }) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "primary", onClick: handlePrimaryClick, disabled: primaryBusy, children: [
           primaryBusy ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowPath, { className: "mr-1.5 h-4 w-4 animate-spin", "aria-hidden": "true" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(PrimaryIcon, { className: "mr-1.5 h-4 w-4", "aria-hidden": "true" }),
@@ -1766,6 +1801,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
   const [auditRecoveryGate, setAuditRecoveryGate] = reactExports.useState(null);
   const [auditRecoveryPhase, setAuditRecoveryPhase] = reactExports.useState("ready");
   const [auditRecoveryError, setAuditRecoveryError] = reactExports.useState(null);
+  const [auditRecoveryErrorOp, setAuditRecoveryErrorOp] = reactExports.useState("sync");
   const [resumeFixAllAfterConnect, setResumeFixAllAfterConnect] = reactExports.useState(false);
   const { resolvedApprovalGate, resolveApprovalGate } = useResolvedApprovalGate(approvalGate);
   const openSyncApprovalRecovery = reactExports.useCallback(
@@ -1921,6 +1957,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
         setLastFailed({ op: "audit", manager: null, message });
         onAuditErrorChange?.(message);
         setAuditRecoveryPhase("failed");
+        setAuditRecoveryErrorOp("audit");
         setAuditRecoveryError(message);
         return false;
       } finally {
@@ -1982,6 +2019,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
             err,
             "Guard Cloud is temporarily unavailable. Try syncing again in a few minutes."
           );
+          setAuditRecoveryErrorOp("sync");
           setAuditRecoveryError(message);
           setAuditRecoveryPhase("ready");
           setLastFailed({ op: "sync", manager: null, message });
@@ -1996,6 +2034,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
           });
           return;
         }
+        setAuditRecoveryErrorOp("sync");
         setAuditRecoveryError(failure.message);
         setAuditRecoveryPhase(credentials === void 0 ? "failed" : "approval");
         setLastFailed({ op: "sync", manager: null, message: failure.message });
@@ -2327,6 +2366,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
             "Guard Cloud is temporarily unavailable. Try syncing again in a few minutes."
           );
           setAuditRecoveryPhase("ready");
+          setAuditRecoveryErrorOp("sync");
           setAuditRecoveryError(message2);
           setLastFailed({ op, manager: null, message: message2 });
           return;
@@ -2563,6 +2603,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
             gate: auditRecoveryGate,
             phase: auditRecoveryPhase,
             error: auditRecoveryError,
+            errorOperation: auditRecoveryErrorOp,
             connectError,
             connectStarting: startingConnect,
             connectFlow: panelLoad.phase === "loaded" ? panelLoad.data.connect_flow : null,
@@ -2752,7 +2793,7 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-2MYuhV93.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-CQYmDV-z.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
 );
 const SupplyChainWorkspaceDetails = lazyWorkspace(
   "supply-chain-workspace-details",
@@ -2760,7 +2801,7 @@ const SupplyChainWorkspaceDetails = lazyWorkspace(
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-BvehEjZY.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-DSjiGaSO.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",

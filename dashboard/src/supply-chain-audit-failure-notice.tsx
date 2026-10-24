@@ -1,5 +1,5 @@
 import { HiMiniExclamationTriangle } from "react-icons/hi2";
-import { describeSupplyChainSyncFailure } from "./supply-chain-audit-failure";
+import { describeSupplyChainRecoveryFailure, type SupplyChainRecoveryOperation } from "./supply-chain-audit-failure";
 
 /**
  * Failure state for the workspace audit setup modal. It stays in the brand
@@ -8,8 +8,15 @@ import { describeSupplyChainSyncFailure } from "./supply-chain-audit-failure";
  * pale attention hue alone is not readable as text, so it only draws the icon
  * and border.
  */
-export function SupplyChainAuditFailureNotice(props: { message: string; approvalStep?: boolean }) {
-  const failure = describeSupplyChainSyncFailure(props.message, { approvalStep: props.approvalStep });
+export function SupplyChainAuditFailureNotice(props: {
+  message: string;
+  approvalStep?: boolean;
+  operation?: SupplyChainRecoveryOperation;
+}) {
+  const failure = describeSupplyChainRecoveryFailure(props.message, {
+    approvalStep: props.approvalStep,
+    operation: props.operation,
+  });
   return (
     <div
       role="alert"

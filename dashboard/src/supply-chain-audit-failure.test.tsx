@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ApprovalProofInline } from "./approval-proof-inline";
-import { describeSupplyChainSyncFailure } from "./supply-chain-audit-failure";
+import { describeSupplyChainRecoveryFailure } from "./supply-chain-audit-failure";
 import { SupplyChainAuditFailureNotice } from "./supply-chain-audit-failure-notice";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -13,30 +13,76 @@ function assert(condition: unknown, message: string): asserts condition {
 const HASH_MISMATCH =
   "Guard supply-chain bundle sync failed: Bundle payloadHash does not match the canonical payload";
 
-const mismatch = describeSupplyChainSyncFailure(HASH_MISMATCH, { approvalStep: true });
+const mismatch = describeSupplyChainRecoveryFailure(HASH_MISMATCH, { approvalStep: true });
 assert(mismatch.kind === "unverified_bundle", "payload hash mismatch is an unverified bundle");
 assert(mismatch.nextStep.includes("Update Guard"), "payload hash mismatch tells the user to update Guard");
 assert(mismatch.summary.includes("did not install it"), "payload hash mismatch says nothing was installed");
 assert(mismatch.technicalDetail === HASH_MISMATCH, "payload hash mismatch keeps the exact technical text");
 assert(!/skip|ignore|override|bypass|anyway/i.test(`${mismatch.summary} ${mismatch.nextStep}`), "verification is never offered as skippable");
 
-const signature = describeSupplyChainSyncFailure("Bundle signature verification failed");
+const signature = describeSupplyChainRecoveryFailure("Bundle signature verification failed");
 assert(signature.kind === "unverified_bundle", "signature failures are unverified bundles");
 
-const offline = describeSupplyChainSyncFailure(
+const offline = describeSupplyChainRecoveryFailure(
   "Guard lost connection while syncing supply-chain intel. Confirm the local daemon is still running, then try again.",
 );
-assert(offline.kind === "unreachable", "connection loss reads as unreachable");
-assert(offline.nextStep.includes("connection"), "connection loss tells the user to check the connection");
+assert(offline.kind === "local_connection", "daemon connection loss reads as a local connection problem");
+assert(offline.nextStep.includes("still running"), "daemon connection loss tells the user to check Guard is running");
 
-const rejected = describeSupplyChainSyncFailure("Approval password is incorrect.", { approvalStep: true });
+const cloudOutage = describeSupplyChainRecoveryFailure(
+  "Guard Cloud is temporarily unavailable. Try syncing again in a few minutes.",
+);
+assert(cloudOutage.kind === "service_unavailable", "a cloud outage is not a local connection problem");
+assert(cloudOutage.nextStep.startsWith("Wait a few minutes"), "a cloud outage tells the user to wait and retry");
+assert(!cloudOutage.nextStep.includes("still running"), "a cloud outage never sends the user to troubleshoot the daemon");
+
+const auditFailure = describeSupplyChainRecoveryFailure("Audit workspace directory was not found.", { operation: "audit" });
+assert(auditFailure.kind === "audit", "an audit failure is reported as an audit failure");
+assert(auditFailure.title === "The workspace audit did not finish", "an audit failure names the audit, not the sync");
+assert(!/sync/i.test(`${auditFailure.title} ${auditFailure.nextStep}`), "an audit failure never points at the sync");
+assert(
+  describeSupplyChainRecoveryFailure("Guard Cloud is temporarily unavailable.", { operation: "audit" }).kind ===
+    "service_unavailable",
+  "an audit that hits a cloud outage says so",
+);
+assert(
+  describeSupplyChainRecoveryFailure("Bundle signature verification failed", { operation: "audit" }).kind === "audit",
+  "bundle wording is only used for the sync step",
+);
+
+const rejected = describeSupplyChainRecoveryFailure("Approval password is incorrect.", { approvalStep: true });
 assert(rejected.kind === "approval_step", "approval step failures keep their own kind");
 assert(rejected.summary === "Approval password is incorrect.", "approval step failures keep the message");
 assert(rejected.nextStep.includes("enter it again"), "approval step failures tell the user to re-enter proof");
 
-const generic = describeSupplyChainSyncFailure("Sync failed.");
+const generic = describeSupplyChainRecoveryFailure("Sync failed.");
 assert(generic.kind === "generic" && generic.nextStep.startsWith("Try again"), "other failures say to try again");
-assert(describeSupplyChainSyncFailure("   ").summary.length > 0, "an empty message still explains the failure");
+assert(describeSupplyChainRecoveryFailure("   ").summary.length > 0, "an empty message still explains the failure");
+
+// Every verification failure the Python bundle verifier can raise must read as a rejected
+// bundle, never as a generic retry. The messages come straight from the verifier source.
+const verifierSource = readFileSync(
+  new URL("../../src/codex_plugin_scanner/guard/runtime/supply_chain_bundle_runtime.py", import.meta.url),
+  "utf8",
+);
+const raised = [...verifierSource.matchAll(/raise SupplyChainBundle(Expired|Rollback|Keyring|Signature|PayloadHash)Error\(\s*f?"([^"]*)"/g)];
+assert(raised.length >= 10, `found the verifier's raised messages (${raised.length})`);
+const kindsByError: Record<string, string[]> = {
+  Expired: ["rejected_bundle"],
+  Rollback: ["rejected_bundle"],
+  Keyring: ["unverified_bundle"],
+  Signature: ["unverified_bundle"],
+  PayloadHash: ["unverified_bundle"],
+};
+for (const [, errorName, template] of raised) {
+  const text = `Guard supply-chain bundle sync failed: ${template.replace(/\{[^}]*\}/g, "X")}`;
+  const described = describeSupplyChainRecoveryFailure(text);
+  assert(
+    kindsByError[errorName].includes(described.kind),
+    `${errorName} failure "${text}" reads as ${kindsByError[errorName].join(" or ")}, got ${described.kind}`,
+  );
+  assert(described.technicalDetail === text, `${errorName} failure keeps its technical text`);
+}
 
 const noticeMarkup = renderToStaticMarkup(<SupplyChainAuditFailureNotice message={HASH_MISMATCH} />);
 assert(noticeMarkup.includes('role="alert"'), "failure notice is announced as an alert");

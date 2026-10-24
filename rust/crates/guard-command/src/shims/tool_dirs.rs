@@ -130,8 +130,7 @@ fn versioned_dirs(facts: &ShimFacts, root: &str, suffix: &str) -> Vec<String> {
         .filter_map(Result::ok)
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
-    versions.sort_unstable();
-    versions.reverse();
+    newest_first(&mut versions);
     versions.truncate(MAX_VERSIONS_PER_ROOT);
     versions
         .into_iter()
@@ -139,9 +138,66 @@ fn versioned_dirs(facts: &ShimFacts, root: &str, suffix: &str) -> Vec<String> {
         .collect()
 }
 
+/// Numeric components of a version directory name such as `v22.4.0`, so that
+/// `v22` outranks `v9` where a plain string comparison would not.
+fn version_key(name: &str) -> Vec<u64> {
+    name.trim_start_matches(['v', 'V'])
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().unwrap_or(u64::MAX))
+        .collect()
+}
+
+fn newest_first(versions: &mut [String]) {
+    versions.sort_unstable_by(|left, right| {
+        version_key(right)
+            .cmp(&version_key(left))
+            .then_with(|| right.cmp(left))
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ordered(names: &[&str]) -> Vec<String> {
+        let mut versions: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+        newest_first(&mut versions);
+        versions
+    }
+
+    #[test]
+    fn a_two_digit_major_outranks_a_one_digit_major() {
+        assert_eq!(
+            ordered(&["v9.11.2", "v22.4.0", "v10.0.0", "v18.20.0"]),
+            ["v22.4.0", "v18.20.0", "v10.0.0", "v9.11.2"]
+        );
+    }
+
+    #[test]
+    fn minor_and_patch_are_compared_as_numbers() {
+        assert_eq!(
+            ordered(&["v20.9.0", "v20.10.0", "v20.10.1"]),
+            ["v20.10.1", "v20.10.0", "v20.9.0"]
+        );
+    }
+
+    #[test]
+    fn a_name_without_digits_sorts_last() {
+        assert_eq!(ordered(&["system", "v8.0.0"]), ["v8.0.0", "system"]);
+    }
+
+    #[test]
+    fn the_cap_keeps_the_newest_versions_across_a_digit_boundary() {
+        let mut versions: Vec<String> = (1..=12).map(|major| format!("v{major}.0.0")).collect();
+        newest_first(&mut versions);
+        versions.truncate(MAX_VERSIONS_PER_ROOT);
+        assert_eq!(versions.first().map(String::as_str), Some("v12.0.0"));
+        assert_eq!(versions.last().map(String::as_str), Some("v5.0.0"));
+        assert_eq!(versions.len(), MAX_VERSIONS_PER_ROOT);
+        assert!(versions.contains(&"v9.0.0".to_owned()));
+        assert!(!versions.contains(&"v4.0.0".to_owned()));
+    }
 
     #[test]
     fn every_directory_is_a_plain_relative_or_absolute_path() {

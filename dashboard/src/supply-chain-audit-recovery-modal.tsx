@@ -14,6 +14,7 @@ import type { GuardApprovalGatePublicConfig, PackageFirewallStatusResponse } fro
 import { SupplyChainAuditFailureNotice } from "./supply-chain-audit-failure-notice";
 import { ConnectFlowCard } from "./supply-chain-firewall-views";
 import type { SupplyChainAuditRecoveryGate } from "./supply-chain-audit-recovery";
+import type { SupplyChainRecoveryOperation } from "./supply-chain-audit-failure";
 
 export type AuditRecoveryModalPhase =
   | "ready"
@@ -27,6 +28,8 @@ type AuditRecoveryModalProps = {
   gate: SupplyChainAuditRecoveryGate;
   phase: AuditRecoveryModalPhase;
   error: string | null;
+  /** Which step produced `error`, so the notice names the right one. */
+  errorOperation?: SupplyChainRecoveryOperation;
   connectError: string | null;
   connectStarting: boolean;
   connectFlow: PackageFirewallStatusResponse["connect_flow"];
@@ -122,6 +125,7 @@ export function AuditRecoveryModal({
   gate,
   phase,
   error,
+  errorOperation = "sync",
   connectError,
   connectStarting,
   connectFlow,
@@ -221,7 +225,7 @@ export function AuditRecoveryModal({
               approvalGate={approvalGate}
               approvalPassword={approvalPassword}
               approvalTotpCode={approvalTotpCode}
-              error={error !== null ? <SupplyChainAuditFailureNotice message={error} approvalStep /> : null}
+              error={error !== null ? <SupplyChainAuditFailureNotice message={error} approvalStep operation={errorOperation} /> : null}
               submitLabel="Sync supply-chain intel"
               submitBusy={approvalSubmitting}
               onApprovalPasswordChange={handleApprovalPasswordChange}
@@ -259,7 +263,7 @@ export function AuditRecoveryModal({
               })}
             </ol>
 
-            {error !== null ? <SupplyChainAuditFailureNotice message={error} /> : null}
+            {error !== null ? <SupplyChainAuditFailureNotice message={error} operation={errorOperation} /> : null}
 
             <div className="flex flex-wrap items-center gap-2">
               <ActionButton variant="primary" onClick={handlePrimaryClick} disabled={primaryBusy}>
