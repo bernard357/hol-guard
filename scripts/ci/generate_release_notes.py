@@ -45,7 +45,10 @@ BULLETED_SECTIONS = {"feat", "fix"}
 
 MAX_SUMMARY_BULLETS = 3
 MAX_BULLET_CHARS = 220
-MAX_RENDERED_CHANGES = 80
+# GitHub rejects release bodies over 125,000 characters. The change list gets
+# most of that; the rest leaves room for the install block, the readiness notes
+# appended after generation and the contributor thanks.
+MAX_CHANGE_LIST_CHARS = 100_000
 
 
 @dataclass
@@ -414,7 +417,7 @@ def entry_line(change: Change, repo: str) -> str:
     return f"- {description} ({link}){breaking}"
 
 
-def render_sections(changes: Sequence[Change], repo: str) -> str:
+def render_sections(changes: Sequence[Change], repo: str, *, with_bullets: bool = True) -> str:
     blocks: list[str] = []
     for section in SECTION_ORDER:
         entries = [change for change in changes if change.section == section]
@@ -423,7 +426,7 @@ def render_sections(changes: Sequence[Change], repo: str) -> str:
         lines = [f"## {SECTION_TITLES.get(section, 'Internal')}", ""]
         for change in entries:
             lines.append(entry_line(change, repo))
-            if section in BULLETED_SECTIONS:
+            if with_bullets and section in BULLETED_SECTIONS:
                 for bullet in change.summary_bullets:
                     lines.append(f"  - {bullet}")
         blocks.append("\n".join(lines))
@@ -431,11 +434,10 @@ def render_sections(changes: Sequence[Change], repo: str) -> str:
 
 
 def render_condensed_sections(changes: Sequence[Change], repo: str) -> str:
-    """Summarize very large histories (no previous tag) instead of listing every entry.
+    """Summarize a history too large to list as per-section counts plus a link.
 
-    GitHub caps release bodies at 125,000 characters; a first-of-channel release
-    covering the full project history would exceed that, so render per-section
-    counts plus a link into the commit history.
+    Only reached when even the bare change list exceeds the body budget, such
+    as a first-of-channel release covering the full project history.
     """
     counts: list[tuple[str, int]] = []
     for section in SECTION_ORDER:
@@ -449,6 +451,22 @@ def render_condensed_sections(changes: Sequence[Change], repo: str) -> str:
         f"This release spans too many changes to list; browse the [full commit history](https://github.com/{repo}/commits/{changes[0].sha})."
     )
     return "\n".join(lines)
+
+
+def render_change_list(changes: Sequence[Change], repo: str) -> str:
+    """List every change, shedding detail only when the list would not fit.
+
+    A large release still names each change: the PR summary bullets go first,
+    and the list falls back to per-section counts only when the bare entries
+    alone exceed ``MAX_CHANGE_LIST_CHARS``.
+    """
+    full = render_sections(changes, repo)
+    if len(full) <= MAX_CHANGE_LIST_CHARS:
+        return full
+    bare = render_sections(changes, repo, with_bullets=False)
+    if len(bare) <= MAX_CHANGE_LIST_CHARS:
+        return bare
+    return render_condensed_sections(changes, repo)
 
 
 def render_notes(
@@ -510,17 +528,12 @@ def render_notes(
         lines.append(f"**{' • '.join(heading_stats)}**{scope_note}.")
     lines.append("")
 
-    if len(changes) > MAX_RENDERED_CHANGES:
-        lines.append(render_condensed_sections(changes, repo))
-        lines.append("")
+    sections = render_change_list(changes, repo)
+    if sections:
+        lines.append(sections)
     else:
-        sections = render_sections(changes, repo)
-        if sections:
-            lines.append(sections)
-            lines.append("")
-        else:
-            lines.append("This release ships no user-facing changes; it refreshes release artifacts only.")
-            lines.append("")
+        lines.append("This release ships no user-facing changes; it refreshes release artifacts only.")
+    lines.append("")
 
     lines.append("## Install")
     lines.append("")
