@@ -224,8 +224,7 @@ def _fit_budget(entries: list[dict[str, object]], size: Callable[[], int], limit
 
     while size() > limit:
         largest = max(entries, key=lambda entry: len(_findings(entry)), default=None)
-        findings = _findings(largest) if largest is not None else []
-        if findings:
+        if largest is not None and (findings := _findings(largest)):
             drop = max(1, len(findings) // 4)
             del findings[-drop:]
             largest["findingsTruncated"] = True
@@ -242,14 +241,21 @@ def _trim_coverage(entries: list[dict[str, object]]) -> bool:
 
     coverages = [coverage for coverage in map(_coverage, entries) if coverage is not None]
     for field in ("reasons", "detectors"):
-        largest = max(coverages, key=lambda coverage: len(coverage[field]), default=None)
-        if largest is None or not largest[field]:
+        largest = max(coverages, key=lambda coverage: _length(coverage[field]), default=None)
+        if largest is None:
             continue
         values = largest[field]
-        keep = len(values) // 2
-        largest[field] = values[:keep] if isinstance(values, list) else dict(list(values.items())[:keep])
-        return True
+        if isinstance(values, list) and values:
+            largest[field] = values[: len(values) // 2]
+            return True
+        if isinstance(values, dict) and values:
+            largest[field] = dict(list(values.items())[: len(values) // 2])
+            return True
     return False
+
+
+def _length(value: object) -> int:
+    return len(value) if isinstance(value, (list, dict)) else 0
 
 
 def _coverage(entry: dict[str, object]) -> dict[str, object] | None:
