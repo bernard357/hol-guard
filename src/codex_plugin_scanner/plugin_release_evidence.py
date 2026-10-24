@@ -108,17 +108,25 @@ def _command_name(command: str) -> str:
     return name[:_MAX_TEXT] or command[:_MAX_TEXT]
 
 
-def _package(args: object) -> str | None:
-    """The first positional argument when it names a package (npx, uvx, ...)."""
+_PACKAGE_LAUNCHERS = frozenset({"npx", "bunx", "uvx", "pnpx"})
+_PACKAGE_RE = re.compile(r"^(?:@[a-z0-9][a-z0-9._~-]*/)?[A-Za-z0-9][A-Za-z0-9._~-]*(?:(?:@|==)[A-Za-z0-9._+~^-]+)?$")
 
+
+def _package(command: str, args: object) -> str | None:
+    """The package a known launcher (npx, bunx, uvx, pnpx) starts.
+
+    Only a value shaped like a package name is kept, so an argument that
+    carries a token or a path is never copied into the evidence.
+    """
+
+    if _command_name(command).removesuffix(".cmd").removesuffix(".exe") not in _PACKAGE_LAUNCHERS:
+        return None
     if not isinstance(args, list):
         return None
     for arg in args:
         if not isinstance(arg, str) or not arg or arg.startswith("-"):
             continue
-        if ("/" in arg and not arg.startswith("@")) or "\\" in arg or arg.startswith("."):
-            return None
-        return arg[:_MAX_TEXT]
+        return arg if len(arg) <= _MAX_TEXT and _PACKAGE_RE.fullmatch(arg) else None
     return None
 
 
@@ -159,7 +167,7 @@ def mcp_server_surface(name: str, server: Mapping[str, object]) -> McpServerSurf
         name=name[:_MAX_TEXT],
         transport=transport,
         command=_command_name(command) if command else None,
-        package=_package(server.get("args")) if command else None,
+        package=_package(command, server.get("args")) if command else None,
         host=None if command else _host(server.get("url")),
         env_vars=_env_vars(server),
     )
@@ -237,7 +245,10 @@ def build_plugin_release_evidence(
         mcp_server_surface(name, server)
         for name, server in sorted((servers_value if isinstance(servers_value, Mapping) else {}).items())
         if isinstance(name, str) and isinstance(server, Mapping)
-    )[:_MAX_SERVERS]
+    )
+    if len(servers) > _MAX_SERVERS:
+        # A partial surface would hide what the release can reach, so refuse instead of truncating.
+        raise ValueError(f"the plugin declares more than {_MAX_SERVERS} MCP servers")
     skills = plugin.get("skills")
     commands = plugin.get("commands")
     agents = plugin.get("agents")

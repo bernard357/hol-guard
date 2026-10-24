@@ -10,7 +10,7 @@ The supported claim is intentionally narrow:
 
 ## Pieces
 
-- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its PyPI provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off.
+- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its PyPI provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off. The `fail_on_severity` and `fail_on_check_errors` gates run after the attestation, so a release that fails a gate still gets an attested record of why.
 - `src/codex_plugin_scanner/plugin_release_evidence.py` defines the evidence contract.
 - `src/codex_plugin_scanner/plugin_release_runner.py` runs the evidence, registration and summary steps.
 
@@ -25,9 +25,11 @@ HOL accepts registration only from the reusable workflow. Its verifier checks th
 The evidence records the repository and exact commit SHA, ref, workflow run ID, `hol-guard` version, scan profile, score and grade, highest finding severity, finding count, the Kit check result with its error and warning counts and diagnostic codes, the runtimes the Kit can package for, counts of skills, commands and agents, whether hooks ship, and one entry per MCP server:
 
 - transport (`stdio`, `http` or `sse`);
-- for stdio servers, the program's file name and the package it starts (for example `npx -y @acme/weather-mcp` records `npx` and `@acme/weather-mcp`);
+- for stdio servers, the program's file name and, for `npx`, `bunx`, `pnpx` and `uvx`, the package it starts when the argument is shaped like a package name (for example `npx -y @acme/weather-mcp` records `npx` and `@acme/weather-mcp`); other programs record no package;
 - for remote servers, the host name only;
 - the names of the environment variables the server reads, taken from `env` values and `${NAME}` header templates.
+
+A plugin that declares more than 50 MCP servers gets no evidence rather than a partial surface.
 
 The evidence never includes source code, scanner findings, file contents, local paths, URLs beyond the host, environment variable values, header values, prompts, credentials or actor identity.
 

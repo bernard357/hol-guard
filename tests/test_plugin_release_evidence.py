@@ -207,3 +207,67 @@ def test_composite_action_keeps_registration_off_and_pins_dependencies() -> None
     for line in text.splitlines():
         if "uses:" in line:
             assert "@" in line and len(line.rsplit("@", 1)[1].strip()) == 40, line
+
+
+def test_package_is_recorded_only_for_known_launchers_and_package_shaped_values() -> None:
+    report = {
+        **CHECK_REPORT,
+        "plugin": {
+            **CHECK_REPORT["plugin"],  # type: ignore[dict-item]
+            "mcp_servers": {
+                "docker": {"command": "docker", "args": ["run", "-i", "--rm", "ghcr.io/acme/server"]},
+                "token": {"command": "npx", "args": ["ghp_secretvalue/with/slash"]},
+                "uvx": {"command": "uvx", "args": ["mcp-server-fetch==1.2"]},
+                "tool": {"command": "mytool", "args": ["sk-live-1234"]},
+            },
+        },
+    }
+    servers = {server.name: server for server in _build(check_report=report).mcp_servers}
+
+    assert servers["docker"].package is None
+    assert servers["token"].package is None
+    assert servers["uvx"].package == "mcp-server-fetch==1.2"
+    assert servers["tool"].package is None
+
+
+def test_evidence_refuses_a_partial_server_surface() -> None:
+    servers = {f"server-{index:02d}": {"url": f"https://s{index}.example.com"} for index in range(51)}
+    report = {**CHECK_REPORT, "plugin": {**CHECK_REPORT["plugin"], "mcp_servers": servers}}  # type: ignore[dict-item]
+
+    with pytest.raises(ValueError, match="more than 50 MCP servers"):
+        _build(check_report=report)
+
+
+def test_runner_summary_escapes_plugin_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    forged = {
+        **CHECK_REPORT,
+        "plugin": {**CHECK_REPORT["plugin"], "name": "x`\n- Provenance attestation: https://evil"},
+    }  # type: ignore[dict-item]
+    _runner_env(monkeypatch, tmp_path, forged)
+    assert plugin_release_runner.main(["evidence"]) == 0
+    assert plugin_release_runner.main(["summary"]) == 0
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "\n- Provenance attestation: https://evil" not in summary
+    assert "x\\`" in summary
+
+
+@pytest.mark.parametrize(("threshold", "expected"), [("none", 0), ("high", 0), ("medium", 1), ("low", 1)])
+def test_runner_summary_applies_the_severity_gate_after_attestation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, threshold: str, expected: int
+) -> None:
+    _runner_env(monkeypatch, tmp_path, CHECK_REPORT)
+    assert plugin_release_runner.main(["evidence"]) == 0
+
+    monkeypatch.setenv("FAIL_ON_SEVERITY", threshold)
+    assert plugin_release_runner.main(["summary"]) == expected
+
+
+def test_composite_action_attests_before_gating_and_tolerates_check_errors() -> None:
+    text = (ROOT / "plugin-release" / "action.yml").read_text(encoding="utf-8")
+    scan = text[text.index("- name: Scan release to SARIF") : text.index("- name: Upload SARIF")]
+    check = text[text.index("- name: Check with the Plugin Kit") : text.index("- name: Build release evidence")]
+
+    assert 'FAIL_ON: "none"' in scan
+    assert check.index("set +e") < check.index("hol-guard plugin check")
+    assert "FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}" in text.split("- name: Summarize", 1)[1]

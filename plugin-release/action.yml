@@ -12,7 +12,7 @@ inputs:
     required: false
     default: "default"
   fail_on_severity:
-    description: "Fail if a scanner finding reaches this severity"
+    description: "Fail the job, after the evidence is attested, if a scanner finding reaches this severity (or none)"
     required: false
     default: "critical"
   fail_on_check_errors:
@@ -79,8 +79,10 @@ runs:
         REGISTER_RELEASE: ${{ inputs.register_release }}
         RELEASE_ENDPOINT: ${{ inputs.release_endpoint }}
         FAIL_ON_CHECK_ERRORS: ${{ inputs.fail_on_check_errors }}
+        FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}
       run: |
         set -euo pipefail
+        case "$FAIL_ON_SEVERITY" in none|info|low|medium|high|critical) ;; *) echo "fail_on_severity must be none, info, low, medium, high or critical" >&2; exit 2 ;; esac
         case "$VISIBILITY" in public|private) ;; *) echo "visibility must be public or private" >&2; exit 2 ;; esac
         case "$REGISTER_RELEASE" in true|false) ;; *) echo "register_release must be true or false" >&2; exit 2 ;; esac
         case "$FAIL_ON_CHECK_ERRORS" in true|false) ;; *) echo "fail_on_check_errors must be true or false" >&2; exit 2 ;; esac
@@ -147,7 +149,8 @@ runs:
         OUTPUT: ${{ runner.temp }}/hol-plugin-release.sarif
         PROFILE: ${{ inputs.profile }}
         MIN_SCORE: "0"
-        FAIL_ON: ${{ inputs.fail_on_severity }}
+        # The severity gate runs in the summary step, after the evidence is attested.
+        FAIL_ON: "none"
         CISCO_SCAN: "off"
         CISCO_MCP_SCAN: "off"
         WRITE_STEP_SUMMARY: "false"
@@ -174,8 +177,11 @@ runs:
         HOL_GUARD_NATIVE: force
       run: |
         set -uo pipefail
+        # Exit 1 means the check found errors; the summary step applies fail_on_check_errors.
+        set +e
         hol-guard plugin check "$PLUGIN_DIR" --json > "$CHECK_PATH"
         status=$?
+        set -e
         if [ "$status" -gt 1 ] || [ ! -s "$CHECK_PATH" ]; then
           echo "The Plugin Kit could not check this repository (exit $status)." >&2
           exit 1
@@ -230,6 +236,7 @@ runs:
         RELEASE_STATUS: ${{ steps.register.outputs.release_status }}
         RELEASE_URL: ${{ steps.register.outputs.release_url }}
         FAIL_ON_CHECK_ERRORS: ${{ inputs.fail_on_check_errors }}
+        FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}
         PYTHONNOUSERSITE: "1"
         PYTHONSAFEPATH: "1"
       run: python3 -P -m codex_plugin_scanner.plugin_release_runner summary

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -98,6 +99,16 @@ def register_step() -> int:
     return 0
 
 
+_SEVERITY_ORDER = ("none", "info", "low", "medium", "high", "critical")
+
+
+def _plain(value: object, *, limit: int = 100) -> str:
+    """Plugin-supplied text as one line with no Markdown or HTML meaning."""
+
+    text = "".join(character for character in str(value) if character.isprintable())[:limit]
+    return re.sub(r"([\\`*_{}\[\]()<>#+!|~&-])", r"\\\1", text)
+
+
 def _summary_lines(evidence: Mapping[str, object], *, attestation_url: str, status: str, url: str) -> list[str]:
     runtimes = evidence.get("runtimes")
     supported = [
@@ -107,10 +118,12 @@ def _summary_lines(evidence: Mapping[str, object], *, attestation_url: str, stat
     ]
     servers = evidence.get("mcp_servers")
     server_count = len(servers) if isinstance(servers, list) else 0
+    plugin_name = _plain(evidence.get("plugin_name") or "unnamed")
+    plugin_version = _plain(evidence.get("plugin_version") or "")
     lines = [
         "## HOL Plugin Release",
         "",
-        f"- Plugin: `{evidence.get('plugin_name') or 'unnamed'}` {evidence.get('plugin_version') or ''}".rstrip(),
+        f"- Plugin: {plugin_name} {plugin_version}".rstrip(),
         f"- Scan: score {evidence.get('score')} ({evidence.get('grade')}), "
         f"{evidence.get('findings_total')} findings, highest severity {evidence.get('max_severity')}",
         f"- Plugin Kit check: {'passed' if evidence.get('check_passed') else 'failed'} "
@@ -148,6 +161,15 @@ def summary_step() -> int:
         print("\n".join(lines))
     if _env("FAIL_ON_CHECK_ERRORS", "true") == "true" and evidence.get("check_passed") is not True:
         print("The Plugin Kit check reported errors; see `hol-guard plugin check` locally.", file=sys.stderr)
+        return 1
+    threshold = _env("FAIL_ON_SEVERITY", "none")
+    severity = evidence.get("max_severity")
+    if (
+        threshold in _SEVERITY_ORDER[1:]
+        and severity in _SEVERITY_ORDER
+        and _SEVERITY_ORDER.index(str(severity)) >= _SEVERITY_ORDER.index(threshold)
+    ):
+        print(f'Findings met or exceeded the "{threshold}" severity threshold.', file=sys.stderr)
         return 1
     return 0
 
