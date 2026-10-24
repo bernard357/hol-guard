@@ -106,7 +106,7 @@ test("harden Forge without the zod assessment when no VEX is written", () => {
     fs.mkdirSync(zod, { recursive: true });
     fs.writeFileSync(path.join(zod, "package.json"), JSON.stringify({ version: "4.6.6", main: "index.js" }));
     fs.writeFileSync(path.join(zod, "index.js"), "exports.string = () => ({});\nexports.array = () => ({});\n");
-    for (const name of ["harden-forge.cjs", "verify-forge.cjs"]) {
+    for (const name of ["harden-forge.cjs", "harden-zod.cjs", "verify-forge.cjs"]) {
       fs.copyFileSync(path.join(__dirname, name), path.join(root, name));
     }
     const script = path.join(root, "harden-forge.cjs");

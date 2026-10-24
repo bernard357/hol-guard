@@ -19,12 +19,9 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const lockedZodVersion = "3.25.76";
 const zodAdvisory = "CVE-2023-54404";
 
-// The advisory covers every zod below 4.6.6, which sweeps in the locked 3.25
-// line because 3.25 ships the zod 4 core beside the classic one. The issue
-// accumulation it describes lives in `handleArrayResult` under
-// `zod/v4/core/schemas`, and the package root still resolves to the classic v3
-// surface, so nothing reaches that core without importing `zod/v4` by name.
-// Refuse to attest any of that unless it still holds for the locked tree.
+// MCPB and the Pi SDK call this package's classic v3 parser, not zod/v4.
+// harden-zod.cjs patches that parser before use. The bundled v4 core stays
+// unpatched, so attestation still refuses a dependency that names zod/v4.
 function verifyClassicZodEntry(root = __dirname) {
   const packageRoot = path.join(root, "node_modules", "zod");
   const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
@@ -73,7 +70,9 @@ if (require.main === module) {
   if (args.length) {
     // Only the VEX writer depends on the zod assessment. Hardening Forge for a
     // validate or publish run must not fail on an attestation it never writes.
+    const { patchedParserSha256 } = require("./harden-zod.cjs");
     const verifiedZodVersion = verifyClassicZodEntry();
+    const zodParserSha256 = patchedParserSha256();
     const vex = {
       "@context": "https://openvex.dev/ns/v0.2.0",
       "@id": "https://github.com/hashgraph-online/hol-guard/blob/main/.github/tools/mcpb-cli/harden-forge.cjs",
@@ -88,9 +87,8 @@ if (require.main === module) {
       }, {
         vulnerability: { name: zodAdvisory },
         products: [{ "@id": `pkg:npm/zod@${verifiedZodVersion}` }],
-        status: "not_affected",
-        justification: "vulnerable_code_not_in_execute_path",
-        impact_statement: `The accumulation this advisory describes is in the zod 4 core, which ${verifiedZodVersion} ships beside the classic surface its package root exports. No locked dependency names \`zod/v4\`, and the root builds classic schemas, both checked before this statement is written.`,
+        status: "fixed",
+        impact_statement: `The locked MCPB tool patches the zod ${verifiedZodVersion} v3 array and set parsers before CLI use. An upper bound returns before any element is parsed, and a failing collection stops after 32 issues. Patched v3/types.js SHA-256: ${zodParserSha256}.`,
       }],
     };
     fs.writeFileSync(args[1], JSON.stringify(vex, null, 2) + "\n");

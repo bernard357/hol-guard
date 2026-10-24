@@ -72,7 +72,8 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --prefix .github/tools/mcpb-cli
-          node --test .github/tools/mcpb-cli/harden-forge.test.cjs
+          node --test .github/tools/mcpb-cli/harden-forge.test.cjs .github/tools/mcpb-cli/harden-zod.test.cjs
+          node .github/tools/mcpb-cli/harden-zod.cjs
           node .github/tools/mcpb-cli/harden-forge.cjs --vex-output "$RUNNER_TEMP/mcpb-forge-openvex.json"
       - name: Scan the verified MCPB tool dependency
         run: >

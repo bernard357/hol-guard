@@ -19,9 +19,12 @@ def test_every_mcpb_cli_install_is_hardened_before_use() -> None:
                 installs += 1
                 install = command.index("npm ci --ignore-scripts --prefix .github/tools/mcpb-cli")
                 harden = command.index("node .github/tools/mcpb-cli/harden-forge.cjs")
-                assert install < harden
+                zod = command.index("node .github/tools/mcpb-cli/harden-zod.cjs")
+                assert install < min(harden, zod)
                 if "MCPB_CLI=" in command:
-                    assert harden < command.index("MCPB_CLI=")
+                    assert harden < zod < command.index("MCPB_CLI=")
+                if "--vex-output" in command:
+                    assert zod < harden < command.index("--vex-output")
     assert installs == 4
 
 
