@@ -741,6 +741,7 @@
       "src/supply_chain_package_eval/yarn_bun_lock.rs",
       "src/supply_chain_package_identity.rs",
       "src/supply_chain_risk.rs",
+      "src/supply_chain_support.rs",
       "src/target_identities.rs",
       "src/typescript_launch_evidence.rs",
       "src/workspace_inventory.rs"

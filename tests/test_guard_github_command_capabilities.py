@@ -51,7 +51,12 @@ GITHUB_CAPABILITY_CASES = (
     (("ssh-key", "list"), "read_remote", "github.command.proven-access-read"),
     (("gpg-key", "list"), "read_remote", "github.command.proven-access-read"),
     (("ssh-key", "delete", "123"), "access_remote", "github.command.access-mutation"),
-    (("run", "cancel", "--help"), "workflow_remote", "github.command.workflow-mutation"),
+    (("run", "cancel", "--help"), "read_local", "github.command.local-help"),
+    (
+        ("run", "rerun", "42", "--job", "--help"),
+        "workflow_remote",
+        "github.command.workflow-mutation",
+    ),
     (
         ("run", "rerun", "31707639186", "--repo", "hashgraph-online/hol-guard", "--failed"),
         "routine_workflow_remote",
@@ -536,7 +541,12 @@ GITHUB_REVIEW_FLOORS: Final[tuple[tuple[str, str], ...]] = (
         (("ssh-key", "list"), "read_remote", "github.command.proven-access-read"),
         (("gpg-key", "list"), "read_remote", "github.command.proven-access-read"),
         (("ssh-key", "delete", "123"), "access_remote", "github.command.access-mutation"),
-        (("run", "cancel", "--help"), "workflow_remote", "github.command.workflow-mutation"),
+        (("run", "cancel", "--help"), "read_local", "github.command.local-help"),
+        (
+            ("run", "rerun", "42", "--job", "--help"),
+            "workflow_remote",
+            "github.command.workflow-mutation",
+        ),
         (
             ("--repo", "example/project", "workflow", "view", "release.yml"),
             "read_remote",

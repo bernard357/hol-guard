@@ -725,6 +725,7 @@ mod signal_projection_receipt;
 #[cfg(test)]
 mod signal_projection_vectors_tests;
 mod skill_directory_identity_op;
+mod skill_document_evidence;
 mod skill_identity_canon;
 mod skill_identity_discovery;
 mod skill_identity_inspect;
