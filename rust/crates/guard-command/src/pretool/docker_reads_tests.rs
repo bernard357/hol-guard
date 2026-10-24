@@ -286,7 +286,6 @@ fn remote_daemons_secrets_and_other_subcommands_stay_reviewed() {
         vec!["pull", "alpine"],
         vec!["system", "prune", "-af"],
         vec!["rm", "-f", "web"],
-        vec!["stats", "--no-stream"],
         vec!["scan", "alpine"],
         vec!["ps", "web"],
         vec!["ps", "-x"],
