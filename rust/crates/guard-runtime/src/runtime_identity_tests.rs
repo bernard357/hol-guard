@@ -407,6 +407,27 @@ fn restart_is_not_enough_while_an_affected_build_remains() {
             ]
         )
     );
+
+    for (peer, reason) in [
+        (
+            json!({"location_id": "loc-2", "artifact_id": "old", "state": "unknown"}),
+            "affected_location_state_unknown",
+        ),
+        (
+            json!({"location_id": "loc-2", "state": "present"}),
+            "location_unidentified",
+        ),
+    ] {
+        let mut request = replacement_request("running", true, "bound_launch");
+        request["locations"].as_array_mut().unwrap().push(peer);
+        assert_eq!(
+            verdict(&assess(request)),
+            (
+                "affected",
+                vec!["affected_instance_running_after_replacement", reason]
+            )
+        );
+    }
 }
 
 #[test]

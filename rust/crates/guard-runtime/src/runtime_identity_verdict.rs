@@ -164,11 +164,22 @@ pub(super) fn advisory_verdict(
             reasons.push("affected_instance_state_unknown");
         }
         // A restart only clears the risk when no affected build is left to
-        // relaunch; otherwise the advisory is still plainly affected.
+        // relaunch, including one at a location Guard could not read or
+        // identify; otherwise the advisory is still plainly affected.
         if installed_affected {
             reasons.push("affected_artifact_installed");
         }
-        if all_replaced && !installed_affected {
+        if affected_location_unknown {
+            reasons.push("affected_location_state_unknown");
+        }
+        if unidentified_location {
+            reasons.push("location_unidentified");
+        }
+        if all_replaced
+            && !installed_affected
+            && !affected_location_unknown
+            && !unidentified_location
+        {
             "restart_required"
         } else {
             "affected"
