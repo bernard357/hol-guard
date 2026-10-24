@@ -52,6 +52,18 @@ pub(super) fn shebang(script: &Path) -> Shebang {
     }
 }
 
+/// The words a `#!` line holds, separated the way the kernel separates them.
+///
+/// Rust's ASCII-whitespace split also breaks a word at `\r`, `\x0b` and
+/// `\x0c`, which the kernel keeps inside one: it ends the interpreter's name
+/// at a space or a tab and nowhere else. A script written with CRLF endings
+/// therefore names an interpreter whose last byte is `\r`. Reading that line
+/// as the name without the `\r` would admit one file while the kernel starts
+/// another that a sibling planted beside it can supply.
+fn shebang_words(line: &str) -> impl Iterator<Item = &str> {
+    line.split([' ', '\t']).filter(|word| !word.is_empty())
+}
+
 /// The interpreter a `#!` line names outright and hands nothing else.
 ///
 /// `shebang` answers which programs the line starts, which is what admitting
@@ -62,13 +74,13 @@ pub(super) fn shebang(script: &Path) -> Shebang {
 /// interpreter.
 pub(super) fn sole_interpreter(script: &Path) -> Option<String> {
     let text = shebang_line(script).ok().flatten()?;
-    let mut words = text.split_ascii_whitespace();
+    let mut words = shebang_words(&text);
     let interpreter = words.next()?;
     words.next().is_none().then(|| interpreter.to_owned())
 }
 
 fn runs(line: &str) -> Shebang {
-    let mut words = line.split_ascii_whitespace();
+    let mut words = shebang_words(line);
     let Some(first) = words.next() else {
         return Shebang::Absent;
     };
