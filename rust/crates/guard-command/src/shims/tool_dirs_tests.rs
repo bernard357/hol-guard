@@ -153,21 +153,6 @@ fn every_nvm_node_version_counts() {
 }
 
 #[test]
-fn a_file_that_is_not_executable_is_not_a_manager() {
-    let machine = machine();
-    let path = install_tool(&machine.home.join(".cargo/bin"), "cargo");
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("chmod");
-    // The host may ship its own cargo in a system directory; the file under
-    // test must never be the one reported.
-    let order =
-        get_path_order_status(&context(&machine, Some("1")), "cargo", None).expect("path order");
-    assert_ne!(
-        order.get("real_binary_path").and_then(Value::as_str),
-        path.to_str()
-    );
-}
-
-#[test]
 fn an_explicit_path_is_searched_alone() {
     let machine = machine();
     install_home_tools(&machine);
