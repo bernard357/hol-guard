@@ -1,19 +1,43 @@
 import type { ReactNode } from "react";
 
-import { brandMarkSvg } from "./brand-mark-geometry";
+import { BRAND_MARK } from "./brand-mark-geometry";
 import { HeroParticleLogo } from "./home-hero-particle-logo";
 
 /** Visual tone for a branded hero: the accent glow, badge tint, live dot and particle mood all follow it. */
 export type BrandHeroTone = "clear" | "review" | "setup";
 
+const MARK_CENTER = 50;
+const MARK_SCALE = 42;
+
 /** The HOL mark as a flat vector, for places too small or too dense for the particle scene. */
 export function BrandMark(props: { color: string; className?: string }) {
+  const at = (value: number, axis: "x" | "y") =>
+    (axis === "x" ? MARK_CENTER + value * MARK_SCALE : MARK_CENTER - value * MARK_SCALE).toFixed(2);
   return (
-    <span
-      aria-hidden="true"
-      className={`guard-brand-mark${props.className ? ` ${props.className}` : ""}`}
-      dangerouslySetInnerHTML={{ __html: brandMarkSvg(props.color) }}
-    />
+    <span aria-hidden="true" className={`guard-brand-mark${props.className ? ` ${props.className}` : ""}`}>
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        {BRAND_MARK.bars.map((bar, index) => (
+          <line
+            key={`bar:${index}`}
+            x1={at(bar.x1, "x")}
+            y1={at(bar.y1, "y")}
+            x2={at(bar.x2, "x")}
+            y2={at(bar.y2, "y")}
+            stroke={props.color}
+            strokeWidth={(bar.w * MARK_SCALE).toFixed(2)}
+          />
+        ))}
+        {BRAND_MARK.discs.map((disc, index) => (
+          <circle
+            key={`disc:${index}`}
+            cx={at(disc.x, "x")}
+            cy={at(disc.y, "y")}
+            r={(disc.r * MARK_SCALE).toFixed(2)}
+            fill={props.color}
+          />
+        ))}
+      </svg>
+    </span>
   );
 }
 

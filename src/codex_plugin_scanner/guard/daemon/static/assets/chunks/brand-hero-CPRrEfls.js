@@ -562,15 +562,34 @@ function HeroParticleLogo(props) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "guard-hero-fallback", dangerouslySetInnerHTML: { __html: brandMarkSvg(finish === "white" ? "#ffffff" : BRAND_NAVY) } })
   ] });
 }
+const MARK_CENTER = 50;
+const MARK_SCALE = 42;
 function BrandMark(props) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    "span",
-    {
-      "aria-hidden": "true",
-      className: `guard-brand-mark${props.className ? ` ${props.className}` : ""}`,
-      dangerouslySetInnerHTML: { __html: brandMarkSvg(props.color) }
-    }
-  );
+  const at = (value, axis) => (axis === "x" ? MARK_CENTER + value * MARK_SCALE : MARK_CENTER - value * MARK_SCALE).toFixed(2);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", className: `guard-brand-mark${props.className ? ` ${props.className}` : ""}`, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { viewBox: "0 0 100 100", "aria-hidden": "true", children: [
+    BRAND_MARK.bars.map((bar, index) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "line",
+      {
+        x1: at(bar.x1, "x"),
+        y1: at(bar.y1, "y"),
+        x2: at(bar.x2, "x"),
+        y2: at(bar.y2, "y"),
+        stroke: props.color,
+        strokeWidth: (bar.w * MARK_SCALE).toFixed(2)
+      },
+      `bar:${index}`
+    )),
+    BRAND_MARK.discs.map((disc, index) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "circle",
+      {
+        cx: at(disc.x, "x"),
+        cy: at(disc.y, "y"),
+        r: (disc.r * MARK_SCALE).toFixed(2),
+        fill: props.color
+      },
+      `disc:${index}`
+    ))
+  ] }) });
 }
 function BrandHeroBadge(props) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `guard-hero-badge guard-hero-badge--${props.tone}`, children: [
