@@ -10,6 +10,7 @@ applying is the user's explicit action and edits one manifest, never more.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Final, Protocol, cast
 from urllib.parse import parse_qs
 
@@ -40,21 +41,44 @@ def handle_workspace_assessment_get(request_handler: object, path: str, query: s
             {
                 "worktrees": assessments.list_worktrees(store),
                 "runs": assessments.recent_runs(store, limit=50),
+                # The newest run of each worktree, so a busy worktree keeps its
+                # queued or running state however long the history above is.
+                "latest_runs": assessments.latest_runs(store),
             }
         )
         return True
     if path == FINDINGS_PATH:
-        handler._write_json(
-            {
-                "worktrees": assessments.list_worktrees(store),
-                "assessments": assessments.latest_assessed_runs(store),
-            }
-        )
+        worktrees = assessments.list_worktrees(store)
+        payload: dict[str, object] = {
+            "worktrees": worktrees,
+            "assessments": assessments.latest_assessed_runs(store),
+        }
+        suggested = _suggested_root(query)
+        if suggested is not None:
+            payload["suggested_root_tracked"] = _is_tracked(worktrees, suggested)
+        handler._write_json(payload)
         return True
     if path == FIX_PROPOSALS_PATH:
         _list_fix_proposals(handler, query)
         return True
     return False
+
+
+def _suggested_root(query: str) -> str | None:
+    values = parse_qs(query).get("root")
+    if not values or not 0 < len(values[0]) <= 4096:
+        return None
+    return values[0]
+
+
+def _is_tracked(worktrees: list[dict[str, object]], root: str) -> bool:
+    # Worktrees are stored by their resolved root, so resolve the suggestion the
+    # same way: symlinks, ``..`` and trailing separators then compare equal.
+    try:
+        resolved = str(Path(root).resolve(strict=True))
+    except (OSError, ValueError):
+        return False
+    return any(worktree.get("root") == resolved for worktree in worktrees)
 
 
 def handle_workspace_assessment_post(

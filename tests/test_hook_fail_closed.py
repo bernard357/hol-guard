@@ -154,3 +154,25 @@ def test_allow_decision_over_a_blocking_floor_keeps_the_verdict_reason(monkeypat
     assert rendered["decision"] == "deny"
     assert rendered["reason_code"] == "native_policy_reapproval_required"
     assert rendered["reason"] == "Copying .env needs a fresh approval."
+
+
+def test_a_reason_that_looks_like_a_placeholder_is_sent_verbatim() -> None:
+    rendered = fail_closed_pre_tool("pi", reason="$reason_code", reason_code="$reason")
+    assert rendered["reason"] == "$reason_code"
+    assert rendered["reason_code"] == "$reason"
+
+
+def test_every_event_kind_answers_from_the_shared_contract() -> None:
+    assert hook_fail_closed.fail_closed_response("grok", "Stop") == {}
+    assert hook_fail_closed.fail_closed_response("codex", "beforeShellExecution")["policy_action"] == "block"
+    assert hook_fail_closed.fail_closed_response("copilot", "userPromptSubmitted", prompt_reason="Paused.") == {
+        "behavior": "deny",
+        "message": "Paused.",
+        "interrupt": False,
+        "policy_action": "block",
+        "reason_code": "native_prompt_unavailable",
+    }
+    assert hook_fail_closed.fail_closed_response("claude_code", "Notification")["hookSpecificOutput"] == {
+        "hookEventName": "Notification"
+    }
+    assert hook_fail_closed.unmanaged_passthrough("OMP") == {"decision": "allow", "reason_code": "harness_not_managed"}

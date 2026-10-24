@@ -7684,6 +7684,10 @@
       left: 50%;
     }
 
+    .md\:col-span-1 {
+      grid-column: span 1 / span 1;
+    }
+
     .md\:col-span-8 {
       grid-column: span 8 / span 8;
     }
@@ -7742,6 +7746,14 @@
 
     .md\:table-cell {
       display: table-cell;
+    }
+
+    .md\:table-header-group {
+      display: table-header-group;
+    }
+
+    .md\:table-row {
+      display: table-row;
     }
 
     .md\:min-h-0 {
@@ -7824,6 +7836,18 @@
 
     .md\:gap-x-2 {
       column-gap: calc(var(--spacing) * 2);
+    }
+
+    .md\:p-0 {
+      padding: 0;
+    }
+
+    .md\:px-3 {
+      padding-inline: calc(var(--spacing) * 3);
+    }
+
+    .md\:py-2\.5 {
+      padding-block: calc(var(--spacing) * 2.5);
     }
 
     .md\:pl-0 {

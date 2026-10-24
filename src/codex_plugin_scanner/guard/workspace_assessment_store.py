@@ -21,6 +21,7 @@ from .workspace_assessment_reads import (
     get_run,
     latest_assessed_run,
     latest_assessed_runs,
+    latest_runs,
     list_worktrees,
     recent_runs,
 )
@@ -409,6 +410,7 @@ __all__ = [
     "get_run",
     "latest_assessed_run",
     "latest_assessed_runs",
+    "latest_runs",
     "list_worktrees",
     "recent_runs",
     "record_observation",
