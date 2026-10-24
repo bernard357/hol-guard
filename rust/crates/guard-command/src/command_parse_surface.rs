@@ -460,7 +460,14 @@ fn single_bracket_text(text: &str) -> Option<String> {
     let trailing = text.len() - text.trim_end().len();
     let inner = text[leading..text.len() - trailing]
         .strip_prefix("[[")
-        .and_then(|rest| rest.strip_suffix("]]"))?;
+        .and_then(|rest| rest.strip_suffix("]]"))
+        // Each bracket has to be a whole word. `[['' -f NAME ]]` leaves the
+        // same tokens behind quote removal and opens on the same two
+        // characters, and bash runs it as a command named `[[`.
+        .filter(|inner| {
+            inner.starts_with(|c: char| c.is_ascii_whitespace())
+                && inner.ends_with(|c: char| c.is_ascii_whitespace())
+        })?;
     Some(format!(
         "{}[{inner}]{}",
         &text[..leading],

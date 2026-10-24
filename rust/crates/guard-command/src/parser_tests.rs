@@ -220,7 +220,12 @@ fn reads_only_bare_double_brackets_as_the_test_they_ask() {
     assert_eq!(bare.segments[0].executable.as_deref(), Some("["));
     assert_eq!(bare.segments[0].text, "[ -f Cargo.toml ]");
 
-    for command in ["'[[' -f Cargo.toml ']]'", "\"[[\" -f Cargo.toml \"]]\""] {
+    for command in [
+        "'[[' -f Cargo.toml ']]'",
+        "\"[[\" -f Cargo.toml \"]]\"",
+        "[['' -f Cargo.toml ]]",
+        "[[ -f Cargo.toml '']]",
+    ] {
         let quoted = parse_command(&request(command)).unwrap();
         assert_eq!(quoted.confidence, "uncertain", "{command}");
         assert_eq!(
