@@ -601,7 +601,7 @@ function BrandMark(props) {
   ] }) });
 }
 function BrandHeroBadge(props) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `guard-hero-badge guard-hero-badge--${props.tone}`, children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { role: "status", className: `guard-hero-badge guard-hero-badge--${props.tone}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("i", { "aria-hidden": "true" }),
     props.children
   ] });

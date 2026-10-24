@@ -2,8 +2,8 @@ import { j as jsxRuntimeExports, r as reactExports, A as ActionButton, s as HiMi
 import { r as resolveSupplyChainIssues } from "./supply-chain-issues-DeC2Wyty.js";
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-Du65PsUR.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
-import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-C60mcKZP.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-DA3IPfaa.js";
+import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-COty1p6U.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-CHMBrboi.js";
 import "./feed-health-workspace-Bb4acrba.js";
 const PROTECTION_BADGE = {
   protected: "Protected",

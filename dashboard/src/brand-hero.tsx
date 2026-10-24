@@ -56,7 +56,7 @@ export function BrandMark(props: { color: string; className?: string }) {
 
 export function BrandHeroBadge(props: { tone: BrandHeroTone; children: ReactNode }) {
   return (
-    <span className={`guard-hero-badge guard-hero-badge--${props.tone}`}>
+    <span role="status" className={`guard-hero-badge guard-hero-badge--${props.tone}`}>
       <i aria-hidden="true" />
       {props.children}
     </span>
