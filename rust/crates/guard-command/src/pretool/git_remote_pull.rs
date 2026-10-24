@@ -28,7 +28,7 @@ const FAST_FORWARD_HOOKS: &[&str] = &["post-merge", "post-index-change"];
 
 /// The shape of a proven pull, or of a fast-forward merge of what a fetch
 /// from `origin` brought in.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct Pull {
     /// Git picks the upstream: no remote is named.
     pub(super) upstream: bool,
@@ -121,24 +121,21 @@ fn origin_branch(word: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
 }
 
-/// Whether nothing the fast-forward or merge runs after the fetch can start
-/// a program or write outside the checkout.
-pub(super) fn pull_inert(
-    effective: &GitConfig,
-    repository: &GitConfig,
-    pull: Pull,
-    probe: &Probe,
-) -> bool {
+/// Whether the configuration alone, before any probe of the checkout, names
+/// something the fast-forward or merge would start.
+fn configuration_routed(effective: &GitConfig, repository: &GitConfig, pull: Pull) -> bool {
     let merge_driver = effective
         .keys()
         .any(|key| key.starts_with("merge.") && key.ends_with(".driver"));
-    let routed = effective.iter().any(|(key, values)| {
+    effective.iter().any(|(key, values)| {
         let enabled = values.iter().any(|value| !disabled(value));
         (key.starts_with("filter.") && (!standard_lfs(key, values) || repository.contains_key(key)))
-            // The user's own `gpg.*` names a program that only a signature
-            // check (`*.verifysignatures` below) or commit signing (refused by
-            // `merge_inert`) starts. A repository's choice stays routed.
-            || (key.starts_with("gpg.") && repository.contains_key(key))
+            // `gpg.*` names a program that only a signature check
+            // (`*.verifysignatures` below) or commit signing starts. A
+            // fast-forward writes no commit and verifies nothing, so only a
+            // merge reads a repository's choice, and `merge_inert` refuses it
+            // there.
+            || (pull.merge && key.starts_with("gpg.") && repository.contains_key(key))
             || key.starts_with("hook.")
             || key == "core.worktree"
             || (key == "core.fsmonitor" && enabled)
@@ -158,7 +155,18 @@ pub(super) fn pull_inert(
                 && key.starts_with("branch.")
                 && key.ends_with(".remote")
                 && values.iter().any(|value| value.trim() != "origin"))
-    });
+    })
+}
+
+/// Whether nothing the fast-forward or merge runs after the fetch can start
+/// a program or write outside the checkout.
+pub(super) fn pull_inert(
+    effective: &GitConfig,
+    repository: &GitConfig,
+    pull: Pull,
+    probe: &Probe,
+) -> bool {
+    let routed = configuration_routed(effective, repository, pull);
     let hooks = if pull.merge {
         MERGE_HOOKS
     } else {
@@ -250,7 +258,86 @@ pub(in crate::pretool) fn disabled(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::fast_forward_merge;
+    use super::{configuration_routed, fast_forward_merge, merge_inert, GitConfig, Pull};
+
+    fn config(entries: &[(&str, &str)]) -> GitConfig {
+        entries
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), vec![(*value).to_owned()]))
+            .collect()
+    }
+
+    /// The signing settings an identity hook writes into every checkout it
+    /// touches, beside the user's own global copy of them.
+    fn signed() -> (GitConfig, GitConfig) {
+        let repository = config(&[
+            ("gpg.format", "openpgp"),
+            ("gpg.program", "/home/dev/.git-hooks/sign-commit.sh"),
+            ("commit.gpgsign", "true"),
+            ("core.pager", "cat"),
+            ("pager.log", "false"),
+            ("pull.rebase", "false"),
+        ]);
+        (repository.clone(), repository)
+    }
+
+    #[test]
+    fn a_repository_signing_program_leaves_a_fast_forward_alone() {
+        let (effective, repository) = signed();
+        for pull in [
+            Pull {
+                upstream: false,
+                merge: false,
+                fetches: true,
+            },
+            Pull {
+                upstream: true,
+                merge: false,
+                fetches: true,
+            },
+            Pull {
+                upstream: false,
+                merge: false,
+                fetches: false,
+            },
+        ] {
+            assert!(
+                !configuration_routed(&effective, &repository, pull),
+                "{pull:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_repository_signing_program_still_routes_a_merge() {
+        let (effective, repository) = signed();
+        let pull = Pull {
+            upstream: false,
+            merge: true,
+            fetches: true,
+        };
+        assert!(configuration_routed(&effective, &repository, pull));
+        assert!(!merge_inert(&effective, &repository));
+    }
+
+    #[test]
+    fn the_users_own_signing_program_routes_neither() {
+        let (effective, _) = signed();
+        let repository = GitConfig::new();
+        for merge in [false, true] {
+            let pull = Pull {
+                upstream: false,
+                merge,
+                fetches: true,
+            };
+            // `commit.gpgsign` still refuses the commit a merge writes.
+            assert!(
+                !configuration_routed(&effective, &repository, pull),
+                "{merge}"
+            );
+        }
+        assert!(!merge_inert(&effective, &repository));
+    }
 
     fn shape(words: &[&str]) -> Option<(bool, bool, bool)> {
         let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();

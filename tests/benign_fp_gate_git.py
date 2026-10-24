@@ -113,3 +113,35 @@ def _stopped_rebase(org: Path, home: Path, name: str, *options: str) -> None:
     _git(worktree, "rev-parse", "--verify", "--quiet", "REBASE_HEAD", home=home)
     _write(worktree / "README.md", "# resolved\n")
     _git(worktree, "add", "README.md", home=home)
+
+
+def _signed_checkout(home: Path) -> None:
+    """A checkout whose own config file carries the signing and pager settings a team hook writes.
+
+    Repository-scoped `gpg.*`, `commit.gpgsign` and display pager keys are what
+    an identity or signing hook drops into every checkout it touches, so a
+    fast-forward pull and a `worktree add` have to stay quiet with them set.
+    """
+    repository = home / "Code" / "signed" / "app-signed"
+    _write(repository / "README.md", "# app-signed\n")
+    _write(repository / "src" / "index.ts", "export const name = 'app-signed';\n")
+    _git(repository, "init", "--quiet", "--initial-branch=main", home=home)
+    _git(repository, "add", "-A", home=home)
+    _git(repository, "commit", "--quiet", "-m", "app-signed base", home=home)
+    _git(repository, "remote", "add", "origin", "https://github.com/example-org/app-signed.git", home=home)
+    _git(repository, "update-ref", "refs/remotes/origin/main", "HEAD", home=home)
+    _git(repository, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", home=home)
+    _git(repository, "branch", "feat/signed-lane", home=home)
+    signing_program = home / ".git-hooks" / "sign-commit.sh"
+    _write(signing_program, '#!/bin/sh\nexec gpg "$@"\n')
+    signing_program.chmod(0o755)
+    for key, value in (
+        ("commit.gpgsign", "true"),
+        ("tag.gpgsign", "true"),
+        ("gpg.format", "openpgp"),
+        ("gpg.program", str(signing_program)),
+        ("core.pager", "cat"),
+        ("pager.log", "false"),
+        ("pull.rebase", "false"),
+    ):
+        _git(repository, "config", "--local", key, value, home=home)

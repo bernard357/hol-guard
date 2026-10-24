@@ -126,7 +126,7 @@ pub(super) fn safe_worktree_config(output: &[u8], home: &Path) -> Option<Option<
                 "core.sshcommand" | "core.gitproxy" | "core.askpass"
             ) && !user_scope)
             || key.starts_with("hook.")
-            || (display_pager_setting(&key) && !(user_scope && display_pager_key(&key)))
+            || (display_pager_setting(&key) && !display_pager_key(&key))
             || (key.starts_with("credential.") && !global_scope)
             || (key.starts_with("include") && (!user_scope || key.contains("onbranch:")))
             || (key.starts_with("extensions.") && !inert_extension(&key))
@@ -160,9 +160,10 @@ fn display_pager_setting(key: &str) -> bool {
 
 /// A pager starts only for a command that pages its output, and only on a
 /// terminal. `worktree add` runs `worktree`, `reset` and `update-ref`, none
-/// of which a display setting names; the user's global `core.pager` and
-/// `pager.<display command>` keys therefore do nothing here. Any other
-/// `pager.<command>` key, and any repository-scoped pager, stays reviewed.
+/// of which a display setting names, so `core.pager` and
+/// `pager.<display command>` do nothing here whichever file sets them: a
+/// repository that spells one is choosing how `git log` prints, not what this
+/// checkout runs. Any other `pager.<command>` key stays reviewed.
 fn display_pager_key(key: &str) -> bool {
     const DISPLAY: &[&str] = &[
         "diff", "log", "show", "blame", "status", "grep", "stash", "tag", "branch", "shortlog",
@@ -285,10 +286,8 @@ mod tests {
     fn bundled_scope_keeps_execution_settings_reviewed() {
         for (key, value) in [
             ("core.fsmonitor", "/opt/example/run"),
-            ("core.pager", "/opt/example/run"),
             ("core.sshcommand", "/opt/example/run"),
             ("hook.post-checkout.command", "/opt/example/run"),
-            ("pager.log", "/opt/example/run"),
             ("pager.worktree", "/opt/example/run"),
             ("include.path", "/opt/example/run"),
             ("includeif.onbranch:main.path", "/opt/example/run"),
@@ -323,10 +322,35 @@ mod tests {
     }
 
     #[test]
+    fn a_display_pager_is_ordinary_in_every_scope() {
+        // `worktree add` runs `worktree`, `reset` and `update-ref`. None of
+        // them pages, so whichever file spells the pager, it names how another
+        // command prints and nothing this one starts.
+        for scope in ["global", "system", "unknown", "local", "worktree"] {
+            for (key, value) in [
+                ("core.pager", "/tmp/run"),
+                ("pager.log", "less -FRX"),
+                ("pager.diff", "/tmp/run"),
+                ("pager.show", "delta"),
+            ] {
+                assert!(
+                    matches!(judged(&[(scope, key, value)]), Some(Some(_))),
+                    "{scope} {key}"
+                );
+            }
+            // A pager named for a command `worktree add` itself runs stays reviewed.
+            for key in ["pager.worktree", "pager.reset", "pager.update-ref"] {
+                assert!(
+                    matches!(judged(&[(scope, key, "/tmp/run")]), Some(None)),
+                    "{scope} {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn repository_scoped_execution_settings_stay_reviewed() {
         for (key, value) in [
-            ("core.pager", "/tmp/run"),
-            ("pager.log", "/tmp/run"),
             ("core.fsmonitor", "/tmp/run"),
             ("core.sshcommand", "/tmp/run"),
             ("include.path", "../.gitconfig"),

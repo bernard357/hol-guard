@@ -26254,6 +26254,102 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-pull-fast-forward",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git pull --ff-only origin main"
+      },
+      "cwd": "signed_app",
+      "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-merge-fast-forward",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git merge --ff-only origin/main"
+      },
+      "cwd": "signed_app",
+      "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-pull-then-log-status",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git pull --ff-only origin main && git log -1 --oneline && git status -sb"
+      },
+      "cwd": "signed_app",
+      "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-fetch-then-merge-fast-forward",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git merge --ff-only origin/main"
+      },
+      "cwd": "signed_app",
+      "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-worktree-add-branch",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ${HOME}/Code/signed/app-signed-fix feat/signed-lane"
+      },
+      "cwd": "signed_app",
+      "expect": "allow"
+    },
+    {
+      "id": "signed-checkout-git-worktree-add-c-flag",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git -C ${HOME}/Code/signed/app-signed worktree add ${HOME}/Code/signed/app-signed-lane feat/signed-lane"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
     }
   ],
   "mcp_cases": [
