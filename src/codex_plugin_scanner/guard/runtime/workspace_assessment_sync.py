@@ -81,7 +81,7 @@ def build_workspace_assessment_sync(store: GuardStore, *, now: str) -> Workspace
     _fit_budget(entries, lambda: len(json.dumps(payload).encode("utf-8")), MAX_SUMMARY_BYTES)
     if not entries:
         return None
-    digest = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    digest = _digest(entries)
     if not _due(store, digest, now):
         return None
     return WorkspaceAssessmentSyncBuild(payload=payload, digest=digest)
@@ -92,8 +92,9 @@ def fit_workspace_assessment_to_request(
 ) -> WorkspaceAssessmentSyncBuild | None:
     """A copy whose serialized payload fits ``max_bytes``, or ``None`` if it cannot.
 
-    The digest stays that of the full summary, so a trimmed delivery is not
-    mistaken for a changed summary on the next sync.
+    The digest is that of what this request carries. When anything was trimmed it
+    no longer matches the full summary, so the next sync sends the full summary
+    again instead of treating the trimmed delivery as current for a day.
     """
 
     payload = copy.deepcopy(built.payload)
@@ -107,7 +108,7 @@ def fit_workspace_assessment_to_request(
     _fit_budget(entries, size, max_bytes)
     if not entries or size() > max_bytes:
         return None
-    return WorkspaceAssessmentSyncBuild(payload=payload, digest=built.digest)
+    return WorkspaceAssessmentSyncBuild(payload=payload, digest=_digest(entries))
 
 
 def commit_workspace_assessment_sent(store: GuardStore, built: WorkspaceAssessmentSyncBuild, *, now: str) -> None:
@@ -218,8 +219,10 @@ def _fit_budget(entries: list[dict[str, object]], size: Callable[[], int], limit
     """Shrink ``entries`` in place until ``size()`` fits the byte budget.
 
     Findings go first, lowest-ranked first. Coverage reasons and detector states
-    follow, and trailing worktrees are dropped last. The caller checks the final
-    size: an empty list may still not fit.
+    follow, and trailing worktrees are dropped last. Any entry that loses findings
+    or coverage detail is flagged ``findingsTruncated`` so the receiver never
+    closes findings against it. The caller checks the final size: an empty list
+    may still not fit.
     """
 
     while size() > limit:
@@ -239,19 +242,26 @@ def _fit_budget(entries: list[dict[str, object]], size: Callable[[], int], limit
 def _trim_coverage(entries: list[dict[str, object]]) -> bool:
     """Halve the longest reasons list, then the largest detector map. False when both are empty."""
 
-    coverages = [coverage for coverage in map(_coverage, entries) if coverage is not None]
+    covered = [(entry, coverage) for entry in entries if (coverage := _coverage(entry)) is not None]
     for field in ("reasons", "detectors"):
-        largest = max(coverages, key=lambda coverage: _length(coverage[field]), default=None)
+        largest = max(covered, key=lambda pair: _length(pair[1][field]), default=None)
         if largest is None:
             continue
-        values = largest[field]
+        entry, coverage = largest
+        values = coverage[field]
         if isinstance(values, list) and values:
-            largest[field] = values[: len(values) // 2]
-            return True
-        if isinstance(values, dict) and values:
-            largest[field] = dict(list(values.items())[: len(values) // 2])
-            return True
+            coverage[field] = values[: len(values) // 2]
+        elif isinstance(values, dict) and values:
+            coverage[field] = dict(list(values.items())[: len(values) // 2])
+        else:
+            continue
+        entry["findingsTruncated"] = True
+        return True
     return False
+
+
+def _digest(entries: list[dict[str, object]]) -> str:
+    return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _length(value: object) -> int:

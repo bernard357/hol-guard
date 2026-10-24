@@ -250,7 +250,7 @@ def test_findings_are_read_only_for_the_summarized_worktrees(
     assert reads.latest_assessed_runs(guard_store, []) == []
 
 
-def test_request_fit_trims_findings_but_keeps_the_full_summary_digest(tmp_path: Path) -> None:
+def test_request_fit_trims_findings_and_the_full_summary_is_sent_next_time(tmp_path: Path) -> None:
     guard_store = GuardStore(tmp_path / "home")
     assessed(guard_store, findings=[finding(index) for index in range(sync.MAX_FINDINGS_PER_WORKTREE)])
     built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
@@ -259,7 +259,9 @@ def test_request_fit_trims_findings_but_keeps_the_full_summary_digest(tmp_path: 
 
     fitted = sync.fit_workspace_assessment_to_request(built, full // 2)
 
-    assert fitted is not None and fitted.digest == built.digest
+    assert fitted is not None and fitted.digest != built.digest
+    sync.commit_workspace_assessment_sent(guard_store, fitted, now=NOW)
+    assert sync.build_workspace_assessment_sync(guard_store, now="2026-10-24T12:05:00Z") is not None
     [entry] = fitted.payload["worktrees"]
     assert 0 < len(entry["findings"]) < sync.MAX_FINDINGS_PER_WORKTREE
     assert entry["findingsTruncated"] is True
@@ -304,6 +306,7 @@ def test_built_summary_trims_coverage_when_findings_alone_cannot_fit(
     [entry] = built.payload["worktrees"]
     assert 0 < len(entry["assessment"]["coverage"]["reasons"]) < 32
     assert entry["assessment"]["coverage"]["reasons"][0].startswith("00")
+    assert entry["findingsTruncated"] is True
     monkeypatch.setattr(sync, "MAX_SUMMARY_BYTES", 50)
     assert sync.build_workspace_assessment_sync(guard_store, now=NOW) is None
 
@@ -330,3 +333,20 @@ def test_summary_waits_for_a_later_batch_when_the_first_cannot_fit_it(
     assert "workspaceAssessments" not in bodies[0]["syncContext"]
     assert bodies[1]["syncContext"]["workspaceAssessments"]["schemaVersion"] == sync.SCHEMA_VERSION
     assert store.get_sync_payload(sync.DELIVERY_STATE_KEY)
+
+
+def test_worktrees_dropped_from_a_request_are_sent_on_the_next_sync(tmp_path: Path) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store, findings=[])
+    second = assessments.WorktreeKeys(digest("codebase-2"), digest("worktree-2"))
+    assessments.admit_worktree(guard_store, second, root=ROOT + "-2", now_ms=T0 + 1)
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+    assert built is not None and len(built.payload["worktrees"]) == 2
+    one = len(json.dumps({**built.payload, "worktrees": built.payload["worktrees"][:1]}).encode())
+
+    fitted = sync.fit_workspace_assessment_to_request(built, one)
+
+    assert fitted is not None and len(fitted.payload["worktrees"]) == 1
+    sync.commit_workspace_assessment_sent(guard_store, fitted, now=NOW)
+    resent = sync.build_workspace_assessment_sync(guard_store, now="2026-10-24T12:05:00Z")
+    assert resent is not None and len(resent.payload["worktrees"]) == 2
