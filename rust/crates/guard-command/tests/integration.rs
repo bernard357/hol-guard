@@ -43,6 +43,7 @@ pub mod guard_mcp_launch_tokens_parity;
 pub mod guard_protection_health_parity;
 pub mod guard_trust_attestation_verify_parity;
 pub mod guard_trust_claim_parity;
+pub mod hook_fail_closed_envelopes;
 pub mod inline_expression_boundaries;
 pub mod js_semver_vectors;
 pub mod manifest_change_vectors;
@@ -260,6 +261,7 @@ pub mod redact_text_parity;
 pub mod redacted_command_tokens_parity;
 pub mod sed_workflow_boundaries;
 pub mod sfrs_conformance;
+pub mod supply_chain_bundle_producer_vector;
 pub mod workspace_sandbox_tool_path;
 pub mod workspace_write_boundaries;
 

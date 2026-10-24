@@ -54,6 +54,7 @@ import { parseInterceptProofSnapshot, type InterceptProofSnapshot } from "./supp
 import { InterceptProofModal } from "./supply-chain-intercept-proof-modal";
 import { SupplyChainManagerDrawer } from "./supply-chain-manager-drawer";
 import { resolveSupplyChainAuditRecoveryGate, createSupplyChainSyncApprovalGate, type SupplyChainAuditRecoveryGate } from "./supply-chain-audit-recovery";
+import type { SupplyChainRecoveryOperation } from "./supply-chain-audit-failure";
 import {
   AuditRecoveryModal,
   type AuditRecoveryModalPhase,
@@ -229,6 +230,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
   const [auditRecoveryGate, setAuditRecoveryGate] = useState<SupplyChainAuditRecoveryGate | null>(null);
   const [auditRecoveryPhase, setAuditRecoveryPhase] = useState<AuditRecoveryModalPhase>("ready");
   const [auditRecoveryError, setAuditRecoveryError] = useState<string | null>(null);
+  const [auditRecoveryErrorOp, setAuditRecoveryErrorOp] = useState<SupplyChainRecoveryOperation>("sync");
   const [resumeFixAllAfterConnect, setResumeFixAllAfterConnect] = useState(false);
   const { resolvedApprovalGate, resolveApprovalGate } = useResolvedApprovalGate(approvalGate);
 
@@ -399,6 +401,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
         setLastFailed({ op: "audit", manager: null, message });
         onAuditErrorChange?.(message);
         setAuditRecoveryPhase("failed");
+        setAuditRecoveryErrorOp("audit");
         setAuditRecoveryError(message);
         return false;
       } finally {
@@ -462,6 +465,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             err,
             "Guard Cloud is temporarily unavailable. Try syncing again in a few minutes.",
           );
+          setAuditRecoveryErrorOp("sync");
           setAuditRecoveryError(message);
           setAuditRecoveryPhase("ready");
           setLastFailed({ op: "sync", manager: null, message });
@@ -476,6 +480,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           });
           return;
         }
+        setAuditRecoveryErrorOp("sync");
         setAuditRecoveryError(failure.message);
         setAuditRecoveryPhase(credentials === undefined ? "failed" : "approval");
         setLastFailed({ op: "sync", manager: null, message: failure.message });
@@ -842,6 +847,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             "Guard Cloud is temporarily unavailable. Try syncing again in a few minutes.",
           );
           setAuditRecoveryPhase("ready");
+          setAuditRecoveryErrorOp("sync");
           setAuditRecoveryError(message);
           setLastFailed({ op, manager: null, message });
           return;
@@ -1117,6 +1123,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           gate={auditRecoveryGate}
           phase={auditRecoveryPhase}
           error={auditRecoveryError}
+          errorOperation={auditRecoveryErrorOp}
           connectError={connectError}
           connectStarting={startingConnect}
           connectFlow={panelLoad.phase === "loaded" ? panelLoad.data.connect_flow : null}

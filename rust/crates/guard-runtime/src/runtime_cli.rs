@@ -281,6 +281,10 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             write_json(&guard_plugin_telemetry::run_request(&bytes))
         }
+        [command, flag] if command == workspace_snapshot::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_snapshot::run_command(&bytes)?)
+        }
         [command, flag] if command == "context-digest" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             let response = context_digest::evaluate_context_digest_bytes(&bytes)?;

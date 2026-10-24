@@ -114,6 +114,7 @@ from ..store_evidence import (
     clear_evidence,
 )
 from ..store_storage_maintenance import DEFAULT_GUARD_EVENT_LIMIT, DEFAULT_RECEIPT_DETAIL_LIMIT
+from ..workspace_assessment_worker import start_workspace_assessment_worker
 from . import repair_self_check
 from .aibom_inventory_persist import persist_aibom_inventory_context
 from .audit_persistence import NOT_PERSISTED as AUDIT_NOT_PERSISTED
@@ -3410,6 +3411,7 @@ class GuardDaemonServer:
         self._serve_loop_started = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
         self._native_resident_watchdog_thread: threading.Thread | None = None
+        self._workspace_assessment_thread: threading.Thread | None = None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -3604,6 +3606,7 @@ class GuardDaemonServer:
                 self._start_onefile_extraction_reclaim()
                 self._start_repair_self_check()
                 self._start_native_resident_watchdog()
+                self._start_workspace_assessment_worker()
             self._record_lifecycle("ready")
             self._owned_service_ready = True
             self._diagnostics.record("daemon_ready")
@@ -3800,6 +3803,15 @@ class GuardDaemonServer:
     def _start_native_resident_watchdog(self) -> None:
         self._native_resident_watchdog_thread = start_native_resident_watchdog(
             self._server.store.guard_home,
+            stop=self._shutdown_started,
+            on_error=self._diagnostics.record_exception,
+        )
+
+    def _start_workspace_assessment_worker(self) -> None:
+        if self._workspace_assessment_thread is not None and self._workspace_assessment_thread.is_alive():
+            return
+        self._workspace_assessment_thread = start_workspace_assessment_worker(
+            self._server.store,
             stop=self._shutdown_started,
             on_error=self._diagnostics.record_exception,
         )
@@ -4060,6 +4072,12 @@ class GuardDaemonServer:
             getattr(self, "_native_resident_watchdog_thread", None),
             deadline=started + _NATIVE_RESIDENT_WATCHDOG_STOP_JOIN_TIMEOUT_SECONDS,
         )
+        # An assessment still running past the deadline writes to the store
+        # after shutdown, so it counts against containment like the others.
+        self._workspace_assessment_thread = self._join_service_thread(
+            getattr(self, "_workspace_assessment_thread", None),
+            deadline=deadline,
+        )
         return all(
             thread is None
             for thread in (
@@ -4072,6 +4090,7 @@ class GuardDaemonServer:
                 self._command_activity_maintenance_thread,
                 self._onefile_extraction_reclaim_thread,
                 self._native_resident_watchdog_thread,
+                self._workspace_assessment_thread,
             )
         )
 
