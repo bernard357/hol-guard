@@ -3,7 +3,7 @@ import { r as resolveSupplyChainIssues } from "./supply-chain-issues-DeC2Wyty.js
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-Du65PsUR.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
 import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-C60mcKZP.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-DH6YyFOR.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-DA3IPfaa.js";
 import "./feed-health-workspace-Bb4acrba.js";
 const PROTECTION_BADGE = {
   protected: "Protected",
@@ -161,7 +161,10 @@ function SupplyChainWorkspaceHero({ hero }) {
   );
 }
 const LOCAL_PROTECTION_ACTIONS = /* @__PURE__ */ new Set(["firewall_unprotected", "firewall_repair"]);
-function recoverySummary(issueCount) {
+function recoverySummary(issueCount, needsLocalRepair) {
+  if (!needsLocalRepair) {
+    return `${issueCount} step${issueCount === 1 ? "" : "s"} left. Package protection is already on for this device.`;
+  }
   return `${issueCount} issue${issueCount === 1 ? "" : "s"} to resolve. Check Cloud access, approve device changes once, then restore package protection.`;
 }
 function SupplyChainRecovery({
@@ -201,8 +204,8 @@ function SupplyChainRecovery({
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(BrandHeroBadge, { tone, children: needsLocalRepair ? "Needs repair" : "Protected on this device" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-2xl", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "guard-hero-title text-2xl font-semibold tracking-tight text-white sm:text-3xl", children: "Restore supply-chain protection" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-xl text-[15px] leading-relaxed text-white/80", children: recoverySummary(issues.length) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "guard-hero-title text-2xl font-semibold tracking-tight text-white sm:text-3xl", children: needsLocalRepair ? "Restore supply-chain protection" : "Finish supply-chain setup" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-xl text-[15px] leading-relaxed text-white/80", children: recoverySummary(issues.length, needsLocalRepair) }),
           guidance ? /* @__PURE__ */ jsxRuntimeExports.jsx(
             "p",
             {

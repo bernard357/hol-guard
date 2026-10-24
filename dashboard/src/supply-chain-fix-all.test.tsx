@@ -179,6 +179,9 @@ const cloudOnlyMarkup = renderToStaticMarkup(
 );
 assert(cloudOnlyMarkup.includes("Protected on this device"), "a Cloud-only step on a protected device is not a repair");
 assert(!cloudOnlyMarkup.includes("Needs repair"), "a Cloud-only step does not show the repair badge");
+assert(cloudOnlyMarkup.includes("Finish supply-chain setup"), "a Cloud-only step reads as setup, not restore");
+assert(!cloudOnlyMarkup.includes("Restore supply-chain protection"), "a Cloud-only step does not ask to restore protection");
+assert(cloudOnlyMarkup.includes("1 step left. Package protection is already on for this device."), "a Cloud-only summary says protection is on");
 assert(markup.includes("Needs repair"), "local protection issues keep the repair badge");
 
 console.log("supply-chain-fix-all.test.tsx: all assertions passed");

@@ -28,7 +28,10 @@ type SupplyChainRecoveryProps = {
 
 const LOCAL_PROTECTION_ACTIONS = new Set<SupplyChainIssue["action"]["kind"]>(["firewall_unprotected", "firewall_repair"]);
 
-function recoverySummary(issueCount: number): string {
+function recoverySummary(issueCount: number, needsLocalRepair: boolean): string {
+  if (!needsLocalRepair) {
+    return `${issueCount} step${issueCount === 1 ? "" : "s"} left. Package protection is already on for this device.`;
+  }
   return `${issueCount} issue${issueCount === 1 ? "" : "s"} to resolve. Check Cloud access, approve device changes once, then restore package protection.`;
 }
 
@@ -72,10 +75,10 @@ export function SupplyChainRecovery({
       <BrandHeroBadge tone={tone}>{needsLocalRepair ? "Needs repair" : "Protected on this device"}</BrandHeroBadge>
       <div className="max-w-2xl">
         <h2 className="guard-hero-title text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-          Restore supply-chain protection
+          {needsLocalRepair ? "Restore supply-chain protection" : "Finish supply-chain setup"}
         </h2>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-white/80">
-          {recoverySummary(issues.length)}
+          {recoverySummary(issues.length, needsLocalRepair)}
         </p>
         {guidance ? (
           <p
