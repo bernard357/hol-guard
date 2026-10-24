@@ -1698,6 +1698,19 @@
     "rust/crates/guard-command/src/inventory_contract.rs",
     "rust/crates/guard-runtime/src/inventory_scan_findings_op.rs"
    ]
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/runtime/skill_paths.py",
+   "module": "codex_plugin_scanner.guard.runtime.skill_paths",
+   "source_sha256": "0355e63df1a30b56f8ca25699f3e4bc9182371f5848a0ba326d862605637660f",
+   "forbidden_symbols": [
+    "PI_INLINE_RESOURCE_SCHEMES",
+    "_UNSAFE_SKILL_URI_MARKERS",
+    "resolve_known_skill_doc_path"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/codex_output_source_paths.rs"
+   ]
   }
  ],
  "retired_test_paths": [
