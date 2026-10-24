@@ -225,9 +225,9 @@ def build_plugin_release_evidence(
     runtimes = tuple(
         sorted(
             (
-                RuntimeSupport(runtime=item["runtime"][:64], supported=item.get("supported") is True)
+                RuntimeSupport(runtime=runtime[:64], supported=item.get("supported") is True)
                 for item in (runtimes_value if isinstance(runtimes_value, Sequence) else ())
-                if isinstance(item, Mapping) and isinstance(item.get("runtime"), str)
+                if isinstance(item, Mapping) and isinstance(runtime := item.get("runtime"), str)
             ),
             key=lambda support: support.runtime,
         )
