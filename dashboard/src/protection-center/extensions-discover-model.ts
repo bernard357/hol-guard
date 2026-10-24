@@ -1,3 +1,4 @@
+import type { ExtensionTrustClass } from "../extension-controls-api";
 import type { ExtensionCatalogSummary } from "../extension-controls-normalize";
 
 /**
@@ -241,14 +242,30 @@ export function inFeedSlotIndexes(rowCount: number): number[] {
   return indexes;
 }
 
-/** Featured extensions lead the list; everything else keeps catalog order. */
-export function orderFeaturedFirst<T extends { extension_id: string }>(
+const TRUST_RANK: Record<ExtensionTrustClass, number> = {
+  "first-party": 0,
+  "trusted-library": 1,
+  external: 2,
+};
+
+/**
+ * Orders the catalog rows below the featured ones. Project-maintained
+ * coverage (built in, then trusted) leads; external contributions follow,
+ * sponsored ones first. A sponsored placement buys a labeled row, not a place
+ * ahead of Guard's own coverage - only a featured slot does that, and featured
+ * rows are placed before this list. Each group keeps catalog order.
+ */
+export function orderCatalogRows<T extends { extension_id: string; trust_class: ExtensionTrustClass }>(
   extensions: readonly T[],
-  featuredIds: ReadonlySet<string>,
+  sponsoredIds: ReadonlySet<string>,
 ): T[] {
-  if (featuredIds.size === 0) return [...extensions];
-  return [
-    ...extensions.filter((extension) => featuredIds.has(extension.extension_id)),
-    ...extensions.filter((extension) => !featuredIds.has(extension.extension_id)),
-  ];
+  const rank = (extension: T): number => {
+    const trust = TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external;
+    if (trust < TRUST_RANK.external) return trust;
+    return sponsoredIds.has(extension.extension_id) ? trust : trust + 1;
+  };
+  return extensions
+    .map((extension, index) => ({ extension, index, rank: rank(extension) }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map((entry) => entry.extension);
 }

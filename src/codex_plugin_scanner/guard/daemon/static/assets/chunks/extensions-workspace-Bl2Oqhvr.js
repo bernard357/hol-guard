@@ -6594,12 +6594,18 @@ function inFeedSlotIndexes(rowCount) {
   }
   return indexes;
 }
-function orderFeaturedFirst(extensions, featuredIds) {
-  if (featuredIds.size === 0) return [...extensions];
-  return [
-    ...extensions.filter((extension) => featuredIds.has(extension.extension_id)),
-    ...extensions.filter((extension) => !featuredIds.has(extension.extension_id))
-  ];
+const TRUST_RANK = {
+  "first-party": 0,
+  "trusted-library": 1,
+  external: 2
+};
+function orderCatalogRows(extensions, sponsoredIds) {
+  const rank = (extension) => {
+    const trust = TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external;
+    if (trust < TRUST_RANK.external) return trust;
+    return sponsoredIds.has(extension.extension_id) ? trust : trust + 1;
+  };
+  return extensions.map((extension, index) => ({ extension, index, rank: rank(extension) })).sort((left, right) => left.rank - right.rank || left.index - right.index).map((entry) => entry.extension);
 }
 const DISCOVERY_REFRESH_MS = 1e4;
 function useDiscoveryFeed(active, fetchPlacements) {
@@ -9103,7 +9109,7 @@ function ExtensionsOverview(props) {
     const sponsoredIds = new Set(
       joinedDiscovery.sponsored.map((entry) => entry.placement.extensionId).filter((extensionId) => !featuredIds.has(extensionId))
     );
-    const rest = orderFeaturedFirst(
+    const rest = orderCatalogRows(
       visibleCatalog.filter((extension) => !featuredIds.has(extension.extension_id)),
       sponsoredIds
     );

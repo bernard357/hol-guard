@@ -14,7 +14,7 @@ import {
 } from "../local-cli-api";
 import { WorkspacePageHeader } from "../workspace-page-header";
 import { useDiscoveryFeed, useJoinedDiscovery } from "./extensions-discovery-feed";
-import { inFeedSlotIndexes, MIN_ORGANIC_ROWS_BEFORE_IN_FEED, orderFeaturedFirst } from "./extensions-discover-model";
+import { inFeedSlotIndexes, MIN_ORGANIC_ROWS_BEFORE_IN_FEED, orderCatalogRows } from "./extensions-discover-model";
 import { CatalogSlotRow, ExtensionsSpotlight } from "./extensions-spotlight";
 import {
   CATALOG_SLOT_PRODUCTS,
@@ -205,7 +205,8 @@ export function ExtensionsOverview(props: {
     ),
     [joinedDiscovery.featured, joinedDiscovery.sponsored],
   );
-  // Featured rows lead in server order (all-day before time windows).
+  // Featured rows lead in server order (all-day before time windows), then
+  // Guard's own coverage, then external contributions.
   const orderedCatalog = useMemo(() => {
     const visibleIds = new Set(visibleCatalog.map((extension) => extension.extension_id));
     const featuredVisible = joinedDiscovery.featured
@@ -221,7 +222,7 @@ export function ExtensionsOverview(props: {
         .map((entry) => entry.placement.extensionId)
         .filter((extensionId) => !featuredIds.has(extensionId)),
     );
-    const rest = orderFeaturedFirst(
+    const rest = orderCatalogRows(
       visibleCatalog.filter((extension) => !featuredIds.has(extension.extension_id)),
       sponsoredIds,
     );
