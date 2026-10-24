@@ -14,6 +14,9 @@ import { lazyWorkspace } from "./lazy-workspace";
 const SupplyChainWorkspace = lazyWorkspace("supply-chain-workspace", () =>
   import("./supply-chain-workspace").then((m) => ({ default: m.SupplyChainWorkspace }))
 );
+const SupplyChainWorkspaceDetails = lazyWorkspace("supply-chain-workspace-details", () =>
+  import("./supply-chain-workspace-details").then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
+);
 const AuditWorkspace = lazyWorkspace("audit-workspace", () =>
   import("./audit-workspace").then((m) => ({ default: m.AuditWorkspace }))
 );
@@ -78,6 +81,9 @@ export function SupplyChainHubWorkspace(props: {
     },
     [props.onNavigate]
   );
+  const handleAuditNavigate = useCallback(() => {
+    props.onNavigate("/audit");
+  }, [props.onNavigate]);
   const handleFixAll = useCallback(() => {
     firewallPanelRef.current?.fixAll();
   }, []);
@@ -95,10 +101,6 @@ export function SupplyChainHubWorkspace(props: {
         {tab === "supply-chain" && (
           <SupplyChainWorkspace
             snapshot={props.snapshot}
-            onGoHome={props.onGoHome}
-            onAuditNavigate={() => props.onNavigate("/audit")}
-            auditSnapshot={auditSession.auditSnapshot}
-            auditRunning={auditSession.auditRunning}
             fixAllState={fixAllState}
             onFixAll={handleFixAll}
           />
@@ -133,6 +135,20 @@ export function SupplyChainHubWorkspace(props: {
           runAuditRef={auditSession.runAuditRef}
         />
       </div>
+      {/* Status, then the roster, then the facts behind it: DOM order matches
+          what the eye reads, so keyboard and screen-reader users meet the
+          manager rows before the supporting detail. */}
+      {tab === "supply-chain" && (
+        <Suspense fallback={null}>
+          <SupplyChainWorkspaceDetails
+            snapshot={props.snapshot}
+            onGoHome={props.onGoHome}
+            onAuditNavigate={handleAuditNavigate}
+            auditSnapshot={auditSession.auditSnapshot}
+            auditRunning={auditSession.auditRunning}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

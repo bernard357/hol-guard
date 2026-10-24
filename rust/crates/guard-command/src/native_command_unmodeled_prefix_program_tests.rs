@@ -157,6 +157,14 @@ fn an_env_without_a_program_launches_nothing() {
         "env -u NODE_OPTIONS bash -lc 'id'",
         "env -- bash -lc 'id'",
         "env ./deploy.sh",
+        // A written name walks the prefix, and the words behind it are asked
+        // the same question any other handover asks. Without that, a setting
+        // in front of the script read as a dump while the script on its own,
+        // one line up, kept its failure.
+        "env CI=1 ./deploy.sh",
+        "env CI=1 ./scripts/run.sh",
+        "env CI=1 deploy.sh",
+        "env CI=1 bash -lc 'id'",
     ] {
         assert!(dumps(command), "{command}");
     }

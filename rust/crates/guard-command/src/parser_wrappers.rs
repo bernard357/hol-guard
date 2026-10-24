@@ -2,6 +2,8 @@
 
 use crate::{assignment_name, executable_basename, CommandSegmentV1, RawSegment};
 
+#[path = "parser_env_prefix.rs"]
+mod env_prefix;
 #[path = "parser_launchers.rs"]
 mod launchers;
 
@@ -18,11 +20,11 @@ pub(crate) use launchers::launcher_program;
 /// clock. They stay in the wrapper chain, and the duration is still skipped
 /// so the program they name stays the executable. `command` and `time` run
 /// the next word as the program.
-/// `env` does that for the assignments it carries, whatever they name; those
-/// names join `environment_names`. An operand `env` would take as an
-/// assignment of its own leaves `env` as the executable.
-/// Any option on a prefix leaves it as the executable, which keeps
-/// `command -v`, `time -p` and `env -i` on their existing paths.
+/// `env` does that for the assignments it carries, whatever they name, and for
+/// the names it removes; all of them join `environment_names`. An operand
+/// `env` would take as an assignment of its own leaves `env` as the executable.
+/// Any option on `command` or `time` leaves that prefix as the executable,
+/// which keeps `command -v` and `time -p` on their existing paths.
 pub(super) fn unwrap_wrappers(
     tokens: &[String],
     mut index: usize,
@@ -118,6 +120,13 @@ pub(super) fn unwrap_wrappers(
     Ok((index, wrappers))
 }
 
+/// The spellings of `env` this parser reads as a prefix rather than as the
+/// program itself. `./env` and `/opt/bin/env` are files of the user's own that
+/// share the name and do whatever they were written to do, so neither is one.
+pub(crate) fn env_spelling(token: &str) -> bool {
+    matches!(token, "env" | "/usr/bin/env" | "/bin/env")
+}
+
 /// `command X`, `time X` and `env NAME=value... X` run `X` with no other
 /// change. Bare `env X` is left alone: it only bypasses shell functions, and
 /// extension floors key on that spelling.
@@ -131,19 +140,21 @@ pub(super) fn unwrap_wrappers(
 /// compatibility layer reads the rest; an `env` that names no program at all,
 /// or whose next operand `env` would take as an assignment of its own, is
 /// still the environment dump, and keeps its own spelling.
-fn transparent_prefix(tokens: &[String], index: usize) -> Option<(usize, Vec<String>)> {
+///
+/// `env_prefix` reads the controls that only decide which names the program
+/// starts with; each name it collects joins `environment_names` as a written
+/// one does, so `-u PATH` keeps the review a written `PATH=` keeps.
+pub(crate) fn transparent_prefix(tokens: &[String], index: usize) -> Option<(usize, Vec<String>)> {
     let mut next = index + 1;
     let mut names = Vec::new();
+    let mut is_env = false;
     match tokens.get(index)?.as_str() {
         "command" | "time" => {}
-        "env" | "/usr/bin/env" | "/bin/env" => {
-            while let Some(name) = tokens.get(next).and_then(|value| assignment_name(value)) {
-                names.push(name.to_owned());
-                next += 1;
-            }
-            if names.is_empty() {
-                return None;
-            }
+        token if env_spelling(token) => {
+            is_env = true;
+            let (position, decided) = env_prefix::env_names(tokens, next)?;
+            next = position;
+            names = decided;
         }
         _ => return None,
     }
@@ -154,7 +165,7 @@ fn transparent_prefix(tokens: &[String], index: usize) -> Option<(usize, Vec<Str
     // named `A-B=1`, so reading the two alike would model the wrong program.
     // A word the shell would not take as an assignment ends the prefix and
     // leaves `env` itself to be judged.
-    let consumed_by_env = !names.is_empty() && program.contains('=');
+    let consumed_by_env = is_env && program.contains('=');
     (!program.is_empty()
         && !program.starts_with('-')
         && assignment_name(program).is_none()
@@ -678,9 +689,21 @@ mod tests {
             "command -p bun run build",
             "time -p bun run build",
             "env bun run build",
+            // Clearing the environment takes the search path with it, so the
+            // program this text names is not the program that runs.
             "env -i bun run build",
+            "env --ignore-environment bun run build",
+            "env - bun run build",
             "env -u HOME -i bun run build",
             "env -S 'bun run build'",
+            "env -Sbun",
+            "env --split-string='bun run build'",
+            // `-C` runs the program somewhere else, which is not the
+            // directory the rest of this evaluation reads.
+            "env -C /tmp bun run build",
+            // An assignment ends option parsing, so the program here is a
+            // file named `-u`, not `bun`.
+            "env CI=1 -u DEBUG bun run build",
             "env CI=1 sh -c 'rm -rf x'",
             "command sh -c 'rm -rf x'",
             "command env",

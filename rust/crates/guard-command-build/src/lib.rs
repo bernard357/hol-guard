@@ -375,6 +375,8 @@ pub mod supply_chain_bundle;
 pub mod supply_chain_package_identity;
 #[path = "../../guard-command/src/supply_chain_risk.rs"]
 pub mod supply_chain_risk;
+#[path = "../../guard-command/src/supply_chain_support.rs"]
+pub mod supply_chain_support;
 pub(crate) use command_parse_surface::{
     default_dialect, default_provenance, default_transport, is_fd_dup_redirect,
     parse_command_unbound, parse_explicit_powershell, parse_inline_shell_script,

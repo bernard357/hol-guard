@@ -252,6 +252,7 @@
       "src/parser_ansi_c.rs",
       "src/parser_brace_command.rs",
       "src/parser_executables.rs",
+      "src/parser_env_prefix.rs",
       "src/parser_launchers.rs",
       "src/parser_segment_shapes.rs",
       "src/parser_segments.rs",
@@ -740,6 +741,7 @@
       "src/supply_chain_package_eval/yarn_bun_lock.rs",
       "src/supply_chain_package_identity.rs",
       "src/supply_chain_risk.rs",
+      "src/supply_chain_support.rs",
       "src/target_identities.rs",
       "src/typescript_launch_evidence.rs",
       "src/workspace_inventory.rs"

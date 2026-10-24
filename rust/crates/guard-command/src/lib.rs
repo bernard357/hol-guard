@@ -152,6 +152,8 @@ pub mod github_workflow_operations;
 mod harness_config_names;
 pub mod harness_identity;
 mod home_path_text;
+#[cfg(test)]
+mod home_path_text_parity_tests;
 pub mod homebrew_intent;
 mod inline_shell_quoting;
 pub mod jsonc;
@@ -550,6 +552,7 @@ pub mod shims;
 pub mod signals;
 pub mod skill_content_risk;
 pub mod skill_dependency_manifest;
+pub mod skill_document_text_evidence;
 pub mod skill_identity;
 pub mod strict_json;
 pub mod supply_chain_bundle;
