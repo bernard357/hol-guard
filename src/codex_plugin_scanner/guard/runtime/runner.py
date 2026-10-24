@@ -145,6 +145,10 @@ from .supply_chain_bundle import (
 )
 from .supply_chain_bundle_models import SupplyChainVerificationKey
 from .supply_chain_support import ecosystem_support_matrix
+from .workspace_assessment_sync import (
+    build_workspace_assessment_sync_safely,
+    record_workspace_assessment_delivery,
+)
 
 _POLICY_DOCUMENT_VERSIONS = ("guard.hashgraphonline.com/v1alpha1",)
 _POLICY_BUNDLE_VERSIONS = ("guard-policy-bundle.v1", "guard-policy-bundle.v2")
@@ -467,6 +471,7 @@ def sync_receipts(
         home_dir=home_dir,
         workspace_dir=workspace_dir,
     )
+    pending_workspace_assessments = build_workspace_assessment_sync_safely(store)
     bundle_hash_sent = _sync_context_bundle_hash(sync_context)
     for receipt_batch in _iter_receipt_sync_batches(receipts):
         batch_sync_context = dict(sync_context)
@@ -474,6 +479,10 @@ def sync_receipts(
         pending_fleet_posture = None
         if batch_fleet_posture is not None:
             batch_sync_context["fleetPosture"] = batch_fleet_posture.payload
+        batch_workspace_assessments = pending_workspace_assessments
+        pending_workspace_assessments = None
+        if batch_workspace_assessments is not None:
+            batch_sync_context["workspaceAssessments"] = batch_workspace_assessments.payload
         body = json.dumps(
             {
                 "receipts": _cloud_sync_receipts_payload(
@@ -550,6 +559,7 @@ def sync_receipts(
         except OSError as error:
             raise RuntimeError(_sync_url_error_message(error)) from error
         _record_fleet_posture_delivery(store, batch_fleet_posture, payload)
+        record_workspace_assessment_delivery(store, batch_workspace_assessments)
         cursor_batch_rowids = _receipt_sync_cursor_rowids_from_batch(
             receipt_batch,
             cursor_receipt_ids=cursor_receipt_ids,
