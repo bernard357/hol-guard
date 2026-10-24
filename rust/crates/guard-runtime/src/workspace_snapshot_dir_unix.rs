@@ -29,19 +29,26 @@ impl DirHandle {
             .map(|dir| Self { dir })
     }
 
-    /// Entry names in readdir order; `None` marks an entry readdir failed on.
+    /// Entry names in readdir order; a trailing `None` marks where readdir
+    /// failed. Reading stops at the first error, since `nix`'s iterator calls
+    /// readdir again on every `next` and a persistent error would never end.
     pub(crate) fn names(&mut self) -> Vec<Option<OsString>> {
-        self.dir
-            .iter()
-            .filter_map(|entry| match entry {
+        let mut names = Vec::new();
+        for entry in self.dir.iter() {
+            match entry {
                 Ok(entry) => {
                     let name = entry.file_name().to_bytes();
-                    (name != b"." && name != b"..")
-                        .then(|| Some(OsStr::from_bytes(name).to_owned()))
+                    if name != b"." && name != b".." {
+                        names.push(Some(OsStr::from_bytes(name).to_owned()));
+                    }
                 }
-                Err(_) => Some(None),
-            })
-            .collect()
+                Err(_) => {
+                    names.push(None);
+                    break;
+                }
+            }
+        }
+        names
     }
 
     pub(crate) fn stat(&self, name: &OsStr) -> Option<Node> {
