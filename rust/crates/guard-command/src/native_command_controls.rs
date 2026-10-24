@@ -218,6 +218,10 @@ impl CompiledNativeCommandControls {
         context: crate::pretool::PathContext<'_>,
         environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
     ) -> PreToolResultV1 {
+        // Record the active set the decision is actually made with. Compiling
+        // a later snapshot on another thread must not change what this
+        // request reports.
+        crate::native_command_program::work_stats::record_active(self.active_extensions.len());
         let observed = match command {
             Some(command) => self.observe_command(command, deadline, context, environment),
             None => Ok((NativeCommandObservationBatchV1::default(), None)),
