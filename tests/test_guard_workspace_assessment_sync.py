@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -114,7 +115,7 @@ def test_snapshot_digest_is_rekeyed_and_the_stored_digest_never_leaves(tmp_path:
     assert stored not in json.dumps(built.payload)
     [entry] = built.payload["worktrees"]
     sent = entry["assessment"]["snapshotDigest"]
-    assert sent.startswith("sha256:") and len(sent) == 71 and sent != f"sha256:{stored}"
+    assert re.fullmatch(r"[0-9a-f]{64}", sent) and sent != stored
     assert sync.build_workspace_assessment_sync(guard_store, now=NOW).payload["worktrees"] == built.payload["worktrees"]
 
 

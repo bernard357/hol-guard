@@ -181,9 +181,10 @@ def _worktree_entry(
         "trigger": assessed_run.get("trigger_kind"),
         "state": assessed_run.get("state"),
         # The stored digest mixes in root-derived keys and Git identity; it is re-keyed like the rest.
+        # The contract carries this one as bare hex, without the ``sha256:`` prefix.
         "snapshotDigest": keyed_digest(
             hash_key, "guard.workspace.snapshot\0" + str(assessed_run.get("snapshot_digest"))
-        ),
+        ).removeprefix("sha256:"),
         "coverage": {
             "status": "complete" if coverage.get("status") == "complete" else "partial",
             "reasons": [str(item)[:128] for item in _list(coverage.get("reasons"))][:32],
