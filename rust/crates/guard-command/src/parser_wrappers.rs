@@ -120,6 +120,13 @@ pub(super) fn unwrap_wrappers(
     Ok((index, wrappers))
 }
 
+/// The spellings of `env` this parser reads as a prefix rather than as the
+/// program itself. `./env` and `/opt/bin/env` are files of the user's own that
+/// share the name and do whatever they were written to do, so neither is one.
+pub(crate) fn env_spelling(token: &str) -> bool {
+    matches!(token, "env" | "/usr/bin/env" | "/bin/env")
+}
+
 /// `command X`, `time X` and `env NAME=value... X` run `X` with no other
 /// change. Bare `env X` is left alone: it only bypasses shell functions, and
 /// extension floors key on that spelling.
@@ -143,7 +150,7 @@ pub(crate) fn transparent_prefix(tokens: &[String], index: usize) -> Option<(usi
     let mut is_env = false;
     match tokens.get(index)?.as_str() {
         "command" | "time" => {}
-        "env" | "/usr/bin/env" | "/bin/env" => {
+        token if env_spelling(token) => {
             is_env = true;
             let (position, decided) = env_prefix::env_names(tokens, next)?;
             next = position;
