@@ -485,8 +485,9 @@ def sync_receipts(
         pending_fleet_posture = None
         if batch_fleet_posture is not None:
             batch_sync_context["fleetPosture"] = batch_fleet_posture.payload
-        batch_workspace_assessments = pending_workspace_assessments
+        unfitted_workspace_assessments = pending_workspace_assessments
         pending_workspace_assessments = None
+        batch_workspace_assessments = unfitted_workspace_assessments
         batch_receipts_payload = _cloud_sync_receipts_payload(
             receipt_batch,
             device_id=device_id,
@@ -502,6 +503,9 @@ def sync_receipts(
                 batch_workspace_assessments,
                 _WORKSPACE_ASSESSMENT_REQUEST_BYTES - base_size - _WORKSPACE_ASSESSMENT_KEY_OVERHEAD,
             )
+            if batch_workspace_assessments is None:
+                # A later, smaller receipt batch may leave room for it.
+                pending_workspace_assessments = unfitted_workspace_assessments
         if batch_workspace_assessments is not None:
             batch_sync_context["workspaceAssessments"] = batch_workspace_assessments.payload
         body = json.dumps({"receipts": batch_receipts_payload, "syncContext": batch_sync_context}).encode("utf-8")

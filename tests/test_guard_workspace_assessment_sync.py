@@ -55,6 +55,7 @@ def assessed(
     state: str = "completed",
     findings: list[dict[str, object]] | None = None,
     at: int = T0,
+    reasons: list[str] | None = None,
 ) -> None:
     assessments.admit_worktree(guard_store, KEYS, root=ROOT, now_ms=T0)
     assessments.enqueue(guard_store, KEYS, trigger_kind="workspace_open", detector_set_digest=DETECTORS, now_ms=at)
@@ -62,7 +63,7 @@ def assessed(
     assert claimed is not None
     coverage = {
         "status": "complete" if state == "completed" else "partial",
-        "reasons": [] if state == "completed" else ["lockfile_missing"],
+        "reasons": reasons if reasons is not None else [] if state == "completed" else ["lockfile_missing"],
         "detectors": {"supply_chain": "complete"},
         "head_commit": "f" * 40,
     }
@@ -285,3 +286,47 @@ def test_whole_request_stays_within_budget_when_the_summary_shares_it(
     assert len(json.dumps(bodies[0]).encode()) <= budget
     [entry] = bodies[0]["syncContext"]["workspaceAssessments"]["worktrees"]
     assert entry["findingsTruncated"] is True
+
+
+def test_built_summary_trims_coverage_when_findings_alone_cannot_fit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store, state="partial", findings=[], reasons=[f"{index:02d}" + "r" * 126 for index in range(32)])
+    full = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+    assert full is not None
+    limit = len(json.dumps(full.payload).encode()) // 2
+    monkeypatch.setattr(sync, "MAX_SUMMARY_BYTES", limit)
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None and len(json.dumps(built.payload).encode()) <= limit
+    [entry] = built.payload["worktrees"]
+    assert 0 < len(entry["assessment"]["coverage"]["reasons"]) < 32
+    assert entry["assessment"]["coverage"]["reasons"][0].startswith("00")
+    monkeypatch.setattr(sync, "MAX_SUMMARY_BYTES", 50)
+    assert sync.build_workspace_assessment_sync(guard_store, now=NOW) is None
+
+
+def test_summary_waits_for_a_later_batch_when_the_first_cannot_fit_it(
+    store: GuardStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assessed(store)
+    _add_receipts(store, guard_runner_module._RECEIPT_SYNC_BATCH_SIZE + 1)
+    bodies = _install_transport(monkeypatch)
+    real_fit = sync.fit_workspace_assessment_to_request
+    calls: list[int] = []
+
+    def first_batch_too_full(built: sync.WorkspaceAssessmentSyncBuild, max_bytes: int):
+        calls.append(max_bytes)
+        return None if len(calls) == 1 else real_fit(built, max_bytes)
+
+    monkeypatch.setattr(guard_runner_module, "fit_workspace_assessment_to_request", first_batch_too_full)
+
+    guard_runner_module.sync_receipts(store)
+
+    assert len(calls) == 2
+    assert "workspaceAssessments" not in bodies[0]["syncContext"]
+    assert bodies[1]["syncContext"]["workspaceAssessments"]["schemaVersion"] == sync.SCHEMA_VERSION
+    assert store.get_sync_payload(sync.DELIVERY_STATE_KEY)

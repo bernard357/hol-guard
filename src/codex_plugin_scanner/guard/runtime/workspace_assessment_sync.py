@@ -77,14 +77,14 @@ def build_workspace_assessment_sync(store: GuardStore, *, now: str) -> Workspace
                 worktree, latest[0] if latest else None, assessed.get((keys.codebase_key, keys.worktree_key)), hash_key
             )
         )
-    _fit_budget(entries, lambda: len(json.dumps(entries, separators=(",", ":")).encode("utf-8")), MAX_SUMMARY_BYTES)
+    payload: dict[str, object] = {"schemaVersion": SCHEMA_VERSION, "generatedAt": now, "worktrees": entries}
+    _fit_budget(entries, lambda: len(json.dumps(payload).encode("utf-8")), MAX_SUMMARY_BYTES)
+    if not entries:
+        return None
     digest = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if not _due(store, digest, now):
         return None
-    return WorkspaceAssessmentSyncBuild(
-        payload={"schemaVersion": SCHEMA_VERSION, "generatedAt": now, "worktrees": entries},
-        digest=digest,
-    )
+    return WorkspaceAssessmentSyncBuild(payload=payload, digest=digest)
 
 
 def fit_workspace_assessment_to_request(
@@ -98,13 +98,14 @@ def fit_workspace_assessment_to_request(
 
     payload = copy.deepcopy(built.payload)
     worktrees = payload.get("worktrees")
-    entries = [entry for entry in worktrees if isinstance(entry, dict)] if isinstance(worktrees, list) else []
+    # Built payloads hold only dict entries; trimming must shrink the list the payload serializes.
+    entries: list[dict[str, object]] = worktrees if isinstance(worktrees, list) else []
 
     def size() -> int:
         return len(json.dumps(payload).encode("utf-8"))
 
     _fit_budget(entries, size, max_bytes)
-    if size() > max_bytes:
+    if not entries or size() > max_bytes:
         return None
     return WorkspaceAssessmentSyncBuild(payload=payload, digest=built.digest)
 
@@ -214,16 +215,51 @@ def _finding(item: dict[str, object], hash_key: bytes) -> dict[str, object]:
 
 
 def _fit_budget(entries: list[dict[str, object]], size: Callable[[], int], limit: int) -> None:
-    """Drop the lowest-ranked findings until ``size()`` fits the byte budget."""
+    """Shrink ``entries`` in place until ``size()`` fits the byte budget.
+
+    Findings go first, lowest-ranked first. Coverage reasons and detector states
+    follow, and trailing worktrees are dropped last. The caller checks the final
+    size: an empty list may still not fit.
+    """
 
     while size() > limit:
-        largest = max(entries, key=lambda entry: len(_findings(entry)))
-        findings = _findings(largest)
-        if not findings:
-            break
-        drop = max(1, len(findings) // 4)
-        del findings[-drop:]
-        largest["findingsTruncated"] = True
+        largest = max(entries, key=lambda entry: len(_findings(entry)), default=None)
+        findings = _findings(largest) if largest is not None else []
+        if findings:
+            drop = max(1, len(findings) // 4)
+            del findings[-drop:]
+            largest["findingsTruncated"] = True
+            continue
+        if _trim_coverage(entries):
+            continue
+        if not entries:
+            return
+        entries.pop()
+
+
+def _trim_coverage(entries: list[dict[str, object]]) -> bool:
+    """Halve the longest reasons list, then the largest detector map. False when both are empty."""
+
+    coverages = [coverage for coverage in map(_coverage, entries) if coverage is not None]
+    for field in ("reasons", "detectors"):
+        largest = max(coverages, key=lambda coverage: len(coverage[field]), default=None)
+        if largest is None or not largest[field]:
+            continue
+        values = largest[field]
+        keep = len(values) // 2
+        largest[field] = values[:keep] if isinstance(values, list) else dict(list(values.items())[:keep])
+        return True
+    return False
+
+
+def _coverage(entry: dict[str, object]) -> dict[str, object] | None:
+    assessment = entry.get("assessment")
+    coverage = assessment.get("coverage") if isinstance(assessment, dict) else None
+    if not isinstance(coverage, dict):
+        return None
+    if not isinstance(coverage.get("reasons"), list) or not isinstance(coverage.get("detectors"), dict):
+        return None
+    return coverage
 
 
 def _findings(entry: dict[str, object]) -> list[object]:
