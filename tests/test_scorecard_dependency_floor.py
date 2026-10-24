@@ -142,6 +142,10 @@ def test_node_vulnerability_floors_are_locked() -> None:
     undici = _npm_versions("ci/pi-exact-continuation/package-lock.json", "undici")
     assert undici, "undici"
     assert all(Version(version) >= Version("8.12.3") for version in undici)
+    assert pi["overrides"]["zod"] == "4.6.6"
+    zod = _npm_versions("ci/pi-exact-continuation/package-lock.json", "zod")
+    assert zod, "zod"
+    assert all(Version(version) >= Version("4.6.6") for version in zod)
 
 
 def _requirement_pins(text: str, name: str) -> list[str]:
