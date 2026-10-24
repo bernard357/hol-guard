@@ -262,10 +262,12 @@ fn pulls_stay_refreshes_under_the_users_own_gpg_program() {
     // The program runs only when Git signs or checks a signature.
     assert_allowed(&session, &pull, &cwd, REFRESH);
     assert_allowed(&session, &fast_forward, &cwd, REFRESH);
-    // A program the repository picks keeps both reviewed.
+    // A program the repository picks keeps the merge pull reviewed. The
+    // fast-forward writes no commit and checks no signature, so it never
+    // starts that program and stays a refresh.
     session.config(&["gpg.program", "/tmp/gpg"]);
     assert_reviewed(&session, &pull, &cwd);
-    assert_reviewed(&session, &fast_forward, &cwd);
+    assert_allowed(&session, &fast_forward, &cwd, REFRESH);
     session.config(&["--unset-all", "gpg.program"]);
     // Signing the merge commit keeps the merge pull reviewed; a fast-forward
     // writes no commit.
@@ -413,7 +415,6 @@ fn a_fast_forward_merge_of_origin_is_a_proven_refresh() {
         ("filter.fixture.smudge", "id"),
         ("hook.post-merge.command", "id"),
         ("merge.verifySignatures", "true"),
-        ("gpg.program", "/tmp/gpg"),
         ("branch.fix/report-lane.mergeoptions", "--verify-signatures"),
         ("remote.origin.promisor", "true"),
         ("submodule.vendor.url", "https://github.com/acme/vendor.git"),
@@ -428,6 +429,12 @@ fn a_fast_forward_merge_of_origin_is_a_proven_refresh() {
         assert_reviewed(&session, split, &wt);
         session.config(&["--unset-all", key]);
     }
+    // A signing program the repository picks runs when Git writes or checks a
+    // signature. A fast-forward does neither.
+    session.config(&["gpg.program", "/tmp/gpg"]);
+    assert_allowed(&session, merge, &wt, REFRESH);
+    assert_allowed(&session, split, &wt, REFRESH);
+    session.config(&["--unset-all", "gpg.program"]);
     // An automatic stash is reapplied with a merge, which runs the driver.
     session.config(&["merge.fixture.driver", "sh -c id %O %A %B"]);
     assert_allowed(&session, split, &wt, REFRESH);
