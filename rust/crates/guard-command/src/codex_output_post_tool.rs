@@ -216,13 +216,29 @@ fn response_text(supplied: String, whole: Option<&Value>) -> String {
         return supplied;
     };
     let collected = collected_response_text(whole, 0);
-    if collected.is_empty() || supplied.contains(&collected) {
+    if collected.is_empty() || already_read(&collected, &supplied) {
         return supplied;
     }
     if supplied.is_empty() {
         return collected;
     }
     format!("{collected}\n{supplied}")
+}
+
+/// Whether the scan would read nothing new by adding `collected`.
+///
+/// The caller's flattening and this walk agree on what they read but not on
+/// the order they read it in: a response map is a `BTreeMap` here, so the walk
+/// follows sorted keys, while the caller follows the order the response was
+/// built in. Comparing the two as whole strings would therefore miss an
+/// ordinary two-key response, and the scan would read every line of it twice.
+/// Each line is checked on its own instead, which also survives the caller
+/// trimming what it sent.
+fn already_read(collected: &str, supplied: &str) -> bool {
+    collected
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .all(|line| supplied.contains(line))
 }
 
 fn os_path(path: Option<&PyPath>) -> Option<PathBuf> {

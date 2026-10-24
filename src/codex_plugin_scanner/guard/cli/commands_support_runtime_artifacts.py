@@ -446,21 +446,54 @@ def _runtime_data_flow_naming(
 _CODEX_PROMPT_SECRET_KEY_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PASS", "API_KEY", "API-KEY", "AUTH", "CREDENTIAL")
 
 
-# How much of the request a whole tool response may take beside the flattened
-# text, under the resident's own `CODEX_POST_TOOL_OUTPUT_MAX_BYTES`.
-_CODEX_TOOL_RESPONSE_WIRE_BUDGET = 2 * 1024 * 1024
+# How large the whole packed request may be once a tool response joins the
+# flattened text, under the resident's own `CODEX_POST_TOOL_OUTPUT_MAX_BYTES`
+# of `6 * 1024 * 1024 - 64 * 1024`. The margin leaves room for the framing the
+# transport adds after this side has encoded the body.
+_CODEX_POST_TOOL_REQUEST_BUDGET = 4 * 1024 * 1024
+
+# How deeply a tool response may nest before this side keeps it back. The
+# resident's walk reads five levels, so nothing below that is scanned anyway,
+# and a response nested past the decoder's own recursion limit would cost the
+# review rather than widen it.
+_CODEX_TOOL_RESPONSE_MAX_NESTING = 64
 
 
-def _codex_tool_response_within_budget(value: object, response_text: str) -> object | None:
-    """The tool response to send whole, or ``None`` when it will not fit."""
+def _codex_json_nesting_exceeds(value: object, limit: int, depth: int = 0) -> bool:
+    """Whether ``value`` nests deeper than ``limit`` containers."""
+
+    if depth > limit:
+        return True
+    if isinstance(value, Mapping):
+        return any(_codex_json_nesting_exceeds(child, limit, depth + 1) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_codex_json_nesting_exceeds(child, limit, depth + 1) for child in value)
+    return False
+
+
+def _codex_tool_response_within_budget(body: Mapping[str, object], value: object) -> object | None:
+    """The tool response to send whole beside ``body``, or ``None`` when it cannot travel.
+
+    The response is kept back whenever adding it would cost the review rather
+    than widen it: when the packed request would pass the resident's bound,
+    when the response nests past what the decoder accepts, or when it holds
+    something this side cannot encode at all, such as a lone surrogate or a
+    non-finite number. In every one of those cases the request still carries
+    the flattened text every caller sent before the resident could read the
+    response itself.
+    """
 
     if value is None:
         return None
+    if _codex_json_nesting_exceeds(value, _CODEX_TOOL_RESPONSE_MAX_NESTING):
+        return None
+    packed = dict(body)
+    packed["tool_response"] = value
     try:
-        encoded = json.dumps(value, ensure_ascii=False)
+        encoded = json.dumps(packed, ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError):
         return None
-    if len(encoded.encode("utf-8")) + len(response_text.encode("utf-8")) > _CODEX_TOOL_RESPONSE_WIRE_BUDGET:
+    if len(encoded) > _CODEX_POST_TOOL_REQUEST_BUDGET:
         return None
     return value
 
@@ -501,7 +534,7 @@ def _codex_post_tool_output_review(
     # caller flattened it. It travels only when it fits: the resident refuses a
     # request over its bound, and a refused review is worse than the flattened
     # text every caller sent before the resident could read the response.
-    whole_response = _codex_tool_response_within_budget(payload.get("tool_response"), response_text)
+    whole_response = _codex_tool_response_within_budget(body, payload.get("tool_response"))
     if whole_response is not None:
         body["tool_response"] = whole_response
     answer = codex_tool_output_native(

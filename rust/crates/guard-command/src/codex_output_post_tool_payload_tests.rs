@@ -235,3 +235,23 @@ fn an_older_caller_keeps_the_text_it_sent() {
     let input = Input::parse(&body).unwrap();
     assert_eq!(input.response_text, "token=abc");
 }
+
+/// A response map is a `BTreeMap` here but the caller flattens it in the order
+/// the response was built, so the two agree on what they read and not on the
+/// order. A two-key response the caller already flattened must not be read
+/// twice, whichever order it sent, and trimming what it sent changes nothing.
+#[test]
+fn a_flattened_response_is_not_repeated_whatever_its_key_order() {
+    let mut body = output_body(json!({"command": "ls"}));
+    body["tool_response"] = json!({"stdout": "A", "stderr": "B"});
+
+    for supplied in ["A\nB", "B\nA", "\nA\nB\n"] {
+        body["response_text"] = json!(supplied);
+        let input = Input::parse(&body).unwrap();
+        assert_eq!(input.response_text, supplied);
+    }
+
+    body["response_text"] = json!("A");
+    let input = Input::parse(&body).unwrap();
+    assert_eq!(input.response_text, "B\nA\nA");
+}
