@@ -67,3 +67,7 @@ When several manifests describe the same plugin, the shallowest one wins and the
 HOL links carry `utm_source=hol-guard` campaign parameters, so HOL can count visits that came from the Kit. The Kit itself sends nothing.
 
 After the first successful `check` or `package` in text mode, the Kit prints a one-line tip showing how to turn on Guard for the agents you test with. It prints once per Guard home and never in `--json` output, and it only prints a command.
+
+## Runtime compatibility
+
+The `Plugin Kit loader smoke` workflow packages the Claude Code fixture and loads the output with pinned releases of each runtime: `claude plugin validate`, `gemini extensions validate`, and a Codex install from a local marketplace. It also checks that each validator rejects a broken manifest. It runs on changes to the Kit and weekly, so a runtime that changes its manifest format shows up as a failed run. The pinned versions live in `.github/tools/plugin-kit-validators`.

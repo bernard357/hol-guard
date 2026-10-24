@@ -43,7 +43,7 @@
         {
           "hooks": [
             {
-              "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check.sh",
+              "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/check.sh",
               "type": "command"
             }
           ],
@@ -160,7 +160,7 @@
       },
       {
         "path": "claude-code/hooks/hooks.json",
-        "sha256": "13c118cb0667f37cc1fe83b5b7363823090893e07951a0326e8cf9459946b47c"
+        "sha256": "b14b8fc6cd967ea05260767e50d639c1adb5bc105d5b3566a3111435a493d024"
       },
       {
         "path": "claude-code/skills/pdf-tools/SKILL.md",
@@ -222,7 +222,7 @@
       "agent-skills"
     ],
     "schema": "hol.plugin-kit.provenance.v1",
-    "source_digest": "sha256:e67c022c72f3005f803f820a36bad93bd85c8e594815be7c44a705ae0ec84205"
+    "source_digest": "sha256:b1fe3fe0cb29c993b410a3ab077e9dece70914e1f2d397fa96a6564791feecf5"
   },
   "opencode/opencode.json": {
     "$schema": "https://opencode.ai/config.json",
