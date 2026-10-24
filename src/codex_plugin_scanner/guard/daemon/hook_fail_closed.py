@@ -3,7 +3,9 @@
 Rust renders every real hook response. This module keeps only the fixed,
 deny-only payloads used when the resident cannot render one. It never computes
 an allow and never mirrors Rust decision logic: it picks the envelope the
-harness can parse and fills in a fixed deny.
+harness can parse and fills in a fixed deny. When the resident already reached
+a blocking verdict, that deny carries the verdict's own reason and reason code,
+so a render that misses its deadline still tells the user why.
 """
 
 from __future__ import annotations
@@ -61,6 +63,28 @@ def fail_closed_pre_tool(
     }
 
 
+def _verdict_text(verdict: Mapping[str, object], key: str) -> str | None:
+    value = verdict.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _verdict_deny(harness: str, verdict: Mapping[str, object], *, reason: str | None = None) -> dict[str, object]:
+    """Fixed deny for a verdict the resident reached but could not render.
+
+    A blocking verdict keeps its own reason and reason code. An allow keeps the
+    generic unavailable code, because the action is denied here only because
+    its rendered allow never arrived.
+    """
+
+    if verdict.get("decision") == "allow":
+        return fail_closed_pre_tool(harness, reason=reason or RENDER_UNAVAILABLE_REASON)
+    return fail_closed_pre_tool(
+        harness,
+        reason=reason or _verdict_text(verdict, "reason") or RENDER_UNAVAILABLE_REASON,
+        reason_code=_verdict_text(verdict, "reason_code") or RENDER_UNAVAILABLE_REASON_CODE,
+    )
+
+
 def _deadline_kwargs(deadline: float | None) -> dict[str, float]:
     return {} if deadline is None else {"deadline": deadline}
 
@@ -71,7 +95,7 @@ def render_pre_tool(
     """Resident-rendered PreToolUse response, or a fixed deny when it cannot render."""
 
     rendered = native_render_pre_tool(harness, verdict, guard_home=guard_home, **_deadline_kwargs(deadline))
-    return rendered or fail_closed_pre_tool(harness)
+    return rendered or _verdict_deny(harness, verdict)
 
 
 def render_accepted_allow(
@@ -122,7 +146,7 @@ def render_pre_tool_review(
         guard_home=guard_home,
         **_deadline_kwargs(deadline),
     )
-    return rendered or fail_closed_pre_tool(harness, reason=linked_reason or RENDER_UNAVAILABLE_REASON)
+    return rendered or _verdict_deny(harness, verdict, reason=linked_reason)
 
 
 def render_recording_only_pre_tool(

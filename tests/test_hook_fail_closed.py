@@ -106,3 +106,35 @@ def test_queued_review_deny_keeps_the_approval_link_when_render_fails(monkeypatc
     )
     assert rendered["decision"] == "deny"
     assert "http://127.0.0.1/a" in str(rendered["reason"])
+
+
+@pytest.mark.parametrize("harness", ["omp", "codex"])
+def test_blocking_verdict_keeps_its_reason_when_render_fails(monkeypatch: pytest.MonkeyPatch, harness: str) -> None:
+    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *_a, **_k: None)
+    verdict = {
+        "decision": "deny",
+        "minimum_action": "require-reapproval",
+        "reason": "Copying .env needs a fresh approval.",
+        "reason_code": "native_policy_reapproval_required",
+    }
+    rendered = render_pre_tool(harness, verdict)
+    assert rendered["policy_action"] == "block"
+    assert rendered["reason_code"] == "native_policy_reapproval_required"
+    assert "Copying .env needs a fresh approval." in str(rendered)
+
+
+def test_review_render_failure_keeps_the_verdict_reason_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool_review", lambda *_a, **_k: None)
+    verdict = {"decision": "deny", "reason": "Needs review.", "reason_code": "native_pre_tool_review"}
+    rendered = render_pre_tool_review("omp", verdict, approval=None)
+    assert rendered["decision"] == "deny"
+    assert rendered["reason_code"] == "native_pre_tool_review"
+    assert rendered["reason"] == "Needs review."
+
+
+def test_allow_verdict_that_failed_to_render_keeps_the_unavailable_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *_a, **_k: None)
+    rendered = render_pre_tool("omp", {"decision": "allow", "reason_code": "native_allow", "reason": "fine"})
+    assert rendered["decision"] == "deny"
+    assert rendered["reason_code"] == "native_hook_render_unavailable"
+    assert rendered["reason"] == "HOL Guard could not complete native review safely."
