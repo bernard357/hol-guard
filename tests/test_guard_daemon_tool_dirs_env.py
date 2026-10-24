@@ -24,7 +24,9 @@ def test_daemon_launch_environment_turns_tool_directory_discovery_on(
     assert child_env[_MARKER] == "1"
 
 
-def test_a_launching_shell_cannot_turn_discovery_off_for_the_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_launching_shell_cannot_turn_discovery_off_for_the_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv(_MARKER, "0")
 
     assert manager._daemon_launcher_env(home_dir=tmp_path)[_MARKER] == "1"
