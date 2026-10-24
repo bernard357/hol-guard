@@ -375,10 +375,16 @@ fn daemon_summaries_that_resolve_no_project_are_admitted() {
         vec!["network", "ls", "-q", "--no-trunc"],
         vec!["network", "ls", "--filter=driver=bridge"],
         vec!["network", "ls", "--format", "{{.Name}} {{.Driver}}"],
+        vec!["network", "ls", "--format={{json .ID}}"],
         vec!["system", "df"],
         vec!["system", "df", "-v"],
         vec!["system", "df", "--verbose"],
-        vec!["system", "df", "--format", "{{json .}}"],
+        vec![
+            "system",
+            "df",
+            "--format",
+            "{{.Type}} {{.Size}} {{.Reclaimable}}",
+        ],
         vec!["stats", "--no-stream"],
         vec!["stats", "--no-stream", "--all"],
         vec!["stats", "--no-stream", "web", "api"],
@@ -399,6 +405,27 @@ fn summaries_that_stream_name_a_secret_or_query_a_registry_stay_reviewed() {
         vec!["stats"],
         vec!["stats", "web"],
         vec!["stats", "--all"],
+        // `--format` takes the next word as its template, so the word that was
+        // supposed to bound the stream is consumed by it and the command
+        // redraws exactly as a bare `docker stats` does.
+        vec!["stats", "--format", "--no-stream"],
+        vec!["stats", "--format=--no-stream"],
+        // A network row carries the labels it was created with, and a verbose
+        // disk row reaches the volumes and the options they were created with.
+        vec!["network", "ls", "--format", "{{.Labels}}"],
+        vec!["network", "ls", "--format", "{{json .}}"],
+        vec!["network", "ls", "--format", "json"],
+        vec!["network", "ls", "--format=json"],
+        vec!["network", "ls", "--format", "{{.IPAM.Config}}"],
+        vec!["system", "df", "--format", "{{json .}}"],
+        vec!["system", "df", "--format", "json"],
+        vec![
+            "system",
+            "df",
+            "-v",
+            "--format",
+            "{{range .Volumes}}{{.Labels}}{{end}}",
+        ],
         // `--format json` on a volume listing serializes the `--opt` values a
         // CIFS or NFS volume was created with, credentials among them.
         vec!["volume", "ls", "--format", "{{json .}}"],

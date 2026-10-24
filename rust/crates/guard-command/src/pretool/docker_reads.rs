@@ -124,12 +124,15 @@ const REGISTRY_VALUES: [&str; 1] = ["--format"];
 /// NFS volume is created with its credentials among them.
 const VOLUME_FLAGS: [&str; 3] = ["-q", "--quiet", "--help"];
 const VOLUME_VALUES: [&str; 2] = ["-f", "--filter"];
-/// A network listing prints an id, name, driver and scope, and `--format`
-/// reads that same summary. It has no `--all` of its own.
+/// A network listing prints an id, name, driver and scope. It has no `--all`
+/// of its own, and a `--format` template is held to those four fields: the
+/// record behind a row also carries the labels the network was created with.
 const NETWORK_FLAGS: [&str; 4] = ["-q", "--quiet", "--no-trunc", "--help"];
 const NETWORK_VALUES: [&str; 3] = ["-f", "--filter", "--format"];
 /// A disk-usage summary counts images, containers, volumes and the build
-/// cache. `--verbose` names each row the totals are made of.
+/// cache. `--verbose` names each row the totals are made of, so a `--format`
+/// template is held to the totals: `.Volumes` reaches the verbose rows and
+/// the labels and creation options a volume carries.
 const DISK_FLAGS: [&str; 3] = ["-v", "--verbose", "--help"];
 const DISK_VALUES: [&str; 1] = ["--format"];
 /// A stats reading prints each container's CPU, memory, network and block
@@ -224,8 +227,9 @@ pub(super) fn safe_docker_arguments(arguments: &[String]) -> bool {
         ["network", "ls" | "list", rest @ ..] => (Listing::Networks, rest),
         ["system", "df", rest @ ..] => (Listing::Disk, rest),
         // The streaming form never returns, so the word that bounds it has to
-        // be in the text rather than left to the caller.
-        ["stats", rest @ ..] if rest.contains(&"--no-stream") => (Listing::Stats, rest),
+        // be in the text. Whether it is a flag of its own, rather than the
+        // value of a preceding option, is settled while the options are read.
+        ["stats", rest @ ..] => (Listing::Stats, rest),
         _ => return super::docker_start::safe_start_arguments(&words),
     };
     listing_options_safe(listing, rest)
@@ -253,6 +257,7 @@ fn listing_options_safe(listing: Listing, words: &[&str]) -> bool {
         Listing::Stats => (&STATS_FLAGS[..], &STATS_VALUES[..], STATS_SHORT),
     };
     let mut positionals = 0usize;
+    let mut bounded = false;
     let mut index = 0;
     while index < words.len() {
         let word = words[index];
@@ -265,6 +270,7 @@ fn listing_options_safe(listing: Listing, words: &[&str]) -> bool {
             continue;
         }
         if shared.contains(&word) || flags.contains(&word) {
+            bounded |= word == "--no-stream";
             continue;
         }
         let (name, inline) = match word.split_once('=') {
@@ -282,9 +288,7 @@ fn listing_options_safe(listing: Listing, words: &[&str]) -> bool {
                     None => return false,
                 },
             };
-            if !option_value_safe(name, value)
-                || (listing == Listing::Manifest && !manifest_format_safe(value))
-            {
+            if !option_value_safe(name, value) || !format_fields_safe(listing, value) {
                 return false;
             }
             continue;
@@ -305,8 +309,9 @@ fn listing_options_safe(listing: Listing, words: &[&str]) -> bool {
         | Listing::Disk => positionals == 0,
         Listing::Images => positionals <= 1,
         Listing::Manifest => positionals == 1,
-        // A stats reading names the containers to count, or all of them.
-        Listing::Stats => true,
+        // A stats reading names the containers to count, or all of them, and
+        // only once a `--no-stream` of its own has bounded it.
+        Listing::Stats => bounded,
     }
 }
 
@@ -332,10 +337,31 @@ fn option_value_safe(name: &str, value: &str) -> bool {
     }
 }
 
-/// A manifest query's template reads only the published name, manifest and
-/// index. The image configuration (`.Image`) can carry a build-time credential
-/// in its environment, so it is not among them.
-fn manifest_format_safe(value: &str) -> bool {
+/// A `--format` template is evaluated over the whole record behind a row, not
+/// over the summary the listing prints, so a listing whose records carry
+/// labels or creation options admits only the fields its summary names.
+///
+/// A manifest query reads the published name, manifest and index. The image
+/// configuration (`.Image`) can carry a build-time credential in its
+/// environment, so it is not among them. A network row carries the labels it
+/// was created with, and a verbose disk summary reaches the volumes and their
+/// labels through `.Volumes`; both are left outside the named fields.
+fn format_fields_safe(listing: Listing, value: &str) -> bool {
+    let fields: &[&str] = match listing {
+        Listing::Manifest => &["Name", "Manifest", "Index"],
+        Listing::Networks => &["ID", "Name", "Driver", "Scope"],
+        Listing::Disk => &["Type", "TotalCount", "Active", "Size", "Reclaimable"],
+        _ => return true,
+    };
+    template_fields_safe(value, fields)
+}
+
+/// A format with no action at all is a named layout, and `json` serializes the
+/// whole record, so a template has to name the fields it prints.
+fn template_fields_safe(value: &str, fields: &[&str]) -> bool {
+    if !value.contains("{{") {
+        return false;
+    }
     let mut rest = value;
     while let Some(start) = rest.find("{{") {
         if rest[..start].contains("}}") {
@@ -345,7 +371,7 @@ fn manifest_format_safe(value: &str) -> bool {
         let Some(end) = after.find("}}") else {
             return false;
         };
-        if !manifest_action_safe(after[..end].trim()) {
+        if !template_action_safe(after[..end].trim(), fields) {
             return false;
         }
         rest = &after[end + 2..];
@@ -353,7 +379,7 @@ fn manifest_format_safe(value: &str) -> bool {
     !rest.contains("}}")
 }
 
-fn manifest_action_safe(action: &str) -> bool {
+fn template_action_safe(action: &str, fields: &[&str]) -> bool {
     let field = match action.strip_prefix("json") {
         Some(after) if after.starts_with(char::is_whitespace) => after.trim_start(),
         _ => action,
@@ -362,7 +388,7 @@ fn manifest_action_safe(action: &str) -> bool {
         return false;
     };
     let mut segments = path.split('.');
-    matches!(segments.next(), Some("Name" | "Manifest" | "Index"))
+    segments.next().is_some_and(|root| fields.contains(&root))
         && segments.all(|segment| {
             !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_alphanumeric())
         })
