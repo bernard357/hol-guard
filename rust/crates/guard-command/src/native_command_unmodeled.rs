@@ -62,7 +62,7 @@ mod xargs;
 use case_labels::without_case_labels;
 use find_exec::{find_exec_programs, text_outside_exec_arguments, EXEC_ACTIONS};
 use link_makers::creates_links;
-pub(crate) use prefix::{launcher_body, prefix_reads_a_program_file};
+pub(crate) use prefix::{launcher_body, prefix_reads_a_program_file, Handover};
 use redirections::without_redirections;
 use shapes::{data_heredocs, without_lookups, without_plain_awk};
 pub(crate) use shapes::{python_is_builtin_only, python_stdin};
