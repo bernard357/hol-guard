@@ -138,11 +138,12 @@ def _artifact_row_ok(row: object) -> bool:
         and all(char in "0123456789abcdef" for char in fingerprint)
         and isinstance(row.get("identity_assurance"), str)
         and isinstance(matches, list)
-        and all(
-            isinstance(match, dict) and all(isinstance(match.get(key), str) for key in ("advisory_id", "status", "reason"))
-            for match in matches
-        )
+        and all(isinstance(match, dict) and _has_text_fields(match) for match in matches)
     )
+
+
+def _has_text_fields(match: dict[str, object]) -> bool:
+    return all(isinstance(match.get(key), str) for key in ("advisory_id", "status", "reason"))
 
 
 def _parse_verdict(row: object) -> RuntimeAdvisoryVerdict:
