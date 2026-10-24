@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.guard import workspace_assessment_reads as reads
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.runtime import workspace_assessment_sync as sync
@@ -100,6 +101,21 @@ def test_summary_rekeys_identifiers_and_never_carries_paths_or_commits(tmp_path:
     assert item["fixVersion"] == "1.0.1"
     assert item["advisoryIds"] == ["GHSA-aaaa-bbbb-cccc"]
     assert "path" not in item
+
+
+def test_snapshot_digest_is_rekeyed_and_the_stored_digest_never_leaves(tmp_path: Path) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store)
+    stored = digest(f"snapshot-{T0}")
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None
+    assert stored not in json.dumps(built.payload)
+    [entry] = built.payload["worktrees"]
+    sent = entry["assessment"]["snapshotDigest"]
+    assert sent.startswith("sha256:") and len(sent) == 71 and sent != f"sha256:{stored}"
+    assert sync.build_workspace_assessment_sync(guard_store, now=NOW).payload["worktrees"] == built.payload["worktrees"]
 
 
 def test_partial_runs_report_partial_coverage_never_all_clear(tmp_path: Path) -> None:
@@ -203,3 +219,68 @@ def test_summary_failure_never_blocks_receipt_sync(
 
     assert summary["receipts"] == 1
     assert "workspaceAssessments" not in bodies[0]["syncContext"]
+
+
+def test_findings_are_read_only_for_the_summarized_worktrees(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store)
+    other = assessments.WorktreeKeys(digest("other-codebase"), digest("other-worktree"))
+    assessments.admit_worktree(guard_store, other, root=f"{ROOT}-other", now_ms=T0 + 1)
+    monkeypatch.setattr(sync, "MAX_WORKTREES", 1)
+    requested: list[object] = []
+    original = reads.latest_assessed_runs
+
+    def spy(guard: GuardStore, keys: object = None) -> list[dict[str, object]]:
+        requested.append(keys)
+        return original(guard, keys)
+
+    monkeypatch.setattr(reads, "latest_assessed_runs", spy)
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None and len(built.payload["worktrees"]) == 1
+    assert requested == [[KEYS]]
+    assert reads.latest_assessed_runs(guard_store, [other]) == []
+    assert [run["worktree_key"] for run in reads.latest_assessed_runs(guard_store, [KEYS])] == [KEYS.worktree_key]
+    assert reads.latest_assessed_runs(guard_store, []) == []
+
+
+def test_request_fit_trims_findings_but_keeps_the_full_summary_digest(tmp_path: Path) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store, findings=[finding(index) for index in range(sync.MAX_FINDINGS_PER_WORKTREE)])
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+    assert built is not None
+    full = len(json.dumps(built.payload).encode())
+
+    fitted = sync.fit_workspace_assessment_to_request(built, full // 2)
+
+    assert fitted is not None and fitted.digest == built.digest
+    [entry] = fitted.payload["worktrees"]
+    assert 0 < len(entry["findings"]) < sync.MAX_FINDINGS_PER_WORKTREE
+    assert entry["findingsTruncated"] is True
+    assert len(json.dumps(fitted.payload).encode()) <= full // 2
+    assert len(built.payload["worktrees"][0]["findings"]) == sync.MAX_FINDINGS_PER_WORKTREE
+    assert sync.fit_workspace_assessment_to_request(built, 10) is None
+
+
+def test_whole_request_stays_within_budget_when_the_summary_shares_it(
+    store: GuardStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assessed(store, findings=[finding(index) for index in range(sync.MAX_FINDINGS_PER_WORKTREE)])
+    _add_receipts(store, 10)
+    bodies = _install_transport(monkeypatch)
+    built = sync.build_workspace_assessment_sync(store, now=NOW)
+    assert built is not None
+    budget = len(json.dumps(built.payload).encode()) // 2
+    monkeypatch.setattr(guard_runner_module, "_WORKSPACE_ASSESSMENT_REQUEST_BYTES", budget)
+
+    guard_runner_module.sync_receipts(store)
+
+    assert len(bodies[0]["receipts"]) == 10
+    assert len(json.dumps(bodies[0]).encode()) <= budget
+    [entry] = bodies[0]["syncContext"]["workspaceAssessments"]["worktrees"]
+    assert entry["findingsTruncated"] is True

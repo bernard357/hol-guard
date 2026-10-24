@@ -9,9 +9,11 @@ The summary is sent again only when it changes or a day has passed.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Final
@@ -29,6 +31,7 @@ MAX_WORKTREES: Final = 50
 MAX_FINDINGS_PER_WORKTREE: Final = 100
 # Receipts share the request; the whole body must stay under 256 KiB.
 MAX_SUMMARY_BYTES: Final = 128 * 1024
+MAX_REQUEST_BYTES: Final = 256 * 1024
 RESEND_AFTER: Final = timedelta(hours=24)
 
 _FINDING_FIELDS: Final = (
@@ -61,13 +64,20 @@ def build_workspace_assessment_sync(store: GuardStore, *, now: str) -> Workspace
     if not worktrees:
         return None
     hash_key = load_hash_key(store, now)
-    assessed = {(str(run["codebase_key"]), str(run["worktree_key"])): run for run in reads.latest_assessed_runs(store)}
+    selected = [WorktreeKeys(str(item["codebase_key"]), str(item["worktree_key"])) for item in worktrees]
+    # Only the worktrees in this summary have their findings read and decoded.
+    assessed = {
+        (str(run["codebase_key"]), str(run["worktree_key"])): run for run in reads.latest_assessed_runs(store, selected)
+    }
     entries = []
-    for worktree in worktrees:
-        keys = (str(worktree["codebase_key"]), str(worktree["worktree_key"]))
-        latest = reads.recent_runs(store, WorktreeKeys(*keys), limit=1)
-        entries.append(_worktree_entry(worktree, latest[0] if latest else None, assessed.get(keys), hash_key))
-    _fit_budget(entries)
+    for worktree, keys in zip(worktrees, selected, strict=True):
+        latest = reads.recent_runs(store, keys, limit=1)
+        entries.append(
+            _worktree_entry(
+                worktree, latest[0] if latest else None, assessed.get((keys.codebase_key, keys.worktree_key)), hash_key
+            )
+        )
+    _fit_budget(entries, lambda: len(json.dumps(entries, separators=(",", ":")).encode("utf-8")), MAX_SUMMARY_BYTES)
     digest = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if not _due(store, digest, now):
         return None
@@ -75,6 +85,28 @@ def build_workspace_assessment_sync(store: GuardStore, *, now: str) -> Workspace
         payload={"schemaVersion": SCHEMA_VERSION, "generatedAt": now, "worktrees": entries},
         digest=digest,
     )
+
+
+def fit_workspace_assessment_to_request(
+    built: WorkspaceAssessmentSyncBuild, max_bytes: int
+) -> WorkspaceAssessmentSyncBuild | None:
+    """A copy whose serialized payload fits ``max_bytes``, or ``None`` if it cannot.
+
+    The digest stays that of the full summary, so a trimmed delivery is not
+    mistaken for a changed summary on the next sync.
+    """
+
+    payload = copy.deepcopy(built.payload)
+    worktrees = payload.get("worktrees")
+    entries = [entry for entry in worktrees if isinstance(entry, dict)] if isinstance(worktrees, list) else []
+
+    def size() -> int:
+        return len(json.dumps(payload).encode("utf-8"))
+
+    _fit_budget(entries, size, max_bytes)
+    if size() > max_bytes:
+        return None
+    return WorkspaceAssessmentSyncBuild(payload=payload, digest=built.digest)
 
 
 def commit_workspace_assessment_sent(store: GuardStore, built: WorkspaceAssessmentSyncBuild, *, now: str) -> None:
@@ -148,7 +180,10 @@ def _worktree_entry(
         "kind": assessed_run.get("kind"),
         "trigger": assessed_run.get("trigger_kind"),
         "state": assessed_run.get("state"),
-        "snapshotDigest": assessed_run.get("snapshot_digest"),
+        # The stored digest mixes in root-derived keys and Git identity; it is re-keyed like the rest.
+        "snapshotDigest": keyed_digest(
+            hash_key, "guard.workspace.snapshot\0" + str(assessed_run.get("snapshot_digest"))
+        ),
         "coverage": {
             "status": "complete" if coverage.get("status") == "complete" else "partial",
             "reasons": [str(item)[:128] for item in _list(coverage.get("reasons"))][:32],
@@ -177,13 +212,10 @@ def _finding(item: dict[str, object], hash_key: bytes) -> dict[str, object]:
     return finding
 
 
-def _fit_budget(entries: list[dict[str, object]]) -> None:
-    """Drop the lowest-ranked findings until the summary fits its byte budget."""
+def _fit_budget(entries: list[dict[str, object]], size: Callable[[], int], limit: int) -> None:
+    """Drop the lowest-ranked findings until ``size()`` fits the byte budget."""
 
-    def size() -> int:
-        return len(json.dumps(entries, separators=(",", ":")).encode("utf-8"))
-
-    while size() > MAX_SUMMARY_BYTES:
+    while size() > limit:
         largest = max(entries, key=lambda entry: len(_findings(entry)))
         findings = _findings(largest)
         if not findings:
@@ -237,11 +269,13 @@ def _list(value: object) -> list[object]:
 
 __all__ = [
     "DELIVERY_STATE_KEY",
+    "MAX_REQUEST_BYTES",
     "SCHEMA_VERSION",
     "WorkspaceAssessmentSyncBuild",
     "build_workspace_assessment_sync",
     "build_workspace_assessment_sync_safely",
     "commit_workspace_assessment_sent",
+    "fit_workspace_assessment_to_request",
     "record_workspace_assessment_delivery",
     "worktree_status",
 ]

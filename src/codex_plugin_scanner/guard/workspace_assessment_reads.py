@@ -75,12 +75,22 @@ def get_run(store: Any, run_id: str) -> dict[str, object] | None:
     return _run_payload(row) if row is not None else None
 
 
-def latest_assessed_runs(store: Any) -> list[dict[str, object]]:
-    """The newest completed or partial run of every admitted worktree."""
+def latest_assessed_runs(store: Any, keys: Sequence[WorktreeKeys] | None = None) -> list[dict[str, object]]:
+    """The newest completed or partial run of every admitted worktree, or of just ``keys``.
 
+    Findings JSON is decoded only for the selected worktrees.
+    """
+
+    if keys is not None and not keys:
+        return []
+    scope = ""
+    params: tuple[str, ...] = ()
+    if keys is not None:
+        scope = "and (" + " or ".join("(r.codebase_key = ? and r.worktree_key = ?)" for _ in keys) + ")"
+        params = tuple(value for item in keys for value in _key_tuple(item))
     with store._connect() as connection:
         rows = connection.execute(
-            """
+            f"""
             select r.run_id, r.codebase_key, r.worktree_key, r.snapshot_digest, r.kind, r.trigger_kind, r.state,
                    r.dirty_generation, r.coverage_json, r.findings_json, r.error_code,
                    r.created_at_ms, r.started_at_ms, r.finished_at_ms
@@ -93,7 +103,9 @@ def latest_assessed_runs(store: Any) -> list[dict[str, object]]:
                 order by latest.finished_at_ms desc, latest.run_id desc
                 limit 1
               )
-            """
+              {scope}
+            """,
+            params,
         ).fetchall()
     return [_run_payload(row) for row in rows]
 
