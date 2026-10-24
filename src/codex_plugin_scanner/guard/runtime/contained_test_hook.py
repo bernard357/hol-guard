@@ -402,7 +402,12 @@ def run_authorized_contained_test(
         )
     try:
         core, assignments, dropped = _peel_for_receipt(shlex.split(tool_input["command"], posix=True))
-    except ValueError:
+    # The peel asks native authority for the prefixes it reads, so a transport
+    # failure or a resident too old to know the operation raises here, before
+    # any receipt is drawn. Nothing is peeled then, and the command goes on to
+    # the guarded planner block, which already answers a native failure the
+    # same way it does for `launcher_program`.
+    except (ValueError, RestrictedPytestError):
         core, assignments, dropped = [], {}, False
     if assignments or dropped:
         # Like a wrapper: the original carries the receipt, then the core is
@@ -431,10 +436,10 @@ def run_authorized_contained_test(
             command, _ = _split_command_prefix(shlex.split(tool_input["command"], posix=True))
         except ValueError as error:
             raise _reject() from error
-        # Native authority reads a system `timeout`, `nice` and `stdbuf`
-        # through to the program they run, so the planners below are handed
-        # that program. A clock still bounds this run: it only ever shortens
-        # the deadline.
+        # Native authority reads a system `timeout` and each launcher it
+        # knows through to the program they run, so the planners below are
+        # handed that program. A clock still bounds this run: it only ever
+        # shortens the deadline.
         command, clock = peel_run_prefixes(command)
         if clock is not None:
             timeout_seconds = min(timeout_seconds, clock)

@@ -1154,6 +1154,7 @@ export function App() {
                   cloudState: runtime.snapshot.cloud_state ?? "unknown",
                   cloudStateLabel: runtime.snapshot.cloud_state_label ?? "Unknown",
                   syncConfigured: runtime.snapshot.sync_configured ?? false,
+                  syncHealth: runtime.snapshot.cloud_sync_health?.state ?? null,
                   pendingCount: runtime.snapshot.pending_count ?? 0,
                   receiptCount: runtime.snapshot.receipt_count ?? 0,
                   protectedAppCount: 0,
