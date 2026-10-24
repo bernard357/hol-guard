@@ -1,10 +1,3 @@
-# node-forge 1.4.0 via @anthropic-ai/mcpb 2.1.2 (CI bundle tooling only).
-# Signature-forgery advisory; the tool creates signatures for our own
-# artifacts and never verifies untrusted input, so the exposure does not
-# apply. No fixed node-forge release exists yet (latest is the affected
-# 1.4.0); revisit on the next dependency refresh.
-CVE-2026-85393 exp:2027-01-01
-
 # undici 8.10.2 and zod 3.25.76 via ci/pi-exact-continuation/package-lock.json.
 # That lock pins the Oh My Pi SDK the Gauntlet lane runs; it is CI-only tooling
 # and ships in no release artifact. Both advisories are denial of service
