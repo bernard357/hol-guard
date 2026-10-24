@@ -81,6 +81,7 @@ updates:
     directories:
       - "/dashboard"
       - "/.github/tools/containment-ci"
+      - "/.github/tools/cline-cli"
     schedule:
       interval: "weekly"
       day: "monday"

@@ -148,6 +148,18 @@ def test_node_vulnerability_floors_are_locked() -> None:
     assert all(Version(version) >= Version("4.6.6") for version in zod)
 
 
+def test_cline_marketplace_cli_is_installed_from_the_lockfile() -> None:
+    workflow = (ROOT / ".github/workflows/cline-marketplace.yml").read_text(encoding="utf-8")
+    assert "npm ci --ignore-scripts" in workflow
+    assert "npm install" not in workflow
+    manifest = json.loads((ROOT / ".github/tools/cline-cli/package.json").read_text(encoding="utf-8"))
+    assert manifest["dependencies"]["cline"] == "3.0.55"
+    locked = _npm_versions(".github/tools/cline-cli/package-lock.json", "cline")
+    assert locked == ["3.0.55"]
+    dependabot = (ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
+    assert "/.github/tools/cline-cli" in dependabot
+
+
 def _requirement_pins(text: str, name: str) -> list[str]:
     return re.findall(rf"^{re.escape(name)}==(\S+?)(?:\s|;|$)", text, flags=re.MULTILINE)
 

@@ -7,12 +7,14 @@ on:
       - llms-install.md
       - server.json
       - .github/workflows/cline-marketplace.yml
+      - .github/tools/cline-cli/**
   push:
     branches: [release/3.0]
     paths:
       - llms-install.md
       - server.json
       - .github/workflows/cline-marketplace.yml
+      - .github/tools/cline-cli/**
 
 permissions:
   contents: read
@@ -34,10 +36,12 @@ jobs:
           node-version: "22"
 
       - name: Install pinned official Cline CLI
+        working-directory: .github/tools/cline-cli
         run: |
           set -euo pipefail
-          npm install --global --no-audit --no-fund cline@3.0.55
-          cline --version
+          npm ci --ignore-scripts --no-audit --no-fund
+          echo "$GITHUB_WORKSPACE/.github/tools/cline-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/.github/tools/cline-cli/node_modules/.bin/cline" --version
 
       - name: Verify current Cline CLI exposes MCP installation
         run: |

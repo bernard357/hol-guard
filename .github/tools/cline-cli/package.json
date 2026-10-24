@@ -1,0 +1,7 @@
+{
+  "name": "hol-guard-cline-cli",
+  "private": true,
+  "dependencies": {
+    "cline": "3.0.55"
+  }
+}
