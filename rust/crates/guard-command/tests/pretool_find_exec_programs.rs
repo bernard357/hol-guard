@@ -151,6 +151,28 @@ fn a_shell_the_find_does_not_name_keeps_the_evaluation_failure() {
     }
 }
 
+/// A `+` ends the `-exec` body, so the `sh` written after it stands in a
+/// command position again and is not one of the program's arguments. The
+/// router reads this as a shell the find does not name and holds it for
+/// review rather than failing evaluation, so assert the outcome that keeps
+/// the constraint: nothing here is allowed.
+#[test]
+fn a_shell_after_an_exec_terminator_is_not_an_argument() {
+    let (root, _cleanup) = workspace("terminator-shell");
+    let controls = git_github_controls("default", "default");
+    for command in [
+        "find src -type f -exec echo hi {} + sh -c 'echo hi'",
+        "find src -type f -exec echo hi {} + bash -lc 'echo hi'",
+    ] {
+        let result = evaluate(&root, &controls, command);
+        assert_ne!(
+            result.minimum_action, "allow",
+            "{command}: {}",
+            result.reason
+        );
+    }
+}
+
 #[test]
 fn a_batch_script_the_text_names_is_not_a_bounded_program() {
     let (root, _cleanup) = workspace("batch-child");
