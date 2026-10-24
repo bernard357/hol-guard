@@ -134,7 +134,23 @@ def test_review_render_failure_keeps_the_verdict_reason_code(monkeypatch: pytest
 
 def test_allow_verdict_that_failed_to_render_keeps_the_unavailable_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *_a, **_k: None)
-    rendered = render_pre_tool("omp", {"decision": "allow", "reason_code": "native_allow", "reason": "fine"})
+    rendered = render_pre_tool(
+        "omp", {"decision": "allow", "minimum_action": "allow", "reason_code": "native_allow", "reason": "fine"}
+    )
     assert rendered["decision"] == "deny"
     assert rendered["reason_code"] == "native_hook_render_unavailable"
     assert rendered["reason"] == "HOL Guard could not complete native review safely."
+
+
+def test_allow_decision_over_a_blocking_floor_keeps_the_verdict_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *_a, **_k: None)
+    verdict = {
+        "decision": "allow",
+        "minimum_action": "require-reapproval",
+        "reason_code": "native_policy_reapproval_required",
+        "reason": "Copying .env needs a fresh approval.",
+    }
+    rendered = render_pre_tool("omp", verdict)
+    assert rendered["decision"] == "deny"
+    assert rendered["reason_code"] == "native_policy_reapproval_required"
+    assert rendered["reason"] == "Copying .env needs a fresh approval."

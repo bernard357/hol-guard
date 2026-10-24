@@ -63,6 +63,9 @@ def fail_closed_pre_tool(
     }
 
 
+_ALLOW_FLOORS = ("allow", "warn")
+
+
 def _verdict_text(verdict: Mapping[str, object], key: str) -> str | None:
     value = verdict.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
@@ -73,10 +76,11 @@ def _verdict_deny(harness: str, verdict: Mapping[str, object], *, reason: str | 
 
     A blocking verdict keeps its own reason and reason code. An allow keeps the
     generic unavailable code, because the action is denied here only because
-    its rendered allow never arrived.
+    its rendered allow never arrived. A verdict counts as an allow only on the
+    terms the renderer uses: an allow decision over an allow or warn floor.
     """
 
-    if verdict.get("decision") == "allow":
+    if verdict.get("decision") == "allow" and verdict.get("minimum_action") in _ALLOW_FLOORS:
         return fail_closed_pre_tool(harness, reason=reason or RENDER_UNAVAILABLE_REASON)
     return fail_closed_pre_tool(
         harness,
