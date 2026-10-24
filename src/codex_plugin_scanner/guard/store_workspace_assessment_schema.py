@@ -3,7 +3,9 @@
 One state row per admitted worktree carries its dirty generation; one run row
 per assessment attempt carries the snapshot it was bound to, its lease and its
 bounded result. Customer source never lands here: findings hold package
-coordinates and rule identifiers only.
+coordinates and rule identifiers only. A fix proposal row binds one reviewed
+manifest edit to the snapshot it was prepared against; it holds a bounded
+diff of the edit and the byte offsets to apply it, never the manifest itself.
 """
 
 from __future__ import annotations
@@ -14,9 +16,12 @@ from typing import Final
 from .store_command_activity_schema import _validate_schema_object_sql
 
 WORKSPACE_ASSESSMENT_MIGRATION_VERSION: Final = 33
+WORKSPACE_FIX_PROPOSAL_MIGRATION_VERSION: Final = 34
 
 MAX_COVERAGE_JSON_BYTES: Final = 16 * 1024
 MAX_FINDINGS_JSON_BYTES: Final = 256 * 1024
+MAX_FIX_DIFF_BYTES: Final = 64 * 1024
+MAX_FIX_EDITS_JSON_BYTES: Final = 16 * 1024
 
 _STATEMENTS: Final = (
     """
@@ -94,6 +99,39 @@ _STATEMENTS: Final = (
     """,
 )
 
+_FIX_PROPOSAL_STATEMENTS: Final = (
+    """
+    CREATE TABLE IF NOT EXISTS workspace_fix_proposals (
+        proposal_id TEXT NOT NULL PRIMARY KEY CHECK (length(proposal_id) <= 64),
+        codebase_key TEXT NOT NULL,
+        worktree_key TEXT NOT NULL,
+        finding_id TEXT NOT NULL CHECK (length(finding_id) = 32),
+        source_run_id TEXT NOT NULL CHECK (length(source_run_id) <= 64),
+        snapshot_digest TEXT NOT NULL CHECK (length(snapshot_digest) = 64),
+        manifest_path TEXT NOT NULL CHECK (length(manifest_path) <= 1024),
+        base_sha256 TEXT NOT NULL CHECK (length(base_sha256) = 64),
+        new_sha256 TEXT NOT NULL CHECK (length(new_sha256) = 64),
+        edits_json TEXT NOT NULL
+            CHECK (json_valid(edits_json) AND json_type(edits_json) = 'array' AND length(edits_json) <= 16384),
+        diff_text TEXT NOT NULL CHECK (length(diff_text) <= 65536),
+        state TEXT NOT NULL CHECK (state IN
+            ('prepared', 'applied', 'stale', 'rejected', 'verified_fixed', 'still_present')),
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+        applied_at_ms INTEGER,
+        verified_at_ms INTEGER,
+        verification_run_id TEXT CHECK (verification_run_id IS NULL OR length(verification_run_id) <= 64),
+        FOREIGN KEY (codebase_key, worktree_key)
+            REFERENCES workspace_assessment_state(codebase_key, worktree_key) ON DELETE CASCADE,
+        CHECK (state NOT IN ('applied', 'verified_fixed', 'still_present') OR applied_at_ms IS NOT NULL)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS workspace_fix_proposals_recent
+    ON workspace_fix_proposals (codebase_key, worktree_key, created_at_ms DESC)
+    """,
+)
+
 
 def ensure_workspace_assessment_schema(connection: sqlite3.Connection, *, applied_at: str) -> None:
     connection.execute("savepoint workspace_assessment_schema_v1")
@@ -112,9 +150,30 @@ def ensure_workspace_assessment_schema(connection: sqlite3.Connection, *, applie
     connection.execute("release workspace_assessment_schema_v1")
 
 
+def ensure_workspace_fix_proposal_schema(connection: sqlite3.Connection, *, applied_at: str) -> None:
+    connection.execute("savepoint workspace_fix_proposal_schema_v1")
+    try:
+        for statement in _FIX_PROPOSAL_STATEMENTS:
+            connection.execute(statement)
+        _validate_schema_object_sql(connection, _FIX_PROPOSAL_STATEMENTS, family_label="workspace fix proposal ")
+        connection.execute(
+            "insert or ignore into schema_migrations (version, applied_at) values (?, ?)",
+            (WORKSPACE_FIX_PROPOSAL_MIGRATION_VERSION, applied_at),
+        )
+    except BaseException:
+        connection.execute("rollback to workspace_fix_proposal_schema_v1")
+        connection.execute("release workspace_fix_proposal_schema_v1")
+        raise
+    connection.execute("release workspace_fix_proposal_schema_v1")
+
+
 __all__ = [
     "MAX_COVERAGE_JSON_BYTES",
     "MAX_FINDINGS_JSON_BYTES",
+    "MAX_FIX_DIFF_BYTES",
+    "MAX_FIX_EDITS_JSON_BYTES",
     "WORKSPACE_ASSESSMENT_MIGRATION_VERSION",
+    "WORKSPACE_FIX_PROPOSAL_MIGRATION_VERSION",
     "ensure_workspace_assessment_schema",
+    "ensure_workspace_fix_proposal_schema",
 ]

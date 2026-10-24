@@ -131,7 +131,7 @@ class _DashboardRuntimeReadRoutes:
         if parsed.path == "/v1/supply-chain/bundle":
             self._handle_get_supply_chain_bundle()
             return True
-        if handle_workspace_assessment_get(self, parsed.path):
+        if handle_workspace_assessment_get(self, parsed.path, parsed.query):
             return True
         if len(path_parts) == 4 and path_parts[:2] == ["v1", "apps"] and path_parts[3] == "cloud":
             self._handle_cloud_app_handoff(path_parts[2], parsed.query)

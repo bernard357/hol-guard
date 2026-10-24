@@ -3,19 +3,25 @@
 The routes live under ``/v1/supply-chain/`` so they inherit that family's
 header-token and dashboard-session policy; scoped claim sessions cannot reach
 them. Reads return digests, counts and package-coordinate findings. Writes
-only admit, pause, queue or cancel; a run itself happens on the worker thread.
+admit, pause, queue or cancel runs (a run itself happens on the worker thread)
+or prepare and apply a reviewed dependency fix. Preparing only stores a diff;
+applying is the user's explicit action and edits one manifest, never more.
 """
 
 from __future__ import annotations
 
 from typing import Any, Final, Protocol, cast
+from urllib.parse import parse_qs
 
+from .. import workspace_assessment_fix_proposals as fixes
 from .. import workspace_assessment_store as assessments
 from ..workspace_assessment_worker import WorkspaceAdmissionError, admit_workspace, queue_manual_run
 
 ASSESSMENTS_PATH: Final = "/v1/supply-chain/workspace-assessments"
 FINDINGS_PATH: Final = "/v1/supply-chain/workspace-findings"
+FIX_PROPOSALS_PATH: Final = "/v1/supply-chain/workspace-fix-proposals"
 _ACTIONS: Final = frozenset({"run", "cancel", "pause", "resume"})
+_MAX_QUERY_CHARS: Final = 1024
 
 
 class WorkspaceAssessmentHandler(Protocol):
@@ -24,7 +30,7 @@ class WorkspaceAssessmentHandler(Protocol):
     def _write_json(self, payload: dict[str, object], *, status: int = 200) -> None: ...
 
 
-def handle_workspace_assessment_get(request_handler: object, path: str) -> bool:
+def handle_workspace_assessment_get(request_handler: object, path: str, query: str = "") -> bool:
     # The daemon's route mixins are typed apart from the handler class that
     # provides ``server`` and ``_write_json``.
     handler = cast(WorkspaceAssessmentHandler, request_handler)
@@ -45,6 +51,9 @@ def handle_workspace_assessment_get(request_handler: object, path: str) -> bool:
             }
         )
         return True
+    if path == FIX_PROPOSALS_PATH:
+        _list_fix_proposals(handler, query)
+        return True
     return False
 
 
@@ -56,6 +65,17 @@ def handle_workspace_assessment_post(
     handler = cast(WorkspaceAssessmentHandler, request_handler)
     if path == ASSESSMENTS_PATH:
         _admit(handler, payload)
+        return True
+    if path == FIX_PROPOSALS_PATH:
+        _prepare_fix(handler, payload)
+        return True
+    fix_prefix = FIX_PROPOSALS_PATH + "/"
+    if path.startswith(fix_prefix) and path.endswith("/apply"):
+        proposal_id = path[len(fix_prefix) : -len("/apply")]
+        if not _is_proposal_id(proposal_id):
+            handler._write_json({"error": "invalid_proposal_id"}, status=400)
+            return True
+        _apply_fix(handler, proposal_id)
         return True
     prefix = ASSESSMENTS_PATH + "/"
     if not path.startswith(prefix) or path[len(prefix) :] not in _ACTIONS:
@@ -96,6 +116,48 @@ def _admit(handler: WorkspaceAssessmentHandler, payload: dict[str, object]) -> N
     handler._write_json(admitted, status=202)
 
 
+def _list_fix_proposals(handler: WorkspaceAssessmentHandler, query: str) -> None:
+    params = {name: values[0] for name, values in parse_qs(query[:_MAX_QUERY_CHARS]).items() if values}
+    keys = _keys(params)
+    if keys is None:
+        handler._write_json({"error": "invalid_worktree"}, status=400)
+        return
+    limit = params.get("limit", "")
+    proposals = fixes.list_proposals(
+        handler.server.store,
+        keys,
+        limit=int(limit) if limit.isdigit() else fixes.MAX_LISTED_PROPOSALS,
+        now_ms=_now_ms(),
+    )
+    handler._write_json({"proposals": proposals})
+
+
+def _prepare_fix(handler: WorkspaceAssessmentHandler, payload: dict[str, object]) -> None:
+    keys = _keys(payload)
+    finding_id = payload.get("finding_id")
+    if keys is None:
+        handler._write_json({"error": "invalid_worktree"}, status=400)
+        return
+    if not isinstance(finding_id, str) or len(finding_id) != 32 or not _is_hex(finding_id):
+        handler._write_json({"error": "invalid_finding_id"}, status=400)
+        return
+    try:
+        prepared = fixes.prepare(handler.server.store, keys, finding_id, now_ms=_now_ms())
+    except fixes.FixProposalError as error:
+        handler._write_json({"error": error.code, **error.detail}, status=error.status)
+        return
+    handler._write_json(prepared, status=201)
+
+
+def _apply_fix(handler: WorkspaceAssessmentHandler, proposal_id: str) -> None:
+    try:
+        applied = fixes.apply(handler.server.store, proposal_id, now_ms=_now_ms())
+    except fixes.FixProposalError as error:
+        handler._write_json({"error": error.code, **error.detail}, status=error.status)
+        return
+    handler._write_json(applied)
+
+
 def _keys(payload: dict[str, object]) -> assessments.WorktreeKeys | None:
     codebase_key = payload.get("codebase_key")
     worktree_key = payload.get("worktree_key")
@@ -105,7 +167,15 @@ def _keys(payload: dict[str, object]) -> assessments.WorktreeKeys | None:
 
 
 def _is_key(value: object) -> bool:
-    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+    return isinstance(value, str) and len(value) == 64 and _is_hex(value)
+
+
+def _is_proposal_id(value: str) -> bool:
+    return 0 < len(value) <= 64 and _is_hex(value)
+
+
+def _is_hex(value: str) -> bool:
+    return all(char in "0123456789abcdef" for char in value)
 
 
 def _now_ms() -> int:
@@ -117,6 +187,7 @@ def _now_ms() -> int:
 __all__ = [
     "ASSESSMENTS_PATH",
     "FINDINGS_PATH",
+    "FIX_PROPOSALS_PATH",
     "handle_workspace_assessment_get",
     "handle_workspace_assessment_post",
 ]
