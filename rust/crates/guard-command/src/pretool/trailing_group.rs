@@ -39,6 +39,25 @@ pub(crate) fn unwrap(command: &str) -> Option<String> {
 }
 
 /// The positions of the only unquoted `(` and `)`, in that order.
+/// The trailing group's command list when running that list in place of the
+/// group runs exactly the same commands, or `None`. A decision may read
+/// `false && (touch a; touch b)` as its flattened list, since that list runs
+/// every command the group can; a sink that executes the text cannot, because
+/// the flattened `touch b` no longer waits on `false`. A group behind `&&` or
+/// `||` therefore keeps its parentheses here when it holds a list, as a brace
+/// group does in `brace_group::unwrap`.
+pub(crate) fn unwrap_for_execution(command: &str) -> Option<String> {
+    let ungrouped = unwrap(command)?;
+    let chars: Vec<char> = command.trim().chars().collect();
+    let (open, close) = unquoted_parentheses(&chars)?;
+    if super::brace_group::follows_a_conditional(&chars, open)
+        && super::brace_group::holds_a_list_operator(&chars[open + 1..close])
+    {
+        return None;
+    }
+    Some(ungrouped)
+}
+
 fn unquoted_parentheses(chars: &[char]) -> Option<(usize, usize)> {
     let mut open = None;
     let mut close = None;

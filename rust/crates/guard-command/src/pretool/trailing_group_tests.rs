@@ -134,3 +134,26 @@ fn a_group_no_recognizer_unwraps_keeps_its_unmodeled_review() {
         assert_eq!(decision.command_model.confidence, "uncertain", "{command}");
     }
 }
+
+#[test]
+fn a_conditional_list_group_is_not_flattened_for_execution() {
+    // `touch b` waits on `false` only while the parentheses hold it.
+    for command in [
+        "false && (touch a; touch b)",
+        "false || (touch a && touch b)",
+        "make &&\n(touch a | tee b)",
+    ] {
+        assert_eq!(super::unwrap_for_execution(command), None, "{command}");
+    }
+    for (command, expected) in [
+        ("(touch a; touch b)", "touch a; touch b"),
+        ("cd web && (pytest -q)", "cd web &&  pytest -q"),
+        ("cd web; (touch a; touch b)", "cd web;  touch a; touch b"),
+    ] {
+        assert_eq!(
+            super::unwrap_for_execution(command).as_deref(),
+            Some(expected),
+            "{command}"
+        );
+    }
+}

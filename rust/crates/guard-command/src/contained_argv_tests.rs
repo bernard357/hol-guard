@@ -199,6 +199,17 @@ fn contained_target_answers_the_sink() {
             "{text}"
         );
     }
+    // A group behind a conditional that holds a list keeps its parentheses:
+    // flattened, `touch b` would run whether or not `false` succeeded.
+    let conditional = json!({
+        "text": "false && (.venv/bin/pytest -q; touch b)",
+        "cwd": project.to_str().unwrap(),
+        "home": root.to_str().unwrap(),
+    });
+    assert_eq!(
+        evaluate("contained_target", &conditional).unwrap()["value"],
+        Value::Null
+    );
     // A plain call is its own answer.
     let plain = json!({
         "text": ".venv/bin/pytest -q",

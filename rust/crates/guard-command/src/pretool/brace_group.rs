@@ -149,7 +149,7 @@ fn starts_a_word_position(c: char) -> bool {
 /// A `#` anywhere before the brace hides whatever it comments out, including
 /// the operator this scan is looking for, so the group keeps its review rather
 /// than being flattened on a reading this scan cannot make.
-fn follows_a_conditional(chars: &[char], open: usize) -> bool {
+pub(super) fn follows_a_conditional(chars: &[char], open: usize) -> bool {
     if chars[..open].contains(&'#') {
         return true;
     }
@@ -165,7 +165,7 @@ fn follows_a_conditional(chars: &[char], open: usize) -> bool {
 
 /// Whether the body is itself a list rather than one command: a `;`, a newline
 /// or an unquoted `&` or `|` the shell would act on.
-fn holds_a_list_operator(inner: &[char]) -> bool {
+pub(super) fn holds_a_list_operator(inner: &[char]) -> bool {
     let mut single = false;
     let mut double = false;
     let mut escaped = false;

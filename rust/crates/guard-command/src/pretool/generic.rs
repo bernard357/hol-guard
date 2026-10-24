@@ -82,9 +82,11 @@ pub fn venv_activation_target(command: &str, context: super::PathContext<'_>) ->
 /// decided as that list, and an activation hands its verdict to the command
 /// after it. A sink that plans the call again from its snapshot plans this
 /// text: the group's own text models no command, so `(.venv/bin/pytest -q)`
-/// reached the pytest planner with its parenthesis still attached.
+/// reached the pytest planner with its parenthesis still attached. A group
+/// whose flattened list would run more than the group does, such as
+/// `false && (a; b)`, keeps its own text: the sink executes what it plans.
 pub fn contained_target(command: &str, context: super::PathContext<'_>) -> Option<String> {
-    let ungrouped = super::ungrouped_command_list(command);
+    let ungrouped = super::runnable_ungrouped_command_list(command);
     let text = ungrouped.as_deref().unwrap_or(command);
     venv_activation_target(text, context).or(ungrouped)
 }
