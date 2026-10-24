@@ -14,7 +14,7 @@ from ..approval_link_output import native_review_reason
 from ..models import GuardApprovalRequest
 from ..native_hook_adapter import NativeHookAdapterError
 from .hook_fail_closed import canonical_harness, render_accepted_allow, render_pre_tool, render_pre_tool_review
-from .hook_native_exact_action import native_exact_action, native_review_binding
+from .hook_native_exact_action import native_exact_action, native_review_binding, native_review_evidence
 from .hook_native_local_cli import native_local_cli_grant_response
 from .hook_native_package_review import native_package_review_response
 from .hook_native_review_binding import (
@@ -80,7 +80,20 @@ def pause_native_pre_tool_for_approval(
         return render_pre_tool(harness, failed, guard_home=guard_home)
     launch_target = _native_review_launch_target(payload)
     tool_name = _native_review_tool_name(payload)
-    identity = native_review_binding(harness, payload, native_result, native_receipt, workspace, guard_home)
+    # One resident ask answers both the retry binding and the exact-action token.
+    # The saved-decision lookup and the queued request must bind the identical
+    # token, and each derivation re-reads operands and repeats resident
+    # launch-identity round trips, so it is derived once here.
+    identity, exact_token, once_only_reason = native_review_evidence(
+        harness=harness,
+        tool_name=tool_name,
+        payload=payload,
+        native_result=native_result,
+        native_receipt=native_receipt,
+        workspace=workspace,
+        home_dir=home_dir,
+        guard_home=guard_home,
+    )
     # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
     custom = native_local_cli_grant_response(
         store,
@@ -92,19 +105,6 @@ def pause_native_pre_tool_for_approval(
     )
     if custom is not None and custom[0]:
         return custom[1]
-    # Derive the exact-action token once: the saved-decision lookup and the queued
-    # request must bind the identical value, and each derivation re-reads operands
-    # and repeats resident launch-identity round trips.
-    exact_token, once_only_reason = native_exact_action(
-        harness=harness,
-        tool_name=tool_name,
-        payload=payload,
-        native_result=native_result,
-        native_receipt=native_receipt,
-        workspace=workspace,
-        home_dir=home_dir,
-        guard_home=guard_home,
-    )
     saved = native_saved_review_response(
         store,
         harness=harness,

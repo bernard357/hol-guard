@@ -29,7 +29,7 @@ from ..runtime.extension_control_runtime import current_extension_control_bindin
 from .hook_native_review_binding import native_review_policy_binding
 from .hook_request_parsing import pre_tool_command, pre_tool_input
 
-NATIVE_EXACT_ACTION_FEATURE = "native-exact-action-v4"
+NATIVE_EXACT_ACTION_FEATURE = "native-exact-action-v5"
 UNPROVEN_LAUNCH = "unproven_launch"
 _LOGGER = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 6.0
@@ -267,27 +267,79 @@ def native_review_binding(
 ) -> str | None:
     """Bind a short-lived retry to Rust-owned request and decision evidence."""
 
-    raw_cwd = payload.get("cwd")
     try:
-        query: dict[str, object] = {
-            "kind": "review_binding",
-            "harness": harness,
-            "command": pre_tool_command(payload),
-            "cwd": raw_cwd if isinstance(raw_cwd, str) and raw_cwd.strip() else None,
-            "workspace_bound": workspace is not None,
-            "facts": _facts(native_result),
-            "receipt": dict(native_receipt) if isinstance(native_receipt, Mapping) else None,
-            "policy_binding": _policy_binding(harness, native_result, native_receipt),
-            # A plain `git push origin <branch>` binds to the native push proof,
-            # which runs in the agent's own stamped environment, never this
-            # process's.
-            "workspace": _text(workspace),
-            "execution_environment": _execution_environment(payload),
-        }
+        query = _binding_query(harness, payload, native_result, native_receipt, workspace)
         return _answer(query, guard_home)["binding"]
     except (NativeExactActionError, OSError, RuntimeError, TypeError, ValueError) as error:
         _LOGGER.warning("native review-binding ask failed closed: %s", type(error).__name__)
         return None
+
+
+def _binding_query(
+    harness: str,
+    payload: Mapping[str, object],
+    native_result: Mapping[str, object],
+    native_receipt: Mapping[str, object] | None,
+    workspace: Path | None,
+) -> dict[str, object]:
+    raw_cwd = payload.get("cwd")
+    return {
+        "kind": "review_binding",
+        "harness": harness,
+        "command": pre_tool_command(payload),
+        "cwd": raw_cwd if isinstance(raw_cwd, str) and raw_cwd.strip() else None,
+        "workspace_bound": workspace is not None,
+        "facts": _facts(native_result),
+        "receipt": dict(native_receipt) if isinstance(native_receipt, Mapping) else None,
+        "policy_binding": _policy_binding(harness, native_result, native_receipt),
+        # A plain `git push origin <branch>` binds to the native push proof,
+        # which runs in the agent's own stamped environment, never this
+        # process's.
+        "workspace": _text(workspace),
+        "execution_environment": _execution_environment(payload),
+    }
+
+
+def native_review_evidence(
+    *,
+    harness: str,
+    tool_name: str,
+    payload: Mapping[str, object],
+    native_result: Mapping[str, object],
+    native_receipt: Mapping[str, object] | None,
+    workspace: Path | None,
+    home_dir: Path | None,
+    guard_home: Path | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """The retry binding, exact-action token and once-only reason of one review in a single ask.
+
+    The resident answers each half exactly as ``native_review_binding`` and
+    ``native_exact_action`` would, so this saves a round trip without changing
+    either answer. A failed ask fails closed the way both would.
+    """
+
+    try:
+        query: dict[str, object] = {
+            "kind": "review_evidence",
+            "binding": _binding_query(harness, payload, native_result, native_receipt, workspace),
+            "action": _exact_query(
+                harness=harness,
+                tool_name=tool_name,
+                payload=payload,
+                native_result=native_result,
+                native_receipt=native_receipt,
+                workspace=workspace,
+                home_dir=home_dir,
+            ),
+        }
+        reply = _answer(query, guard_home)
+    except (NativeExactActionError, OSError, RuntimeError, TypeError, ValueError) as error:
+        _LOGGER.warning("native review-evidence ask failed closed: %s", type(error).__name__)
+        return None, None, UNPROVEN_LAUNCH
+    token, reason = reply["token"], reply["once_only_reason"]
+    if (token is None) == (reason is None):
+        return reply["binding"], None, UNPROVEN_LAUNCH
+    return reply["binding"], token, reason
 
 
 def _validate_exact_action(payload: dict[str, Any]) -> None:
@@ -307,17 +359,16 @@ def _answer(query: Mapping[str, object], guard_home: Path | None) -> dict[str, A
             max_request_bytes=_MAX_REQUEST_BYTES,
             slots=EXACT_ACTION_ASK_SLOTS,
         )
-    is_exact = query["kind"] == "exact_action"
-    fields: dict[str, Any] = (
-        {"token": (str, type(None)), "once_only_reason": (str, type(None))}
-        if is_exact
-        else {"binding": (str, type(None))}
-    )
+    fields: dict[str, Any] = {}
+    if query["kind"] in {"review_binding", "review_evidence"}:
+        fields["binding"] = (str, type(None))
+    if query["kind"] in {"exact_action", "review_evidence"}:
+        fields.update(token=(str, type(None)), once_only_reason=(str, type(None)))
     return _decide(
         query,
         guard_home,
         fields,
-        _validate_exact_action if is_exact else None,
+        _validate_exact_action if "token" in fields else None,
         operation=_OPERATION,
         max_request_bytes=_MAX_REQUEST_BYTES,
         slots=EXACT_ACTION_ASK_SLOTS,
@@ -359,4 +410,5 @@ __all__ = [
     "native_exact_action",
     "native_launch_evidence",
     "native_review_binding",
+    "native_review_evidence",
 ]
