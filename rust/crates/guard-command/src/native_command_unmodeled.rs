@@ -60,7 +60,7 @@ mod substitution;
 #[path = "native_command_unmodeled_xargs.rs"]
 mod xargs;
 use case_labels::without_case_labels;
-use find_exec::{find_exec_programs, EXEC_ACTIONS};
+use find_exec::{find_exec_programs, text_outside_exec_arguments, EXEC_ACTIONS};
 use link_makers::creates_links;
 pub(crate) use prefix::{launcher_body, prefix_reads_a_program_file};
 use redirections::without_redirections;
@@ -277,11 +277,18 @@ impl CompiledNativeCommandControls {
         let exec_names_program = exec_programs
             .as_ref()
             .is_some_and(|programs| !programs.is_empty());
+        // The words after the program an `-exec` names are that program's
+        // arguments, not command positions, so a name that appears only there
+        // runs nothing: `find src -exec echo sh {} \;` prints `sh`.
+        let outside_exec = exec_names_program
+            .then(|| named_words(&joined_quotes(&text_outside_exec_arguments(&bare))))
+            .unwrap_or_default();
         if INTERPRETERS.iter().any(|name| {
             interpreted.contains(*name)
                 && !(sourced_bounded && matches!(*name, "source" | "."))
                 && !(xargs_bounded && *name == "xargs")
                 && !(exec_names_program && EXEC_ACTIONS.contains(name))
+                && !(exec_names_program && !outside_exec.contains(*name))
         }) {
             // An `xargs` whose operands are not in the text is not bounded by
             // reading a script file. `2>/dev/null xargs gh` still takes its
