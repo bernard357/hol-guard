@@ -1,5 +1,5 @@
 import { r as reactExports, j as jsxRuntimeExports, d$ as Surface, co as HiMiniArrowTopRightOnSquare, a6 as Badge } from "../guard-dashboard.js";
-import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts, d as BrandMark } from "./brand-hero-CPRrEfls.js";
+import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts, d as BrandMark } from "./brand-hero-C60mcKZP.js";
 import { b as ALLOWED_LINKS, c as ABOUT_HERO_TITLE, d as ABOUT_HERO_BODY, e as ABOUT_TRUST_CONTRACT_CLAIMS, f as ABOUT_DATA_BOUNDARY_ROWS, g as ABOUT_STANDARDS_NODES, h as ABOUT_PATH_CARDS, i as ABOUT_PARTNER_SECTION_BODY, j as ABOUT_PARTNER_SECTION_TITLE, k as ABOUT_PARTNER_LEVELS, l as ABOUT_PARTNER_CTA, m as ABOUT_PARTNER_CTA_HREF, n as ABOUT_AFFILIATE_SECTION_BODY, o as ABOUT_AFFILIATE_SECTION_TITLE, p as ABOUT_AFFILIATE_TERMS, q as ABOUT_AFFILIATE_CTA, r as ABOUT_AFFILIATE_CTA_HREF, s as ABOUT_AFFILIATE_DISCLOSURE } from "./about-content-Dr9zFg1V.js";
 class AboutExternalLinkError extends Error {
   constructor(message) {
@@ -373,6 +373,13 @@ function Callout({ n }) {
     n
   ] });
 }
+const SYNC_FACT = {
+  on: "Cloud sync on",
+  stalled: "Cloud sync stalled",
+  pairing: "Cloud sync waiting for first upload",
+  off: "Cloud sync off",
+  unavailable: "Cloud sync unavailable"
+};
 function resolveAboutHeroState(runtimeSummary) {
   if (!runtimeSummary) {
     return {
@@ -386,7 +393,7 @@ function resolveAboutHeroState(runtimeSummary) {
   const version = runtimeSummary.guardVersion?.trim();
   const facts = [
     version && version.toLowerCase() !== "unknown" ? `Version ${version}` : null,
-    `Cloud sync ${SYNC_STATE_LABEL[resolveSyncState(runtimeSummary)].toLowerCase()}`,
+    SYNC_FACT[resolveSyncState(runtimeSummary)],
     "Open source under Apache-2.0"
   ].filter((fact) => fact !== null);
   if (pending > 0) {
@@ -397,14 +404,14 @@ function resolveAboutHeroState(runtimeSummary) {
       facts
     };
   }
-  return { tone: "clear", badge: "Protecting this device", liveLabel: "Local-first", facts };
+  return { tone: "setup", badge: "Running on this device", liveLabel: "Local-first", facts };
 }
 function AboutHero({
   runtimeSummary
 }) {
   const hero = resolveAboutHeroState(runtimeSummary);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-10", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(BrandHero, { tone: hero.tone, liveLabel: hero.liveLabel, labelledBy: "about-hero-heading", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(BrandHero, { tone: hero.tone, liveLabel: hero.liveLabel, children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(BrandHeroBadge, { tone: hero.tone, children: hero.badge }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-2xl", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(

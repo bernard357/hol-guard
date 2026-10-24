@@ -169,4 +169,16 @@ assert(
   "active access runs repair immediately",
 );
 
+const cloudOnlyMarkup = renderToStaticMarkup(
+  <SupplyChainRecovery
+    issues={[{ id: "connect", title: "Connect", detail: "", tone: "blue", actionLabel: "Connect", action: { kind: "connect" } }]}
+    state={IDLE_SUPPLY_CHAIN_FIX_ALL_STATE}
+    onFixAll={() => undefined}
+    locallyProtected
+  />,
+);
+assert(cloudOnlyMarkup.includes("Protected on this device"), "a Cloud-only step on a protected device is not a repair");
+assert(!cloudOnlyMarkup.includes("Needs repair"), "a Cloud-only step does not show the repair badge");
+assert(markup.includes("Needs repair"), "local protection issues keep the repair badge");
+
 console.log("supply-chain-fix-all.test.tsx: all assertions passed");

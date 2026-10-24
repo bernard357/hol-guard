@@ -562,6 +562,15 @@ function HeroParticleLogo(props) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "guard-hero-fallback", dangerouslySetInnerHTML: { __html: brandMarkSvg(finish === "white" ? "#ffffff" : BRAND_NAVY) } })
   ] });
 }
+const STAGE_QUERY = "(min-width: 1024px)";
+function stageVisible() {
+  return typeof window !== "undefined" && window.matchMedia(STAGE_QUERY).matches;
+}
+function subscribeStage(callback) {
+  const query = window.matchMedia(STAGE_QUERY);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+}
 const MARK_CENTER = 50;
 const MARK_SCALE = 42;
 function BrandMark(props) {
@@ -603,9 +612,13 @@ function BrandHeroFacts(props) {
 }
 function BrandHero(props) {
   const inline = props.markOnSmall === "inline";
+  const wide = reactExports.useSyncExternalStore(subscribeStage, stageVisible, () => false);
+  const mountStage = !inline || wide;
+  const named = Boolean(props.labelledBy || props.ariaLabel);
+  const Surface = named ? "section" : "div";
   const column = props.compact ? "lg:grid-cols-[minmax(0,1fr)_260px]" : "lg:grid-cols-[minmax(0,1fr)_380px]";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-    "section",
+    Surface,
     {
       className: "guard-hero guard-surface-in relative overflow-hidden rounded-2xl border border-white/10 p-5 text-white sm:p-6 lg:p-8",
       "data-status": props.tone,
@@ -617,7 +630,7 @@ function BrandHero(props) {
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `grid gap-6 ${column} lg:items-center`, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "relative min-w-0 space-y-5", children: props.children }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `relative mx-auto w-full max-w-[380px] lg:max-w-none${inline ? " hidden lg:block" : ""}`, children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(HeroParticleLogo, { mood: props.tone, finish: "white", className: props.compact ? "guard-hero-stage--compact" : void 0 }),
+            mountStage ? /* @__PURE__ */ jsxRuntimeExports.jsx(HeroParticleLogo, { mood: props.tone, finish: "white", className: props.compact ? "guard-hero-stage--compact" : void 0 }) : null,
             /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "guard-hero-live", "aria-hidden": "true", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("i", {}),
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: props.liveLabel })

@@ -13,6 +13,7 @@ import {
   supplyChainFixAllNeedsCloudConnect,
 } from "./supply-chain-fix-all";
 import type { SupplyChainIssue } from "./supply-chain-issues";
+import { setupStepsLabel } from "./supply-chain-workspace-hero-state";
 
 type SupplyChainRecoveryProps = {
   issues: SupplyChainIssue[];
@@ -21,7 +22,11 @@ type SupplyChainRecoveryProps = {
   guidance?: string | null;
   /** One-line facts under the summary, from the workspace hero state. */
   facts?: string[];
+  /** Local package protection is on, so Cloud or audit steps alone are not a repair. */
+  locallyProtected?: boolean;
 };
+
+const LOCAL_PROTECTION_ACTIONS = new Set<SupplyChainIssue["action"]["kind"]>(["firewall_unprotected", "firewall_repair"]);
 
 function recoverySummary(issueCount: number): string {
   return `${issueCount} issue${issueCount === 1 ? "" : "s"} to resolve. Check Cloud access, approve device changes once, then restore package protection.`;
@@ -33,6 +38,7 @@ export function SupplyChainRecovery({
   onFixAll,
   guidance = null,
   facts = [],
+  locallyProtected = false,
 }: SupplyChainRecoveryProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const handleDetailsToggle = useCallback(() => {
@@ -45,6 +51,9 @@ export function SupplyChainRecovery({
   const needsCloudConnect = supplyChainFixAllNeedsCloudConnect(state);
   const isHardFailure =
     state.phase === "error" || (state.phase === "incomplete" && state.failedSteps.length > 0);
+  const needsLocalRepair =
+    !locallyProtected || issues.some((issue) => LOCAL_PROTECTION_ACTIONS.has(issue.action.kind));
+  const tone = needsLocalRepair ? "review" : "clear";
   const buttonLabel = supplyChainFixAllButtonLabel(
     state.phase,
     state.remainingAction ?? null,
@@ -53,14 +62,14 @@ export function SupplyChainRecovery({
 
   return (
     <BrandHero
-      tone="review"
-      liveLabel={`${issues.length} to fix`}
+      tone={tone}
+      liveLabel={setupStepsLabel(issues.length)}
       ariaLabel="Supply-chain recovery"
       testId="supply-chain-recovery"
       markOnSmall="inline"
       compact
     >
-      <BrandHeroBadge tone="review">Needs repair</BrandHeroBadge>
+      <BrandHeroBadge tone={tone}>{needsLocalRepair ? "Needs repair" : "Protected on this device"}</BrandHeroBadge>
       <div className="max-w-2xl">
         <h2 className="guard-hero-title text-2xl font-semibold tracking-tight text-white sm:text-3xl">
           Restore supply-chain protection

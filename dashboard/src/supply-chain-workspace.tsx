@@ -50,6 +50,7 @@ export function SupplyChainWorkspace({ snapshot, fixAllState, onFixAll }: Supply
       onFixAll={onFixAll}
       guidance={workspaceHero.stagedGuidance}
       facts={workspaceHero.facts}
+      locallyProtected={workspaceHero.protectionStatus === "protected"}
     />
   ) : (
     <SupplyChainWorkspaceHero hero={workspaceHero} />

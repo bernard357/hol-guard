@@ -27,19 +27,35 @@ const PROTECTION_BADGE: Record<HomeProtectionStatus, string> = {
   unknown: "Checking",
 };
 
+function toolCount(count: number): string {
+  return `${count} tool${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Tool counts read from the same manager lists as the badge
+ * (resolveHomeProtectionStatus), so the hero never pairs a status with a
+ * count from a different source.
+ */
+function badgeManagerCounts(snapshot: GuardRuntimeSnapshot): { protectedCount: number; unprotectedCount: number } {
+  const protection = snapshot.supply_chain?.package_manager_protection;
+  return {
+    protectedCount: protection?.protected_managers.length ?? 0,
+    unprotectedCount: protection?.unprotected_managers.length ?? 0,
+  };
+}
+
 function protectionLiveLabel(
   status: HomeProtectionStatus,
-  stats: { protectedManagers: number; unprotectedManagers: number; repairRequiredManagers: number },
+  counts: { protectedCount: number; unprotectedCount: number },
 ): string {
   if (status === "protected") {
-    return `Guarding ${stats.protectedManagers} tool${stats.protectedManagers === 1 ? "" : "s"}`;
+    return `Guarding ${toolCount(counts.protectedCount)}`;
   }
   if (status === "staged") {
     return "Restart pending";
   }
   if (status === "partial" || status === "unprotected") {
-    const open = stats.unprotectedManagers + stats.repairRequiredManagers;
-    return `${open} unprotected`;
+    return counts.unprotectedCount > 0 ? `${counts.unprotectedCount} unprotected` : PROTECTION_BADGE[status];
   }
   return "Checking";
 }
@@ -108,6 +124,11 @@ function cloudLabel(snapshot: GuardRuntimeSnapshot): string {
   return label.trim().length > 0 ? label : "On this device only";
 }
 
+/** Counts setup steps, the unit the recovery summary and issue list use. */
+export function setupStepsLabel(count: number): string {
+  return `${count} step${count === 1 ? "" : "s"} to fix`;
+}
+
 export function resolveSupplyChainWorkspaceHero(
   snapshot: GuardRuntimeSnapshot,
   options?: { openIssueCount?: number },
@@ -121,10 +142,10 @@ export function resolveSupplyChainWorkspaceHero(
   const stagedGuidance =
     protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;
 
-  const openManagers = stats.unprotectedManagers + stats.repairRequiredManagers;
+  const counts = badgeManagerCounts(snapshot);
   const facts = [
-    `${stats.protectedManagers} tool${stats.protectedManagers === 1 ? "" : "s"} protected`,
-    openManagers > 0 ? `${openManagers} tool${openManagers === 1 ? "" : "s"} unprotected` : null,
+    counts.protectedCount > 0 ? `${toolCount(counts.protectedCount)} protected` : null,
+    counts.unprotectedCount > 0 ? `${toolCount(counts.unprotectedCount)} unprotected` : null,
     preventedLabel,
     cloudLabel(snapshot),
   ].filter((fact): fact is string => fact !== null);
@@ -142,7 +163,7 @@ export function resolveSupplyChainWorkspaceHero(
       tone: protectionTone(protectionStatus),
       statLine: `${stats.protectedManagers} protected · ${stats.unprotectedManagers} open · ${preventedLabel}`,
       badge: "Needs repair",
-      liveLabel: `${openIssueCount} to fix`,
+      liveLabel: setupStepsLabel(openIssueCount),
       facts,
     };
   }
@@ -157,7 +178,7 @@ export function resolveSupplyChainWorkspaceHero(
     tone: protectionTone(protectionStatus),
     statLine: `${stats.protectedManagers} protected · ${stats.unprotectedManagers} open · ${preventedLabel}`,
     badge: PROTECTION_BADGE[protectionStatus],
-    liveLabel: protectionLiveLabel(protectionStatus, stats),
+    liveLabel: protectionLiveLabel(protectionStatus, counts),
     facts,
   };
 }

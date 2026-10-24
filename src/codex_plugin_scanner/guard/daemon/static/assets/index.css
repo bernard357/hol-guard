@@ -995,6 +995,10 @@
     display: grid !important;
   }
 
+  .\!inline {
+    display: inline !important;
+  }
+
   .block {
     display: block;
   }

@@ -1,6 +1,6 @@
 import { BrandHero, BrandHeroBadge, BrandHeroFacts, type BrandHeroTone } from "../../brand-hero";
 import { TrackedExternalButton } from "./tracked-action-button";
-import { MachineFigure, SYNC_STATE_LABEL, resolveSyncState } from "./machine-figure";
+import { MachineFigure, resolveSyncState } from "./machine-figure";
 import { ABOUT_HERO_BODY, ABOUT_HERO_TITLE } from "../about-content";
 import type { AboutRuntimeSummary } from "../about-types";
 
@@ -11,7 +11,19 @@ type AboutHeroState = {
   facts: string[];
 };
 
-/** What the branded hero may say about this install. No runtime report means no claim. */
+const SYNC_FACT: Record<ReturnType<typeof resolveSyncState>, string> = {
+  on: "Cloud sync on",
+  stalled: "Cloud sync stalled",
+  pairing: "Cloud sync waiting for first upload",
+  off: "Cloud sync off",
+  unavailable: "Cloud sync unavailable",
+};
+
+/**
+ * What the branded hero may say about this install. No runtime report means no
+ * claim. The summary carries no protection health, so About says Guard is
+ * running and leaves protected or not to Home.
+ */
 export function resolveAboutHeroState(runtimeSummary: AboutRuntimeSummary | null): AboutHeroState {
   if (!runtimeSummary) {
     return {
@@ -25,7 +37,7 @@ export function resolveAboutHeroState(runtimeSummary: AboutRuntimeSummary | null
   const version = runtimeSummary.guardVersion?.trim();
   const facts = [
     version && version.toLowerCase() !== "unknown" ? `Version ${version}` : null,
-    `Cloud sync ${SYNC_STATE_LABEL[resolveSyncState(runtimeSummary)].toLowerCase()}`,
+    SYNC_FACT[resolveSyncState(runtimeSummary)],
     "Open source under Apache-2.0",
   ].filter((fact): fact is string => fact !== null);
   if (pending > 0) {
@@ -36,7 +48,7 @@ export function resolveAboutHeroState(runtimeSummary: AboutRuntimeSummary | null
       facts,
     };
   }
-  return { tone: "clear", badge: "Protecting this device", liveLabel: "Local-first", facts };
+  return { tone: "setup", badge: "Running on this device", liveLabel: "Local-first", facts };
 }
 
 export function AboutHero({
@@ -47,7 +59,8 @@ export function AboutHero({
   const hero = resolveAboutHeroState(runtimeSummary);
   return (
     <div className="space-y-10">
-      <BrandHero tone={hero.tone} liveLabel={hero.liveLabel} labelledBy="about-hero-heading">
+      {/* The surrounding SectionShell already names this region by its heading. */}
+      <BrandHero tone={hero.tone} liveLabel={hero.liveLabel}>
         <BrandHeroBadge tone={hero.tone}>{hero.badge}</BrandHeroBadge>
         <div className="max-w-2xl">
           <h1

@@ -2,8 +2,8 @@ import { j as jsxRuntimeExports, r as reactExports, A as ActionButton, s as HiMi
 import { r as resolveSupplyChainIssues } from "./supply-chain-issues-DeC2Wyty.js";
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-Du65PsUR.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
-import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-CPRrEfls.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-BuT7YuDN.js";
+import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-C60mcKZP.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-DH6YyFOR.js";
 import "./feed-health-workspace-Bb4acrba.js";
 const PROTECTION_BADGE = {
   protected: "Protected",
@@ -12,16 +12,25 @@ const PROTECTION_BADGE = {
   unprotected: "Not protected",
   unknown: "Checking"
 };
-function protectionLiveLabel(status, stats) {
+function toolCount(count) {
+  return `${count} tool${count === 1 ? "" : "s"}`;
+}
+function badgeManagerCounts(snapshot) {
+  const protection = snapshot.supply_chain?.package_manager_protection;
+  return {
+    protectedCount: protection?.protected_managers.length ?? 0,
+    unprotectedCount: protection?.unprotected_managers.length ?? 0
+  };
+}
+function protectionLiveLabel(status, counts) {
   if (status === "protected") {
-    return `Guarding ${stats.protectedManagers} tool${stats.protectedManagers === 1 ? "" : "s"}`;
+    return `Guarding ${toolCount(counts.protectedCount)}`;
   }
   if (status === "staged") {
     return "Restart pending";
   }
   if (status === "partial" || status === "unprotected") {
-    const open = stats.unprotectedManagers + stats.repairRequiredManagers;
-    return `${open} unprotected`;
+    return counts.unprotectedCount > 0 ? `${counts.unprotectedCount} unprotected` : PROTECTION_BADGE[status];
   }
   return "Checking";
 }
@@ -78,15 +87,18 @@ function cloudLabel(snapshot) {
   }
   return label.trim().length > 0 ? label : "On this device only";
 }
+function setupStepsLabel(count) {
+  return `${count} step${count === 1 ? "" : "s"} to fix`;
+}
 function resolveSupplyChainWorkspaceHero(snapshot, options) {
   const protectionStatus = resolveHomeProtectionStatus(snapshot);
   const stats = buildSupplyChainStats(snapshot);
   const preventedLabel = stats.preventedInstalls > 0 ? `${stats.preventedInstalls} blocked install${stats.preventedInstalls === 1 ? "" : "s"}` : "No blocked installs yet";
   const stagedGuidance = protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;
-  const openManagers = stats.unprotectedManagers + stats.repairRequiredManagers;
+  const counts = badgeManagerCounts(snapshot);
   const facts = [
-    `${stats.protectedManagers} tool${stats.protectedManagers === 1 ? "" : "s"} protected`,
-    openManagers > 0 ? `${openManagers} tool${openManagers === 1 ? "" : "s"} unprotected` : null,
+    counts.protectedCount > 0 ? `${toolCount(counts.protectedCount)} protected` : null,
+    counts.unprotectedCount > 0 ? `${toolCount(counts.unprotectedCount)} unprotected` : null,
     preventedLabel,
     cloudLabel(snapshot)
   ].filter((fact) => fact !== null);
@@ -103,7 +115,7 @@ function resolveSupplyChainWorkspaceHero(snapshot, options) {
       tone: protectionTone(protectionStatus),
       statLine: `${stats.protectedManagers} protected · ${stats.unprotectedManagers} open · ${preventedLabel}`,
       badge: "Needs repair",
-      liveLabel: `${openIssueCount} to fix`,
+      liveLabel: setupStepsLabel(openIssueCount),
       facts
     };
   }
@@ -117,7 +129,7 @@ function resolveSupplyChainWorkspaceHero(snapshot, options) {
     tone: protectionTone(protectionStatus),
     statLine: `${stats.protectedManagers} protected · ${stats.unprotectedManagers} open · ${preventedLabel}`,
     badge: PROTECTION_BADGE[protectionStatus],
-    liveLabel: protectionLiveLabel(protectionStatus, stats),
+    liveLabel: protectionLiveLabel(protectionStatus, counts),
     facts
   };
 }
@@ -148,6 +160,7 @@ function SupplyChainWorkspaceHero({ hero }) {
     }
   );
 }
+const LOCAL_PROTECTION_ACTIONS = /* @__PURE__ */ new Set(["firewall_unprotected", "firewall_repair"]);
 function recoverySummary(issueCount) {
   return `${issueCount} issue${issueCount === 1 ? "" : "s"} to resolve. Check Cloud access, approve device changes once, then restore package protection.`;
 }
@@ -156,7 +169,8 @@ function SupplyChainRecovery({
   state,
   onFixAll,
   guidance = null,
-  facts = []
+  facts = [],
+  locallyProtected = false
 }) {
   const [detailsOpen, setDetailsOpen] = reactExports.useState(false);
   const handleDetailsToggle = reactExports.useCallback(() => {
@@ -168,6 +182,8 @@ function SupplyChainRecovery({
   const failures = [...new Set(state.failedSteps)].filter((message) => message !== state.message);
   const needsCloudConnect = supplyChainFixAllNeedsCloudConnect(state);
   const isHardFailure = state.phase === "error" || state.phase === "incomplete" && state.failedSteps.length > 0;
+  const needsLocalRepair = !locallyProtected || issues.some((issue) => LOCAL_PROTECTION_ACTIONS.has(issue.action.kind));
+  const tone = needsLocalRepair ? "review" : "clear";
   const buttonLabel = supplyChainFixAllButtonLabel(
     state.phase,
     state.remainingAction ?? null,
@@ -176,14 +192,14 @@ function SupplyChainRecovery({
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     BrandHero,
     {
-      tone: "review",
-      liveLabel: `${issues.length} to fix`,
+      tone,
+      liveLabel: setupStepsLabel(issues.length),
       ariaLabel: "Supply-chain recovery",
       testId: "supply-chain-recovery",
       markOnSmall: "inline",
       compact: true,
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(BrandHeroBadge, { tone: "review", children: "Needs repair" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(BrandHeroBadge, { tone, children: needsLocalRepair ? "Needs repair" : "Protected on this device" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-2xl", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "guard-hero-title text-2xl font-semibold tracking-tight text-white sm:text-3xl", children: "Restore supply-chain protection" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-xl text-[15px] leading-relaxed text-white/80", children: recoverySummary(issues.length) }),
@@ -275,7 +291,8 @@ function SupplyChainWorkspace({ snapshot, fixAllState, onFixAll }) {
       state: fixAllState,
       onFixAll,
       guidance: workspaceHero.stagedGuidance,
-      facts: workspaceHero.facts
+      facts: workspaceHero.facts,
+      locallyProtected: workspaceHero.protectionStatus === "protected"
     }
   ) : /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainWorkspaceHero, { hero: workspaceHero });
 }

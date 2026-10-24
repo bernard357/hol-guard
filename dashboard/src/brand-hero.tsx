@@ -1,10 +1,23 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 
 import { BRAND_MARK } from "./brand-mark-geometry";
 import { HeroParticleLogo } from "./home-hero-particle-logo";
 
 /** Visual tone for a branded hero: the accent glow, badge tint, live dot and particle mood all follow it. */
 export type BrandHeroTone = "clear" | "review" | "setup";
+
+/** Matches Tailwind's lg breakpoint, where the particle stage shows. */
+const STAGE_QUERY = "(min-width: 1024px)";
+
+function stageVisible(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(STAGE_QUERY).matches;
+}
+
+function subscribeStage(callback: () => void): () => void {
+  const query = window.matchMedia(STAGE_QUERY);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+}
 
 const MARK_CENTER = 50;
 const MARK_SCALE = 42;
@@ -86,9 +99,14 @@ export function BrandHero(props: {
   compact?: boolean;
 }) {
   const inline = props.markOnSmall === "inline";
+  const wide = useSyncExternalStore(subscribeStage, stageVisible, () => false);
+  // Inline heroes hide the stage below lg; skip its WebGL scene there instead of hiding it.
+  const mountStage = !inline || wide;
+  const named = Boolean(props.labelledBy || props.ariaLabel);
+  const Surface = named ? "section" : "div";
   const column = props.compact ? "lg:grid-cols-[minmax(0,1fr)_260px]" : "lg:grid-cols-[minmax(0,1fr)_380px]";
   return (
-    <section
+    <Surface
       className="guard-hero guard-surface-in relative overflow-hidden rounded-2xl border border-white/10 p-5 text-white sm:p-6 lg:p-8"
       data-status={props.tone}
       aria-label={props.labelledBy ? undefined : props.ariaLabel}
@@ -99,13 +117,15 @@ export function BrandHero(props: {
       <div className={`grid gap-6 ${column} lg:items-center`}>
         <div className="relative min-w-0 space-y-5">{props.children}</div>
         <div className={`relative mx-auto w-full max-w-[380px] lg:max-w-none${inline ? " hidden lg:block" : ""}`}>
-          <HeroParticleLogo mood={props.tone} finish="white" className={props.compact ? "guard-hero-stage--compact" : undefined} />
+          {mountStage ? (
+            <HeroParticleLogo mood={props.tone} finish="white" className={props.compact ? "guard-hero-stage--compact" : undefined} />
+          ) : null}
           <p className="guard-hero-live" aria-hidden="true">
             <i />
             <span>{props.liveLabel}</span>
           </p>
         </div>
       </div>
-    </section>
+    </Surface>
   );
 }
