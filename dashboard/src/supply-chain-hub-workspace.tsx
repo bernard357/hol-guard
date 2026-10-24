@@ -20,15 +20,19 @@ const SupplyChainWorkspaceDetails = lazyWorkspace("supply-chain-workspace-detail
 const AuditWorkspace = lazyWorkspace("audit-workspace", () =>
   import("./audit-workspace").then((m) => ({ default: m.AuditWorkspace }))
 );
+const WorkspaceFindingsWorkspace = lazyWorkspace("workspace-findings-workspace", () =>
+  import("./workspace-findings-workspace").then((m) => ({ default: m.WorkspaceFindingsWorkspace }))
+);
 const FeedHealthWorkspace = lazyWorkspace("feed-health-workspace", () =>
   import("./feed-health-workspace").then((m) => ({ default: m.FeedHealthWorkspace }))
 );
 
-type HubTab = "supply-chain" | "audit" | "feed-health";
+type HubTab = "supply-chain" | "audit" | "workspaces" | "feed-health";
 
 const hubTabs: Array<{ value: HubTab; label: string }> = [
   { value: "supply-chain", label: "Supply Chain" },
   { value: "audit", label: "Audit" },
+  { value: "workspaces", label: "Workspaces" },
   { value: "feed-health", label: "Feed Health" },
 ];
 
@@ -37,7 +41,7 @@ export function hubTitleForTab(tab: HubTab): string {
 }
 
 function viewToTab(view: string): HubTab {
-  if (view === "supply-chain" || view === "audit" || view === "feed-health") {
+  if (view === "supply-chain" || view === "audit" || view === "workspaces" || view === "feed-health") {
     return view;
   }
   return "supply-chain";
@@ -111,6 +115,12 @@ export function SupplyChainHubWorkspace(props: {
             receipts={props.receipts}
             approvalGate={props.approvalGate}
             auditSession={auditSession}
+          />
+        )}
+        {tab === "workspaces" && (
+          <WorkspaceFindingsWorkspace
+            suggestedRoot={auditSession.auditWorkspaceDir || managedAuditWorkspaceDir || ""}
+            onChooseFolder={auditSession.handleChooseAuditWorkspace}
           />
         )}
         {tab === "feed-health" && (
