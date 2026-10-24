@@ -61,7 +61,7 @@ def canonical_supply_chain_bundle_payload(bundle: SupplyChainBundle | dict[str, 
     """Return the canonical payload used for payloadHash and RSA-PSS signing.
 
     Keys sort by code point, separators are compact, and non-ASCII text stays UTF-8
-    rather than becoming ``\\uXXXX`` escapes, because that is how the signing side
+    rather than becoming unicode escape sequences, because that is how the signing side
     writes the bytes it signs. A lone surrogate is escaped the way a well-formed JSON
     writer escapes it, so malformed text fails the hash check instead of raising.
     """
