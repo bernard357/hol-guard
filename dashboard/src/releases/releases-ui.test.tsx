@@ -477,7 +477,7 @@ const detail: ReleaseDetail = {
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     assert.doesNotMatch(
       source,
-      /\b(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d/,
+      /\b(?:slate|gray|zinc|neutral|stone|mauve|olive|mist|taupe|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d/,
       path,
     );
     assert.doesNotMatch(source, /tone=\{?[^}\n]*"(?:amber|warning)"/, path);
