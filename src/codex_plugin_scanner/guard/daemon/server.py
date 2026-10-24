@@ -251,6 +251,8 @@ _LOCAL_DISCOVERY_MEASUREMENT = {
 
 _LOCAL_DASHBOARD_SESSION_REFRESH_GRACE_SECONDS = 7 * 24 * 60 * 60
 _DEFAULT_HEADLESS_CLOUD_SYNC_INTERVAL_SECONDS = 30.0
+_PLUGIN_TELEMETRY_FIRST_CHECK_SECONDS = 300.0
+_PLUGIN_TELEMETRY_CHECK_INTERVAL_SECONDS = 6 * 60 * 60.0
 _DEFAULT_HEADLESS_CLOUD_SYNC_BACKOFF_SECONDS = 10.0
 
 
@@ -3401,6 +3403,7 @@ class GuardDaemonServer:
         self._command_activity_maintenance_thread: threading.Thread | None = None
         self._onefile_extraction_reclaim_thread: threading.Thread | None = None
         self._extension_control_refresh_thread: threading.Thread | None = None
+        self._plugin_telemetry_thread: threading.Thread | None = None
         self._extension_control_refresh_interval_seconds = extension_control_refresh_interval_seconds
         self._cloud_review_sync_worker: CloudReviewSyncWorker | None = None
         self._thread: threading.Thread | None = None
@@ -3588,6 +3591,7 @@ class GuardDaemonServer:
                 self._start_supply_chain_bundle_refresh()
                 self._start_aibom_inventory_refresh()
                 self._start_extension_control_refresh()
+                self._start_plugin_telemetry()
             with timed_phase("start_queue_and_cloud_workers", phase):
                 self._command_queue_worker = start_command_queue_worker(self._server.store, self._command_queue_worker)
                 self._cloud_review_sync_worker = start_cloud_sync_sync_worker(
@@ -4040,6 +4044,10 @@ class GuardDaemonServer:
             getattr(self, "_headless_cloud_sync_thread", None),
             deadline=deadline,
         )
+        self._plugin_telemetry_thread = self._join_service_thread(
+            getattr(self, "_plugin_telemetry_thread", None),
+            deadline=deadline,
+        )
         self._command_activity_maintenance_thread = self._join_service_thread(
             getattr(self, "_command_activity_maintenance_thread", None),
             deadline=deadline,
@@ -4060,6 +4068,7 @@ class GuardDaemonServer:
                 self._aibom_refresh_thread,
                 self._extension_control_refresh_thread,
                 self._headless_cloud_sync_thread,
+                self._plugin_telemetry_thread,
                 self._command_activity_maintenance_thread,
                 self._onefile_extraction_reclaim_thread,
                 self._native_resident_watchdog_thread,
@@ -4245,6 +4254,31 @@ class GuardDaemonServer:
             sync_network_protection_bundle_best_effort(self._server.store)
             if self._shutdown_started.wait(wait_seconds):
                 return
+
+    def _start_plugin_telemetry(self) -> None:
+        if self._plugin_telemetry_thread is not None:
+            return
+        self._plugin_telemetry_thread = threading.Thread(
+            target=self._plugin_telemetry_loop,
+            daemon=True,
+            name="guard-plugin-telemetry",
+        )
+        self._plugin_telemetry_thread.start()
+
+    def _plugin_telemetry_loop(self) -> None:
+        """Sends the opted-in weekly plugin install report; a no-op until opt-in."""
+
+        from ..plugin_telemetry.report import PluginTelemetryError, send_if_due
+
+        wait_seconds = _PLUGIN_TELEMETRY_FIRST_CHECK_SECONDS
+        while not self._shutdown_started.wait(wait_seconds):
+            wait_seconds = _PLUGIN_TELEMETRY_CHECK_INTERVAL_SECONDS
+            try:
+                send_if_due(self._server.store.guard_home)
+            except PluginTelemetryError as error:
+                _LOGGER.info("Plugin install report not sent: %s", error)
+            except Exception:
+                _LOGGER.exception("Plugin install report failed")
 
     def _start_extension_control_refresh(self) -> None:
         if self._extension_control_refresh_thread is not None:

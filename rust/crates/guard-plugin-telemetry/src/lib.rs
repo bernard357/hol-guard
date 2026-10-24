@@ -67,7 +67,13 @@ pub fn run_request(bytes: &[u8]) -> Value {
 
 fn handle(request: Request) -> Result<Value, String> {
     match request {
-        Request::Report { homes, index, secret, week, guard_version } => {
+        Request::Report {
+            homes,
+            index,
+            secret,
+            week,
+            guard_version,
+        } => {
             let secret = decode_secret(&secret)?;
             if !valid_week(&week) {
                 return Err("plugin_telemetry_week_invalid".to_owned());
@@ -142,8 +148,14 @@ mod tests {
     #[test]
     fn rejects_unknown_fields_and_bad_secrets() {
         let unknown = br#"{"command":"report","homes":{},"index":[],"secret":"00","week":"2026-W43","guardVersion":"1","hostname":"x"}"#;
-        assert_eq!(run_request(unknown)["error"], "plugin_telemetry_request_invalid");
+        assert_eq!(
+            run_request(unknown)["error"],
+            "plugin_telemetry_request_invalid"
+        );
         let short = br#"{"command":"report","homes":{},"index":[],"secret":"00","week":"2026-W43","guardVersion":"1"}"#;
-        assert_eq!(run_request(short)["error"], "plugin_telemetry_secret_invalid");
+        assert_eq!(
+            run_request(short)["error"],
+            "plugin_telemetry_secret_invalid"
+        );
     }
 }

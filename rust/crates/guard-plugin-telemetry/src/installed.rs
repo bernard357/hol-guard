@@ -40,19 +40,48 @@ pub struct InstalledPlugin {
 pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
     let mut found = Vec::new();
     if let Some(home) = &homes.claude {
-        walk_manifests(&home.join("plugins").join("cache"), 4, ".claude-plugin/plugin.json", "claude-code", &mut found);
+        walk_manifests(
+            &home.join("plugins").join("cache"),
+            4,
+            ".claude-plugin/plugin.json",
+            "claude-code",
+            &mut found,
+        );
     }
     if let Some(home) = &homes.codex {
-        walk_manifests(&home.join("plugins").join("cache"), 4, ".codex-plugin/plugin.json", "codex", &mut found);
+        walk_manifests(
+            &home.join("plugins").join("cache"),
+            4,
+            ".codex-plugin/plugin.json",
+            "codex",
+            &mut found,
+        );
     }
     if let Some(home) = &homes.cursor {
-        walk_manifests(&home.join("plugins"), 4, ".cursor-plugin/plugin.json", "cursor", &mut found);
+        walk_manifests(
+            &home.join("plugins"),
+            4,
+            ".cursor-plugin/plugin.json",
+            "cursor",
+            &mut found,
+        );
     }
     if let Some(home) = &homes.gemini {
-        walk_manifests(&home.join("extensions"), 1, "gemini-extension.json", "gemini", &mut found);
+        walk_manifests(
+            &home.join("extensions"),
+            1,
+            "gemini-extension.json",
+            "gemini",
+            &mut found,
+        );
     }
     found.sort_by(|a, b| {
-        (a.runtime, &a.repository, &a.name, &a.version).cmp(&(b.runtime, &b.repository, &b.name, &b.version))
+        (a.runtime, &a.repository, &a.name, &a.version).cmp(&(
+            b.runtime,
+            &b.repository,
+            &b.name,
+            &b.version,
+        ))
     });
     found.dedup();
     found.truncate(MAX_INSTALLED);
@@ -61,7 +90,13 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
 
 /// Breadth-first walk of `root` to `max_depth`, reading `manifest` (a path
 /// relative to each folder) wherever it exists.
-fn walk_manifests(root: &Path, max_depth: usize, manifest: &str, runtime: &'static str, out: &mut Vec<InstalledPlugin>) {
+fn walk_manifests(
+    root: &Path,
+    max_depth: usize,
+    manifest: &str,
+    runtime: &'static str,
+    out: &mut Vec<InstalledPlugin>,
+) {
     let mut queue = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0usize;
     while let Some((dir, depth)) = queue.pop() {
@@ -69,7 +104,9 @@ fn walk_manifests(root: &Path, max_depth: usize, manifest: &str, runtime: &'stat
         if visited > MAX_DIRS_VISITED {
             return;
         }
-        let Ok(meta) = fs::symlink_metadata(&dir) else { continue };
+        let Ok(meta) = fs::symlink_metadata(&dir) else {
+            continue;
+        };
         if !meta.is_dir() {
             continue;
         }
@@ -82,7 +119,9 @@ fn walk_manifests(root: &Path, max_depth: usize, manifest: &str, runtime: &'stat
         if depth >= max_depth {
             continue;
         }
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let name = entry.file_name();
             if name.to_string_lossy().starts_with('.') {
@@ -101,17 +140,30 @@ fn read_manifest(path: &Path, runtime: &'static str) -> Option<InstalledPlugin> 
         return None;
     }
     let value: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
     let repository = match value.get("repository") {
         Some(Value::String(url)) => normalize_repository_url(url),
-        Some(Value::Object(object)) => object.get("url").and_then(Value::as_str).and_then(normalize_repository_url),
+        Some(Value::Object(object)) => object
+            .get("url")
+            .and_then(Value::as_str)
+            .and_then(normalize_repository_url),
         _ => None,
     }
     .or_else(|| text("homepage").and_then(normalize_repository_url));
     Some(InstalledPlugin {
         runtime,
-        name: text("name").filter(|name| name.len() <= 200).map(str::to_owned),
-        version: text("version").filter(|version| valid_version(version, 64)).map(str::to_owned),
+        name: text("name")
+            .filter(|name| name.len() <= 200)
+            .map(str::to_owned),
+        version: text("version")
+            .filter(|version| valid_version(version, 64))
+            .map(str::to_owned),
         repository,
     })
 }
@@ -126,7 +178,10 @@ mod tests {
     }
 
     fn temp_root(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("guard-plugin-telemetry-{tag}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "guard-plugin-telemetry-{tag}-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&root);
         root
     }
@@ -155,8 +210,14 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         assert_eq!(found.len(), 3);
         assert_eq!(found[0].runtime, "claude-code");
-        assert_eq!(found[0].repository.as_deref(), Some("https://github.com/octo/pdf"));
-        assert_eq!(found[1].repository.as_deref(), Some("https://github.com/octo/lint"));
+        assert_eq!(
+            found[0].repository.as_deref(),
+            Some("https://github.com/octo/pdf")
+        );
+        assert_eq!(
+            found[1].repository.as_deref(),
+            Some("https://github.com/octo/lint")
+        );
         assert_eq!(found[2].runtime, "gemini");
         assert_eq!(found[2].version, None);
     }
@@ -164,12 +225,18 @@ mod tests {
     #[test]
     fn skips_oversized_and_malformed_manifests() {
         let root = temp_root("bad");
-        write(&root.join("plugins/cache/m/a/1/.codex-plugin/plugin.json"), "{not json");
+        write(
+            &root.join("plugins/cache/m/a/1/.codex-plugin/plugin.json"),
+            "{not json",
+        );
         write(
             &root.join("plugins/cache/m/b/1/.codex-plugin/plugin.json"),
             &format!(r#"{{"name":"{}"}}"#, "x".repeat(300 * 1024)),
         );
-        let found = discover(&RuntimeHomes { codex: Some(root.clone()), ..RuntimeHomes::default() });
+        let found = discover(&RuntimeHomes {
+            codex: Some(root.clone()),
+            ..RuntimeHomes::default()
+        });
         let _ = fs::remove_dir_all(&root);
         assert!(found.is_empty());
     }
