@@ -39,6 +39,10 @@ _FINDINGS_BYTE_BUDGET: Final = MAX_FINDINGS_JSON_BYTES - 1024
 _MAX_LIST_ITEMS: Final = 8
 _SEVERITY_ORDER: Final = ("critical", "high", "medium", "low", "info", "unknown")
 _FINDING_DECISIONS: Final = frozenset({"block", "ask", "warn"})
+# An automatic run never asks Cloud, so a package the cached bundle does not
+# cover comes back with one of these codes. They mean the answer is unknown,
+# which is a coverage gap rather than evidence that the package is risky.
+_LOOKUP_UNAVAILABLE: Final = frozenset({"cloud_auth_error", "cloud_http_error", "cloud_timeout"})
 
 
 def now_ms() -> int:
@@ -152,7 +156,7 @@ def coverage_summary(
     supply_chain = "complete"
     if payload.get("audit_status") == "incomplete":
         supply_chain = "no_inputs" if not payload.get("manifest_paths") else "incomplete"
-    if supply_chain == "complete" and egress_refused:
+    if supply_chain == "complete" and (egress_refused or _unresolved_packages(payload)):
         # A package needed registry or Cloud data the offline run could not get.
         supply_chain = "incomplete"
     if supply_chain == "incomplete":
@@ -188,16 +192,10 @@ def project_supply_chain_findings(
     identifiers. It never carries file content, commands or local paths.
     """
 
-    evaluation = payload.get("evaluation")
-    packages = evaluation.get("packages") if isinstance(evaluation, Mapping) else None
-    if not isinstance(packages, list):
-        return [], False
     findings: dict[str, dict[str, object]] = {}
-    for package in packages:
-        if not isinstance(package, Mapping):
-            continue
+    for package in _packages(payload):
         decision = str(package.get("decision") or "")
-        if decision not in _FINDING_DECISIONS:
+        if decision not in _FINDING_DECISIONS or _lookup_unavailable(package):
             continue
         ecosystem = _text(package.get("ecosystem")) or "unknown"
         name = _text(package.get("name"))
@@ -246,6 +244,26 @@ def project_supply_chain_findings(
         kept.append(finding)
         used += size
     return kept, len(kept) < len(ordered)
+
+
+def _packages(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
+    evaluation = payload.get("evaluation")
+    packages = evaluation.get("packages") if isinstance(evaluation, Mapping) else None
+    return [item for item in packages if isinstance(item, Mapping)] if isinstance(packages, list) else []
+
+
+def _lookup_unavailable(package: Mapping[str, object]) -> bool:
+    if package.get("decision") == "block":
+        return False
+    reasons = package.get("reasons")
+    codes = {item.get("code") for item in reasons if isinstance(item, Mapping)} if isinstance(reasons, list) else set()
+    codes.add(package.get("ruleId"))
+    codes.discard(None)
+    return bool(codes) and codes <= _LOOKUP_UNAVAILABLE
+
+
+def _unresolved_packages(payload: Mapping[str, object]) -> int:
+    return sum(1 for package in _packages(payload) if _lookup_unavailable(package))
 
 
 def _max_severity(reasons: list[Mapping[str, object]]) -> str:
