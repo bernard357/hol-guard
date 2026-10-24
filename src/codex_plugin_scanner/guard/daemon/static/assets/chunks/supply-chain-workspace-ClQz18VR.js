@@ -1,9 +1,9 @@
 import { j as jsxRuntimeExports, T as Tag, ea as HiMiniComputerDesktop, a0 as HiMiniCloud, s as HiMiniCheckCircle, d as HiMiniArrowPath, a4 as HiMiniExclamationTriangle, r as reactExports, ap as HiMiniWrenchScrewdriver, A as ActionButton, c as HiMiniChevronDown, ab as HiMiniExclamationCircle } from "../guard-dashboard.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-hFGaGr34.js";
-import { r as resolveHomeProtectionStatus } from "./home-protection-module-Du65PsUR.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-DK82944v.js";
+import { r as resolveHomeProtectionStatus } from "./home-protection-module-DYHkHSPd.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-C3d9J9-5.js";
-import "./feed-health-workspace-CdF42t_-.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-BZ3-TyJ3.js";
+import "./feed-health-workspace-B4WCTrqZ.js";
 function protectionTitle(status) {
   if (status === "protected") {
     return "Package installs are protected on this device";
