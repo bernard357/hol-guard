@@ -395,7 +395,12 @@ def recent_runs(store: Any, keys: WorktreeKeys | None = None, *, limit: int = 20
             """,
             (*params, max(1, min(limit, 200))),
         ).fetchall()
-    return [_run_payload(row) for row in rows]
+    # Run history carries a count; findings are read from the latest assessed
+    # run, so a long history never multiplies the stored finding lists.
+    runs = [_run_payload(row) for row in rows]
+    for run in runs:
+        run["finding_count"] = len(run.pop("findings"))
+    return runs
 
 
 def get_run(store: Any, run_id: str) -> dict[str, object] | None:

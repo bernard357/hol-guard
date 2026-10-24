@@ -196,6 +196,9 @@ def test_latest_assessed_runs_skip_failed_runs(tmp_path: Path) -> None:
     assert assessments.finish(store, second, failed, now_ms=T0 + 3)
     [latest] = assessments.latest_assessed_runs(store)
     assert (latest["run_id"], latest["state"], latest["findings"]) == (first.run_id, "partial", findings)
+    history = {run["run_id"]: run for run in assessments.recent_runs(store)}
+    assert history[first.run_id]["finding_count"] == 1
+    assert "findings" not in history[first.run_id]
 
 
 def test_oversized_result_is_rejected_before_storage(tmp_path: Path) -> None:
