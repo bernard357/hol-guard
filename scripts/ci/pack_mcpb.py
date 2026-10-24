@@ -11,12 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import stat
 import sys
+import tempfile
 import urllib.parse
 import zipfile
 from pathlib import Path
+
+import tomllib
 
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_FILE_BYTES = 256 * 1024
@@ -311,21 +313,30 @@ def _relative_file(value: str) -> str:
 def _pyproject(root: Path, files: list[tuple[str, Path]], version: str) -> None:
     if not any(name == "pyproject.toml" for name, _file in files):
         raise PackError("pyproject.toml is missing")
-    text = (root / "pyproject.toml").read_text(encoding="utf-8")
-    if len(text.encode("utf-8")) > MAX_FILE_BYTES:
+    raw = (root / "pyproject.toml").read_bytes()
+    if len(raw) > MAX_FILE_BYTES:
         raise PackError("pyproject.toml exceeds 256 KiB")
-    pinned = re.escape(version)
-    version_line = re.search(rf'(?m)^version = "{pinned}"$', text)
-    dependency = re.search(r'"hol-guard==([^"]+)"', text)
-    if version_line is None or dependency is None or dependency.group(1) != version:
+    try:
+        document = tomllib.loads(raw.decode("utf-8"))
+    except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise PackError("pyproject.toml is not valid TOML") from exc
+    project = document.get("project")
+    if not isinstance(project, dict) or project.get("version") != version:
         raise PackError("pyproject.toml version must match the manifest")
+    dependencies = project.get("dependencies")
+    if not isinstance(dependencies, list) or f"hol-guard=={version}" not in dependencies:
+        raise PackError("pyproject.toml must depend on the manifest version of hol-guard")
 
 
 def _write_archive(files: list[tuple[str, Path]], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    partial = output.with_name(output.name + ".partial")
+    descriptor, partial_name = tempfile.mkstemp(prefix=f".{output.name}.", suffix=".partial", dir=output.parent)
+    partial = Path(partial_name)
     try:
-        with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        with (
+            os.fdopen(descriptor, "wb") as handle,
+            zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive,
+        ):
             for name, path in files:
                 data = path.read_bytes()
                 if len(data) > MAX_FILE_BYTES:
@@ -336,7 +347,7 @@ def _write_archive(files: list[tuple[str, Path]], output: Path) -> None:
                 info.external_attr = (stat.S_IFREG | (path.stat().st_mode & 0o777)) << 16
                 info.flag_bits |= 0x800
                 archive.writestr(info, data)
-        partial.replace(output)
+        os.replace(partial, output)
     except Exception:
         partial.unlink(missing_ok=True)
         raise

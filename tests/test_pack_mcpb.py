@@ -89,6 +89,49 @@ def test_entry_point_escape_is_refused(tmp_path: Path) -> None:
         pack_bundle(bundle, tmp_path / "hol-guard.mcpb")
 
 
+def test_project_file_accepts_equivalent_toml(tmp_path: Path) -> None:
+    bundle = _copy_bundle(tmp_path)
+    version = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))["version"]
+    text = (bundle / "pyproject.toml").read_text(encoding="utf-8")
+    text = text.replace(f'version = "{version}"', f"version = '{version}'")
+    text = text.replace(f'"hol-guard=={version}"', f"'hol-guard=={version}'")
+    (bundle / "pyproject.toml").write_text(text, encoding="utf-8")
+    assert pack_bundle(bundle, tmp_path / "hol-guard.mcpb") == list(EXPECTED)
+
+
+def test_dependency_text_outside_the_dependency_list_is_refused(tmp_path: Path) -> None:
+    bundle = _copy_bundle(tmp_path)
+    version = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))["version"]
+    (bundle / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "hol-guard-mcpb-runtime"',
+                f'version = "{version}"',
+                "dependencies = []",
+                "",
+                "[tool.note]",
+                f'comment = "hol-guard=={version}"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(PackError, match="depend on the manifest version"):
+        pack_bundle(bundle, tmp_path / "hol-guard.mcpb")
+
+
+def test_partial_symlink_does_not_replace_its_target(tmp_path: Path) -> None:
+    bundle = _copy_bundle(tmp_path)
+    output = tmp_path / "hol-guard.mcpb"
+    target = tmp_path / "target.txt"
+    target.write_text("keep", encoding="utf-8")
+    output.with_name(output.name + ".partial").symlink_to(target)
+    pack_bundle(bundle, output)
+    assert target.read_text(encoding="utf-8") == "keep"
+    assert output.is_file() and not output.is_symlink()
+
+
 def test_pyproject_version_must_match_the_manifest(tmp_path: Path) -> None:
     bundle = _copy_bundle(tmp_path)
     manifest_path = bundle / "manifest.json"
@@ -132,5 +175,8 @@ def test_release_workflows_pack_without_the_mcpb_cli() -> None:
     gates = (workflows / "security-gates.yml").read_text(encoding="utf-8")
     assert "harden-forge" not in gates
     assert "--vex" not in gates
+    ignore = (ROOT / ".trivyignore").read_text(encoding="utf-8")
+    assert "CVE-2026-85393" not in ignore
+    assert "@anthropic-ai/mcpb" not in ignore
     dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     assert "mcpb-cli" not in dependabot
