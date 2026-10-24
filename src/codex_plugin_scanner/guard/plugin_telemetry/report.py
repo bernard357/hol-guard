@@ -19,7 +19,7 @@ from typing import Any
 
 from ...version import __version__
 from ..mdm.network import ManagedNetworkError, managed_urlopen
-from .state import TelemetryState, ensure_secret, read_secret, read_state, write_state
+from .state import TelemetryState, TelemetryStateBusyError, claim_week, read_secret, read_state, release_week
 
 PLUGIN_TELEMETRY_COMMAND = "plugin-telemetry"
 PLUGIN_TELEMETRY_FEATURE = "plugin-telemetry-v1"
@@ -28,9 +28,15 @@ REPORT_URL = "https://hol.org/api/guard/plugins/install-telemetry"
 PRIVACY_URL = "https://hol.org/privacy#guard-plugin-install-telemetry"
 _TIMEOUT_SECONDS = 20.0
 _NATIVE_TIMEOUT_SECONDS = 60.0
-_INDEX_LIMIT_BYTES = 8 * 1024 * 1024
+# The full index is downloaded, then cut down to the installed repositories
+# before it reaches the native runtime, which reads at most 6 MiB of stdin.
+_INDEX_LIMIT_BYTES = 32 * 1024 * 1024
+_NATIVE_REQUEST_LIMIT_BYTES = 6 * 1024 * 1024
 _OUTPUT_LIMIT_BYTES = 1024 * 1024
 _INDEX_FIELDS = ("slug", "repository", "manifestName", "pluginRoot")
+
+
+_OFF_MESSAGE = "Plugin install counts are off. Run: hol-guard telemetry plugins on"
 
 
 class PluginTelemetryError(RuntimeError):
@@ -98,9 +104,14 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     ):
         raise PluginTelemetryError("Plugin install counts need the Guard native runtime. Run: pip install -U hol-guard")
     runtime = status.identity.path
+    input_text = json.dumps(dict(request), sort_keys=True, separators=(",", ":"))
+    if len(input_text.encode("utf-8")) > _NATIVE_REQUEST_LIMIT_BYTES:
+        raise PluginTelemetryError(
+            "The HOL plugin index is too large for this Guard version. Run: pip install -U hol-guard"
+        )
     completed = run_isolated_hook_process(
         (str(runtime), PLUGIN_TELEMETRY_COMMAND, "--stdin"),
-        input_text=json.dumps(dict(request), sort_keys=True, separators=(",", ":")),
+        input_text=input_text,
         cwd=runtime.parent,
         environment=dict(os.environ),
         timeout_seconds=_NATIVE_TIMEOUT_SECONDS,
@@ -123,6 +134,19 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     return response["result"]
 
 
+def installed_index(index: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The index entries whose repository a plugin installed here declares.
+
+    Matching needs a repository, so the rest of the index is never needed on
+    the device. The repository list is used here and is not sent anywhere.
+    """
+
+    result = _native_request({"command": "repositories", "homes": runtime_homes()})
+    repositories = result.get("repositories")
+    installed = {item for item in repositories if isinstance(item, str)} if isinstance(repositories, list) else set()
+    return [entry for entry in index if entry.get("repository") in installed]
+
+
 def build_report(secret: str, *, week: str, index: list[dict[str, object]] | None = None) -> dict[str, Any]:
     """``{"installed": n, "report": {...}}`` for this machine and week."""
 
@@ -130,7 +154,7 @@ def build_report(secret: str, *, week: str, index: list[dict[str, object]] | Non
         {
             "command": "report",
             "homes": runtime_homes(),
-            "index": fetch_index() if index is None else index,
+            "index": installed_index(fetch_index() if index is None else index),
             "secret": secret,
             "week": week,
             "guardVersion": __version__,
@@ -161,25 +185,48 @@ def dry_run(guard_home: Path) -> dict[str, Any]:
     return build_report(secret, week=current_week())
 
 
+def _send(guard_home: Path, week: str, previous: TelemetryState) -> dict[str, Any]:
+    try:
+        secret = read_secret(guard_home)
+        if secret is None:
+            raise PluginTelemetryError(_OFF_MESSAGE)
+        built = build_report(secret, week=week)
+        report = built["report"]
+        entries = report.get("entries") if isinstance(report, dict) else None
+        # Counts can be turned off while the index downloads and the report builds.
+        if not read_state(guard_home).enabled:
+            raise PluginTelemetryError(_OFF_MESSAGE)
+        accepted = post_report(report) if entries else 0
+    except BaseException:
+        release_week(guard_home, week, previous)
+        raise
+    return {"week": week, "installed": built.get("installed", 0), "listed": len(entries or []), "accepted": accepted}
+
+
 def send_now(guard_home: Path, *, now: datetime | None = None) -> dict[str, Any]:
     """Send this week's report. Requires opt-in; records the week on success."""
 
-    state = read_state(guard_home)
-    if not state.enabled:
-        raise PluginTelemetryError("Plugin install counts are off. Run: hol-guard telemetry plugins on")
     week = current_week(now)
-    built = build_report(ensure_secret(guard_home), week=week)
-    report = built["report"]
-    entries = report.get("entries") if isinstance(report, dict) else None
-    accepted = post_report(report) if entries else 0
-    write_state(guard_home, TelemetryState(enabled=True, last_week=week))
-    return {"week": week, "installed": built.get("installed", 0), "listed": len(entries or []), "accepted": accepted}
+    try:
+        previous = claim_week(guard_home, week, only_if_due=False)
+    except TelemetryStateBusyError as error:
+        raise PluginTelemetryError("Another Guard process is sending the report. Try again shortly.") from error
+    if previous is None:
+        raise PluginTelemetryError(_OFF_MESSAGE)
+    return _send(guard_home, week, previous)
 
 
 def send_if_due(guard_home: Path, *, now: datetime | None = None) -> dict[str, Any] | None:
     """Send at most one report per ISO week, and only after opt-in."""
 
+    week = current_week(now)
     state = read_state(guard_home)
-    if not state.enabled or state.last_week == current_week(now):
+    if not state.enabled or state.last_week == week:
         return None
-    return send_now(guard_home, now=now)
+    try:
+        previous = claim_week(guard_home, week, only_if_due=True)
+    except TelemetryStateBusyError:
+        return None
+    if previous is None:
+        return None
+    return _send(guard_home, week, previous)

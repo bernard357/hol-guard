@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..config import resolve_guard_home
 from .report import PRIVACY_URL, PluginTelemetryError, dry_run, send_now
-from .state import TelemetryState, delete_secret, ensure_secret, read_state, write_state
+from .state import read_state, turn_off, turn_on
 
 _WHAT_IS_SENT = (
     "Once a week Guard sends HOL the public plugin listings installed on this machine:\n"
@@ -52,14 +52,11 @@ def main(argv: Sequence[str], *, program_name: str = "hol-guard telemetry") -> i
     guard_home = resolve_guard_home(args.guard_home)
     as_json = bool(args.json)
     if args.action == "on":
-        ensure_secret(guard_home)
-        state = read_state(guard_home)
-        write_state(guard_home, TelemetryState(enabled=True, last_week=state.last_week))
+        turn_on(guard_home)
         _print({"enabled": True}, as_json=as_json, text=f"Plugin install counts are on.\n\n{_WHAT_IS_SENT}")
         return 0
     if args.action == "off":
-        write_state(guard_home, TelemetryState(enabled=False, last_week=None))
-        delete_secret(guard_home)
+        turn_off(guard_home)
         _print({"enabled": False}, as_json=as_json, text="Plugin install counts are off. The device key was deleted.")
         return 0
     if args.action == "status":

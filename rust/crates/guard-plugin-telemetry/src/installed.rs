@@ -1,6 +1,7 @@
 //! Installed plugins, read from each agent runtime's own install folders.
 //!
-//! Only the manifest's name, version and repository are read. Walks are
+//! Only the manifest's name, version and repository are read; a plugin is
+//! matched to a listing by its repository alone, never its homepage. Walks are
 //! bounded in depth and in folders visited, symlinks are not followed, and a
 //! manifest larger than `MAX_MANIFEST_BYTES` is skipped.
 
@@ -45,6 +46,7 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
             4,
             ".claude-plugin/plugin.json",
             "claude-code",
+            false,
             &mut found,
         );
     }
@@ -54,6 +56,7 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
             4,
             ".codex-plugin/plugin.json",
             "codex",
+            false,
             &mut found,
         );
     }
@@ -63,6 +66,7 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
             4,
             ".cursor-plugin/plugin.json",
             "cursor",
+            false,
             &mut found,
         );
     }
@@ -72,6 +76,7 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
             1,
             "gemini-extension.json",
             "gemini",
+            true,
             &mut found,
         );
     }
@@ -89,12 +94,15 @@ pub fn discover(homes: &RuntimeHomes) -> Vec<InstalledPlugin> {
 }
 
 /// Breadth-first walk of `root` to `max_depth`, reading `manifest` (a path
-/// relative to each folder) wherever it exists.
+/// relative to each folder) wherever it exists. Hidden folders are skipped,
+/// except directly under `root` when `hidden_top_level` is set: Gemini
+/// installs extensions in folders whose names can start with a dot.
 fn walk_manifests(
     root: &Path,
     max_depth: usize,
     manifest: &str,
     runtime: &'static str,
+    hidden_top_level: bool,
     out: &mut Vec<InstalledPlugin>,
 ) {
     let mut queue = vec![(root.to_path_buf(), 0usize)];
@@ -124,7 +132,7 @@ fn walk_manifests(
         };
         for entry in entries.flatten() {
             let name = entry.file_name();
-            if name.to_string_lossy().starts_with('.') {
+            if name.to_string_lossy().starts_with('.') && !(hidden_top_level && depth == 0) {
                 continue;
             }
             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
@@ -154,8 +162,7 @@ fn read_manifest(path: &Path, runtime: &'static str) -> Option<InstalledPlugin> 
             .and_then(Value::as_str)
             .and_then(normalize_repository_url),
         _ => None,
-    }
-    .or_else(|| text("homepage").and_then(normalize_repository_url));
+    };
     Some(InstalledPlugin {
         runtime,
         name: text("name")
@@ -220,6 +227,30 @@ mod tests {
         );
         assert_eq!(found[2].runtime, "gemini");
         assert_eq!(found[2].version, None);
+        assert_eq!(
+            found[2].repository, None,
+            "a homepage is never a repository"
+        );
+    }
+
+    #[test]
+    fn reads_hidden_gemini_extension_folders() {
+        let root = temp_root("gemini-hidden");
+        write(
+            &root.join("extensions/.notes/gemini-extension.json"),
+            r#"{"name":"notes","version":"1.0.0","repository":"https://github.com/octo/notes"}"#,
+        );
+        write(
+            &root.join("extensions/.notes/.cache/gemini-extension.json"),
+            r#"{"name":"nested","version":"1.0.0"}"#,
+        );
+        let found = discover(&RuntimeHomes {
+            gemini: Some(root.clone()),
+            ..RuntimeHomes::default()
+        });
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name.as_deref(), Some("notes"));
     }
 
     #[test]

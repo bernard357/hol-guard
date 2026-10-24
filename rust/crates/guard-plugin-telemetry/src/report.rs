@@ -1,5 +1,6 @@
 //! Matching installed plugins to public listings and building report entries.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use hmac::{Hmac, Mac};
@@ -99,8 +100,41 @@ fn counting_key(secret: &[u8], week: &str, slug: &str, runtime: &str) -> String 
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// Orders dotted numeric versions numerically (`1.10.0` > `1.9.0`), a release
+/// above its prereleases, and anything else as text.
+fn compare_versions(a: &str, b: &str) -> Ordering {
+    fn parts(version: &str) -> (Option<Vec<u64>>, bool) {
+        let version = version.strip_prefix('v').unwrap_or(version);
+        let core = version.split('+').next().unwrap_or(version);
+        let (release, prerelease) = match core.split_once('-') {
+            Some((release, _)) => (release, true),
+            None => (core, false),
+        };
+        let numbers = release
+            .split('.')
+            .map(|part| part.parse::<u64>().ok())
+            .collect::<Option<Vec<_>>>();
+        (numbers, prerelease)
+    }
+    match (parts(a), parts(b)) {
+        ((Some(x), x_pre), (Some(y), y_pre)) => x.cmp(&y).then(y_pre.cmp(&x_pre)),
+        _ => a.cmp(b),
+    }
+}
+
+/// Whether `candidate` should replace `current` as the version to report:
+/// a known version beats an unknown one, and a higher version beats a lower.
+fn is_newer(candidate: Option<&str>, current: Option<&str>) -> bool {
+    match (candidate, current) {
+        (Some(_), None) => true,
+        (Some(a), Some(b)) => compare_versions(a, b) == Ordering::Greater,
+        (None, _) => false,
+    }
+}
+
 /// One entry per (listing, runtime) among the installed plugins that match a
-/// public listing, capped at `MAX_ENTRIES`.
+/// public listing, capped at `MAX_ENTRIES`. When a runtime's cache holds
+/// several versions of a plugin, the highest is reported.
 pub fn build_report(
     index: &[IndexEntry],
     installed: &[InstalledPlugin],
@@ -112,7 +146,7 @@ pub fn build_report(
         let Some(listing) = match_listing(index, plugin) else {
             continue;
         };
-        entries
+        let entry = entries
             .entry((listing.slug.clone(), plugin.runtime))
             .or_insert_with(|| ReportEntry {
                 slug: listing.slug.clone(),
@@ -120,6 +154,9 @@ pub fn build_report(
                 version: plugin.version.clone(),
                 key: counting_key(secret, week, &listing.slug, plugin.runtime),
             });
+        if is_newer(plugin.version.as_deref(), entry.version.as_deref()) {
+            entry.version = plugin.version.clone();
+        }
     }
     entries.into_values().take(MAX_ENTRIES).collect()
 }
@@ -229,5 +266,31 @@ mod tests {
         );
         assert_ne!(a, counting_key(&[2u8; 32], "2026-W43", "octo/pdf", "codex"));
         assert_eq!(a, counting_key(&[1u8; 32], "2026-W43", "octo/pdf", "codex"));
+    }
+
+    #[test]
+    fn reports_the_highest_cached_version() {
+        let index = vec![listing(
+            "octo/pdf",
+            Some("https://github.com/octo/pdf"),
+            None,
+        )];
+        let at = |version: Option<&str>| InstalledPlugin {
+            version: version.map(str::to_owned),
+            ..plugin(
+                "claude-code",
+                Some("https://github.com/octo/pdf"),
+                Some("pdf"),
+            )
+        };
+        let installed = vec![
+            at(None),
+            at(Some("1.10.0")),
+            at(Some("1.9.0")),
+            at(Some("1.10.0-rc.1")),
+        ];
+        let entries = build_report(&index, &installed, &[7u8; 32], "2026-W43");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].version.as_deref(), Some("1.10.0"));
     }
 }

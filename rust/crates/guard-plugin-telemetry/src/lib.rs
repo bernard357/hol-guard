@@ -5,8 +5,14 @@
 //! device. Only plugins whose manifest repository is a public HOL listing are
 //! reported, so private or unlisted plugin names never leave the machine.
 //! Each entry carries a counting key, `HMAC-SHA256(secret, "<week>:<slug>:<runtime>")`,
-//! where the secret stays on the device. The server can count distinct
-//! machines per week but cannot link a machine across weeks or listings.
+//! where the secret stays on the device, so the keys differ for every week,
+//! listing and runtime. One report carries all of a machine's matched
+//! listings, so the keys hide the device, not which listings arrived together.
+//!
+//! The full index is larger than one native request may be, so Guard first
+//! asks for the repositories of the installed plugins (`repositories`), keeps
+//! only the index entries for them, and then asks for the report. The
+//! repository list stays on the device.
 //!
 //! `hol-guard telemetry plugins` sends one JSON request on stdin to
 //! `hol-guard-runtime plugin-telemetry --stdin` and gets one response back:
@@ -15,6 +21,7 @@
 mod installed;
 mod report;
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -44,6 +51,9 @@ struct Homes {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "command", rename_all = "lowercase", deny_unknown_fields)]
 enum Request {
+    Repositories {
+        homes: Homes,
+    },
     Report {
         homes: Homes,
         index: Vec<IndexEntry>,
@@ -65,8 +75,24 @@ pub fn run_request(bytes: &[u8]) -> Value {
     }
 }
 
+fn runtime_homes(homes: Homes) -> RuntimeHomes {
+    RuntimeHomes {
+        claude: homes.claude.map(PathBuf::from),
+        codex: homes.codex.map(PathBuf::from),
+        gemini: homes.gemini.map(PathBuf::from),
+        cursor: homes.cursor.map(PathBuf::from),
+    }
+}
+
 fn handle(request: Request) -> Result<Value, String> {
     match request {
+        Request::Repositories { homes } => {
+            let repositories: BTreeSet<String> = discover(&runtime_homes(homes))
+                .into_iter()
+                .filter_map(|plugin| plugin.repository)
+                .collect();
+            Ok(json!({ "repositories": repositories }))
+        }
         Request::Report {
             homes,
             index,
@@ -81,13 +107,7 @@ fn handle(request: Request) -> Result<Value, String> {
             if !valid_version(&guard_version, 32) {
                 return Err("plugin_telemetry_guard_version_invalid".to_owned());
             }
-            let homes = RuntimeHomes {
-                claude: homes.claude.map(PathBuf::from),
-                codex: homes.codex.map(PathBuf::from),
-                gemini: homes.gemini.map(PathBuf::from),
-                cursor: homes.cursor.map(PathBuf::from),
-            };
-            let installed = discover(&homes);
+            let installed = discover(&runtime_homes(homes));
             let entries = build_report(&index, &installed, &secret, &week);
             Ok(json!({
                 "installed": installed.len(),

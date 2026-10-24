@@ -21,7 +21,7 @@ from codex_plugin_scanner import cli as guard_cli
 from codex_plugin_scanner.guard import config as guard_config
 from codex_plugin_scanner.guard.plugin_telemetry import cli as telemetry_cli
 from codex_plugin_scanner.guard.plugin_telemetry import report as telemetry_report
-from codex_plugin_scanner.guard.plugin_telemetry.state import SECRET_FILE, read_state
+from codex_plugin_scanner.guard.plugin_telemetry.state import SECRET_FILE, TelemetryState, read_state
 
 INDEX = [
     {"slug": "acme/notes-kit", "repository": "https://github.com/acme/notes-kit"},
@@ -144,3 +144,66 @@ def test_dry_run_prints_the_report_without_opt_in_or_sending(
     assert [entry["slug"] for entry in report["entries"]] == ["acme/notes-kit"]
     assert not (guard_home / SECRET_FILE).exists()
     assert not read_state(guard_home).enabled
+
+
+def test_turning_counts_off_during_a_send_stops_it_and_stays_off(
+    guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def index_then_opt_out() -> list[dict[str, str]]:
+        assert _run(["telemetry", "plugins", "off"])[0] == 0
+        return INDEX
+
+    monkeypatch.setattr(telemetry_report, "fetch_index", index_then_opt_out)
+    monkeypatch.setattr(telemetry_report, "post_report", lambda _report: pytest.fail("sent after opt-out"))
+    assert _run(["telemetry", "plugins", "on"])[0] == 0
+
+    with pytest.raises(telemetry_report.PluginTelemetryError):
+        telemetry_report.send_if_due(guard_home, now=datetime(2026, 10, 21, tzinfo=timezone.utc))
+    assert read_state(guard_home) == TelemetryState(enabled=False, last_week=None)
+    assert not (guard_home / SECRET_FILE).exists()
+
+
+def test_a_failed_send_leaves_the_week_due(guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(telemetry_report, "fetch_index", lambda: INDEX)
+
+    def refuse(_report: object) -> int:
+        raise telemetry_report.PluginTelemetryError("HOL did not accept the report (HTTP 503).")
+
+    monkeypatch.setattr(telemetry_report, "post_report", refuse)
+    assert _run(["telemetry", "plugins", "on"])[0] == 0
+    now = datetime(2026, 10, 21, tzinfo=timezone.utc)
+    with pytest.raises(telemetry_report.PluginTelemetryError):
+        telemetry_report.send_if_due(guard_home, now=now)
+    assert read_state(guard_home).last_week is None
+
+    sent: list[object] = []
+    monkeypatch.setattr(telemetry_report, "post_report", lambda report: sent.append(report) or 1)
+    assert telemetry_report.send_if_due(guard_home, now=now) is not None
+    assert len(sent) == 1
+    assert read_state(guard_home).last_week == "2026-W43"
+
+
+def test_report_builds_when_the_full_index_is_larger_than_one_native_request(
+    guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    padding = [
+        {
+            "slug": f"bulk/plugin-{number}",
+            "repository": f"https://github.com/bulk/plugin-{number}",
+            "manifestName": "x" * 60,
+        }
+        for number in range(70_000)
+    ]
+    assert len(json.dumps(padding)) > 6 * 1024 * 1024
+    monkeypatch.setattr(telemetry_report, "fetch_index", lambda: [*padding, *INDEX])
+    sent: list[dict[str, object]] = []
+    monkeypatch.setattr(telemetry_report, "post_report", lambda report: sent.append(dict(report)) or 1)
+    assert _run(["telemetry", "plugins", "on"])[0] == 0
+
+    result = telemetry_report.send_if_due(guard_home, now=datetime(2026, 10, 21, tzinfo=timezone.utc))
+    assert result is not None
+    assert result["listed"] == 1
+    (report,) = sent
+    entries = report["entries"]
+    assert isinstance(entries, list)
+    assert [entry["slug"] for entry in entries] == ["acme/notes-kit"]
