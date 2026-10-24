@@ -249,20 +249,18 @@ const TRUST_RANK: Record<ExtensionTrustClass, number> = {
 };
 
 /**
- * Orders the catalog rows below the featured ones. Project-maintained
- * coverage (built in, then trusted) leads; external contributions follow,
- * sponsored ones first. A sponsored placement buys a labeled row, not a place
- * ahead of Guard's own coverage - only a featured slot does that, and featured
- * rows are placed before this list. Each group keeps catalog order.
+ * Orders the catalog rows below the featured ones: sponsored placements lead,
+ * then project-maintained coverage (built in, then trusted), then free
+ * external contributions. A free external extension never sorts above a paid
+ * placement or Guard's own coverage. Each group keeps catalog order.
  */
 export function orderCatalogRows<T extends { extension_id: string; trust_class: ExtensionTrustClass }>(
   extensions: readonly T[],
   sponsoredIds: ReadonlySet<string>,
 ): T[] {
   const rank = (extension: T): number => {
-    const trust = TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external;
-    if (trust < TRUST_RANK.external) return trust;
-    return sponsoredIds.has(extension.extension_id) ? trust : trust + 1;
+    if (sponsoredIds.has(extension.extension_id)) return 0;
+    return 1 + (TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external);
   };
   return extensions
     .map((extension, index) => ({ extension, index, rank: rank(extension) }))

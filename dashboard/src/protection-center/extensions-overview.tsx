@@ -206,7 +206,7 @@ export function ExtensionsOverview(props: {
     [joinedDiscovery.featured, joinedDiscovery.sponsored],
   );
   // Featured rows lead in server order (all-day before time windows), then
-  // Guard's own coverage, then external contributions.
+  // sponsored rows, Guard's own coverage, and free external contributions.
   const orderedCatalog = useMemo(() => {
     const visibleIds = new Set(visibleCatalog.map((extension) => extension.extension_id));
     const featuredVisible = joinedDiscovery.featured

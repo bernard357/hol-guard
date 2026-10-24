@@ -6601,9 +6601,8 @@ const TRUST_RANK = {
 };
 function orderCatalogRows(extensions, sponsoredIds) {
   const rank = (extension) => {
-    const trust = TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external;
-    if (trust < TRUST_RANK.external) return trust;
-    return sponsoredIds.has(extension.extension_id) ? trust : trust + 1;
+    if (sponsoredIds.has(extension.extension_id)) return 0;
+    return 1 + (TRUST_RANK[extension.trust_class] ?? TRUST_RANK.external);
   };
   return extensions.map((extension, index) => ({ extension, index, rank: rank(extension) })).sort((left, right) => left.rank - right.rank || left.index - right.index).map((entry) => entry.extension);
 }

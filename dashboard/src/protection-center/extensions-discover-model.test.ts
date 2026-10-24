@@ -173,9 +173,9 @@ assert.equal(sponsoredCardLabel(true), "Sponsored · Featured");
   assert.match(featuredWindowLabel(placement({ product: "time_slot" })) ?? "", /^Featured until /);
 }
 
-// Guard's own coverage leads an alphabetical catalog: built in, then trusted,
-// then external contributions with sponsored ones first. A sponsored
-// placement never moves an external row ahead of internal coverage.
+// Sponsored rows lead an alphabetical catalog, then Guard's own coverage
+// (built in, then trusted), then free external contributions. A free external
+// extension never sorts above a paid placement or internal coverage.
 {
   const ordered = orderCatalogRows(
     [
@@ -191,7 +191,7 @@ assert.equal(sponsoredCardLabel(true), "Sponsored · Featured");
   );
   assert.deepEqual(
     ordered.map((entry) => entry.extension_id),
-    ["git", "shell", "aws", "npm", "zeta", "acme", "bolt"],
+    ["zeta", "git", "shell", "aws", "npm", "acme", "bolt"],
   );
 }
 
