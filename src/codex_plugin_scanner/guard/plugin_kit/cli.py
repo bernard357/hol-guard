@@ -219,6 +219,30 @@ def _write_links(result: Mapping[str, Any]) -> None:
             print(f"  - {step.get('message')}")
 
 
+_GUARD_OFFER_MARKER = ("plugin-kit", "guard-offer-shown")
+
+
+def _offer_guard_once() -> None:
+    """Point plugin authors at local Guard protection, once per Guard home.
+
+    The offer only prints a command; nothing is installed or sent.
+    """
+
+    from ..config import resolve_guard_home
+
+    try:
+        marker = resolve_guard_home().joinpath(*_GUARD_OFFER_MARKER)
+        if marker.exists():
+            return
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("1\n", encoding="utf-8")
+    except OSError:
+        return
+    print()
+    print("Tip: Guard can also protect the agents you test this plugin in.")
+    print("  hol-guard install claude-code   (or codex, cursor, gemini, opencode)")
+
+
 def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard plugin") -> int:
     args = build_parser(program_name=program_name).parse_args(argv)
     result = _call(_request(args))
@@ -244,6 +268,10 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
             for runtime in result.get("runtimes") or []:
                 if runtime.get("supported"):
                     print(f"  {runtime.get('runtime')}/")
+    if not args.json and (
+        (args.command == "check" and result.get("passed")) or (args.command == "package" and result.get("packaged"))
+    ):
+        _offer_guard_once()
     if args.command == "check" and not result.get("passed"):
         return 1
     if args.command == "package" and not result.get("packaged"):

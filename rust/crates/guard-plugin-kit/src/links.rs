@@ -7,6 +7,10 @@ use crate::detect::Detection;
 use crate::emit::{self, Runtime};
 use crate::model::{Plugin, SourceKind};
 
+/// Campaign parameters on HOL links, so visits from the Kit are counted
+/// without the Kit itself reporting anything.
+const ATTRIBUTION: &str = "utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit";
+
 #[derive(Debug, Serialize)]
 pub struct Install {
     pub runtime: Runtime,
@@ -100,8 +104,8 @@ pub fn links(detection: &Detection) -> Links {
     }
     Links {
         hol: repository.as_ref().map(|repository| HolLinks {
-            connect: format!("https://hol.org/plugins/connect?repo={repository}"),
-            submit: "https://hol.org/registry/plugins/submit?intent=launch".to_owned(),
+            connect: format!("https://hol.org/plugins/connect?repo={repository}&{ATTRIBUTION}"),
+            submit: format!("https://hol.org/registry/plugins/submit?intent=launch&{ATTRIBUTION}"),
         }),
         checklist: checklist(detection, plugin, repository.is_some()),
         repository,

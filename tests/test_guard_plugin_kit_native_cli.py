@@ -16,8 +16,16 @@ from types import SimpleNamespace
 import pytest
 
 from codex_plugin_scanner import cli as guard_cli
+from codex_plugin_scanner.guard import config as guard_config
 from codex_plugin_scanner.guard import native_runtime
 from codex_plugin_scanner.guard.plugin_kit import cli as plugin_kit_cli
+
+
+@pytest.fixture(autouse=True)
+def _guard_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path_factory.mktemp("guard-home")
+    monkeypatch.setattr(guard_config, "resolve_guard_home", lambda override=None: home)
+    return home
 
 
 def _run(argv: list[str]) -> tuple[int, str, str]:
@@ -119,7 +127,7 @@ def test_init_scaffolds_then_links_print_install_commands(tmp_path: Path) -> Non
     exit_code, output, _error = _run(["plugin", "links", str(tmp_path / "published")])
     assert exit_code == 0
     assert "npx skills add acme/notes-kit" in output
-    assert "https://hol.org/plugins/connect?repo=acme/notes-kit" in output
+    assert "https://hol.org/plugins/connect?repo=acme/notes-kit&utm_source=hol-guard" in output
 
 
 def test_plugin_fails_closed_without_native_runtime(
@@ -138,3 +146,20 @@ def test_unknown_native_errors_are_printed_as_codes(monkeypatch: pytest.MonkeyPa
     exit_code, _output, error = _run(["plugin", "links"])
     assert exit_code == 2
     assert "new_code" in error
+
+
+def test_guard_offer_prints_once_and_never_in_json(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    _exit_code, output, _error = _run(["plugin", "check", str(tmp_path), "--json"])
+    assert "hol-guard install" not in output
+    _exit_code, output, _error = _run(["plugin", "check", str(tmp_path)])
+    assert "hol-guard install claude-code" in output
+    _exit_code, output, _error = _run(["plugin", "check", str(tmp_path)])
+    assert "hol-guard install" not in output
+
+
+def test_links_carry_campaign_attribution(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    _exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--json"])
+    hol = json.loads(output)["hol"]
+    assert hol["connect"].endswith("repo=acme/notes-kit&utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit")

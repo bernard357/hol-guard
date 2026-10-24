@@ -27,8 +27,8 @@
     }
   ],
   "hol": {
-    "connect": "https://hol.org/plugins/connect?repo=acme/weather-tools",
-    "submit": "https://hol.org/registry/plugins/submit?intent=launch"
+    "connect": "https://hol.org/plugins/connect?repo=acme/weather-tools&utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit",
+    "submit": "https://hol.org/registry/plugins/submit?intent=launch&utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit"
   },
   "install": [
     {

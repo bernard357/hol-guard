@@ -63,3 +63,7 @@ When several manifests describe the same plugin, the shallowest one wins and the
 ## List the plugin
 
 `hol-guard plugin links` prints the install commands that work today and the steps still open, such as adding a Codex marketplace file or publishing to the MCP Registry. For a GitHub repository it also prints the HOL link that verifies ownership and claims the plugin's listing on HOL.
+
+HOL links carry `utm_source=hol-guard` campaign parameters, so HOL can count visits that came from the Kit. The Kit itself sends nothing.
+
+After the first successful `check` or `package` in text mode, the Kit prints a one-line tip showing how to turn on Guard for the agents you test with. It prints once per Guard home and never in `--json` output, and it only prints a command.
