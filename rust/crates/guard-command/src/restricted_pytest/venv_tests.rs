@@ -302,6 +302,19 @@ fn entry_points_that_do_not_name_their_own_venv_launcher_are_rejected() {
             symlink("python", venv.join("bin/tool")).unwrap();
             Some(venv.join("bin/tool").display().to_string())
         }),
+        ("module option", |_, venv| {
+            Some(format!(
+                "{} -mnot_pytest",
+                venv.join("bin/python3").display()
+            ))
+        }),
+        ("script operand", |_, venv| {
+            Some(format!(
+                "{} {}",
+                venv.join("bin/python3").display(),
+                venv.join("bin/other.py").display()
+            ))
+        }),
     ];
     for (name, line) in cases {
         let fixture = fixture();
@@ -315,6 +328,13 @@ fn entry_points_that_do_not_name_their_own_venv_launcher_are_rejected() {
                 fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
             }
         }
+        // The end-to-end error alone would also come from a check that runs
+        // before the venv is read, so the venv decision is asserted directly.
+        let script = venv.join("bin/pytest");
+        assert!(
+            external_root(&script, &script, &workspace).is_none(),
+            "{name}"
+        );
         assert!(admit_entry_point(&workspace, &venv).is_err(), "{name}");
     }
 }

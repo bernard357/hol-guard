@@ -7,7 +7,7 @@
 //! approved runtime, and no ancestor relation to HOME or the workspace. A venv
 //! inside the workspace needs no grant of its own; what it needs is the
 //! interpreter install its launchers point out of the workspace to.
-use super::launch_shebang::{shebang, Shebang};
+use super::launch_shebang::sole_interpreter;
 use super::*;
 
 const VENV_ENTRIES: &[&str] = &[
@@ -149,24 +149,21 @@ pub(super) fn launcher_root(launch: &Path) -> Option<PathBuf> {
 /// `pip` and `uv` write a console script as a regular file, not a symlink, so
 /// the chain `resolve_executable` answers ends in the script itself and there
 /// is no launcher to read a venv out of. The script's `#!` line names one. It
-/// has to name it outright: `env` would look the interpreter up on `PATH`,
-/// which containment does not set, and a wrapper such as `/bin/sh` would run
-/// something the line does not say. The interpreter it names has to be a
-/// launcher of the script's own `bin`, ending in an approved image rather than
-/// a `/usr/bin` shim, exactly as a Python-named launch does.
+/// has to name it outright and hand it nothing else: `env` would look the
+/// interpreter up on `PATH`, which containment does not set, a wrapper such
+/// as `/bin/sh` would run something the line does not say, and an operand
+/// such as `-mother_module` would send the interpreter to that module instead
+/// of to this script. The interpreter it names has to be a launcher of the
+/// script's own `bin`, ending in an approved image rather than a `/usr/bin`
+/// shim, exactly as a Python-named launch does.
 ///
 /// Running `<venv>/bin/pytest` is then that venv's interpreter over that
 /// venv's packages, which `<venv>/bin/python -m pytest` already reaches, so
 /// the grant is the one `launcher_root` would have made for it.
 fn entry_point_root(executable: &Path) -> Option<PathBuf> {
     let bin = executable.parent()?.canonicalize().ok()?;
-    let Shebang::Runs(programs) = shebang(executable) else {
-        return None;
-    };
-    let [interpreter] = programs.as_slice() else {
-        return None;
-    };
-    let interpreter = Path::new(interpreter);
+    let interpreter = sole_interpreter(executable)?;
+    let interpreter = Path::new(&interpreter);
     if !interpreter.is_absolute() || interpreter.parent()?.canonicalize().ok()? != bin {
         return None;
     }
