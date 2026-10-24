@@ -285,7 +285,7 @@ export function useFleetAppPosture(props: FleetAppPostureOptions): FleetAppPostu
     if (!row) return null;
     const saving = savingHarness === harness;
     return (
-      <fieldset className="shrink-0 border-0 p-0" data-testid="fleet-app-posture">
+      <fieldset className="flex shrink-0 items-center gap-2 border-0 p-0" data-testid="fleet-app-posture">
         <legend className="sr-only">{`Protection for ${row.displayName}`}</legend>
         <div className="inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1">
           {harnessPostureOptions(settings, harness).map((option) => (
@@ -302,7 +302,7 @@ export function useFleetAppPosture(props: FleetAppPostureOptions): FleetAppPostu
             />
           ))}
         </div>
-        {saving ? <span className="sr-only">Saving…</span> : null}
+        {saving ? <span className="text-xs font-medium text-slate-500">Saving…</span> : null}
       </fieldset>
     );
   };

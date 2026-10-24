@@ -152,7 +152,11 @@ export function FleetAppCoverage(props: FleetAppCoverageProps) {
             const control = posture.control(app.harness);
             const postureNote = row !== undefined && (watching || row.hasOverride) ? harnessRowStatus(row) : null;
             return (
-              <li key={app.harness} className="py-3" data-harness={app.harness}>
+              <li
+                key={app.harness}
+                className={watching ? "-mx-2 rounded-lg bg-brand-attention/[0.05] px-2 py-3" : "py-3"}
+                data-harness={app.harness}
+              >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <AppSummary
                     app={app}

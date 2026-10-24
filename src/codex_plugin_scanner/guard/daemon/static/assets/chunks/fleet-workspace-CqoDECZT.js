@@ -1,5 +1,5 @@
 import { a8 as isUnsupportedPlatformCheck, h as harnessDisplayName, j as jsxRuntimeExports, a9 as RECHECK_UNAVAILABLE_SIGNATURE, aa as protectionReasonText, r as reactExports, A as ActionButton, ab as HiMiniExclamationCircle, ac as hasRepairableProtectionGap, ad as remainingProtectionRepairParts, ae as protectionGapSignature, af as repairOutcomeIsStalled, ag as ProtectionRepairFlowError, ah as nextProtectionRepairOutcome, ai as waitForAuthorizeUrl, aj as startOrRecoverCloudConnect, ak as safeCloudConnectUrl, al as openPackageFirewallAuthorizeFallback, am as waitForCloudConnection, an as activeFailedHarnesses, ao as resetRepairOutcomeTracker, ap as HiMiniWrenchScrewdriver, s as HiMiniCheckCircle, c as HiMiniChevronDown, aq as fetchSettings, ar as harnessPostureRows, as as selectHarnessPosture, at as harnessPosturePatch, I as updateSettings, au as harnessRowTone, av as PROTECTION_POSTURE_COPY, aw as harnessPostureOptions, ax as globalPosture, S as SectionLabel, ay as harnessRowStatus, N as EmptyState, H as HiMiniChevronRight, az as HiMiniEye, aA as HiMiniXCircle, u as isConnectableAppHarness, L as protectionHealthFor, K as useProtectionPresentationState, aB as GuardHero, aC as ProofStrip, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard } from "../guard-dashboard.js";
-import { H as HarnessVersionLabel, u as useHarnessDetection, d as detectedHarnesses, v as visibleHarnessesFor, a as versionCompatibilityFor, r as resolveDetectedAppStatus } from "./harness-version-label-BEu-FrKY.js";
+import { H as HarnessVersionLabel, u as useHarnessDetection, d as detectedHarnesses, v as visibleHarnessesFor, r as resolveDetectedAppStatus, a as versionCompatibilityFor } from "./harness-version-label-BEu-FrKY.js";
 import { C as ConnectGuardCloudButton } from "./connect-guard-cloud-button-D3-S0tLq.js";
 import { a as SUPPORTED_APPS_BRIEF, d as defaultConnectHarness, A as APP_STATUS_LABELS } from "./app-catalog-BU3dzTBu.js";
 import { G as GuardRepairControl, S as SettingsSaveProofModal, H as HarnessPostureChoiceLabel } from "./settings-save-proof-modal-CZZvxWFO.js";
@@ -717,7 +717,7 @@ function useFleetAppPosture(props) {
     const row = rowFor(harness);
     if (!row) return null;
     const saving = savingHarness === harness;
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("fieldset", { className: "shrink-0 border-0 p-0", "data-testid": "fleet-app-posture", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("fieldset", { className: "flex shrink-0 items-center gap-2 border-0 p-0", "data-testid": "fleet-app-posture", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("legend", { className: "sr-only", children: `Protection for ${row.displayName}` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "inline-flex items-center gap-1 rounded-xl bg-slate-100 p-1", children: harnessPostureOptions(settings, harness).map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         HarnessPostureChoiceLabel,
@@ -733,7 +733,7 @@ function useFleetAppPosture(props) {
         },
         option.choice
       )) }),
-      saving ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: "Saving…" }) : null
+      saving ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-medium text-slate-500", children: "Saving…" }) : null
     ] });
   };
   const watchConfirm = (harness) => {
@@ -896,22 +896,30 @@ function FleetAppCoverage(props) {
       const watching = isWatching(app.harness);
       const control = posture.control(app.harness);
       const postureNote = row !== void 0 && (watching || row.hasOverride) ? harnessRowStatus(row) : null;
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "py-3", "data-harness": app.harness, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            AppSummary,
-            {
-              app,
-              postureNote,
-              watching,
-              showBadge: control === null || app.status !== "protected",
-              onOpenAppDetail: props.onOpenAppDetail
-            }
-          ),
-          control
-        ] }),
-        posture.watchConfirm(app.harness)
-      ] }, app.harness);
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "li",
+        {
+          className: watching ? "-mx-2 rounded-lg bg-brand-attention/[0.05] px-2 py-3" : "py-3",
+          "data-harness": app.harness,
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                AppSummary,
+                {
+                  app,
+                  postureNote,
+                  watching,
+                  showBadge: control === null || app.status !== "protected",
+                  onOpenAppDetail: props.onOpenAppDetail
+                }
+              ),
+              control
+            ] }),
+            posture.watchConfirm(app.harness)
+          ]
+        },
+        app.harness
+      );
     }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
       EmptyState,
       {
@@ -985,15 +993,10 @@ function FleetWorkspace(props) {
     const install = managedInstalls.find((i) => i.harness === harness);
     const presentInventory = inventory.filter((i) => i.harness === harness && i.present);
     const appProtection = protectionHealthFor(props.runtime, harness);
+    const status = resolveDetectedAppStatus(install, appProtection, presentInventory.length > 0, receiptHarnesses.has(harness), detected.includes(harness));
     return {
       harness,
-      status: resolveDetectedAppStatus(
-        install,
-        appProtection,
-        presentInventory.length > 0,
-        receiptHarnesses.has(harness),
-        detected.includes(harness)
-      ),
+      status,
       inventoryCount: presentInventory.length,
       policyCount: props.policies.filter((p) => p.harness === harness).length,
       versionCompatibility: versionCompatibilityFor(harnessDetection, harness) ?? null
