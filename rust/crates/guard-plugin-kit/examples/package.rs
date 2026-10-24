@@ -22,7 +22,10 @@ fn main() -> ExitCode {
         "strict": false,
     });
     let response = guard_plugin_kit::run_request(request.to_string().as_bytes());
-    println!("{}", serde_json::to_string_pretty(&response).expect("render"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).expect("render")
+    );
     if response["ok"] == serde_json::json!(true)
         && response["result"]["packaged"] == serde_json::json!(true)
     {
