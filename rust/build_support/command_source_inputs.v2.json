@@ -191,6 +191,7 @@
       "src/native_command_program_pack_cache.rs",
       "src/native_command_program_pack_validation.rs",
       "src/native_command_program_wire.rs",
+      "src/native_command_program_work_stats.rs",
       "src/native_command_quarantine.rs",
       "src/native_command_source.rs",
       "src/native_command_source_addition.rs",

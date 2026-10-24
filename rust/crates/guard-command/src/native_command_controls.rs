@@ -163,6 +163,7 @@ impl CompiledNativeCommandControls {
             .enumerate()
             .map(|(index, rule)| (rule.rule_id.clone(), index))
             .collect();
+        crate::native_command_program::work_stats::record_active(active_extensions.len());
         Ok(Self {
             catalog: None,
             candidate_index: CommandCandidateIndex::for_active(&program, &active_extensions),

@@ -87,6 +87,16 @@ pub(super) fn evaluate(
     request: &[u8],
     store: Option<&PolicySnapshotStore>,
 ) -> Result<Vec<u8>, String> {
+    let response = evaluate_request(pending, request, store);
+    crate::resident_diagnostics::note_command_work();
+    response
+}
+
+fn evaluate_request(
+    pending: &mut PendingRequest,
+    request: &[u8],
+    store: Option<&PolicySnapshotStore>,
+) -> Result<Vec<u8>, String> {
     let owns_launch = crate::strict_json_value(request).is_ok_and(|value| {
         value.get("operation").and_then(serde_json::Value::as_str) == Some("native_bash_execute")
     });
