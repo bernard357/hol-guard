@@ -315,7 +315,9 @@ def native_review_evidence(
 
     The resident answers each half exactly as ``native_review_binding`` and
     ``native_exact_action`` would, so this saves a round trip without changing
-    either answer. A failed ask fails closed the way both would.
+    either answer. The combined envelope carries both halves under one size
+    cap and one deadline, so when it fails the halves are asked separately and
+    each fails closed on its own, as they did before they were combined.
     """
 
     try:
@@ -334,8 +336,19 @@ def native_review_evidence(
         }
         reply = _answer(query, guard_home)
     except (NativeExactActionError, OSError, RuntimeError, TypeError, ValueError) as error:
-        _LOGGER.warning("native review-evidence ask failed closed: %s", type(error).__name__)
-        return None, None, UNPROVEN_LAUNCH
+        _LOGGER.warning("native review-evidence ask failed, asking separately: %s", type(error).__name__)
+        binding = native_review_binding(harness, payload, native_result, native_receipt, workspace, guard_home)
+        token, reason = native_exact_action(
+            harness=harness,
+            tool_name=tool_name,
+            payload=payload,
+            native_result=native_result,
+            native_receipt=native_receipt,
+            workspace=workspace,
+            home_dir=home_dir,
+            guard_home=guard_home,
+        )
+        return binding, token, reason
     token, reason = reply["token"], reply["once_only_reason"]
     if (token is None) == (reason is None):
         return reply["binding"], None, UNPROVEN_LAUNCH

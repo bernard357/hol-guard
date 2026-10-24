@@ -80,6 +80,18 @@ def pause_native_pre_tool_for_approval(
         return render_pre_tool(harness, failed, guard_home=guard_home)
     launch_target = _native_review_launch_target(payload)
     tool_name = _native_review_tool_name(payload)
+    # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
+    custom = native_local_cli_grant_response(
+        store,
+        harness=harness,
+        payload=payload,
+        native_result=native_result,
+        workspace=workspace,
+        home_dir=home_dir,
+    )
+    if custom is not None and custom[0]:
+        return custom[1]
+    # A matching custom grant never uses the evidence below, so it settles first.
     # One resident ask answers both the retry binding and the exact-action token.
     # The saved-decision lookup and the queued request must bind the identical
     # token, and each derivation re-reads operands and repeats resident
@@ -94,17 +106,6 @@ def pause_native_pre_tool_for_approval(
         home_dir=home_dir,
         guard_home=guard_home,
     )
-    # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
-    custom = native_local_cli_grant_response(
-        store,
-        harness=harness,
-        payload=payload,
-        native_result=native_result,
-        workspace=workspace,
-        home_dir=home_dir,
-    )
-    if custom is not None and custom[0]:
-        return custom[1]
     saved = native_saved_review_response(
         store,
         harness=harness,
