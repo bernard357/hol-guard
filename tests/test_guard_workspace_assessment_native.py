@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.guard import native_supply_chain_egress as egress_module
 from codex_plugin_scanner.guard import supply_chain_cloud_audit as cloud_audit_module
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
@@ -76,6 +77,35 @@ def test_background_run_reports_a_blocked_dependency_locally(
 
     (workspace / "notes.txt").write_text("edited", encoding="utf-8")
     assert worker.observe(store) == 1
+
+
+def test_automatic_run_never_reaches_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_binary: None
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "package.json").write_text('{"dependencies":{"minimist":"^1.2.0"}}', encoding="utf-8")
+    (workspace / "package-lock.json").write_text(json.dumps(LOCKFILE), encoding="utf-8")
+    store = GuardStore(tmp_path / "guard-home")
+    bind_workspace(store, WORKSPACE_ID)
+    bundle = _package(
+        ecosystem="npm", name="minimist", version="1.2.8", default_action="block", recommended_fix_version="1.2.9"
+    )
+    store.cache_supply_chain_bundle(WORKSPACE_ID, _bundle_response(packages=[bundle]), WORKSPACE_AUDIT_NOW)
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("an automatic assessment must not open a connection")
+
+    monkeypatch.setattr(egress_module, "_fetch_raw", no_network)
+    opened = 1_000_000_000
+    admitted = worker.admit_workspace(store, str(workspace), clock=lambda: opened)
+    due = opened + assessments.MAX_DEBOUNCE_WAIT_MS
+    assert runner.run_next(store, load_guard_config(store.guard_home), owner="test", clock=lambda: due)
+    [latest] = assessments.latest_assessed_runs(store)
+    assert (latest["run_id"], latest["trigger_kind"]) == (admitted["run_id"], "workspace_open")
+    assert latest["state"] == "partial"
+    [finding] = [item for item in latest["findings"] if item["package_name"] == "minimist"]
+    assert finding["decision"] == "block"
 
 
 def test_daemon_routes_require_dashboard_auth_and_admit_a_worktree(tmp_path: Path, native_binary: None) -> None:

@@ -68,6 +68,7 @@ _STATEMENTS: Final = (
                 AND length(findings_json) <= 262144),
         error_code TEXT CHECK (error_code IS NULL OR length(error_code) <= 128),
         created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        triggered_at_ms INTEGER NOT NULL CHECK (triggered_at_ms >= created_at_ms),
         started_at_ms INTEGER,
         finished_at_ms INTEGER,
         FOREIGN KEY (codebase_key, worktree_key)

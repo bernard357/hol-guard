@@ -112,7 +112,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
     git = result.get("git")
     head = git.get("head_commit") if isinstance(git, dict) else None
     reasons = result.get("partial_reasons")
-    summary = {
+    summary: dict[str, object] = {
         key: result.get(key)
         for key in ("entry_count", "hashed_bytes", "excluded", "unreadable_count", "unstable_count", "limits")
     }

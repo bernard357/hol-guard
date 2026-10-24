@@ -12,6 +12,7 @@ fn request(root: &Path, mode: SnapshotMode) -> SnapshotRequest {
         max_entries: 0,
         max_total_bytes: 0,
         max_file_bytes: 0,
+        max_visited_entries: 0,
     }
 }
 
@@ -245,4 +246,85 @@ fn linked_worktrees_share_a_codebase_but_not_a_worktree_or_snapshot() {
     assert_eq!(linked_result["git"]["linked_worktree"], true);
     assert_eq!(linked_result["git"]["head_commit"], commit.as_str());
     assert_ne!(digest(&main_result), digest(&linked_result));
+}
+
+#[test]
+fn depth_bound_reports_partial_coverage_and_records_the_cut() {
+    let dir = project();
+    let mut nested = dir.path().to_path_buf();
+    for level in 0..=walk::MAX_WALK_DEPTH {
+        nested.push(format!("d{level}"));
+    }
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("deep.txt"), "deep").unwrap();
+    let result = content(dir.path());
+    assert_eq!(result["coverage"], "partial");
+    assert_eq!(result["partial_reasons"], serde_json::json!(["depth_cap"]));
+    assert_eq!(result["entry_count"], 2);
+}
+
+#[test]
+fn visit_budget_counts_excluded_entries_and_reports_partial_coverage() {
+    let dir = project();
+    for index in 0..5 {
+        fs::create_dir_all(dir.path().join(format!("node_modules{index}/node_modules"))).unwrap();
+    }
+    let mut capped = request(dir.path(), SnapshotMode::Content);
+    capped.max_visited_entries = 4;
+    let result = snapshot(&capped).unwrap();
+    assert_eq!(result["coverage"], "partial");
+    assert_eq!(result["partial_reasons"], serde_json::json!(["visit_cap"]));
+    assert_eq!(result["limits"]["max_visited_entries"], 4);
+}
+
+#[cfg(unix)]
+#[test]
+fn every_exclusion_stays_in_the_digest_however_many_there_are() {
+    let outside = tempfile::tempdir().unwrap();
+    let dir = project();
+    for index in 0..300 {
+        std::os::unix::fs::symlink(
+            outside.path().join("a"),
+            dir.path().join(format!("l{index:03}")),
+        )
+        .unwrap();
+    }
+    let first = content(dir.path());
+    fs::remove_file(dir.path().join("l299")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("b"), dir.path().join("l299")).unwrap();
+    let retargeted = content(dir.path());
+    assert_eq!(
+        first["excluded"]["symlinks"],
+        retargeted["excluded"]["symlinks"]
+    );
+    assert_ne!(digest(&first), digest(&retargeted));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_swapped_for_a_symlink_after_classification_is_not_entered() {
+    use std::ffi::OsStr;
+
+    use crate::workspace_snapshot_file::{DirHandle, HashError, Kind};
+
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("secret.txt"), "outside").unwrap();
+    let dir = project();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let handle = DirHandle::open_root(&root).unwrap();
+    let seen = handle.stat(OsStr::new("src")).unwrap();
+    assert_eq!(seen.kind, Kind::Directory);
+    fs::rename(root.join("src"), root.join("src-moved")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("src")).unwrap();
+    assert_eq!(
+        handle.open_dir(OsStr::new("src"), &seen).err(),
+        Some(HashError::Unstable)
+    );
+    // A different directory under the same name is rejected too.
+    fs::remove_file(root.join("src")).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    assert_eq!(
+        handle.open_dir(OsStr::new("src"), &seen).err(),
+        Some(HashError::Unstable)
+    );
 }

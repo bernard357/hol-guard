@@ -1,31 +1,72 @@
-//! Stable reads for workspace snapshot files.
+//! Directory handles and stable reads for workspace snapshot files.
 //!
-//! A file is opened without following a leaf symlink or reparse point and is
-//! hashed only when the open descriptor is the file the walk saw and its
-//! size, mtime and inode held still for the whole read.
+//! On Unix every step below the root is relative to a directory descriptor
+//! the walk already verified: entries are classified with `fstatat` without
+//! following a symlink, child directories are opened with `O_NOFOLLOW` and
+//! must be the directory that was classified, and files are opened the same
+//! way. Replacing a directory with a symlink mid-walk therefore cannot move
+//! the walk outside the root. A file is hashed only when the open descriptor
+//! is the file the walk saw and its size, mtime and inode held still for the
+//! whole read.
 
-use std::fs::{self, File, Metadata};
+use std::fs::File;
 use std::io::Read;
-use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+#[cfg(unix)]
+#[path = "workspace_snapshot_dir_unix.rs"]
+mod platform;
+#[cfg(not(unix))]
+#[path = "workspace_snapshot_dir_path.rs"]
+mod platform;
+
+pub(crate) use platform::DirHandle;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    File,
+    Directory,
+    Symlink,
+    Special,
+}
+
+/// What the walk saw of one entry, without following it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Node {
+    pub(crate) kind: Kind,
+    pub(crate) len: u64,
+    pub(crate) mtime_ns: i128,
+    pub(crate) ino: u64,
+    pub(crate) dev: u64,
+}
+
+impl Node {
+    pub(crate) fn same_object(&self, other: &Node) -> bool {
+        self.kind == other.kind && self.ino == other.ino && self.dev == other.dev
+    }
+
+    fn unchanged(&self, other: &Node) -> bool {
+        self.same_object(other) && self.len == other.len && self.mtime_ns == other.mtime_ns
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HashError {
     Unreadable,
     Unstable,
 }
 
-/// Hash one file opened without following a leaf symlink and reject it when
-/// the open descriptor is not the file the walk saw, or when its size or
-/// mtime moved during the read.
+/// Hash one file the walk opened without following a leaf symlink and reject
+/// it when the open descriptor is not the file the walk saw, or when its size
+/// or mtime moved during the read.
 pub(crate) fn hash_stable(
-    path: &Path,
-    seen: &Metadata,
+    mut file: File,
+    seen: &Node,
     max_bytes: u64,
 ) -> Result<(String, u64), HashError> {
-    let mut file = open_no_follow(path).map_err(|_| HashError::Unreadable)?;
-    let before = file.metadata().map_err(|_| HashError::Unreadable)?;
-    if !before.is_file() || !same_file(seen, &before) {
+    let before = platform::file_node(&file).map_err(|_| HashError::Unreadable)?;
+    if !before.unchanged(seen) {
         return Err(HashError::Unstable);
     }
     let mut hasher = Sha256::new();
@@ -42,52 +83,9 @@ pub(crate) fn hash_stable(
         }
         hasher.update(&buffer[..count]);
     }
-    let after = file.metadata().map_err(|_| HashError::Unreadable)?;
-    if read_total != before.len() || !same_file(&before, &after) {
+    let after = platform::file_node(&file).map_err(|_| HashError::Unreadable)?;
+    if read_total != before.len || !before.unchanged(&after) {
         return Err(HashError::Unstable);
     }
     Ok((hex::encode(hasher.finalize()), read_total))
-}
-
-pub(crate) fn same_file(left: &Metadata, right: &Metadata) -> bool {
-    left.len() == right.len() && mtime_ns(left) == mtime_ns(right) && inode(left) == inode(right)
-}
-
-#[cfg(unix)]
-pub(crate) fn open_no_follow(path: &Path) -> std::io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-pub(crate) fn open_no_follow(path: &Path) -> std::io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    // FILE_FLAG_OPEN_REPARSE_POINT: open a reparse point itself, never its
-    // target. `same_file` then rejects anything but the regular file seen.
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(0x0020_0000)
-        .open(path)
-}
-
-pub(crate) fn mtime_ns(metadata: &Metadata) -> u128 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |elapsed| elapsed.as_nanos())
-}
-
-#[cfg(unix)]
-pub(crate) fn inode(metadata: &Metadata) -> u64 {
-    use std::os::unix::fs::MetadataExt;
-    metadata.ino()
-}
-
-#[cfg(not(unix))]
-pub(crate) fn inode(_metadata: &Metadata) -> u64 {
-    0
 }

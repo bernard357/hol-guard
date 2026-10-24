@@ -3,21 +3,27 @@
 The run is bound to a content snapshot taken before the detectors start and
 checked again after they finish. If the two differ the worktree changed under
 the detectors, so the run is superseded rather than reporting findings for
-content that no longer exists. Detectors run locally; the Cloud audit is
-never used from here.
+content that no longer exists. Detectors run locally and the Cloud audit is
+never used from here. An automatic run is also offline: every network
+exchange the local evaluation asks for is answered from cache or refused,
+which leaves the run partial. A run the user asked for may look up package
+coordinates the way an interactive audit does.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import time
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final
 
 from . import workspace_assessment_store as assessments
+from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
 
@@ -58,7 +64,10 @@ def run_next(store: Any, config: Any, *, owner: str, clock: Callable[[], int] = 
 
 def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments.RunOutcome:
     root = Path(run.private_root)
-    feed_digest = feed_context_digest(store)
+    try:
+        feed_digest = feed_context_digest(store)
+    except sqlite3.Error:
+        return assessments.RunOutcome(state="failed", error_code="feed_context_unavailable")
     try:
         before = workspace_snapshot(root, mode="content")
     except WorkspaceSnapshotError as error:
@@ -66,8 +75,10 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
     if before.worktree_key != run.keys.worktree_key or before.codebase_key != run.keys.codebase_key:
         # The path now names a different worktree (moved, re-cloned, replaced).
         return assessments.RunOutcome(state="failed", error_code="workspace_identity_changed")
+    automatic = run.trigger_kind not in assessments.USER_TRIGGERS
     try:
-        payload = _local_audit(store, config, root)
+        with offline_egress() if automatic else nullcontext(None) as offline:
+            payload = _local_audit(store, config, root)
     except Exception:
         return assessments.RunOutcome(
             state="failed",
@@ -87,7 +98,8 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             feed_context_digest=feed_digest,
         )
     findings, truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
-    coverage = coverage_summary(before, payload, findings_truncated=truncated)
+    refused = offline.refused if offline is not None else 0
+    coverage = coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused)
     return assessments.RunOutcome(
         state="completed" if coverage["status"] == "complete" else "partial",
         snapshot_digest=before.snapshot_digest,
@@ -134,21 +146,26 @@ def coverage_summary(
     payload: Mapping[str, object],
     *,
     findings_truncated: bool,
+    egress_refused: int = 0,
 ) -> dict[str, object]:
     reasons = [f"snapshot_{reason}" for reason in snapshot.partial_reasons]
     supply_chain = "complete"
     if payload.get("audit_status") == "incomplete":
         supply_chain = "no_inputs" if not payload.get("manifest_paths") else "incomplete"
+    if supply_chain == "complete" and egress_refused:
+        # A package needed registry or Cloud data the offline run could not get.
+        supply_chain = "incomplete"
     if supply_chain == "incomplete":
         reasons.append("supply_chain_incomplete")
     if payload.get("lockfile_warnings"):
         reasons.append("lockfile_warnings")
     if findings_truncated:
         reasons.append("finding_cap")
+    # A detector that did not run leaves its findings unknown, so the run is
+    # partial until every detector in the set has covered the snapshot.
     reasons.extend(f"detector_not_run:{name}" for name in _NOT_RUN_DETECTORS)
-    blocking = [reason for reason in reasons if not reason.startswith("detector_not_run:")]
     return {
-        "status": "partial" if blocking else "complete",
+        "status": "partial" if reasons else "complete",
         "reasons": reasons,
         "snapshot": {"coverage": snapshot.coverage, **snapshot.summary},
         "detectors": {
@@ -187,7 +204,8 @@ def project_supply_chain_findings(
         if name is None:
             continue
         version = _text(package.get("resolvedVersion")) or _text(package.get("requestedVersion"))
-        reasons = [item for item in package.get("reasons") or () if isinstance(item, Mapping)]
+        raw_reasons = package.get("reasons")
+        reasons = [item for item in raw_reasons if isinstance(item, Mapping)] if isinstance(raw_reasons, list) else []
         rule_ids = {value[:128] for item in reasons if (value := _text(item.get("code")))}
         if (rule_id := _text(package.get("ruleId"))) is not None:
             rule_ids.add(rule_id[:128])

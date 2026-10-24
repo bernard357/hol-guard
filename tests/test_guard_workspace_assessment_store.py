@@ -68,6 +68,19 @@ def test_automatic_run_waits_for_debounce(tmp_path: Path) -> None:
     assert claimed is not None and claimed.private_root == "/work/0"
 
 
+def test_later_change_restarts_the_debounce_up_to_the_maximum_wait(tmp_path: Path) -> None:
+    store = admitted(tmp_path)
+    enqueue(store)
+    enqueue(store, at=T0 + assessments.DEBOUNCE_MS - 1)
+    assert assessments.claim_next(store, owner="w", now_ms=AFTER_DEBOUNCE) is None
+    # A worktree that never stops changing is still assessed once the wait caps.
+    step = assessments.DEBOUNCE_MS - 1
+    for at in range(T0, T0 + assessments.MAX_DEBOUNCE_WAIT_MS, step):
+        enqueue(store, at=at)
+        assert assessments.claim_next(store, owner="w", now_ms=at) is None
+    assert assessments.claim_next(store, owner="w", now_ms=T0 + assessments.MAX_DEBOUNCE_WAIT_MS) is not None
+
+
 def test_manual_request_skips_debounce_and_upgrades_queued_run(tmp_path: Path) -> None:
     store = admitted(tmp_path)
     run_id = enqueue(store, "file_change")
@@ -132,16 +145,28 @@ def test_expired_lease_is_failed_requeued_and_fenced(tmp_path: Path) -> None:
     assert assessments.finish(store, fresh, completed(), now_ms=expiry + 1)
 
 
-def test_superseded_run_queues_one_successor(tmp_path: Path) -> None:
+def test_finish_after_the_lease_deadline_is_refused(tmp_path: Path) -> None:
     store = admitted(tmp_path)
     enqueue(store, "manual")
     claimed = assessments.claim_next(store, owner="w", now_ms=T0)
     assert claimed is not None
-    assert assessments.finish(store, claimed, completed("superseded"), now_ms=T0 + 1)
+    # No claim ran in between to expire the lease; the deadline alone fences it.
+    assert not assessments.finish(store, claimed, completed(), now_ms=T0 + assessments.LEASE_MS + 1)
+    assert assessments.get_run(store, claimed.run_id)["state"] == "running"
+
+
+@pytest.mark.parametrize(("trigger", "successor"), [("manual", "manual"), ("file_change", "file_change")])
+def test_superseded_run_queues_one_successor(tmp_path: Path, trigger: str, successor: str) -> None:
+    store = admitted(tmp_path)
+    enqueue(store, trigger)
+    claimed = assessments.claim_next(store, owner="w", now_ms=T0 + assessments.MAX_DEBOUNCE_WAIT_MS)
+    assert claimed is not None
+    assert assessments.finish(store, claimed, completed("superseded"), now_ms=T0 + assessments.MAX_DEBOUNCE_WAIT_MS)
     runs = assessments.recent_runs(store)
     assert [run["state"] for run in runs].count("queued") == 1
     queued = next(run for run in runs if run["state"] == "queued")
-    assert queued["trigger_kind"] == "file_change"
+    # A run the user asked for stays theirs: its successor skips the debounce.
+    assert queued["trigger_kind"] == successor
     assert assessments.list_worktrees(store)[0]["last_completed_generation"] == 0
 
 

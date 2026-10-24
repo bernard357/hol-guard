@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.guard import native_supply_chain_egress as egress
 from codex_plugin_scanner.guard import native_workspace_snapshot as native
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
@@ -80,15 +82,16 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
     return modes
 
 
-def test_unchanged_snapshot_completes_with_projected_findings(tmp_path: Path, monkeypatch) -> None:
+def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     modes = snapshots(monkeypatch, runner, SNAPSHOT)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     outcome = runner.execute(store, None, claimed)
     assert modes == ["content", "content"]
-    assert outcome.state == "completed"
+    # Secret scanning never runs in the background, so no run is complete yet.
+    assert outcome.state == "partial"
     assert outcome.snapshot_digest == SNAPSHOT.snapshot_digest
-    assert outcome.coverage is not None and outcome.coverage["status"] == "complete"
+    assert outcome.coverage is not None and outcome.coverage["status"] == "partial"
     assert outcome.coverage["reasons"] == ["detector_not_run:secrets"]
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
@@ -155,10 +158,47 @@ def test_partial_snapshot_and_missing_lockfile_report_partial_coverage() -> None
     assert coverage["detectors"] == {"supply_chain": "incomplete", "secrets": "not_run"}
 
 
-def test_workspace_without_manifests_is_complete_with_no_inputs() -> None:
+def test_workspace_without_manifests_reports_no_inputs() -> None:
     coverage = runner.coverage_summary(SNAPSHOT, {"audit_status": "incomplete"}, findings_truncated=False)
-    assert coverage["status"] == "complete"
+    assert coverage["reasons"] == ["detector_not_run:secrets"]
     assert coverage["detectors"]["supply_chain"] == "no_inputs"
+
+
+def test_refused_offline_lookup_leaves_supply_chain_incomplete() -> None:
+    coverage = runner.coverage_summary(SNAPSHOT, AUDIT, findings_truncated=False, egress_refused=1)
+    assert coverage["detectors"]["supply_chain"] == "incomplete"
+    assert coverage["reasons"] == ["supply_chain_incomplete", "detector_not_run:secrets"]
+
+
+@pytest.mark.parametrize(("trigger", "offline"), [("file_change", True), ("manual", False)])
+def test_only_automatic_runs_are_offline(tmp_path: Path, monkeypatch, trigger: str, offline: bool) -> None:
+    store = GuardStore(tmp_path / "home")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    assessments.enqueue(store, KEYS, trigger_kind=trigger, detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0)
+    claimed = assessments.claim_next(store, owner="test", now_ms=T0 + assessments.MAX_DEBOUNCE_WAIT_MS)
+    assert claimed is not None
+    snapshots(monkeypatch, runner, SNAPSHOT)
+    seen: list[bool] = []
+
+    def audit(store, config, root):
+        seen.append(egress._OFFLINE.get() is not None)
+        return AUDIT
+
+    monkeypatch.setattr(runner, "_local_audit", audit)
+    runner.execute(store, None, claimed)
+    assert seen == [offline]
+
+
+def test_unreadable_feed_cache_fails_the_run(tmp_path: Path, monkeypatch) -> None:
+    store, claimed = queued_run(tmp_path)
+
+    def broken(store):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(runner, "feed_context_digest", broken)
+    monkeypatch.setattr(runner, "workspace_snapshot", pytest.fail)
+    outcome = runner.execute(store, None, claimed)
+    assert (outcome.state, outcome.error_code) == ("failed", "feed_context_unavailable")
 
 
 def test_finding_identity_is_stable_and_bounded() -> None:
@@ -241,12 +281,16 @@ def test_observe_queues_on_file_change_only(tmp_path: Path, monkeypatch) -> None
     assert assessments.list_worktrees(store)[0]["dirty_generation"] == before + 1
 
 
-def test_observe_ignores_a_root_that_now_names_another_worktree(tmp_path: Path, monkeypatch) -> None:
+def test_losing_the_root_queues_one_run_and_then_stays_quiet(tmp_path: Path, monkeypatch) -> None:
     store = GuardStore(tmp_path / "home")
     snapshots(monkeypatch, worker, replace(SNAPSHOT, mode="stat"))
     worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
+    before = assessments.list_worktrees(store)[0]["dirty_generation"]
+    # The path now names another worktree: record that once, then stay quiet.
     snapshots(monkeypatch, worker, replace(SNAPSHOT, mode="stat", worktree_key=digest("moved")))
+    assert worker.observe(store, clock=lambda: T0) == 1
     assert worker.observe(store, clock=lambda: T0) == 0
+    assert assessments.list_worktrees(store)[0]["dirty_generation"] == before + 1
 
 
 class FakeHandler:

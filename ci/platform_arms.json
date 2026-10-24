@@ -1523,6 +1523,14 @@
    "body": "14d1c940c90f"
   },
   {
+   "verdict": "posix-primitive",
+   "note": "Windows has no openat/O_NOFOLLOW directory descriptors, so the snapshot walk lists directories by path: symlink_metadata classifies symlinks and junctions as symlinks, files open with FILE_FLAG_OPEN_REPARSE_POINT and must match the node seen, and a child directory is re-checked just before it is listed. That narrows but does not close a directory-to-junction swap race; the snapshot is read-only and feeds a local assessment, never an enforcement decision. Compiles for x86_64-pc-windows-gnu; the nightly native-platform job runs the platform-neutral snapshot tests against it on windows-2025.",
+   "file": "rust/crates/guard-runtime/src/workspace_snapshot_file.rs",
+   "item": "mod platform",
+   "cfg": "not(unix)",
+   "body": "0e244582f000"
+  },
+  {
    "file": "rust/crates/guard-scanner/src/git_read.rs",
    "item": "fn raw_returncode(status: &std::process::ExitStatus) -> i32",
    "verdict": "posix-primitive",

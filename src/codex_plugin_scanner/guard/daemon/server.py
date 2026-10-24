@@ -4064,9 +4064,8 @@ class GuardDaemonServer:
             getattr(self, "_native_resident_watchdog_thread", None),
             deadline=started + _NATIVE_RESIDENT_WATCHDOG_STOP_JOIN_TIMEOUT_SECONDS,
         )
-        # An assessment in flight may outlast the deadline. It holds no hook
-        # state and its lease expires on its own, so it does not count against
-        # containment.
+        # An assessment still running past the deadline writes to the store
+        # after shutdown, so it counts against containment like the others.
         self._workspace_assessment_thread = self._join_service_thread(
             getattr(self, "_workspace_assessment_thread", None),
             deadline=deadline,
@@ -4082,6 +4081,7 @@ class GuardDaemonServer:
                 self._command_activity_maintenance_thread,
                 self._onefile_extraction_reclaim_thread,
                 self._native_resident_watchdog_thread,
+                self._workspace_assessment_thread,
             )
         )
 

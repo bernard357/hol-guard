@@ -8,7 +8,7 @@ only admit, pause, queue or cancel; a run itself happens on the worker thread.
 
 from __future__ import annotations
 
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 from .. import workspace_assessment_store as assessments
 from ..workspace_assessment_worker import WorkspaceAdmissionError, admit_workspace, queue_manual_run
@@ -24,7 +24,10 @@ class WorkspaceAssessmentHandler(Protocol):
     def _write_json(self, payload: dict[str, object], *, status: int = 200) -> None: ...
 
 
-def handle_workspace_assessment_get(handler: WorkspaceAssessmentHandler, path: str) -> bool:
+def handle_workspace_assessment_get(request_handler: object, path: str) -> bool:
+    # The daemon's route mixins are typed apart from the handler class that
+    # provides ``server`` and ``_write_json``.
+    handler = cast(WorkspaceAssessmentHandler, request_handler)
     store = handler.server.store
     if path == ASSESSMENTS_PATH:
         handler._write_json(
@@ -46,10 +49,11 @@ def handle_workspace_assessment_get(handler: WorkspaceAssessmentHandler, path: s
 
 
 def handle_workspace_assessment_post(
-    handler: WorkspaceAssessmentHandler,
+    request_handler: object,
     path: str,
     payload: dict[str, object],
 ) -> bool:
+    handler = cast(WorkspaceAssessmentHandler, request_handler)
     if path == ASSESSMENTS_PATH:
         _admit(handler, payload)
         return True

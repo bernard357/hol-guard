@@ -2,10 +2,14 @@
 //! background workspace assessment to the exact files it read.
 //!
 //! The walk never follows a symlink, never executes Git and never reads a
-//! sensitive basename. Every admitted regular file contributes its relative
+//! sensitive basename. On Unix it descends through directory descriptors
+//! opened without following symlinks, so swapping a directory for a symlink
+//! mid-walk cannot lead it outside the root. Every admitted regular file contributes its relative
 //! path, size and SHA-256 to a sorted manifest; directories skipped by policy,
 //! symlinks, oversize files and unreadable entries contribute an exclusion
 //! record instead, so a change to what was left out still changes the digest.
+//! Depth and the number of entries visited are bounded; hitting either bound
+//! leaves the snapshot partial.
 //! A file whose identity changed while it was read is reported as unstable and
 //! the snapshot is partial: callers must not treat it as a consistent view.
 //!
@@ -13,16 +17,19 @@
 //! only and exists to notice that something changed between content
 //! snapshots; it is never an assessment identity.
 
-use std::fs::{self, Metadata};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 
-use guard_command::local_supply_chain::is_audit_sensitive_basename;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::workspace_snapshot_file::{hash_stable, inode, mtime_ns, HashError};
+use crate::workspace_snapshot_file::DirHandle;
 use crate::workspace_snapshot_git::{git_identity, GitIdentity};
+
+#[path = "workspace_snapshot_walk.rs"]
+mod walk;
+use walk::{walk_directory, Walk, MAX_WALK_DEPTH};
 
 pub(crate) const COMMAND: &str = "workspace-snapshot";
 pub(crate) const FEATURE: &str = "workspace-snapshot-v1";
@@ -35,10 +42,10 @@ pub(crate) const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const HARD_MAX_ENTRIES: usize = 100_000;
 const HARD_MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 const HARD_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-/// Exclusion records past this count are folded into one overflow record so
-/// a tree full of skipped directories cannot grow the reply without bound.
-const MAX_EXCLUSION_RECORDS: usize = 20_000;
-
+/// Every directory entry the walk looks at counts against this budget, so a
+/// tree of empty or excluded entries cannot keep the walk running.
+const DEFAULT_MAX_VISITED_ENTRIES: usize = 250_000;
+const HARD_MAX_VISITED_ENTRIES: usize = 1_000_000;
 /// Vendored, generated and dependency directories. Their content is owned by
 /// a lockfile or a build, not by the developer's edits.
 pub(crate) const SKIP_DIRS: [&str; 22] = [
@@ -66,36 +73,6 @@ pub(crate) const SKIP_DIRS: [&str; 22] = [
     "worktrees",
 ];
 
-/// Basenames whose content detectors read for dependency risk. An oversize
-/// file in this set leaves the snapshot partial instead of merely excluded.
-const DETECTOR_INPUT_BASENAMES: [&str; 25] = [
-    "package.json",
-    "requirements.txt",
-    "constraints.txt",
-    "pyproject.toml",
-    "Pipfile",
-    "Cargo.toml",
-    "go.mod",
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "composer.json",
-    "Gemfile",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lock",
-    "bun.lockb",
-    "poetry.lock",
-    "uv.lock",
-    "Pipfile.lock",
-    "Cargo.lock",
-    "go.sum",
-    "gradle.lockfile",
-    "composer.lock",
-    "Gemfile.lock",
-];
-
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SnapshotMode {
@@ -114,12 +91,15 @@ pub(crate) struct SnapshotRequest {
     pub(crate) max_total_bytes: u64,
     #[serde(default)]
     pub(crate) max_file_bytes: u64,
+    #[serde(default)]
+    pub(crate) max_visited_entries: usize,
 }
 
 struct Limits {
     entries: usize,
     total_bytes: u64,
     file_bytes: u64,
+    visits: usize,
 }
 
 impl Limits {
@@ -143,51 +123,23 @@ impl Limits {
                 DEFAULT_MAX_FILE_BYTES,
                 HARD_MAX_FILE_BYTES,
             ),
+            visits: bounded(
+                request.max_visited_entries,
+                DEFAULT_MAX_VISITED_ENTRIES,
+                HARD_MAX_VISITED_ENTRIES,
+            ),
         }
     }
 
     fn policy_line(&self) -> String {
         format!(
-            "policy\0v{CONTRACT_VERSION}\0{}\0{}\0{}\0{}",
+            "policy\0v{CONTRACT_VERSION}\0{}\0{}\0{}\0{MAX_WALK_DEPTH}\0{}\0{}",
             self.entries,
             self.total_bytes,
             self.file_bytes,
+            self.visits,
             SKIP_DIRS.join(",")
         )
-    }
-}
-
-#[derive(Default)]
-struct Walk {
-    /// `path\0size\0sha256` (content) or `path\0size\0mtime\0ino` (stat).
-    entries: Vec<String>,
-    exclusions: Vec<String>,
-    exclusion_overflow: usize,
-    hashed_bytes: u64,
-    counts: ExclusionCounts,
-    unreadable: usize,
-    unstable: usize,
-    entry_cap_hit: bool,
-    byte_cap_hit: bool,
-    oversize_detector_input: bool,
-}
-
-#[derive(Default)]
-struct ExclusionCounts {
-    directories: usize,
-    sensitive: usize,
-    oversize: usize,
-    symlinks: usize,
-    special: usize,
-}
-
-impl Walk {
-    fn exclude(&mut self, record: String) {
-        if self.exclusions.len() < MAX_EXCLUSION_RECORDS {
-            self.exclusions.push(record);
-        } else {
-            self.exclusion_overflow += 1;
-        }
     }
 }
 
@@ -213,12 +165,12 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         .to_str()
         .ok_or("workspace_snapshot_root_not_utf8")?
         .to_owned();
+    let mut handle = DirHandle::open_root(&root).ok_or("workspace_snapshot_root_unreadable")?;
     let limits = Limits::from_request(request);
     let git = git_identity(&root);
     let mut walk = Walk::default();
-    walk_directory(&root, "", request.mode, &limits, &mut walk);
+    walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
     walk.entries.sort();
-    walk.exclusions.sort();
 
     let worktree_key = keyed_digest("worktree", &root_text);
     let codebase_key = keyed_digest(
@@ -249,6 +201,12 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     }
     if walk.unstable > 0 {
         partial_reasons.push("unstable");
+    }
+    if walk.depth_cap_hit {
+        partial_reasons.push("depth_cap");
+    }
+    if walk.visit_cap_hit {
+        partial_reasons.push("visit_cap");
     }
     Ok(json!({
         "schema": RESULT_SCHEMA,
@@ -284,6 +242,8 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
             "max_entries": limits.entries,
             "max_total_bytes": limits.total_bytes,
             "max_file_bytes": limits.file_bytes,
+            "max_depth": MAX_WALK_DEPTH,
+            "max_visited_entries": limits.visits,
         },
     }))
 }
@@ -298,11 +258,14 @@ fn keyed_digest(domain: &str, value: &str) -> String {
 fn input_manifest_digest(limits: &Limits, walk: &Walk) -> String {
     let mut hasher = Sha256::new();
     hasher.update(limits.policy_line().as_bytes());
-    for record in &walk.exclusions {
-        hasher.update(b"\nexclude\0");
-        hasher.update(record.as_bytes());
-    }
-    hasher.update(format!("\noverflow\0{}", walk.exclusion_overflow).as_bytes());
+    hasher.update(
+        format!(
+            "\nexclusions\0{}\0{}",
+            walk.exclusion_count,
+            hex::encode(walk.exclusions.clone().finalize())
+        )
+        .as_bytes(),
+    );
     hex::encode(hasher.finalize())
 }
 
@@ -329,142 +292,18 @@ fn snapshot_digest(
     }
     hasher.update(
         format!(
-            "\nstate\0{}\0{}\0{}\0{}\0{}",
+            "\nstate\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
             walk.unreadable,
             walk.unstable,
             walk.entry_cap_hit,
             walk.byte_cap_hit,
-            walk.oversize_detector_input
+            walk.oversize_detector_input,
+            walk.depth_cap_hit,
+            walk.visit_cap_hit
         )
         .as_bytes(),
     );
     hex::encode(hasher.finalize())
-}
-
-fn join(relative: &str, name: &str) -> String {
-    if relative.is_empty() {
-        name.to_owned()
-    } else {
-        format!("{relative}/{name}")
-    }
-}
-
-fn walk_directory(
-    directory: &Path,
-    relative: &str,
-    mode: SnapshotMode,
-    limits: &Limits,
-    walk: &mut Walk,
-) {
-    let Ok(reader) = fs::read_dir(directory) else {
-        walk.unreadable += 1;
-        walk.exclude(format!("{relative}\0unreadable_directory"));
-        return;
-    };
-    let mut names: Vec<(String, std::ffi::OsString)> = Vec::new();
-    for entry in reader {
-        let Ok(entry) = entry else {
-            walk.unreadable += 1;
-            continue;
-        };
-        let os_name = entry.file_name();
-        match os_name.to_str() {
-            Some(name) => names.push((name.to_owned(), os_name.clone())),
-            None => {
-                walk.unreadable += 1;
-                walk.exclude(format!("{relative}\0non_utf8_name"));
-            }
-        }
-    }
-    // Readdir order is filesystem specific; the walk visits names in order so
-    // the entry cap always keeps the same prefix.
-    names.sort();
-    for (name, os_name) in names {
-        if walk.entry_cap_hit {
-            return;
-        }
-        let path = directory.join(&os_name);
-        let child = join(relative, &name);
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
-            walk.unreadable += 1;
-            walk.exclude(format!("{child}\0unreadable"));
-            continue;
-        };
-        let kind = metadata.file_type();
-        if kind.is_symlink() {
-            walk.counts.symlinks += 1;
-            let target = fs::read_link(&path)
-                .map(|target| hex::encode(Sha256::digest(target.as_os_str().as_encoded_bytes())))
-                .unwrap_or_else(|_| "-".to_owned());
-            walk.exclude(format!("{child}\0symlink\0{target}"));
-        } else if kind.is_dir() {
-            if SKIP_DIRS.contains(&name.as_str()) {
-                walk.counts.directories += 1;
-                walk.exclude(format!("{child}\0policy_directory"));
-            } else {
-                walk_directory(&path, &child, mode, limits, walk);
-            }
-        } else if !kind.is_file() {
-            walk.counts.special += 1;
-            walk.exclude(format!("{child}\0special"));
-        } else if is_audit_sensitive_basename(&name) {
-            walk.counts.sensitive += 1;
-            walk.exclude(format!("{child}\0sensitive"));
-        } else {
-            admit_file(&path, &child, &name, &metadata, mode, limits, walk);
-        }
-    }
-}
-
-fn admit_file(
-    path: &Path,
-    child: &str,
-    name: &str,
-    metadata: &Metadata,
-    mode: SnapshotMode,
-    limits: &Limits,
-    walk: &mut Walk,
-) {
-    if walk.entries.len() >= limits.entries {
-        walk.entry_cap_hit = true;
-        return;
-    }
-    let size = metadata.len();
-    if size > limits.file_bytes {
-        walk.counts.oversize += 1;
-        if DETECTOR_INPUT_BASENAMES.contains(&name) {
-            walk.oversize_detector_input = true;
-        }
-        walk.exclude(format!("{child}\0oversize\0{size}"));
-        return;
-    }
-    if mode == SnapshotMode::Stat {
-        walk.entries.push(format!(
-            "{child}\0{size}\0{}\0{}",
-            mtime_ns(metadata),
-            inode(metadata)
-        ));
-        return;
-    }
-    if walk.hashed_bytes.saturating_add(size) > limits.total_bytes {
-        walk.byte_cap_hit = true;
-        walk.exclude(format!("{child}\0byte_budget\0{size}"));
-        return;
-    }
-    match hash_stable(path, metadata, limits.file_bytes) {
-        Ok((digest, read)) => {
-            walk.hashed_bytes += read;
-            walk.entries.push(format!("{child}\0{read}\0{digest}"));
-        }
-        Err(HashError::Unstable) => {
-            walk.unstable += 1;
-            walk.exclude(format!("{child}\0unstable"));
-        }
-        Err(HashError::Unreadable) => {
-            walk.unreadable += 1;
-            walk.exclude(format!("{child}\0unreadable"));
-        }
-    }
 }
 
 #[cfg(test)]

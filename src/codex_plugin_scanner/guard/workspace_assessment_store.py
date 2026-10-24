@@ -17,15 +17,18 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from .store_workspace_assessment_schema import MAX_COVERAGE_JSON_BYTES, MAX_FINDINGS_JSON_BYTES
+from .workspace_assessment_reads import get_run, latest_assessed_runs, list_worktrees, recent_runs
 
 DEBOUNCE_MS: Final = 5_000
+# Edits that never pause for the debounce still get assessed this often.
+MAX_DEBOUNCE_WAIT_MS: Final = 60_000
 MIN_INTERVAL_MS: Final = 60_000
 MAX_DEVICE_WORKERS: Final = 2
 LEASE_MS: Final = 5 * 60_000
 
 TRIGGERS: Final = frozenset({"workspace_open", "file_change", "feed_change", "manual", "fix_verification"})
 # User-requested runs skip the debounce and interval: someone is waiting.
-_IMMEDIATE_TRIGGERS: Final = ("manual", "fix_verification")
+USER_TRIGGERS: Final = ("manual", "fix_verification")
 _FINISHED_STATES: Final = frozenset({"completed", "partial", "failed", "superseded"})
 
 
@@ -138,12 +141,17 @@ def _enqueue_locked(
         (keys.codebase_key, keys.worktree_key),
     ).fetchone()
     if queued is not None:
-        # Coalesce: the queued run now covers the newer generation. A user
-        # request upgrades an automatic one so it is not held by the debounce.
-        upgraded = trigger_kind if trigger_kind in _IMMEDIATE_TRIGGERS else str(queued[1])
+        # Coalesce: the queued run now covers the newer generation and the
+        # debounce restarts from this trigger. A user request upgrades an
+        # automatic one so it is not held by the debounce.
+        upgraded = trigger_kind if trigger_kind in USER_TRIGGERS else str(queued[1])
         connection.execute(
-            "update workspace_assessment_runs set dirty_generation = ?, trigger_kind = ? where run_id = ?",
-            (generation, upgraded, queued[0]),
+            """
+            update workspace_assessment_runs set
+              dirty_generation = ?, trigger_kind = ?, triggered_at_ms = max(triggered_at_ms, ?)
+            where run_id = ?
+            """,
+            (generation, upgraded, now_ms, queued[0]),
         )
         return str(queued[0])
     run_id = uuid.uuid4().hex
@@ -151,10 +159,20 @@ def _enqueue_locked(
         """
         insert into workspace_assessment_runs (
           run_id, codebase_key, worktree_key, detector_set_digest, kind, trigger_kind,
-          state, dirty_generation, created_at_ms
-        ) values (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+          state, dirty_generation, created_at_ms, triggered_at_ms
+        ) values (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
         """,
-        (run_id, keys.codebase_key, keys.worktree_key, detector_set_digest, kind, trigger_kind, generation, now_ms),
+        (
+            run_id,
+            keys.codebase_key,
+            keys.worktree_key,
+            detector_set_digest,
+            kind,
+            trigger_kind,
+            generation,
+            now_ms,
+            now_ms,
+        ),
     )
     return run_id
 
@@ -180,13 +198,14 @@ def claim_next(store: Any, *, owner: str, now_ms: int) -> ClaimedRun | None:
                   and active.state = 'running'
               )
               and (
-                r.trigger_kind in ({", ".join("?" for _ in _IMMEDIATE_TRIGGERS)})
-                or (r.created_at_ms <= ? and (s.last_scan_at_ms is null or s.last_scan_at_ms <= ?))
+                r.trigger_kind in ({", ".join("?" for _ in USER_TRIGGERS)})
+                or ((r.triggered_at_ms <= ? or r.created_at_ms <= ?)
+                    and (s.last_scan_at_ms is null or s.last_scan_at_ms <= ?))
               )
             order by r.created_at_ms, r.run_id
             limit 1
             """,
-            (*_IMMEDIATE_TRIGGERS, now_ms - DEBOUNCE_MS, now_ms - MIN_INTERVAL_MS),
+            (*USER_TRIGGERS, now_ms - DEBOUNCE_MS, now_ms - MAX_DEBOUNCE_WAIT_MS, now_ms - MIN_INTERVAL_MS),
         ).fetchone()
         if row is None:
             return None
@@ -254,7 +273,7 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
               state = ?, snapshot_digest = ?, input_manifest_digest = ?, feed_context_digest = ?,
               coverage_json = ?, findings_json = ?, error_code = ?, finished_at_ms = ?,
               lease_owner = null, lease_until_ms = null
-            where run_id = ? and state = 'running' and lease_generation = ?
+            where run_id = ? and state = 'running' and lease_generation = ? and lease_until_ms >= ?
             """,
             (
                 outcome.state,
@@ -267,6 +286,7 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
                 now_ms,
                 run.run_id,
                 run.lease_generation,
+                now_ms,
             ),
         )
         if cursor.rowcount != 1:
@@ -289,10 +309,12 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
                 (now_ms, *_key_tuple(run.keys)),
             )
         if outcome.state == "superseded":
+            # The successor keeps a user request's trigger so it is not held
+            # back by the debounce the user already bypassed.
             _enqueue_locked(
                 connection,
                 run.keys,
-                trigger_kind="file_change",
+                trigger_kind=run.trigger_kind if run.trigger_kind in USER_TRIGGERS else "file_change",
                 detector_set_digest=run.detector_set_digest,
                 now_ms=now_ms,
                 kind=run.kind,
@@ -351,112 +373,6 @@ def record_observation(
             (stat_digest, feed_digest, *_key_tuple(keys)),
         )
         return tuple(triggers)
-
-
-def list_worktrees(store: Any, *, include_paused: bool = True) -> list[dict[str, object]]:
-    with store._connect() as connection:
-        rows = connection.execute(
-            """
-            select codebase_key, worktree_key, private_root, dirty_generation, last_completed_generation,
-                   last_scan_at_ms, paused, admitted_at_ms
-            from workspace_assessment_state
-            where ? or paused = 0
-            order by admitted_at_ms, worktree_key
-            """,
-            (1 if include_paused else 0,),
-        ).fetchall()
-    return [
-        {
-            "codebase_key": row[0],
-            "worktree_key": row[1],
-            "root": row[2],
-            "dirty_generation": int(row[3]),
-            "last_completed_generation": int(row[4]),
-            "stale": int(row[4]) < int(row[3]),
-            "last_scan_at_ms": row[5],
-            "paused": bool(row[6]),
-            "admitted_at_ms": int(row[7]),
-        }
-        for row in rows
-    ]
-
-
-def recent_runs(store: Any, keys: WorktreeKeys | None = None, *, limit: int = 20) -> list[dict[str, object]]:
-    clause, params = ("where codebase_key = ? and worktree_key = ?", _key_tuple(keys)) if keys else ("", ())
-    with store._connect() as connection:
-        rows = connection.execute(
-            f"""
-            select run_id, codebase_key, worktree_key, snapshot_digest, kind, trigger_kind, state,
-                   dirty_generation, coverage_json, findings_json, error_code,
-                   created_at_ms, started_at_ms, finished_at_ms
-            from workspace_assessment_runs {clause}
-            order by created_at_ms desc, run_id desc
-            limit ?
-            """,
-            (*params, max(1, min(limit, 200))),
-        ).fetchall()
-    # Run history carries a count; findings are read from the latest assessed
-    # run, so a long history never multiplies the stored finding lists.
-    runs = [_run_payload(row) for row in rows]
-    for run in runs:
-        run["finding_count"] = len(run.pop("findings"))
-    return runs
-
-
-def get_run(store: Any, run_id: str) -> dict[str, object] | None:
-    with store._connect() as connection:
-        row = connection.execute(
-            """
-            select run_id, codebase_key, worktree_key, snapshot_digest, kind, trigger_kind, state,
-                   dirty_generation, coverage_json, findings_json, error_code,
-                   created_at_ms, started_at_ms, finished_at_ms
-            from workspace_assessment_runs where run_id = ?
-            """,
-            (run_id,),
-        ).fetchone()
-    return _run_payload(row) if row is not None else None
-
-
-def latest_assessed_runs(store: Any) -> list[dict[str, object]]:
-    """The newest completed or partial run of every admitted worktree."""
-
-    with store._connect() as connection:
-        rows = connection.execute(
-            """
-            select r.run_id, r.codebase_key, r.worktree_key, r.snapshot_digest, r.kind, r.trigger_kind, r.state,
-                   r.dirty_generation, r.coverage_json, r.findings_json, r.error_code,
-                   r.created_at_ms, r.started_at_ms, r.finished_at_ms
-            from workspace_assessment_runs r
-            where r.state in ('completed', 'partial')
-              and r.run_id = (
-                select latest.run_id from workspace_assessment_runs latest
-                where latest.codebase_key = r.codebase_key and latest.worktree_key = r.worktree_key
-                  and latest.state in ('completed', 'partial')
-                order by latest.finished_at_ms desc, latest.run_id desc
-                limit 1
-              )
-            """
-        ).fetchall()
-    return [_run_payload(row) for row in rows]
-
-
-def _run_payload(row: Sequence[object]) -> dict[str, object]:
-    return {
-        "run_id": row[0],
-        "codebase_key": row[1],
-        "worktree_key": row[2],
-        "snapshot_digest": row[3],
-        "kind": row[4],
-        "trigger_kind": row[5],
-        "state": row[6],
-        "dirty_generation": row[7],
-        "coverage": json.loads(str(row[8])),
-        "findings": json.loads(str(row[9])),
-        "error_code": row[10],
-        "created_at_ms": row[11],
-        "started_at_ms": row[12],
-        "finished_at_ms": row[13],
-    }
 
 
 def _bounded_json(value: object, limit: int) -> str:

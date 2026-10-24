@@ -9,6 +9,7 @@ a hook path, and the Cloud audit is never used.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import uuid
@@ -21,6 +22,10 @@ from .native_workspace_snapshot import WorkspaceSnapshotError, workspace_snapsho
 from .workspace_assessment_runner import DETECTOR_SET_DIGEST, feed_context_digest, now_ms, run_next
 
 POLL_INTERVAL_SECONDS: Final = 30.0
+# Recorded when an admitted root is missing, unreadable or now names another
+# worktree. Losing the root is itself a change: it queues one run, which fails
+# with the reason, and staying lost queues nothing more.
+UNAVAILABLE_STAT_DIGEST: Final = hashlib.sha256(b"guard.workspace-stat.unavailable.v1").hexdigest()
 # Runs per poll; the rest wait for the next poll so shutdown stays prompt.
 _MAX_RUNS_PER_POLL: Final = 4
 
@@ -81,14 +86,12 @@ def observe(store: Any, *, clock: Callable[[], int] = now_ms) -> int:
         try:
             snapshot = workspace_snapshot(Path(str(worktree["root"])), mode="stat")
         except WorkspaceSnapshotError:
-            # A missing or unreadable root is reported by the next run itself.
             snapshot = None
-        if snapshot is not None and snapshot.worktree_key != keys.worktree_key:
-            snapshot = None
+        available = snapshot is not None and snapshot.worktree_key == keys.worktree_key
         triggers = assessments.record_observation(
             store,
             keys,
-            stat_digest=snapshot.snapshot_digest if snapshot is not None else None,
+            stat_digest=snapshot.snapshot_digest if snapshot is not None and available else UNAVAILABLE_STAT_DIGEST,
             feed_digest=feed_digest,
         )
         for trigger in triggers:
@@ -139,6 +142,7 @@ def start_workspace_assessment_worker(
 
 __all__ = [
     "POLL_INTERVAL_SECONDS",
+    "UNAVAILABLE_STAT_DIGEST",
     "WorkspaceAdmissionError",
     "admit_workspace",
     "observe",
