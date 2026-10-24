@@ -57,6 +57,8 @@ _ERRORS = {
         "init scaffolds a plugin only in a new folder: one holding nothing but a README, a LICENSE or dotfiles."
     ),
     "plugin_kit_init_would_overwrite": "init never overwrites files, and one it would write already exists.",
+    "plugin_kit_request_invalid": "The runtime rejected the request. Reinstall hol-guard so the CLI and the runtime match.",
+    "plugin_kit_encode_failed": "The runtime could not encode its answer.",
 }
 
 
