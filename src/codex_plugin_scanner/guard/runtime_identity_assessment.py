@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 RUNTIME_IDENTITY_FEATURE = "runtime-identity-assess-v1"
 RUNTIME_IDENTITY_COMMAND = "runtime-identity-assess"
@@ -151,22 +151,23 @@ def _parse_verdict(row: object) -> RuntimeAdvisoryVerdict:
         raise RuntimeIdentityError("runtime_identity_failed")
     advisory_id = row.get("advisory_id")
     verdict = row.get("verdict")
-    lists = [row.get(key) for key in _VERDICT_LISTS]
-    if (
-        not isinstance(advisory_id, str)
-        or verdict not in _VERDICTS
-        or not all(isinstance(items, list) and all(isinstance(item, str) for item in items) for items in lists)
-    ):
+    if not isinstance(advisory_id, str) or verdict not in _VERDICTS:
         raise RuntimeIdentityError("runtime_identity_failed")
-    reasons, artifact_ids, instance_ids, replacement_ids = (tuple(items) for items in lists)  # type: ignore[arg-type]
+    reasons, artifact_ids, instance_ids, replacement_ids = (_text_tuple(row.get(key)) for key in _VERDICT_LISTS)
     return RuntimeAdvisoryVerdict(
         advisory_id=advisory_id,
-        verdict=verdict,  # type: ignore[arg-type]
+        verdict=cast(AdvisoryVerdict, verdict),
         reasons=reasons,
         affected_artifact_ids=artifact_ids,
         affected_instance_ids=instance_ids,
         replacement_instance_ids=replacement_ids,
     )
+
+
+def _text_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise RuntimeIdentityError("runtime_identity_failed")
+    return tuple(str(item) for item in value)
 
 
 __all__ = [
