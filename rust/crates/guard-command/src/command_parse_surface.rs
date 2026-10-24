@@ -306,18 +306,27 @@ pub(crate) fn parse_posix_command(
         // of its operands as arithmetic and resolves a bare name through the
         // value it holds, so `X='a[$(id)]'; [[ $X -eq 0 ]]` runs `id`, which
         // the `[` this would rewrite to never does.
+        //
+        // The delimiters have to be the reserved words themselves. Quote
+        // removal leaves `'[[' -f Cargo.toml ']]'` with these same tokens,
+        // but that text runs a command named `[[`, whose operands the shell
+        // splits and globs like any other command's. The segment's own text
+        // settles it: it is rewritten only when it opens and closes on the
+        // bare brackets.
         if executable_index == 0
             && executable.as_deref() == Some("[[")
             && arguments.last().is_some_and(|last| last == "]]")
             && !arguments.iter().any(|word| arithmetic_test(word))
         {
-            executable = Some("[".to_owned());
-            tokens[executable_index] = "[".to_owned();
-            let closing = tokens.len() - 1;
-            tokens[closing] = "]".to_owned();
-            let closing = arguments.len() - 1;
-            arguments[closing] = "]".to_owned();
-            text = single_bracket_text(&text);
+            if let Some(rewritten) = single_bracket_text(&text) {
+                executable = Some("[".to_owned());
+                tokens[executable_index] = "[".to_owned();
+                let closing = tokens.len() - 1;
+                tokens[closing] = "]".to_owned();
+                let closing = arguments.len() - 1;
+                arguments[closing] = "]".to_owned();
+                text = rewritten;
+            }
         }
         if executable.as_deref().is_some_and(is_shell_control_keyword) {
             return Ok(uncertain(request, raw, "compound_shell_not_yet_supported"));
@@ -446,18 +455,15 @@ fn arithmetic_test(word: &str) -> bool {
 /// The same segment text with its bracket pair written the way `[ ... ]`
 /// writes it. Layers that read a segment's own text rather than its words
 /// would otherwise still see the `[[` spelling the words no longer carry.
-fn single_bracket_text(text: &str) -> String {
+fn single_bracket_text(text: &str) -> Option<String> {
     let leading = text.len() - text.trim_start().len();
     let trailing = text.len() - text.trim_end().len();
-    let Some(inner) = text[leading..text.len() - trailing]
+    let inner = text[leading..text.len() - trailing]
         .strip_prefix("[[")
-        .and_then(|rest| rest.strip_suffix("]]"))
-    else {
-        return text.to_owned();
-    };
-    format!(
+        .and_then(|rest| rest.strip_suffix("]]"))?;
+    Some(format!(
         "{}[{inner}]{}",
         &text[..leading],
         &text[text.len() - trailing..]
-    )
+    ))
 }

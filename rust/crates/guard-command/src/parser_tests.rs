@@ -208,6 +208,30 @@ fn marks_complex_shell_forms_uncertain_without_partial_segments() {
     }
 }
 
+/// Quote removal leaves `'[[' -f Cargo.toml ']]'` with the same words a bare
+/// `[[ ... ]]` carries, but that text runs a command named `[[`, whose
+/// operands the shell splits and globs. Only the bare reserved words are read
+/// as the `[ ... ]` test they ask; the quoted spelling keeps the review every
+/// other shell keyword gets.
+#[test]
+fn reads_only_bare_double_brackets_as_the_test_they_ask() {
+    let bare = parse_command(&request("[[ -f Cargo.toml ]]")).unwrap();
+    assert_eq!(bare.confidence, "exact");
+    assert_eq!(bare.segments[0].executable.as_deref(), Some("["));
+    assert_eq!(bare.segments[0].text, "[ -f Cargo.toml ]");
+
+    for command in ["'[[' -f Cargo.toml ']]'", "\"[[\" -f Cargo.toml \"]]\""] {
+        let quoted = parse_command(&request(command)).unwrap();
+        assert_eq!(quoted.confidence, "uncertain", "{command}");
+        assert_eq!(
+            quoted.uncertainty_reason.as_deref(),
+            Some("compound_shell_not_yet_supported"),
+            "{command}"
+        );
+        assert!(quoted.segments.is_empty(), "{command}");
+    }
+}
+
 #[test]
 fn rejects_oversized_commands_without_partial_exact_parse() {
     let parsed = parse_command(&request(&"x".repeat(MAX_COMMAND_BYTES + 1))).unwrap();
