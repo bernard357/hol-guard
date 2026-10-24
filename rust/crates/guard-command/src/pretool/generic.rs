@@ -76,6 +76,19 @@ pub fn venv_activation_target(command: &str, context: super::PathContext<'_>) ->
     venv_activation_projection::project(command, context)
 }
 
+/// The command the pre-tool pass answered for, when it read through the
+/// call's own wrapping, or `None` when the call is its own answer. A trailing
+/// subshell or brace group runs exactly the command list inside it and is
+/// decided as that list, and an activation hands its verdict to the command
+/// after it. A sink that plans the call again from its snapshot plans this
+/// text: the group's own text models no command, so `(.venv/bin/pytest -q)`
+/// reached the pytest planner with its parenthesis still attached.
+pub fn contained_target(command: &str, context: super::PathContext<'_>) -> Option<String> {
+    let ungrouped = super::ungrouped_command_list(command);
+    let text = ungrouped.as_deref().unwrap_or(command);
+    venv_activation_target(text, context).or(ungrouped)
+}
+
 /// Bounded caller-supplied context, never authenticated provider facts.
 pub struct UntrustedCommandContext {
     pub command: Option<String>,
