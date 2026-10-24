@@ -22,6 +22,7 @@ from .harness_version_api import attach_version_compatibility
 from .local_cli_http import handle_local_cli_list
 from .server_common import _now, _ServerProxy, _settings_export_payload, _settings_response_payload
 from .server_control_cloud_sync import _managed_controls_publish_for, _maybe_queue_first_cloud_sync
+from .workspace_assessment_api import handle_workspace_assessment_get
 
 m = _ServerProxy()
 
@@ -129,6 +130,8 @@ class _DashboardRuntimeReadRoutes:
             return True
         if parsed.path == "/v1/supply-chain/bundle":
             self._handle_get_supply_chain_bundle()
+            return True
+        if handle_workspace_assessment_get(self, parsed.path):
             return True
         if len(path_parts) == 4 and path_parts[:2] == ["v1", "apps"] and path_parts[3] == "cloud":
             self._handle_cloud_app_handoff(path_parts[2], parsed.query)

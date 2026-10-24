@@ -761,6 +761,9 @@ mod windows_readonly;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
 mod workspace_scan_targets;
+mod workspace_snapshot;
+mod workspace_snapshot_file;
+mod workspace_snapshot_git;
 mod zcode_artifacts;
 #[path = "adapters/detection/zcode_detect.rs"]
 mod zcode_detect;
