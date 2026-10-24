@@ -163,13 +163,20 @@ fn an_exec_without_a_named_program_keeps_the_failure() {
 /// test` that way, and the contained-launcher sink peels the same prefix;
 /// only this scan still read the word `env` as a program it never saw, so an
 /// ordinary test run behind a launcher blocked outright while the same run
-/// without the names went through.
+/// without the names went through. `exec env npm test` decides no name at
+/// all, so it is that same run spelled twice over and settles where `npm
+/// test` settles. A local script behind the same prefix lands here too: the
+/// projection hands the scan `./deploy.sh`, which this repository reviews on
+/// its own terms, so the launcher stops being the reason the command is
+/// refused.
 #[test]
 fn a_transparent_env_behind_a_launcher_reaches_its_owners_floor() {
     let controls = controls(github("enabled", None), false);
     for command in [
         "exec env CI=1 npm test",
+        "exec env npm test",
         "exec env CI=1 FOO=bar cargo build",
+        "exec env CI=1 ./deploy.sh",
         "exec /usr/bin/env CI=1 npm test",
         "exec env -u LANG npm test",
         "stdbuf -oL env CI=1 cargo build",
@@ -187,13 +194,12 @@ fn a_transparent_env_behind_a_launcher_reaches_its_owners_floor() {
     assert_eq!(bare, "review", "env -u NODE_OPTIONS npm test: {code}");
     // Whatever floor the bare spelling settles on, putting a launcher in
     // front of it never buys the command something the bare spelling lacks.
-    // It does not yet reach the same floor: the projection reads a simple
-    // command from its first word and stops at anything that is neither an
-    // assignment nor `env` (`env_prefix_projection::strip_prefixes`), so a
-    // launcher leaves the command unprojected and on its own floor. Closing
-    // that is the projection's to do, not this scan's. `-u PATH` is the
-    // shape the projection refuses outright, so both spellings already
-    // agree there.
+    // `env_prefix_projection::strip_prefixes` reads past an option-less
+    // `exec` in front of an `env` wrapper, so the launcher no longer leaves
+    // the command unprojected and the two spellings reach the same floor.
+    // `-u PATH` is the shape the projection refuses outright, so they agree
+    // there too. The ladder is what this asserts either way: it holds
+    // whether or not the projection reads a given spelling.
     for command in ["env -u NODE_OPTIONS npm test", "env -u PATH npm test"] {
         let (bare, _) = decision(&controls, command);
         let (behind, _) = decision(&controls, &format!("exec {command}"));
@@ -237,9 +243,7 @@ fn an_env_that_is_not_a_name_list_keeps_the_failure() {
         "exec env -i npm test",
         "exec env -S'sh -c id'",
         "exec env -C /tmp npm test",
-        "exec env npm test",
         "exec env CI=1 bash -lc 'npm run build'",
-        "exec env CI=1 ./deploy.sh",
         "stdbuf -oL env CI=1 python3 deploy.py",
         "nice -n 10 env CI=1 xargs rm -f",
         "exec env LD_PRELOAD=/tmp/x.so pytest -q",
