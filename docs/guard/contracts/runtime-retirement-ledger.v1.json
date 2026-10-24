@@ -112,7 +112,8 @@
   "src/codex_plugin_scanner/guard/runtime/github_command_capabilities.py",
   "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/read_only_filters.py",
   "src/codex_plugin_scanner/guard/runtime/extension_control_resolver.py",
-  "src/codex_plugin_scanner/guard/inventory_contract_scans.py"
+  "src/codex_plugin_scanner/guard/inventory_contract_scans.py",
+  "src/codex_plugin_scanner/guard/runtime/skill_paths.py"
  ],
  "retired_tests": [
   {
@@ -7345,6 +7346,12 @@
    ],
    "status": "native_behavior_ported_requires_ci",
    "rationale": "The budget assertion itself is ported: bound_fs::Directory::entries refuses an overflowing scan and leaves later scans intact, which the native test proves with real directory entries instead of the fake scandir iterator this test installed. The declared-output capture walk the assertion ran through is gone with runtime/containment_outputs.py; the native contained-execution path captures only stdout.bin and stderr.bin from its own run directory."
+  },
+  {
+   "old_node": "tests/test_hook_source_skill_read.py::test_supported_omp_scheme_matrix_is_complete",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Compared PI_INLINE_RESOURCE_SCHEMES to a literal copy of itself. No production module imported runtime/skill_paths.py; skill:// document resolution is resolve_known_skill_doc_path in codex_output_source_paths.rs."
   }
  ],
  "preserved_tests": [

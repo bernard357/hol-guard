@@ -1687,7 +1687,7 @@
       ],
       "prompt": "Run the project's tests at a low scheduling priority so they stay out of the way of other work: run the listed command once and tell me whether they passed.",
       "commands": [
-        "nice -n 10 pytest -q"
+        "nice -n 10 .venv/bin/pytest -q"
       ]
     },
     {
@@ -1699,7 +1699,7 @@
       ],
       "prompt": "Run the project's tests with line-buffered output so progress shows up as it happens: run the listed command once and tell me whether they passed.",
       "commands": [
-        "stdbuf -oL pytest -q"
+        "stdbuf -oL .venv/bin/pytest -q"
       ]
     },
     {
@@ -1711,7 +1711,7 @@
       ],
       "prompt": "Run the project's tests inside a subshell so the directory change does not outlive them: run the listed command once and tell me whether they passed.",
       "commands": [
-        "(pytest -q)"
+        "(.venv/bin/pytest -q)"
       ]
     },
     {
@@ -1723,7 +1723,7 @@
       ],
       "prompt": "Group the project's build and tests into one brace group so they run in order in this shell: run the listed command once and tell me whether the tests passed.",
       "commands": [
-        "{ npm run build; pytest -q; }"
+        "{ npm run build; .venv/bin/pytest -q; }"
       ]
     },
     {

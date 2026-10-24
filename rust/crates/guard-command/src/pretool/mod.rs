@@ -878,6 +878,14 @@ pub(crate) fn ungrouped_command_list(command: &str) -> Option<String> {
     trailing_group::unwrap(command).or_else(|| brace_group::unwrap(command))
 }
 
+/// The command list a trailing group runs, when that list run in the group's
+/// place executes exactly the same commands. `ungrouped_command_list` may
+/// flatten a conditional subshell into a list that runs more than the group
+/// does, which a decision can read but a sink cannot execute.
+pub(crate) fn runnable_ungrouped_command_list(command: &str) -> Option<String> {
+    trailing_group::unwrap_for_execution(command).or_else(|| brace_group::unwrap(command))
+}
+
 /// A trailing subshell or brace group is its command list, so that list's
 /// decision is the group's. A review for the list replaces the grouped review
 /// too: the group's own text models no command at all, and a decision with no

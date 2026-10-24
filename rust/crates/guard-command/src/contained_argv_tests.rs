@@ -133,9 +133,10 @@ fn only_a_bare_pnpm_exec_reads_as_vitest() {
 }
 
 /// The sink plans the call again from its own snapshot, so it has to be able
-/// to ask for the same reading the pre-tool pass made of an activation.
+/// to ask for the same reading the pre-tool pass made of an activation or a
+/// trailing group.
 #[test]
-fn venv_activation_target_answers_the_sink() {
+fn contained_target_answers_the_sink() {
     let root = std::env::temp_dir().join(format!("contained-argv-venv-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let venv = root.join("project/.venv");
@@ -160,7 +161,7 @@ fn venv_activation_target_answers_the_sink() {
         "cwd": project.to_str().unwrap(),
         "home": root.to_str().unwrap(),
     });
-    let projected = evaluate("venv_activation_target", &input).unwrap();
+    let projected = evaluate("contained_target", &input).unwrap();
     assert_eq!(
         projected["value"],
         json!(".venv/bin/pytest -q"),
@@ -173,7 +174,50 @@ fn venv_activation_target_answers_the_sink() {
         "home": root.to_str().unwrap(),
     });
     assert_eq!(
-        evaluate("venv_activation_target", &unread).unwrap()["value"],
+        evaluate("contained_target", &unread).unwrap()["value"],
+        Value::Null
+    );
+    // A trailing group runs exactly the list inside it, around an activation
+    // or not.
+    for (text, expected) in [
+        ("(.venv/bin/pytest -q)", ".venv/bin/pytest -q"),
+        ("( .venv/bin/pytest -q )", ".venv/bin/pytest -q"),
+        ("{ .venv/bin/pytest -q; }", ".venv/bin/pytest -q"),
+        (
+            "(source .venv/bin/activate && pytest -q)",
+            ".venv/bin/pytest -q",
+        ),
+    ] {
+        let grouped = json!({
+            "text": text,
+            "cwd": project.to_str().unwrap(),
+            "home": root.to_str().unwrap(),
+        });
+        assert_eq!(
+            evaluate("contained_target", &grouped).unwrap()["value"],
+            json!(expected),
+            "{text}"
+        );
+    }
+    // A group behind a conditional that holds a list keeps its parentheses:
+    // flattened, `touch b` would run whether or not `false` succeeded.
+    let conditional = json!({
+        "text": "false && (.venv/bin/pytest -q; touch b)",
+        "cwd": project.to_str().unwrap(),
+        "home": root.to_str().unwrap(),
+    });
+    assert_eq!(
+        evaluate("contained_target", &conditional).unwrap()["value"],
+        Value::Null
+    );
+    // A plain call is its own answer.
+    let plain = json!({
+        "text": ".venv/bin/pytest -q",
+        "cwd": project.to_str().unwrap(),
+        "home": root.to_str().unwrap(),
+    });
+    assert_eq!(
+        evaluate("contained_target", &plain).unwrap()["value"],
         Value::Null
     );
     let _ = std::fs::remove_dir_all(&root);
