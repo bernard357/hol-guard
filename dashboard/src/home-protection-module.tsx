@@ -13,6 +13,7 @@ import { ActionButton, SectionLabel, Tag } from "./approval-center-primitives";
 import { formatRelativeTime } from "./approval-center-utils";
 import type { GuardReceipt, GuardRuntimeSnapshot } from "./guard-types";
 import { isPackageBlockReceipt } from "./supply-chain-evidence-rail";
+import { collectPackageBlockReceipts } from "./supply-chain-protection-stats";
 
 export type HomeProtectionStatus = "protected" | "partial" | "staged" | "unprotected" | "unknown";
 
@@ -80,17 +81,22 @@ function ProtectedManagerRow({ manager, protected: isProtected }: ProtectedManag
 
 type HomeProtectionModuleProps = {
   snapshot: GuardRuntimeSnapshot;
+  receipts?: readonly GuardReceipt[];
   onOpenFleet: () => void;
   onOpenSupplyChain?: () => void;
 };
 
 export function HomeProtectionModule({
   snapshot,
+  receipts,
   onOpenFleet,
   onOpenSupplyChain,
 }: HomeProtectionModuleProps) {
   const status = useMemo(() => resolveHomeProtectionStatus(snapshot), [snapshot]);
-  const lastBlocked = useMemo(() => resolveLastBlockedInstall(snapshot.latest_receipts ?? []), [snapshot.latest_receipts]);
+  const lastBlocked = useMemo(
+    () => resolveLastBlockedInstall(collectPackageBlockReceipts(snapshot, receipts)),
+    [snapshot, receipts],
+  );
   const intelState = useMemo(() => resolveIntelStaleness(snapshot), [snapshot]);
   const protection = snapshot.supply_chain?.package_manager_protection;
 

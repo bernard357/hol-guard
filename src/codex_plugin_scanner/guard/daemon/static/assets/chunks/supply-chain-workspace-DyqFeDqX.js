@@ -1,11 +1,10 @@
 import { j as jsxRuntimeExports, r as reactExports, A as ActionButton, s as HiMiniCheckCircle, c as HiMiniChevronDown, ab as HiMiniExclamationCircle } from "../guard-dashboard.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-CiBhiuhn.js";
-import { r as resolveHomeProtectionStatus } from "./home-protection-module-BaDbuq0C.js";
-import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-NtheBh1x.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-AUw4VU3p.js";
+import { r as resolveHomeProtectionStatus } from "./home-protection-module-BN08Sv5L.js";
+import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-Bc9FBgdN.js";
 import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-COty1p6U.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-BBdFnG-P.js";
-import "./feed-health-workspace-DP7m4bKi.js";
-import "./supply-chain-evidence-rail-Bq37hbRn.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-qqW6EZdl.js";
+import "./feed-health-workspace-DFExwQ4K.js";
 const PROTECTION_BADGE = {
   protected: "Protected",
   partial: "Partly protected",
@@ -93,7 +92,7 @@ function setupStepsLabel(count) {
 }
 function resolveSupplyChainWorkspaceHero(snapshot, options) {
   const protectionStatus = resolveHomeProtectionStatus(snapshot);
-  const stats = buildSupplyChainStats(snapshot);
+  const stats = buildSupplyChainStats(snapshot, options?.receipts);
   const preventedLabel = stats.preventedInstalls > 0 ? `${stats.preventedInstalls} recent blocked install${stats.preventedInstalls === 1 ? "" : "s"}` : "No blocked installs yet";
   const stagedGuidance = protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;
   const counts = badgeManagerCounts(snapshot);
@@ -282,11 +281,11 @@ function SupplyChainRecovery({
     }
   );
 }
-function SupplyChainWorkspace({ snapshot, fixAllState, onFixAll }) {
+function SupplyChainWorkspace({ snapshot, receipts, fixAllState, onFixAll }) {
   const supplyChainIssues = reactExports.useMemo(() => resolveSupplyChainIssues(snapshot), [snapshot]);
   const workspaceHero = reactExports.useMemo(
-    () => resolveSupplyChainWorkspaceHero(snapshot, { openIssueCount: supplyChainIssues.length }),
-    [snapshot, supplyChainIssues.length]
+    () => resolveSupplyChainWorkspaceHero(snapshot, { openIssueCount: supplyChainIssues.length, receipts }),
+    [snapshot, supplyChainIssues.length, receipts]
   );
   return supplyChainIssues.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
     SupplyChainRecovery,

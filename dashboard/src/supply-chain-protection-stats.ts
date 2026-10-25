@@ -1,4 +1,4 @@
-import type { GuardRuntimeSnapshot, PackageManagerProtection } from "./guard-types";
+import type { GuardReceipt, GuardRuntimeSnapshot, PackageManagerProtection } from "./guard-types";
 import { isPackageBlockReceipt } from "./supply-chain-evidence-rail";
 
 export type ManagerCoverageStatus = "protected" | "restart_required" | "path_repair" | "unprotected";
@@ -32,8 +32,27 @@ export function resolveManagerCoverageStatus(
   return "unprotected";
 }
 
+/**
+ * Package blocks from the snapshot plus the longer receipt page, once loaded.
+ * The snapshot carries only the newest receipts, so an older block would
+ * otherwise drop out while the activity rail still shows it.
+ */
+export function collectPackageBlockReceipts(
+  snapshot: GuardRuntimeSnapshot,
+  loadedReceipts?: readonly GuardReceipt[] | null,
+): GuardReceipt[] {
+  const blocks = new Map<string, GuardReceipt>();
+  for (const receipt of [...(snapshot.latest_receipts ?? []), ...(loadedReceipts ?? [])]) {
+    if (isPackageBlockReceipt(receipt)) {
+      blocks.set(receipt.receipt_id, receipt);
+    }
+  }
+  return [...blocks.values()];
+}
+
 export function buildSupplyChainStats(
   snapshot: GuardRuntimeSnapshot,
+  loadedReceipts?: readonly GuardReceipt[] | null,
 ): {
   totalApps: number;
   activeApps: number;
@@ -62,8 +81,8 @@ export function buildSupplyChainStats(
     totalApps: managedInstalls.length,
     activeApps: managedInstalls.filter((install) => install.active).length,
     // Managed installs are connected apps; an inactive one is not a blocked
-    // package. Count the package blocks among the receipts the snapshot carries.
-    preventedInstalls: (snapshot.latest_receipts ?? []).filter(isPackageBlockReceipt).length,
+    // package. Count the package blocks among the receipts Guard has loaded.
+    preventedInstalls: collectPackageBlockReceipts(snapshot, loadedReceipts).length,
     protectedManagers,
     stagedManagers,
     repairRequiredManagers,

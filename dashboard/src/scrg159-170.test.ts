@@ -1,5 +1,6 @@
 import { resolveHomeProtectionStatus, resolveLastBlockedInstall, resolveIntelStaleness } from "./home-protection-module";
 import { buildSupplyChainStats } from "./supply-chain-workspace";
+import { collectPackageBlockReceipts } from "./supply-chain-protection-stats";
 import { deriveFrontendAuditResults } from "./audit-workspace";
 import { groupPoliciesByHarness, resolveSecurityModeCopy } from "./policy-workspace";
 import { resolveFeedSourceMode, resolveFeedStaleness } from "./feed-health-workspace";
@@ -223,6 +224,25 @@ assert(
     latest_receipts: [packageBlock(recentDate), makeReceipt("block", recentDate), makeReceipt("allow", recentDate)],
   }).preventedInstalls === 1,
   "SCRG160-E2: prevented installs count package block receipts only",
+);
+const olderBlock = packageBlock(olderDate);
+const crowdedSnapshot = {
+  ...snapshotWithInstalls,
+  // Newer receipts have pushed the package block out of the snapshot.
+  latest_receipts: [makeReceipt("allow", recentDate)],
+};
+assert(
+  buildSupplyChainStats(crowdedSnapshot, [olderBlock, makeReceipt("allow", recentDate)]).preventedInstalls === 1,
+  "SCRG160-E3: a package block outside the snapshot still counts once the receipt page loads",
+);
+assert(
+  buildSupplyChainStats({ ...crowdedSnapshot, latest_receipts: [olderBlock] }, [olderBlock]).preventedInstalls === 1,
+  "SCRG160-E4: a block present in both the snapshot and the receipt page counts once",
+);
+assert(
+  resolveLastBlockedInstall(collectPackageBlockReceipts(crowdedSnapshot, [olderBlock]))?.receipt_id ===
+    olderBlock.receipt_id,
+  "SCRG160-E5: Home finds the last block from the loaded receipt page",
 );
 assert(statsWithInstalls.protectedManagers === 1, "SCRG160-F: 1 protected manager");
 assert(statsWithInstalls.unprotectedManagers === 1, "SCRG160-G: 1 unprotected manager");
