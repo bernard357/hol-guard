@@ -1,5 +1,5 @@
 import { resolveHomeProtectionStatus, type HomeProtectionStatus } from "./home-protection-module";
-import type { GuardRuntimeSnapshot } from "./guard-types";
+import type { GuardReceipt, GuardRuntimeSnapshot } from "./guard-types";
 import { buildSupplyChainStats } from "./supply-chain-protection-stats";
 
 export type SupplyChainWorkspaceHeroState = {
@@ -131,13 +131,13 @@ export function setupStepsLabel(count: number): string {
 
 export function resolveSupplyChainWorkspaceHero(
   snapshot: GuardRuntimeSnapshot,
-  options?: { openIssueCount?: number },
+  options?: { openIssueCount?: number; receipts?: readonly GuardReceipt[] | null },
 ): SupplyChainWorkspaceHeroState {
   const protectionStatus = resolveHomeProtectionStatus(snapshot);
-  const stats = buildSupplyChainStats(snapshot);
+  const stats = buildSupplyChainStats(snapshot, options?.receipts);
   const preventedLabel =
     stats.preventedInstalls > 0
-      ? `${stats.preventedInstalls} blocked install${stats.preventedInstalls === 1 ? "" : "s"}`
+      ? `${stats.preventedInstalls} recent blocked install${stats.preventedInstalls === 1 ? "" : "s"}`
       : "No blocked installs yet";
   const stagedGuidance =
     protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;

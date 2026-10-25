@@ -1101,6 +1101,142 @@
       "expect": "allow"
     },
     {
+      "id": "git-worktree-submodule-status",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule status"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "git-worktree-submodule-bare",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-submodule-status-cached",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule status --cached"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "git-worktree-submodule-quiet-leading",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule --quiet status"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-submodule-cached-leading",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule --cached status"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-submodule-status-recursive",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule status --recursive"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-submodule-foreach-program",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule foreach git status"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-submodule-update-init",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule update --init --recursive"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "git-worktree-status-short",
       "fix_area": "git",
       "harnesses": [
@@ -27167,6 +27303,57 @@
       },
       "cwd": "worktree",
       "expect": "not_allow"
+    },
+    {
+      "id": "contained-cd-subdirectory-parent-listing",
+      "fix_area": "containment",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && ls .."
+      },
+      "cwd": "worktree",
+      "contained_ok": true,
+      "expect": "allow"
+    },
+    {
+      "id": "contained-cd-subdirectory-parent-long-listing",
+      "fix_area": "containment",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && ls -la .."
+      },
+      "cwd": "worktree",
+      "contained_ok": true,
+      "expect": "allow"
+    },
+    {
+      "id": "contained-cd-subdirectory-parent-read",
+      "fix_area": "containment",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && cat ../package.json"
+      },
+      "cwd": "worktree",
+      "contained_ok": true,
+      "expect": "allow"
     }
   ],
   "mcp_cases": [

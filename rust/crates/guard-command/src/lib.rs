@@ -190,6 +190,7 @@ pub mod ordered_json;
 #[cfg(unix)]
 pub mod package_context_build;
 pub mod package_execution_context;
+mod package_extension_ids;
 pub mod package_intent_common;
 pub mod package_intent_parser;
 pub mod package_manager_command;
@@ -455,6 +456,8 @@ pub mod target_identities;
 pub mod workspace_inventory;
 #[cfg(test)]
 mod workspace_path_guard_tests;
+#[cfg(unix)]
+mod workspace_roots;
 
 // RTM-014/017/020/023 pending modules — compile signal only until legs complete.
 pub mod aibom_reporting;
@@ -481,6 +484,8 @@ pub mod egress_caller_policy;
 pub mod egress_proxy_credentials;
 mod egress_spool;
 pub mod false_positive_rules;
+#[cfg(unix)]
+mod forwarded_settings;
 pub mod guard_sync_transport;
 #[path = "adapters/hook/hook_adapter_envelope.rs"]
 pub mod hook_adapter_envelope;

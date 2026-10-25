@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { GuardRuntimeSnapshot } from "./guard-types";
+import type { GuardReceipt, GuardRuntimeSnapshot } from "./guard-types";
 import { resolveSupplyChainIssues } from "./supply-chain-issues";
 import { resolveSupplyChainWorkspaceHero } from "./supply-chain-workspace-hero-state";
 import { SupplyChainWorkspaceHero } from "./supply-chain-workspace-hero";
@@ -31,16 +31,17 @@ export { buildSupplyChainStats } from "./supply-chain-protection-stats";
 
 type SupplyChainWorkspaceProps = {
   snapshot: GuardRuntimeSnapshot;
+  receipts?: readonly GuardReceipt[];
   fixAllState: SupplyChainFixAllState;
   onFixAll: () => void;
 };
 
 /** The status line above the roster: all clear, or what to restore. */
-export function SupplyChainWorkspace({ snapshot, fixAllState, onFixAll }: SupplyChainWorkspaceProps) {
+export function SupplyChainWorkspace({ snapshot, receipts, fixAllState, onFixAll }: SupplyChainWorkspaceProps) {
   const supplyChainIssues = useMemo(() => resolveSupplyChainIssues(snapshot), [snapshot]);
   const workspaceHero = useMemo(
-    () => resolveSupplyChainWorkspaceHero(snapshot, { openIssueCount: supplyChainIssues.length }),
-    [snapshot, supplyChainIssues.length],
+    () => resolveSupplyChainWorkspaceHero(snapshot, { openIssueCount: supplyChainIssues.length, receipts }),
+    [snapshot, supplyChainIssues.length, receipts],
   );
 
   return supplyChainIssues.length > 0 ? (
