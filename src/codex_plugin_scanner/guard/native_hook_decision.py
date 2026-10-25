@@ -213,33 +213,6 @@ _REVIEW_ROUTE_INPUT_FIELDS = frozenset(
         "prompt_secret_read",
     }
 )
-_PLAN_FIELDS: dict[str, Any] = {
-    "policy_action": str,
-    "approval_reuse": (dict, type(None)),
-    "scanner_evidence": list,
-    "effects": list,
-    "exit_code": (int, type(None)),
-}
-_EFFECT_FIELDS: dict[str, dict[str, Any]] = {
-    "silent_review": {"artifact": dict},
-    "observe_queue": {"executable_action": str, "observed_policy_action": str, "changed_fields": list},
-    "receipt": {"verdict": str, "decision_source": str, "policy_action": str},
-    "activity": {"event": str, "policy_action": str, "prompted": bool, "reuse_status": str},
-    "usage": {"policy_action": str},
-    "pretool_response": {"permission_decision": str, "reason": str},
-    "permission_response": {"behavior": str, "message": _OPT_STR, "interrupt": (bool, type(None))},
-    "queue_approval": {"evaluation_artifact": dict, "response_payload": dict, "deny_reason": str},
-}
-# Effect values the transport dispatches on; anything else is malformed.
-_EFFECT_VALUES: dict[str, frozenset[str]] = {
-    "verdict": frozenset({"allow", "block"}),
-    "reuse_status": frozenset({"accepted", "rejected", "not-applicable"}),
-    "permission_decision": frozenset({"allow", "deny"}),
-    "behavior": frozenset({"allow", "deny"}),
-    "event": frozenset({"preToolUse", "copilotPermissionRequest"}),
-}
-_ACKED_FACT = "acked_recording_only"
-_EDGE_KEYS = ("policy_action", "minimum_action", "decision", "reason_code")
 
 
 class NativeHookDecisionError(RuntimeError):
@@ -514,64 +487,6 @@ def native_permission_persist_plan(
     return {key: payload[key] for key in _PERSIST_PLAN_FIELDS}
 
 
-def native_copilot_settle(
-    inputs: Mapping[str, object],
-    acked_recording_only: Callable[[], bool],
-    *,
-    guard_home: Path | None = None,
-) -> dict[str, Any]:
-    """Settle a Copilot tool call: the final action and the effects to run, in order.
-
-    ``acked_recording_only`` runs only when the resident asks for it.
-    """
-
-    def validate(payload: dict[str, Any]) -> None:
-        if set(payload) != {"kind", "needs_facts", "plan"}:
-            raise NativeHookDecisionError(_INVALID)
-        needs = payload["needs_facts"]
-        if not isinstance(needs, list):
-            raise NativeHookDecisionError(_INVALID)
-        if needs:
-            if needs != [_ACKED_FACT] or inputs[_ACKED_FACT] is not None or payload["plan"] is not None:
-                raise NativeHookDecisionError(_INVALID)
-            return
-        plan = _shape(payload["plan"], _PLAN_FIELDS)
-        _action(plan["policy_action"])
-        if not all(isinstance(entry, dict) for entry in plan["scanner_evidence"]):
-            raise NativeHookDecisionError(_INVALID)
-        for effect in plan["effects"]:
-            kind = effect.get("effect") if isinstance(effect, dict) else None
-            if kind not in _EFFECT_FIELDS:
-                raise NativeHookDecisionError(_INVALID)
-            fields = _shape({key: value for key, value in effect.items() if key != "effect"}, _EFFECT_FIELDS[kind])
-            for key, allowed in _EFFECT_VALUES.items():
-                if key in fields and fields[key] not in allowed:
-                    raise NativeHookDecisionError(_INVALID)
-            for key in ("policy_action", "executable_action", "observed_policy_action"):
-                if key in fields:
-                    _action(fields[key])
-
-    # The resident binds the reply to its typed request, so every optional
-    # field travels explicitly.
-    edge = inputs.get("native_edge")
-    inputs = {
-        **inputs,
-        _ACKED_FACT: inputs.get(_ACKED_FACT),
-        "native_edge": {key: edge.get(key) for key in _EDGE_KEYS} if isinstance(edge, Mapping) else None,
-    }
-    settle = functools.partial(
-        _decide,
-        guard_home=guard_home,
-        validate=validate,
-        feature=HOOK_DECISION_NATIVE_EDGE_REASON_FEATURE,
-    )
-    payload = settle({"kind": "copilot_settle", "inputs": dict(inputs)})
-    if payload["needs_facts"]:
-        inputs = {**inputs, _ACKED_FACT: bool(acked_recording_only())}
-        payload = settle({"kind": "copilot_settle", "inputs": dict(inputs)})
-    return payload["plan"]
-
-
 __all__ = [
     "HOOK_DECISION_ARTIFACT_DIRECTIVE_FEATURE",
     "HOOK_DECISION_ARTIFACT_REVIEW_ROUTE_FEATURE",
@@ -584,7 +499,6 @@ __all__ = [
     "native_artifact_directive",
     "native_artifact_review_route",
     "native_compose_current",
-    "native_copilot_settle",
     "native_finalize",
     "native_permission_persist_plan",
     "native_post_claim_decision",

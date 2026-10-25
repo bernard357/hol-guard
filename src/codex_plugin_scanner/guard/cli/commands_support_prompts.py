@@ -577,26 +577,6 @@ def _emit_copilot_hook_response(
             payload["scanner_evidence"] = list(scanner_evidence)
     _write_json_line(payload, output_stream=output_stream)
 
-def _emit_copilot_permission_request_response(
-    *,
-    behavior: str,
-    message: str | None = None,
-    interrupt: bool | None = None,
-    approval_reuse: dict[str, object] | None = None,
-    scanner_evidence: tuple[dict[str, object], ...] = (),
-    output_stream: TextIO | None = None,
-) -> None:
-    payload: dict[str, object] = {"behavior": behavior}
-    if isinstance(message, str) and message.strip():
-        payload["message"] = message.strip()
-    if isinstance(interrupt, bool):
-        payload["interrupt"] = interrupt
-    if approval_reuse is not None:
-        payload["approval_reuse"] = approval_reuse
-    if scanner_evidence:
-        payload["scanner_evidence"] = list(scanner_evidence)
-    _write_json_line(payload, output_stream=output_stream)
-
 __all__ = [
     "_append_guard_context_args",
     "_claude_prompt_additional_context",
@@ -609,7 +589,6 @@ __all__ = [
     "_decision_v2_harness_message",
     "_decision_v2_has_data_flow_signal",
     "_emit_copilot_hook_response",
-    "_emit_copilot_permission_request_response",
     "_guard_approvals_command",
     "_guard_diff_command",
     "_guard_rerun_command",

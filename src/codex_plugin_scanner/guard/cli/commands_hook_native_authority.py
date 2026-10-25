@@ -110,11 +110,23 @@ def try_native_hook_authority(
             event_name=runtime_hook_event_name(payload),
         )
         _log_worker_exception(error, harness=harness)
-        return availability_harness_response(
+        event_name = runtime_hook_event_name(payload)
+        response = availability_harness_response(
             harness=harness,
-            event_name=runtime_hook_event_name(payload),
+            event_name=event_name,
             reason_code="native_hook_worker_exception",
             reason="HOL Guard could not complete the native hook decision safely.",
+        )
+        if worker is None:
+            return response
+        # The worker withholds a managed structured destination on its own
+        # unavailable answers; an answer it never returned stays withheld too.
+        return worker._apply_structured_unavailable_overlay(
+            response,
+            harness=harness,
+            event_name=event_name,
+            guard_home=guard_home,
+            workspace=workspace,
         )
     finally:
         if worker is not None:

@@ -1,19 +1,16 @@
 """A terminal native denial cannot retain an approval invitation."""
 
-import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.guard.cli import commands_hook_native_copilot as copilot
 from codex_plugin_scanner.guard.cli.commands_hook_native_review import review_native_artifact_hook
 from codex_plugin_scanner.guard.cli.commands_hook_native_state import (
     NativeArtifactHookState,
     record_native_artifact_hook_receipt,
 )
 from codex_plugin_scanner.guard.config import GuardConfig
-from codex_plugin_scanner.guard.mcp_tool_calls import ToolCallDecision
 from codex_plugin_scanner.guard.receipts.manager import build_receipt
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_protect_approval_guidance import _pending_package_payload
@@ -97,51 +94,3 @@ def test_native_package_denial_clears_approval_copy(tmp_path, harness):
     with sqlite3.connect(store.path) as connection:
         row = connection.execute("select policy_action, prompted from command_activity").fetchone()
     assert row == ("block", 0)
-
-
-@pytest.mark.usefixtures("native_approval_reuse_runtime")
-@pytest.mark.parametrize("stage", ["pretool", "permission"])
-def test_copilot_native_denial_records_no_prompt(tmp_path, monkeypatch, capsys, stage):
-    context = _context(tmp_path)
-    store = GuardStore(context.guard_home)
-    artifact = _package_artifact(context=context, harness="copilot", config_path="config.json")
-    monkeypatch.setattr(
-        copilot,
-        "evaluate_tool_call",
-        lambda **kwargs: ToolCallDecision(
-            action="review", policy_action="review", source="policy", signals=(), summary="Review required."
-        ),
-    )
-    request = (artifact, "a" * 64, {})
-    options = {
-        "action_envelope": None,
-        "config": GuardConfig(guard_home=context.guard_home, workspace=context.workspace_dir),
-        "context": context,
-        "payload": {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "bash",
-            "tool_input": {"command": "hol-guard-unmatched-probe --flag"},
-            "tool_call_id": "copilot-unprompted-case",
-        },
-        "runtime_workspace": context.workspace_dir,
-        "store": store,
-    }
-    args = SimpleNamespace(harness="copilot", json=False)
-    if stage == "pretool":
-        result = copilot.run_native_copilot_pretool(args, copilot_runtime_tool_call=request, **options)
-    else:
-        result = copilot.run_native_copilot_permission_request(
-            args,
-            copilot_permission_request=request,
-            guard_home=context.guard_home,
-            managed_install=None,
-            **options,
-        )
-    assert result == 0
-    assert "safe, permitted alternative" in json.dumps(json.loads(capsys.readouterr().out))
-    with sqlite3.connect(store.path) as connection:
-        row = connection.execute("select policy_action, prompted from command_activity").fetchone()
-    assert row == ("block", 0)
-    pending = store.list_approval_requests(status="pending")
-    assert len(pending) == 1
-    assert pending[0]["policy_action"] == "review"

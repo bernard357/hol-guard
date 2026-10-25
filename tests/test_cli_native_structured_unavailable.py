@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import io
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
-from codex_plugin_scanner.guard.cli import commands_hook_native_availability as availability
+from codex_plugin_scanner.guard.cli import commands_hook_native_authority as authority
 from codex_plugin_scanner.guard.cli.commands_support_hook_payload import _apply_native_edge_envelope_fields
 from codex_plugin_scanner.guard.daemon.hook_worker_native import HookWorkerNativeMixin
 from codex_plugin_scanner.guard.runtime.structured_output_mediation import STRUCTURED_OUTPUT_SETTING_PATH
+from codex_plugin_scanner.guard.store import GuardStore
 
 
 def _structured_policy() -> tuple[dict[str, object], int]:
@@ -76,6 +79,9 @@ class _OverlayWorker(HookWorkerNativeMixin):
     def _load_config(self, _guard_home: Path, _workspace: Path | None) -> _Config:
         return self.config
 
+    def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("injected native failure")
+
 
 def _emit_unavailable(
     monkeypatch: pytest.MonkeyPatch,
@@ -83,57 +89,41 @@ def _emit_unavailable(
     *,
     harness: str,
     event_name: str,
-    reason_code: str,
     config: _Config,
 ) -> tuple[dict[str, object], int]:
-    emitted: dict[str, object] = {}
-
-    def capture(command: str, payload: dict[str, object], as_json: bool) -> None:
-        emitted.update(command=command, payload=payload, as_json=as_json)
-
-    monkeypatch.setattr(availability, "_emit", capture)
+    monkeypatch.setattr(authority, "NativeHookEvidenceWriter", lambda **_kwargs: None)
+    monkeypatch.setattr(authority, "HookWorker", lambda **_kwargs: _OverlayWorker(config))
     context = HarnessContext(
         home_dir=tmp_path / "home",
         workspace_dir=tmp_path / "workspace",
         guard_home=tmp_path / "guard-home",
     )
-    args = _Args(harness=harness)
-    rc = availability._emit_native_unavailable(
-        args,
-        workspace=context.workspace_dir,
+    output = io.StringIO()
+    rc = authority.route_native_hook(
+        _Args(harness=harness),  # type: ignore[arg-type]
+        config=None,
         context=context,
-        event_name=event_name,
-        reason_code=reason_code,
-        worker=_OverlayWorker(config),
+        payload={"hook_event_name": event_name},
+        runtime_workspace=context.workspace_dir,
+        store=GuardStore(context.guard_home),
+        output_stream=output,
     )
-    assert emitted["command"] == "hook"
-    assert emitted["as_json"] is True
-    response = emitted["payload"]
+    response = json.loads(output.getvalue())
     assert isinstance(response, dict)
     return response, rc
 
 
 @pytest.mark.parametrize("harness", ["pi", "omp"])
-@pytest.mark.parametrize(
-    "reason_code",
-    [
-        "native_post_tool_unavailable",
-        "native_review_deadline_exceeded",
-        "native_command_control_fence_unavailable",
-    ],
-)
 def test_cli_native_unavailable_withholds_managed_posttool_destination(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     harness: str,
-    reason_code: str,
 ) -> None:
     response, rc = _emit_unavailable(
         monkeypatch,
         tmp_path,
         harness=harness,
         event_name="PostToolUse",
-        reason_code=reason_code,
         config=_managed_config(),
     )
 
@@ -141,7 +131,7 @@ def test_cli_native_unavailable_withholds_managed_posttool_destination(
     assert rc == 0
     assert response["decision"] == "allow"
     assert response["policy_action"] == "allow"
-    assert response["reason_code"] == reason_code
+    assert response["reason_code"] == "native_hook_worker_exception"
     assert response["structured_content_mediation"] == {
         "schema": "guard-structured-content-mediation.v1",
         "action": "withhold",
@@ -162,16 +152,14 @@ def test_cli_native_unavailable_keeps_optional_structured_destination_off(
         tmp_path,
         harness=harness,
         event_name="PostToolUse",
-        reason_code="native_post_tool_unavailable",
         config=_optional_config(),
     )
 
     assert rc == 0
-    assert response == {
-        "decision": "allow",
-        "policy_action": "allow",
-        "reason_code": "native_post_tool_unavailable",
-    }
+    assert response["decision"] == "allow"
+    assert response["policy_action"] == "allow"
+    assert response["reason_code"] == "native_hook_worker_exception"
+    assert "structured_content_mediation" not in response
 
 
 def _native_success_result() -> tuple[dict[str, object], int]:
@@ -285,7 +273,6 @@ def test_cli_native_unavailable_blocks_the_prompt(
         tmp_path,
         harness="pi",
         event_name="UserPromptSubmit",
-        reason_code="native_prompt_unavailable",
         config=_optional_config(),
     )
 

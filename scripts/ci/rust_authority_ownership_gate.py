@@ -419,7 +419,6 @@ def _assert_policy_floor_fail_closed(path: Path) -> None:
 
 
 _CONTAINMENT_ADAPTER = Path("src/codex_plugin_scanner/guard/adapters/zcode_contained_tests.py")
-_CONTAINMENT_CLI = Path("src/codex_plugin_scanner/guard/cli/commands_hook_native_containment.py")
 _CONTAINMENT_DAEMON = Path("src/codex_plugin_scanner/guard/daemon/hook_worker_native.py")
 _CONTAINMENT_TRANSPORT = Path("src/codex_plugin_scanner/guard/native_hook_containment_route.py")
 # The routing tables the resident's ``containment_route``/``containment_sink`` replaced.
@@ -436,7 +435,7 @@ def _top_level_function(tree: ast.Module, name: str, path: Path) -> ast.Function
 
 
 def _assert_containment_routed_by_resident() -> None:
-    """Containment routing is the resident's answer on both hook paths; Python only does the I/O."""
+    """Containment routing is the resident's answer on the hook path; Python only does the I/O."""
 
     adapter = ast.parse(_read(_CONTAINMENT_ADAPTER), filename=str(_CONTAINMENT_ADAPTER))
     for node in adapter.body:
@@ -452,12 +451,6 @@ def _assert_containment_routed_by_resident() -> None:
         fn = _top_level_function(adapter, name, _CONTAINMENT_ADAPTER)
         if "native_containment_sink" not in _ordered_call_names(fn):
             raise RuntimeError(f"{name} does not ask the resident whether the sink takes the call")
-    cli = ast.parse(_read(_CONTAINMENT_CLI), filename=str(_CONTAINMENT_CLI))
-    emit = _top_level_function(cli, "emit_native_containment_route", _CONTAINMENT_CLI)
-    if "edge_containment_route" not in _ordered_call_names(emit):
-        raise RuntimeError("CLI containment does not ask the resident for the route")
-    if any(isinstance(node, ast.Constant) and node.value == "sandbox-required" for node in ast.walk(emit)):
-        raise RuntimeError("CLI containment still picks the route from the result's action")
     if "edge_containment_route(" not in _read(_CONTAINMENT_DAEMON):
         raise RuntimeError("daemon containment does not ask the resident for the route")
     if "edge_route(" not in _read(Path("rust/crates/guard-runtime/src/edge.rs")):
