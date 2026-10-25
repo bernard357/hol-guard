@@ -156,7 +156,7 @@ def test_a_never_enrolled_device_still_asks(monkeypatch, tmp_path: Path) -> None
 def test_queue_time_hints_hand_the_resident_the_paused_result(monkeypatch, tmp_path: Path) -> None:
     asked = _record_asks(monkeypatch, answer=dict(_STORED_COVERAGE))
     payload = {"tool_name": "Bash", "tool_input": {"command": "git fetch origin main"}}
-    paused = {"decision": "review", "reason_code": "native_extension_review"}
+    paused = {"decision": "review", "reason_code": "native_extension_review", "command_extensions": {}}
     store = SimpleNamespace(guard_home=tmp_path)
 
     hint = module.native_review_hint(store, payload, paused, tmp_path, tmp_path, None, None)
@@ -169,20 +169,32 @@ def test_queue_time_hints_hand_the_resident_the_paused_result(monkeypatch, tmp_p
     assert asked[0]["budget_seconds"] == 5.0
 
 
-def test_queue_time_hints_spend_only_what_the_hook_deadline_leaves(monkeypatch, tmp_path: Path) -> None:
+def test_queue_time_hints_leave_the_hook_time_to_persist_the_review(monkeypatch, tmp_path: Path) -> None:
     asked = _record_asks(monkeypatch)
     monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
     store = SimpleNamespace(guard_home=tmp_path)
+    paused = {"command_extensions": {}}
 
-    module.native_review_hint(store, {}, {}, None, None, 100.25, None)
-
+    module.native_review_hint(store, {}, paused, None, None, 100.6, None)
     assert asked[0]["budget_seconds"] == pytest.approx(0.25)
+
+    # Too little left after the margin: the review is persisted without hints.
+    assert module.native_review_hint(store, {}, paused, None, None, 100.45, None) is None
+    assert len(asked) == 1
+
+
+def test_queue_time_hints_need_extension_evidence_to_ask(monkeypatch, tmp_path: Path) -> None:
+    asked = _record_asks(monkeypatch, answer=dict(_STORED_COVERAGE))
+    store = SimpleNamespace(guard_home=tmp_path)
+
+    assert module.native_review_hint(store, {}, {"decision": "review"}, tmp_path, tmp_path, None, None) is None
+    assert asked == []
 
 
 def test_queue_time_hints_need_a_guard_home_to_reach_the_resident(monkeypatch, tmp_path: Path) -> None:
     asked = _record_asks(monkeypatch, answer=dict(_STORED_COVERAGE))
 
-    assert module.native_review_hint(object(), {}, {}, tmp_path, tmp_path, None, None) is None
+    assert module.native_review_hint(object(), {}, {"command_extensions": {}}, tmp_path, tmp_path, None, None) is None
     assert asked == []
 
 

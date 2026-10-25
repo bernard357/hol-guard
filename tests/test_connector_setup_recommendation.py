@@ -198,7 +198,10 @@ def test_queue_time_hint_without_a_connector_is_the_extension_hint(monkeypatch: 
     monkeypatch.setattr(native_review_allow_hint, "_ask_review_hint", lambda *_a, **_k: sentinel)
     store = SimpleNamespace(guard_home=Path("guard-home"))
 
-    assert native_review_allow_hint.native_review_hint(store, {}, {}, None, None, None, None) is sentinel
+    assert (
+        native_review_allow_hint.native_review_hint(store, {}, {"command_extensions": {}}, None, None, None, None)
+        is sentinel
+    )
 
 
 def test_available_while_the_connector_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:

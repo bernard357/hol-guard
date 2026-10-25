@@ -45,6 +45,11 @@ _DEFAULT_BUDGET_SECONDS: Final = 5.0
 # The read-time review and its counterfactual, plus the resident's safety
 # margin: the budget the inbox gave the two asks this replaces.
 _LIVE_BUDGET_SECONDS: Final = 1.2
+# Approval persistence and the hook response still need time after the
+# queue-time ask, and the ask's timeout also covers a slot wait and the round
+# trip the resident's own margin cannot see.
+_SAFETY_MARGIN_SECONDS: Final = 0.35
+_MIN_BUDGET_SECONDS: Final = 0.15
 _MAX_BUDGET_MS: Final = 10_000
 # The resident refuses a canonical request over 1 MiB, so the client never
 # sends a larger envelope.
@@ -224,14 +229,19 @@ def native_review_hint(
             risk_classes=_observed_risk_classes(native_result),
         )
     guard_home = getattr(store, "guard_home", None)
-    if not isinstance(guard_home, Path):
+    # Both hints are read out of the extension evidence the review paused on;
+    # without it there is nothing to ask for.
+    if not isinstance(guard_home, Path) or not isinstance(native_result.get("command_extensions"), Mapping):
+        return None
+    budget = _DEFAULT_BUDGET_SECONDS if deadline is None else deadline - time.monotonic() - _SAFETY_MARGIN_SECONDS
+    if budget < _MIN_BUDGET_SECONDS:
         return None
     return _ask_review_hint(
         payload,
         guard_home=guard_home,
         workspace=workspace,
         home_dir=home_dir,
-        budget_seconds=_DEFAULT_BUDGET_SECONDS if deadline is None else deadline - time.monotonic(),
+        budget_seconds=budget,
         paused=native_result,
     )
 
