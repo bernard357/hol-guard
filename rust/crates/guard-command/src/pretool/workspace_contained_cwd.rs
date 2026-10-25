@@ -82,3 +82,52 @@ pub(super) fn locations(model: &CanonicalCommandV1, workspace: &Path) -> Option<
     }
     Some(result)
 }
+
+/// How many directories below `workspace` every shell that could run each
+/// segment stands, segment by segment. A segment that runs one directory down
+/// resolves one leading `..` back inside the workspace, so the reach checks
+/// may spend that many parent steps before a path leaves. Where the walk
+/// cannot prove the directory — an unmodelled connector, a `popd`, a `cd`
+/// whose target is not there yet — every segment keeps the root's zero, which
+/// is what the checks assumed before.
+pub(super) fn depths(model: &CanonicalCommandV1, workspace: &Path) -> Vec<usize> {
+    let zeros = vec![0usize; model.segments.len()];
+    // A command with no `cd` and no parent step cannot spend one, and the walk
+    // reads the file system, so it is worth skipping.
+    if !model.normalized_text.contains("..")
+        || !model.segments.iter().any(|segment| {
+            segment
+                .executable
+                .as_deref()
+                .map(crate::pretool::executable_basename)
+                .is_some_and(|name| matches!(name, "cd" | "pushd"))
+        })
+    {
+        return zeros;
+    }
+    let Some(locations) = locations(model, workspace) else {
+        return zeros;
+    };
+    locations
+        .iter()
+        .map(|roots| {
+            // The shallowest possible directory decides: a `;` after a `cd`
+            // leaves both the moved and the unmoved shell, and only the steps
+            // both can spend stay inside.
+            roots
+                .iter()
+                .map(|root| {
+                    root.strip_prefix(workspace)
+                        .map_or(0, |rest| rest.components().count())
+                })
+                .min()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+// The tests spell the workspace path inside POSIX shell text, which a
+// Windows `\\?\C:\...` path cannot be written in.
+#[cfg(all(test, unix))]
+#[path = "workspace_contained_cwd_tests.rs"]
+mod tests;

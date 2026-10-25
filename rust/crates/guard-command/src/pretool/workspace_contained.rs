@@ -38,6 +38,8 @@ mod cd;
 mod chmod;
 #[path = "workspace_contained_compiled.rs"]
 mod compiled;
+#[path = "workspace_contained_cwd.rs"]
+mod cwd;
 #[path = "workspace_contained_git.rs"]
 mod git_metadata;
 #[path = "workspace_contained_home_cd.rs"]
@@ -208,6 +210,9 @@ pub(crate) fn command_shape(
     let temp_fixed = !reach::rebinds_private_temp(&model.normalized_text);
     // `~` is the private home the launcher seeds only while nothing rebinds it.
     let home_fixed = !model.normalized_text.contains("HOME");
+    // How far under the workspace root each segment's shell stands, so a
+    // relative path may spend that many parent steps and stay inside.
+    let below = cwd::depths(model, workspace);
     for (index, segment) in model.segments.iter().enumerate() {
         // A bare private assignment starts no program.
         if segment.executable.is_none() && cd::assigns_private(model, segment) {
@@ -244,6 +249,7 @@ pub(crate) fn command_shape(
                 temp_fixed,
                 home_fixed,
                 script.as_ref().map(|(operand, _)| operand.as_str()),
+                below.get(index).copied().unwrap_or(0),
             )
             || (matches!(name, "cd" | "pushd")
                 && !matches!(segment.arguments.as_slice(),
