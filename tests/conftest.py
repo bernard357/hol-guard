@@ -109,6 +109,17 @@ def _checkout_runtime_judges_distribution(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _no_fleet_runtime_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep receipt-sync tests off the real runtime probe; its own tests stub ``_observe``."""
+    from codex_plugin_scanner.guard.runtime import fleet_posture_runtimes
+
+    def unavailable(_context: object, _now: object) -> None:
+        raise RuntimeError("runtime probe disabled in tests")
+
+    monkeypatch.setattr(fleet_posture_runtimes, "_observe", unavailable)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_native_answer_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep reused native answers from crossing tests that stub native replies."""
     from codex_plugin_scanner.guard.catalog_delivery import installed_bundle, object_native
