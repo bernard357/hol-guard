@@ -242,7 +242,10 @@ def coverage_summary(
     reasons = [f"snapshot_{reason}" for reason in snapshot.partial_reasons]
     supply_chain = "complete"
     if payload.get("audit_status") == "incomplete":
-        supply_chain = "no_inputs" if not payload.get("manifest_paths") else "incomplete"
+        # A lockfile that yielded no packages is still a dependency file that
+        # went unaudited; only a workspace with neither kind has no inputs.
+        has_inputs = payload.get("manifest_paths") or payload.get("lockfile_paths")
+        supply_chain = "incomplete" if has_inputs else "no_inputs"
     # The audit stopped, or a package needed registry or Cloud data the offline
     # run could not get.
     missing_lookup = supply_chain == "incomplete" or bool(egress_refused or _unresolved_packages(payload))

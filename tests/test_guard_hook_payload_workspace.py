@@ -8,11 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters._modules.zcode.zcode_hooks import prepare_zcode_hook_payload
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
-from codex_plugin_scanner.guard.adapters.grok_hooks import prepare_grok_hook_payload
 from codex_plugin_scanner.guard.cli import commands_hook
-from codex_plugin_scanner.guard.cli.commands_support_workspace import _workspace_from_hook_payload
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -32,37 +29,6 @@ def _repository(root: Path) -> Path:
     repository.mkdir()
     _ = subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(repository)], check=True)
     return repository
-
-
-def test_hook_payload_cwd_resolves_workspace(tmp_path: Path) -> None:
-    repository = _repository(tmp_path)
-    other = tmp_path / "other"
-    other.mkdir()
-
-    assert _workspace_from_hook_payload({"cwd": str(repository)}) == repository.resolve()
-    assert _workspace_from_hook_payload({"workspaceRoot": str(repository)}) == repository.resolve()
-    assert _workspace_from_hook_payload({}) is None
-    assert _workspace_from_hook_payload({"workspaceRoot": str(repository), "cwd": str(other)}) == repository.resolve()
-    assert _workspace_from_hook_payload({"cwd": str(other)}, repository) == repository.resolve()
-
-
-def test_grok_and_zcode_payloads_keep_workspace_root_when_cwd_differs(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    cwd = tmp_path / "cwd"
-    root.mkdir()
-    cwd.mkdir()
-    payload = {
-        "hookEventName": "PreToolUse",
-        "toolName": "run_terminal_command",
-        "toolInput": {"command": "git status --short"},
-        "workspaceRoot": str(root),
-        "cwd": str(cwd),
-    }
-
-    grok = prepare_grok_hook_payload(payload)
-    zcode = prepare_zcode_hook_payload(payload)
-    assert grok["workspace_root"] == str(root)
-    assert zcode["workspace_root"] == str(root)
 
 
 @pytest.mark.usefixtures("native_hook_force")

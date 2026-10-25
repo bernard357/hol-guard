@@ -17,7 +17,6 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, generat
 
 import codex_plugin_scanner.guard.native_supply_chain_egress as egress_module
 from codex_plugin_scanner.cli import main
-from codex_plugin_scanner.guard.models import GuardArtifact
 from codex_plugin_scanner.guard.runtime.signals import RiskSignalV2
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.conftest import guard_commands_module
@@ -237,48 +236,6 @@ def _scanner_signal_v2() -> RiskSignalV2:
         redaction_level="summary",
         false_positive_hint=None,
         advisory_id=None,
-    )
-
-
-def _data_flow_signal_v2() -> RiskSignalV2:
-    return RiskSignalV2(
-        signal_id="data-flow:secret-pipe-http",
-        category="network",
-        severity="critical",
-        confidence="strong",
-        detector="data_flow.exfiltration",
-        title="Shell pipeline sends a local secret to a network host",
-        plain_reason="This command sends local secret to network host.",
-        technical_detail="source and sink were detected without retaining secret contents",
-        evidence_ref="command",
-        redaction_level="summary",
-        false_positive_hint="Allow only when the command intentionally moves non-sensitive data.",
-        advisory_id=None,
-    )
-
-
-def _data_flow_artifact() -> GuardArtifact:
-    """The artifact the resident names alongside `_data_flow_signal_v2`."""
-    summary = "This command sends local secret to network host. Guard kept raw secret contents out of the evidence."
-    return GuardArtifact(
-        artifact_id="codex:project:data-flow:" + "a" * 64,
-        name="Bash data-flow exfiltration",
-        harness="codex",
-        artifact_type="tool_action_request",
-        source_scope="project",
-        config_path="codex.json",
-        metadata={
-            "action_class": "credential exfiltration shell command",
-            "command_text": "npm install minimist@1.2.8",
-            "guard_default_action": "require-reapproval",
-            "risk_classes": ["data_flow_exfiltration"],
-            "request_summary": summary,
-            "runtime_request_signals": ["This command sends local secret to network host."],
-            "runtime_request_summary": summary,
-            "runtime_request_reason": (
-                "Guard detected local-secret data flow in the runtime action before the command could send it away."
-            ),
-        },
     )
 
 

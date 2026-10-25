@@ -165,6 +165,7 @@ function normalizeAssessment(value) {
     partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
+    dependencyFilesFound: detectors.supply_chain !== "no_inputs",
     finishedAtMs: count(item.finished_at_ms),
     findings: list$1(item.findings).map(normalizeFinding).filter((entry) => entry !== null)
   };
@@ -817,6 +818,7 @@ const COVERAGE_REASONS = {
   snapshot_depth_cap: "Some folders are nested deeper than one assessment reads.",
   snapshot_visit_cap: "The workspace has more entries than one assessment visits.",
   snapshot_unsupported_dependency_input: "Some lockfiles use a format Guard does not check yet, so those dependencies were not checked.",
+  snapshot_undiscovered_dependency_input: "Some dependency files are more than three folders below the workspace root, so those dependencies were not checked.",
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   advisory_data_unavailable: "No threat intel is cached on this device yet, so dependencies were listed but not checked for known vulnerabilities.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
@@ -1009,14 +1011,19 @@ function WorktreeRow(props) {
   ] });
 }
 function AssessmentFindings(props) {
-  const { findings, runId, notRun } = props.assessment;
+  const { findings, runId, notRun, dependencyFilesFound } = props.assessment;
   const fixes = useWorktreeFixes(props.worktree, runId);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixLoadError, { fixes }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsSections, { findings, secretsChecked: !notRun.includes("secrets"), fixes }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsSections, { findings, dependencyFilesFound, secretsChecked: !notRun.includes("secrets"), fixes }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixReview, { fixes, findings }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixHistory, { fixes, findings })
   ] });
+}
+function emptyFindingsCopy(dependencyFilesFound, secretsChecked) {
+  const none = "No dependency files were found, so there were no dependencies to check.";
+  if (!dependencyFilesFound) return secretsChecked ? `${none} No secret findings in the checked files.` : none;
+  return secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files.";
 }
 function FindingsSections(props) {
   const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
@@ -1024,7 +1031,7 @@ function FindingsSections(props) {
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   const skills = props.findings.filter((finding) => finding.kind === "skill");
   if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0 && skills.length === 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked) });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies, fixes: props.fixes }),

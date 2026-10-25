@@ -181,6 +181,25 @@ class _HookWorkerNativeHost(Protocol):
     ) -> StructuredOutputResolution: ...
 
 
+def withholds_structured_destination(*, harness: str, event_name: str) -> bool:
+    """Return whether this hook can carry a managed structured destination."""
+
+    return event_name == "PostToolUse" and canonical_harness_name(harness) in {"pi", "omp"}
+
+
+def withhold_structured_destination(response: dict[str, object]) -> dict[str, object]:
+    """Withhold the structured destination on an answer without native proof."""
+
+    return {
+        **response,
+        "structured_content_mediation": StructuredContentMediation(
+            action="withhold",
+            reason_code="structured_native_edge_unavailable",
+            native_decision_id=None,
+        ).to_harness_json(),
+    }
+
+
 def _record_native_pre_activity(
     host: _HookWorkerNativeHost,
     harness: str,
@@ -395,7 +414,7 @@ class HookWorkerNativeMixin:
         structured destination keeps the existing availability response.
         """
 
-        if event_name != "PostToolUse" or canonical_harness_name(harness) not in {"pi", "omp"}:
+        if not withholds_structured_destination(harness=harness, event_name=event_name):
             return response
         # Unavailable-edge callers supply their one resolution. The successful
         # edge uses a separate initial read and a post-scan revocation check.
@@ -406,14 +425,7 @@ class HookWorkerNativeMixin:
         )
         if not resolved.required:
             return response
-        return {
-            **response,
-            "structured_content_mediation": StructuredContentMediation(
-                action="withhold",
-                reason_code="structured_native_edge_unavailable",
-                native_decision_id=None,
-            ).to_harness_json(),
-        }
+        return withhold_structured_destination(response)
 
     def _review_native_edge(
         self: _HookWorkerNativeHost,
