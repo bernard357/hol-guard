@@ -71,15 +71,18 @@ def record_background_event(event: str, detail: str) -> bool:
 
 
 def record_background_notice(event: str, detail: str) -> bool:
-    """Record an expected background state that is not a failure."""
+    """Record an expected background state that is not a failure.
+
+    Returns whether it was taken: a sink that answers ``False``, as a full or
+    closed daemon log queue does, did not take it.
+    """
 
     with _lock:
         sink = _notice_sink
     if sink is None:
         return False
     with suppress(Exception):
-        sink(event, detail)
-        return True
+        return sink(event, detail) is not False
     return False
 
 

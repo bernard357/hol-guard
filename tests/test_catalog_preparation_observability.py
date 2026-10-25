@@ -424,16 +424,24 @@ def test_an_engine_mismatch_with_nothing_kept_is_noted_once_per_publication(prep
     ]
 
 
-def test_a_note_made_before_the_daemon_listens_is_made_again(prepared, monkeypatch) -> None:
+def test_a_note_that_was_not_written_is_made_again(prepared, monkeypatch) -> None:
     mismatched(monkeypatch, {"id": "40151296356.1"}, "discovery_current_cached_publication_unavailable")
+    # Before the daemon listens there is no sink at all.
     discovery._refresh(prepared, SimpleNamespace())
     notices: list[tuple[str, str]] = []
 
     def failure(_event: str, _detail: str) -> None:
         raise AssertionError("an engine mismatch is not a failure")
 
-    background_diagnostics.install_sink(failure, notice=lambda event, detail: notices.append((event, detail)))
+    def refused(_event: str, _detail: str) -> bool:
+        # A full or closed daemon log queue answers False.
+        return False
+
     try:
+        background_diagnostics.install_sink(failure, notice=refused)
+        discovery._refresh(prepared, SimpleNamespace())
+        background_diagnostics.install_sink(failure, notice=lambda event, detail: notices.append((event, detail)))
+        discovery._refresh(prepared, SimpleNamespace())
         discovery._refresh(prepared, SimpleNamespace())
     finally:
         background_diagnostics.release_sink(failure)
