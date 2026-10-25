@@ -55,6 +55,10 @@ pub(super) fn exact_safe_command(
     // Whether the current pipeline starts with the proven fetch, as in
     // `git fetch origin main 2>&1 | tail -2`.
     let mut fetch_pipeline = false;
+    // The pull or fast-forward merge that rewrote the work tree, if one did.
+    // A commit it checks out may become configuration a later Git read obeys,
+    // which the proof of that read never saw.
+    let mut rewrote: Option<usize> = None;
     for (index, segment) in model.segments.iter().enumerate() {
         if segment.pipeline_index == 0 {
             fetch_pipeline = false;
@@ -97,6 +101,9 @@ pub(super) fn exact_safe_command(
                 fetch_seen = true;
                 pulled |= upstream.is_some();
             }
+            if upstream.is_some() {
+                rewrote = Some(index);
+            }
             fetch_pipeline = true;
             continue;
         }
@@ -125,6 +132,23 @@ pub(super) fn exact_safe_command(
             && !proven_read(model, index, context, deadline, execution_environment)
         {
             return None;
+        }
+        // A fast-forward earlier in the chain may check out a file an include
+        // names, which this read would then obey; the refresh answers for the
+        // read only when no include reaches into the work tree.
+        if let Some(prior) = rewrote {
+            if super::executable_basename(segment.executable.as_deref().unwrap_or_default())
+                == "git"
+                && !verified_refresh(
+                    &model.segments[prior],
+                    segment,
+                    context,
+                    deadline,
+                    execution_environment,
+                )
+            {
+                return None;
+            }
         }
     }
     (fetch_seen || merged).then_some((
