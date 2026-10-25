@@ -423,22 +423,19 @@ fn scan_into(
         })
 }
 
-/// Every recursive root is proven, or missing beside at least one proven
-/// root (`grep -rn x src tests` with no `tests`): a search whose only roots
-/// are missing (`grep -rn x src/missing.ts`) proves nothing it reads.
+/// Every recursive root is proven or missing (`grep -rn x src tests` with no
+/// `tests`, and `grep -rn x <absent>` on its own): a root that is not there
+/// opens nothing, so the walk reads no file. With no operand at all `grep -r`
+/// walks the working directory instead, which only a proven root admits.
 fn recursive_targets_proven(
     targets: &[&str],
     proven: impl Fn(&str) -> bool,
     absent: Option<ReadContext<'_>>,
 ) -> bool {
-    let mut real = false;
-    targets.iter().copied().all(|target| {
-        if proven(target) {
-            real = true;
-            return true;
-        }
-        absent.is_some_and(|context| absent_target(target, context))
-    }) && real
+    !targets.is_empty()
+        && targets.iter().copied().all(|target| {
+            proven(target) || absent.is_some_and(|context| absent_target(target, context))
+        })
 }
 
 /// A missing operand only prints an error, as a probe `ls` of the same path

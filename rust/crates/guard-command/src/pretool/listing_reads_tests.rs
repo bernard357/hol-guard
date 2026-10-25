@@ -50,7 +50,7 @@ fn a_leaf_glob_lists_hidden_names_in_a_listable_directory_only() {
     ] {
         let words: Vec<String> = command.split(' ').map(str::to_owned).collect();
         assert_eq!(
-            super::safe_listing_segment(&command, &words[1..], context),
+            super::safe_listing_segment(&command, &words[1..], context, true),
             allowed,
             "{command}"
         );
@@ -105,13 +105,30 @@ fn a_recursive_listing_screens_what_it_can_print() {
         ("ls -Rf .".to_owned(), false),
         ("ls -fR .".to_owned(), false),
         (format!("ls -R {keyed}"), false),
+        // A root that is not there holds no tree, so the walk prints an error
+        // and reads nothing. A hidden missing name keeps the screen.
+        ("ls -R lib".to_owned(), true),
+        ("ls -aR lib".to_owned(), true),
+        (format!("ls -R {keyed}/missing"), true),
+        (
+            format!("ls -R {home}/.ssh/missing", home = home.display()),
+            false,
+        ),
     ] {
         let words: Vec<String> = command.split(' ').map(str::to_owned).collect();
         assert_eq!(
-            super::safe_listing_segment(&command, &words[1..], context),
+            super::safe_listing_segment(&command, &words[1..], context, true),
             allowed,
             "{command}"
         );
     }
+    // A peer step could create the missing root before the walk reaches it.
+    let words: Vec<String> = "ls -R lib".split(' ').map(str::to_owned).collect();
+    assert!(!super::safe_listing_segment(
+        "ls -R lib",
+        &words[1..],
+        context,
+        false
+    ));
     std::fs::remove_dir_all(root).unwrap();
 }

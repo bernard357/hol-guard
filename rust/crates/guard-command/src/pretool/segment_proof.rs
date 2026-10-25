@@ -301,9 +301,16 @@ pub(super) fn exact_safe_segment_with_context(
         "lsof" => super::safe_scalar::safe_lsof_arguments(&segment.arguments),
         "pkill" => super::process_stops::safe_pkill_arguments(&segment.arguments, context),
         "pg_isready" => super::safe_scalar::safe_pg_isready_arguments(&segment.arguments),
-        "ls" => {
-            super::listing_reads::safe_listing_segment(&segment.text, &segment.arguments, context)
-        }
+        "ls" => super::listing_reads::safe_listing_segment(
+            &segment.text,
+            &segment.arguments,
+            context,
+            model
+                .segments
+                .iter()
+                .filter(|other| other.span != segment.span)
+                .all(|other| search::grep::creates_nothing(other, true)),
+        ),
         "tree" => super::tree_reads::safe_tree_segment(&segment.arguments, context),
         "test" => {
             safe_reads::safe_file_predicate_arguments(&segment.arguments, &segment.text, context)

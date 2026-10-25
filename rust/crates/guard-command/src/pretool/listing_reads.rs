@@ -91,10 +91,14 @@ fn classify_operands(text: &str, arguments: &[String]) -> Option<Vec<Operand>> {
         .collect()
 }
 
+/// `absent_recursive` says whether a missing operand stays missing while the
+/// listing runs: no peer segment may create a file, directory or link at that
+/// name, because a recursive listing walks whatever appears there.
 pub(super) fn safe_listing_segment(
     text: &str,
     arguments: &[String],
     context: super::PathContext<'_>,
+    absent_recursive: bool,
 ) -> bool {
     let recursive = arguments.iter().any(|argument| is_recursive_flag(argument));
     let lists_hidden = arguments
@@ -128,9 +132,12 @@ pub(super) fn safe_listing_segment(
             None => &Operand::Plain,
         };
         let allowed = match kind {
+            // A name that is not there holds no tree to walk, so a recursive
+            // listing of it prints the same error a plain `ls` does.
             Operand::Plain if recursive => {
                 surviving += 1;
                 search::safe_recursive_listing_target(argument, context, lists_hidden)
+                    || (absent_recursive && absent_listing_operand(argument, context))
             }
             // A listing without a glob admits a name that is not there, because
             // the shell prints an error and nothing else. One glob beside it
