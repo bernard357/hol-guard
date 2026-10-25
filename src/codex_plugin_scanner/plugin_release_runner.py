@@ -86,7 +86,9 @@ def register_step() -> int:
             oidc_request_token=os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", ""),
         )
     except Exception as error:  # Registration is best effort; the attested evidence still stands.
-        print(f"HOL Plugin Release registration unavailable: {type(error).__name__}")
+        status_code = getattr(error, "code", None)
+        detail = f" {status_code}" if isinstance(status_code, int) else ""
+        print(f"HOL Plugin Release registration unavailable: {type(error).__name__}{detail}")
         result = {"status": "unavailable"}
     status = result.get("status")
     url = result.get("releaseUrl")

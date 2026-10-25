@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -271,3 +275,29 @@ def test_composite_action_attests_before_gating_and_tolerates_check_errors() -> 
     assert 'FAIL_ON: "none"' in scan
     assert check.index("set +e") < check.index("hol-guard plugin check")
     assert "FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}" in text.split("- name: Summarize", 1)[1]
+
+
+def test_registration_names_itself_and_reports_the_http_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = _runner_env(monkeypatch, tmp_path, CHECK_REPORT)
+    assert plugin_release_runner.main(["evidence"]) == 0
+    monkeypatch.setenv("REGISTER_RELEASE", "true")
+    monkeypatch.setenv("RELEASE_ENDPOINT", "https://hol.example/api")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://token.example/request")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "runner-request-token")
+    seen: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: int) -> io.BytesIO:
+        seen.append(request)
+        if len(seen) == 1:
+            return io.BytesIO(b'{"value": "oidc-token"}')
+        raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", Message(), None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    assert plugin_release_runner.main(["register"]) == 0
+    # hol.org's edge answers Python's default urllib User-Agent with a 403.
+    assert seen[1].get_header("User-agent") == "hol-guard-attestation-registration"
+    assert "registration unavailable: HTTPError 403" in capsys.readouterr().out
+    assert "release_status=unavailable" in output.read_text(encoding="utf-8")
