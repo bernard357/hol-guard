@@ -7,6 +7,7 @@
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
 
 mod check;
+mod config;
 mod detect;
 mod emit;
 mod init;
@@ -134,7 +135,13 @@ pub fn package_plan(root: &Path, requested: &[String]) -> Result<Vec<Output>, St
     let detection = detect::detect(root)?;
     let runtimes = select_runtimes(root, &detection.plugin, requested)?;
     let mut copied = BTreeSet::new();
-    let mut outputs = emit::plan(root, &detection.plugin, &runtimes, &mut copied)?;
+    let mut outputs = emit::plan(
+        root,
+        &detection.plugin,
+        &detection.excludes,
+        &runtimes,
+        &mut copied,
+    )?;
     let mut inputs: BTreeSet<PathBuf> = detection.inputs.iter().cloned().collect();
     inputs.extend(copied);
     let inputs: Vec<PathBuf> = inputs.into_iter().collect();

@@ -6,7 +6,8 @@ root from repository text or from a hook's working directory.
 Each poll takes a cheap stat snapshot of every admitted worktree and a digest
 of the cached advisory bundles and of the runtimes its configured tools would
 launch (probed at most once per interval); a change queues an assessment, and the
-coordinator's debounce and interval decide when it runs. Nothing here runs in
+coordinator's debounce and interval decide when it runs. While the host is
+under resource pressure only user-requested runs start. Nothing here runs in
 a hook path, and the Cloud audit is never used.
 """
 
@@ -23,6 +24,7 @@ from typing import Any, Final
 from . import workspace_assessment_store as assessments
 from .native_workspace_snapshot import WorkspaceSnapshotError, workspace_snapshot
 from .workspace_assessment_admissions import admit_and_queue, end_unregistered_install_admissions, watched_roots
+from .workspace_assessment_pressure import host_resource_pressure, record_deferral
 from .workspace_assessment_runner import DETECTOR_SET_DIGEST, feed_context_digest, now_ms, run_next
 from .workspace_runtime_findings import assessment_context_digest, cached_runtime_digest, observed_runtime_digest
 
@@ -86,6 +88,20 @@ def admit_workspace(
     return {"codebase_key": keys.codebase_key, "worktree_key": keys.worktree_key, "run_id": run_id}
 
 
+def withdraw_unregistered_admissions(store: Any) -> list[str]:
+    """End admissions whose registering install is gone; return the roots still registered."""
+
+    registered = [
+        workspace
+        for install in store.list_managed_installs()
+        if install.get("active")
+        and isinstance(workspace := install.get("workspace"), str)
+        and Path(workspace).is_absolute()
+    ]
+    end_unregistered_install_admissions(store, {os.path.realpath(workspace) for workspace in registered})
+    return registered
+
+
 def admit_registered_workspaces(
     store: Any, *, attempted: dict[str, int] | None = None, clock: Callable[[], int] = now_ms
 ) -> int:
@@ -100,14 +116,7 @@ def admit_registered_workspaces(
     walked on every poll; a root that is missing is retried once it exists.
     """
 
-    registered = [
-        workspace
-        for install in store.list_managed_installs()
-        if install.get("active")
-        and isinstance(workspace := install.get("workspace"), str)
-        and Path(workspace).is_absolute()
-    ]
-    end_unregistered_install_admissions(store, {os.path.realpath(workspace) for workspace in registered})
+    registered = withdraw_unregistered_admissions(store)
     known = watched_roots(store, unavailable_digest=UNAVAILABLE_STAT_DIGEST)
     admitted = 0
     for workspace in registered:
@@ -187,14 +196,28 @@ def poll_once(
 ) -> int:
     from .config import load_guard_config
 
-    admit_registered_workspaces(store, attempted=attempted)
-    observe(store)
+    # A busy host defers admission, observation and automatic runs; a run the
+    # user asked for still starts. Observation resumes from the stored digests,
+    # so a change made while deferred still queues a run afterwards. Removing
+    # an install withdraws its admission even while the host is busy.
+    pressure = host_resource_pressure()
+    record_deferral(store, pressure)
+    if pressure is None:
+        admit_registered_workspaces(store, attempted=attempted)
+        observe(store)
+    else:
+        withdraw_unregistered_admissions(store)
     ran = 0
     config = None
     while ran < _MAX_RUNS_PER_POLL and not (stop is not None and stop.is_set()):
         if config is None:
             config = load_guard_config(store.guard_home)
-        if not run_next(store, config, owner=owner):
+        if ran > 0:
+            # A run can take long enough for the host to get busy, so each
+            # further claim uses a fresh sample.
+            pressure = host_resource_pressure()
+            record_deferral(store, pressure)
+        if not run_next(store, config, owner=owner, user_only=pressure is not None):
             break
         ran += 1
     return ran

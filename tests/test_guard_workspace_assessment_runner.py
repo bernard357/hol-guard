@@ -9,6 +9,7 @@ import pytest
 
 from codex_plugin_scanner.guard import native_supply_chain_egress as egress
 from codex_plugin_scanner.guard import native_workspace_snapshot as native
+from codex_plugin_scanner.guard import workspace_assessment_pressure as pressure
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard import workspace_assessment_worker as worker
@@ -489,3 +490,83 @@ def test_run_next_claims_with_the_running_detector_set(tmp_path: Path, monkeypat
     )
     assert runner.run_next(store, None, owner="test", clock=lambda: T0)
     assert seen == [runner.DETECTOR_SET_DIGEST]
+
+
+def test_automatic_runs_wait_while_the_host_is_busy(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    snapshots(monkeypatch, worker, replace(SNAPSHOT, mode="stat"))
+    worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
+    ran: list[str] = []
+
+    def fake_execute(_store, _config, run: assessments.ClaimedRun) -> assessments.RunOutcome:
+        ran.append(run.trigger_kind)
+        return assessments.RunOutcome(state="failed", error_code="test")
+
+    monkeypatch.setattr(runner, "execute", fake_execute)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: pressure.RESOURCE_PRESSURE)
+    observed: list[bool] = []
+    monkeypatch.setattr(worker, "observe", lambda _store: observed.append(True))
+    assert worker.poll_once(store, owner="test") == 0
+    # The workspace_open run stays queued and nothing was observed.
+    assert ran == [] and observed == []
+    assert [run["state"] for run in assessments.recent_runs(store)] == ["queued"]
+    handler = FakeHandler(store)
+    api.handle_workspace_assessment_get(handler, api.ASSESSMENTS_PATH)
+    assert handler.responses[-1][1]["deferred_reason"] == "resource_pressure"
+    # A run the user asked for still starts under pressure.
+    keys = assessments.WorktreeKeys(KEYS.codebase_key, KEYS.worktree_key)
+    worker.queue_manual_run(store, keys, clock=lambda: T0)
+    assert worker.poll_once(store, owner="test") == 1 and ran == ["manual"]
+    # Once the host is quiet the deferral clears and observation resumes.
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: None)
+    worker.poll_once(store, owner="test")
+    assert observed == [True]
+    api.handle_workspace_assessment_get(handler, api.ASSESSMENTS_PATH)
+    assert handler.responses[-1][1]["deferred_reason"] is None
+
+
+def test_each_claim_in_a_poll_rechecks_host_pressure(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    monkeypatch.setattr(worker, "admit_registered_workspaces", lambda store, attempted=None: 0)
+    monkeypatch.setattr(worker, "observe", lambda _store: 0)
+    samples = iter([None, pressure.RESOURCE_PRESSURE])
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: next(samples))
+    claims: list[bool] = []
+
+    def fake_run_next(_store, _config, *, owner: str, user_only: bool = False) -> bool:
+        claims.append(user_only)
+        return True
+
+    monkeypatch.setattr(worker, "run_next", fake_run_next)
+    monkeypatch.setattr(worker, "_MAX_RUNS_PER_POLL", 2)
+    assert worker.poll_once(store, owner="test") == 2
+    # The host got busy during the first run, so the second claim takes only user runs.
+    assert claims == [False, True]
+    assert pressure.deferral_reason(store) == pressure.RESOURCE_PRESSURE
+    pressure.record_deferral(store, None)
+
+
+def test_user_only_claim_leaves_automatic_runs_queued(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    assessments.enqueue(
+        store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0
+    )
+    due = T0 + assessments.MAX_DEBOUNCE_WAIT_MS
+    assert assessments.claim_next(store, owner="test", now_ms=due, user_only=True) is None
+    assert assessments.claim_next(store, owner="test", now_ms=due) is not None
+
+
+@pytest.mark.parametrize(("load", "expected"), [((7.9, 0, 0), None), ((12.0, 0, 0), "resource_pressure")])
+def test_host_pressure_follows_load_per_cpu(monkeypatch, load, expected) -> None:
+    monkeypatch.setattr(pressure.os, "getloadavg", lambda: load)
+    monkeypatch.setattr(pressure.os, "cpu_count", lambda: 8)
+    assert pressure.host_resource_pressure() == expected
+
+
+def test_host_without_load_average_reports_no_pressure(monkeypatch) -> None:
+    def unavailable() -> tuple[float, float, float]:
+        raise OSError("no load average")
+
+    monkeypatch.setattr(pressure.os, "getloadavg", unavailable)
+    assert pressure.host_resource_pressure() is None

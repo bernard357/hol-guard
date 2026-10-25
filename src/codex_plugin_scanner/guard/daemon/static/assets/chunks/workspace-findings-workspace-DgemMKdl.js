@@ -150,7 +150,8 @@ function normalizeWorkspaceFindingsState(assessmentsPayload, findingsPayload) {
     runs: normalizeRuns(history.runs),
     latestRuns: normalizeRuns(history.latest_runs),
     assessments: list$1(findings.assessments).map(normalizeAssessment).filter((entry) => entry !== null),
-    suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null
+    suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null,
+    deferredReason: text$1(history.deferred_reason)
   };
 }
 async function readPayload(path, init) {
@@ -813,6 +814,7 @@ function WorkspaceFindingsWorkspace(props) {
     ] }),
     loadError && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorNotice, { message: loadError, onRetry: () => void refresh() }),
     actionError && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorNotice, { message: actionError }),
+    state.deferredReason === "resource_pressure" && state.worktrees.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "status", className: "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600", children: "This device is busy, so background checks are waiting. Checks you start with Assess now still run." }),
     state.worktrees.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       EmptyState,
       {
