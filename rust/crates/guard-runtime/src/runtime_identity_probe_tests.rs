@@ -26,7 +26,7 @@ fn write(root: &Path, relative: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
-fn artifact_of<'a>(result: &'a Value, index: usize) -> &'a Value {
+fn artifact_of(result: &Value, index: usize) -> &Value {
     let id = result["observations"][index]["artifact_id"]
         .as_str()
         .expect("artifact");
