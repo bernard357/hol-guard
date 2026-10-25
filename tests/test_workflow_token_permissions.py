@@ -198,6 +198,17 @@ def test_non_mapping_or_unreadable_workflow_fails_closed(tmp_path: Path, text: s
                 "security-events": "write",
             },
         ),
+        (
+            "plugin-release.yml",
+            "release",
+            {
+                "contents": "read",
+                "id-token": "write",
+                "attestations": "write",
+                "artifact-metadata": "write",
+                "security-events": "write",
+            },
+        ),
         ("extension-claim-notice.yml", "notify", {"contents": "read", "pull-requests": "write"}),
         ("gitar-fork-access-notice.yml", "notify", {"pull-requests": "write"}),
         ("release-please.yml", "release-please", {"contents": "write", "pull-requests": "write"}),

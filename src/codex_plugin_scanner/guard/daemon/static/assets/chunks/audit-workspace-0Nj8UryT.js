@@ -1,5 +1,5 @@
 import { j as jsxRuntimeExports, T as Tag, f as formatRelativeTime, r as reactExports, A as ActionButton, ec as HiMiniChevronLeft, H as HiMiniChevronRight, dj as IconActionButton, _ as HiMiniXMark, cT as GuardModalLayer, cF as HiMiniFunnel, p as HiMiniMagnifyingGlass, ed as HiMiniArrowDown, ee as HiMiniArrowUp, dO as HiMiniFolder, S as SectionLabel, d as HiMiniArrowPath, dn as HiMiniBugAnt, N as EmptyState, aM as HiMiniAdjustmentsHorizontal, dr as ConnectFlowCard, a4 as HiMiniExclamationTriangle, bQ as useResolvedApprovalGate, ef as runAuditRemediation, a6 as Badge, eg as isBlockedGuardAction, dh as isSupplyChainAuditEvidence, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, aG as ApprovalProofModal, q as HiMiniDocumentText, bc as guardAwareHref, R as HiMiniShieldCheck } from "../guard-dashboard.js";
-import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-xCStffMo.js";
+import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-CevumifN.js";
 import { r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-Bc9FBgdN.js";
 const STEPS = [
   { id: "preparing", label: "Prepare workspace" },
@@ -1013,6 +1013,12 @@ function PackageWorkbenchPanel({
     ) : null
   ] });
 }
+function auditPriorityBadgeLabel(results, resolvedIds) {
+  const count = results.filter(
+    (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id)
+  ).length;
+  return count > 0 ? `${count} high priority` : null;
+}
 function auditSeverityForDecision(decision, blockedCount) {
   if (decision === "block" || blockedCount > 0) {
     return "high";
@@ -1403,10 +1409,8 @@ function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession }) {
     () => listSupplyChainAuditWorkspaceChoices(snapshot.managed_installs ?? []),
     [snapshot.managed_installs]
   );
-  const criticalCount = reactExports.useMemo(
-    () => baseResults.filter(
-      (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id)
-    ).length,
+  const priorityBadge = reactExports.useMemo(
+    () => auditPriorityBadgeLabel(baseResults, resolvedIds),
     [baseResults, resolvedIds]
   );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
@@ -1432,10 +1436,7 @@ function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession }) {
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-start justify-between gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500", children: "Workspace audit results and open issues. Fix high-priority items inline." }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-        criticalCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { tone: "destructive", children: [
-          criticalCount,
-          " critical"
-        ] }),
+        priorityBadge && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { tone: "destructive", children: priorityBadge }),
         openCount > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { tone: "attention", children: [
           openCount,
           " open"

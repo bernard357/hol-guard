@@ -1,7 +1,8 @@
 import { resolveHomeProtectionStatus, resolveLastBlockedInstall, resolveIntelStaleness } from "./home-protection-module";
 import { buildSupplyChainStats } from "./supply-chain-workspace";
+import { auditPriorityBadgeLabel } from "./audit-priority-badge";
 import { collectPackageBlockReceipts } from "./supply-chain-protection-stats";
-import { deriveFrontendAuditResults } from "./audit-workspace";
+import { deriveFrontendAuditResults, type AuditResult } from "./audit-workspace";
 import { groupPoliciesByHarness, resolveSecurityModeCopy } from "./policy-workspace";
 import { resolveFeedSourceMode, resolveFeedStaleness } from "./feed-health-workspace";
 import type { GuardRuntimeSnapshot, GuardManagedInstall, GuardReceipt, GuardPolicyDecision, PackageManagerProtection } from "./guard-types";
@@ -408,3 +409,28 @@ const oldSnapshot = { ...baseSnapshot, latest_receipts: [oldReceipt] };
 const oldStaleness = resolveFeedStaleness(oldSnapshot);
 assert(oldStaleness.stale, "SCRG165-G: 8-day-old receipt is stale");
 assert(oldStaleness.ageLabel.includes("stale"), "SCRG165-H: stale label mentions stale");
+
+const auditResult = (id: string, severity: AuditResult["severity"], resolved = false): AuditResult => ({
+  id,
+  severity,
+  title: id,
+  detail: "",
+  harness: "all",
+  workspace: null,
+  timestamp: new Date().toISOString(),
+  remediation: null,
+  remediationAction: null,
+  resolved,
+  evidenceHref: null,
+});
+const highOnlyBadge = auditPriorityBadgeLabel(
+  [auditResult("a", "high"), auditResult("b", "high"), auditResult("c", "medium")],
+  new Set(),
+);
+assert(highOnlyBadge === "2 high priority", "SCRG161-H: high results are not labelled critical");
+assert(
+  auditPriorityBadgeLabel([auditResult("a", "critical"), auditResult("b", "high", true), auditResult("c", "high")], new Set(["c"])) ===
+    "1 high priority",
+  "SCRG161-I: resolved results drop out of the badge",
+);
+assert(auditPriorityBadgeLabel([auditResult("a", "low")], new Set()) === null, "SCRG161-J: no badge without high priority results");
