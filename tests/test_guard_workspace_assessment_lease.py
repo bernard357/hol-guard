@@ -71,3 +71,20 @@ def test_a_second_lease_expiry_stops_retrying(tmp_path: Path) -> None:
     assert retry is not None and retry.trigger_kind == "manual"
     assert assessments.claim_next(store, owner="test", now_ms=T0 + 2 * assessments.LEASE_MS + 2) is None
     assert runs(store) == [("failed", "lease_expired"), ("failed", "assessment_timed_out")]
+
+
+def test_a_run_queued_after_an_unretried_expiry_still_gets_its_retry(tmp_path: Path) -> None:
+    # A paused worktree cannot queue the retry; the user's later run is a new
+    # run with its own retry, not the second attempt of the expired one.
+    store = manual_run(tmp_path)
+    assert assessments.claim_next(store, owner="test", now_ms=T0) is not None
+    assessments.set_paused(store, KEYS, paused=True)
+    later = T0 + assessments.LEASE_MS + 1
+    assert assessments.claim_next(store, owner="test", now_ms=later) is None
+    assessments.set_paused(store, KEYS, paused=False)
+    digest = runner.DETECTOR_SET_DIGEST
+    assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=digest, now_ms=later + 2)
+    assert assessments.claim_next(store, owner="test", now_ms=later + 2) is not None
+    retry = assessments.claim_next(store, owner="test", now_ms=later + assessments.LEASE_MS + 3)
+    assert retry is not None and retry.trigger_kind == "manual"
+    assert runs(store)[:2] == [("failed", "lease_expired"), ("failed", "lease_expired")]

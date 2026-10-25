@@ -273,18 +273,18 @@ def claim_next(
 def _expire_leases_locked(connection: sqlite3.Connection, *, now_ms: int) -> None:
     expired = connection.execute(
         """
-        select run_id, codebase_key, worktree_key, trigger_kind, detector_set_digest, kind
+        select run_id, codebase_key, worktree_key, trigger_kind, detector_set_digest, kind, created_at_ms
         from workspace_assessment_runs where state = 'running' and lease_until_ms < ?
         """,
         (now_ms,),
     ).fetchall()
-    for run_id, codebase_key, worktree_key, trigger_kind, detector_set_digest, kind in expired:
+    for run_id, codebase_key, worktree_key, trigger_kind, detector_set_digest, kind, created_at in expired:
         # The runner renews its lease between stages, so an expired lease means
         # the worker died or one stage hung. Retry once; a retry that also
         # expires would repeat forever, so the worktree stays stale until its
         # next change or request instead.
-        retried = _previous_error_locked(connection, str(codebase_key), str(worktree_key), str(run_id))
-        error_code = "assessment_timed_out" if retried == "lease_expired" else "lease_expired"
+        retry = _is_lease_retry_locked(connection, str(codebase_key), str(worktree_key), int(created_at))
+        error_code = "assessment_timed_out" if retry else "lease_expired"
         connection.execute(
             """
             update workspace_assessment_runs set
@@ -370,18 +370,21 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
         return True
 
 
-def _previous_error_locked(
-    connection: sqlite3.Connection, codebase_key: str, worktree_key: str, run_id: str
-) -> str | None:
+def _is_lease_retry_locked(
+    connection: sqlite3.Connection, codebase_key: str, worktree_key: str, created_at_ms: int
+) -> bool:
+    # A retry is inserted in the same transaction that expires the run before
+    # it, so it was created at that run's finish time. A run queued later (for
+    # example after a paused worktree resumes) gets its own retry.
     row = connection.execute(
         """
-        select error_code from workspace_assessment_runs
-        where codebase_key = ? and worktree_key = ? and run_id != ? and finished_at_ms is not null
-        order by finished_at_ms desc, created_at_ms desc limit 1
+        select 1 from workspace_assessment_runs
+        where codebase_key = ? and worktree_key = ? and error_code = 'lease_expired' and finished_at_ms = ?
+        limit 1
         """,
-        (codebase_key, worktree_key, run_id),
+        (codebase_key, worktree_key, created_at_ms),
     ).fetchone()
-    return None if row is None or row[0] is None else str(row[0])
+    return row is not None
 
 
 def renew_lease(store: Any, run: ClaimedRun, *, now_ms: int) -> bool:
