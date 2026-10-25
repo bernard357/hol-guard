@@ -428,6 +428,14 @@ def test_partial_coverage_never_marks_a_fix_verified(tmp_path: Path, coverage: d
     assert _state(store, proposal_id) == "applied"
 
 
+def test_an_unchecked_lockfile_from_another_ecosystem_does_not_block_verification(tmp_path: Path) -> None:
+    # Every file was read; a pubspec.lock beside package.json cannot hide an npm finding.
+    coverage = {**COMPLETE_SUPPLY_CHAIN, "reasons": ["snapshot_unsupported_dependency_input"]}
+    store, proposal_id = _applied(tmp_path)
+    _verification_run(store, snapshot="after", findings=[], coverage=coverage)
+    assert _state(store, proposal_id) == "verified_fixed"
+
+
 def test_a_run_on_the_same_snapshot_does_not_count(tmp_path: Path) -> None:
     store, proposal_id = _applied(tmp_path)
     _verification_run(store, snapshot="before", findings=[])

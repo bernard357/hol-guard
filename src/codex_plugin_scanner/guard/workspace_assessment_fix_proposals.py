@@ -56,6 +56,9 @@ _MAX_FIELD_CHARS: Final = 128
 _BLOCKING_COVERAGE_REASONS: Final = frozenset(
     {"finding_cap", "supply_chain_incomplete", "lockfile_warnings", "advisory_data_unavailable"}
 )
+# The one snapshot reason that leaves nothing unread: a lockfile from another
+# ecosystem was read and hashed, so it cannot hide a finding in a supported one.
+_READ_SNAPSHOT_REASONS: Final = frozenset({"snapshot_unsupported_dependency_input"})
 _COLUMNS: Final = (
     "proposal_id",
     "codebase_key",
@@ -298,7 +301,11 @@ def _supply_chain_verifiable(coverage: object) -> bool:
         return False
     if not isinstance(reasons, list) or not all(isinstance(reason, str) for reason in reasons):
         return False
-    return not any(reason in _BLOCKING_COVERAGE_REASONS or reason.startswith("snapshot_") for reason in reasons)
+    return not any(
+        reason in _BLOCKING_COVERAGE_REASONS
+        or (reason.startswith("snapshot_") and reason not in _READ_SNAPSHOT_REASONS)
+        for reason in reasons
+    )
 
 
 def _store_prepared(

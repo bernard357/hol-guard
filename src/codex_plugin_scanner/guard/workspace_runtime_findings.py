@@ -161,9 +161,13 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
     so a new bundle or a replaced runtime queues a ``feed_change`` run. The
     run trigger has no separate runtime kind, and adding one would rewrite a
     table an older Guard on the same home could no longer open.
+
+    The version moves when a release changes what a run reports for unchanged
+    files, so every worktree is reassessed once after the upgrade. v2: coverage
+    now names lockfiles Guard cannot check.
     """
 
-    encoded = f"guard.workspace-context.v1\0{feed_digest}\0{runtime_digest or 'unknown'}"
+    encoded = f"guard.workspace-context.v2\0{feed_digest}\0{runtime_digest or 'unknown'}"
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
