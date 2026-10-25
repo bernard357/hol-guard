@@ -424,6 +424,23 @@ def test_an_engine_mismatch_with_nothing_kept_is_noted_once_per_publication(prep
     ]
 
 
+def test_a_note_made_before_the_daemon_listens_is_made_again(prepared, monkeypatch) -> None:
+    mismatched(monkeypatch, {"id": "40151296356.1"}, "discovery_current_cached_publication_unavailable")
+    discovery._refresh(prepared, SimpleNamespace())
+    notices: list[tuple[str, str]] = []
+
+    def failure(_event: str, _detail: str) -> None:
+        raise AssertionError("an engine mismatch is not a failure")
+
+    background_diagnostics.install_sink(failure, notice=lambda event, detail: notices.append((event, detail)))
+    try:
+        discovery._refresh(prepared, SimpleNamespace())
+    finally:
+        background_diagnostics.release_sink(failure)
+
+    assert [event for event, _detail in notices] == ["catalog_publication_engine_pending"]
+
+
 def test_an_accepted_publication_clears_the_note(prepared, observed, monkeypatch) -> None:
     current = {"id": "40151296356.1"}
     mismatched(monkeypatch, current, "discovery_current_cached_publication_unavailable")

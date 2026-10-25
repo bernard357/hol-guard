@@ -280,8 +280,11 @@ def _note_engine_mismatch(mismatch) -> None:
     with _ready_lock:
         if _noted_engine_mismatch == mismatch.publication_id:
             return
-        _noted_engine_mismatch = mismatch.publication_id
-    record_background_notice("catalog_publication_engine_pending", mismatch.describe())
+    # A refresh can run before the daemon installs its sink. Only a note that
+    # was written counts, so the daemon still gets one once it is listening.
+    if record_background_notice("catalog_publication_engine_pending", mismatch.describe()):
+        with _ready_lock:
+            _noted_engine_mismatch = mismatch.publication_id
 
 
 def _refresh(home, store):
