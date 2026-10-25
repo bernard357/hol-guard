@@ -140,7 +140,7 @@ fn cwd_effectful_segment(segment: &crate::CommandSegmentV1) -> bool {
         // `docker container start` run an existing container again.
         Some("docker") => super::super::docker_start::start_shaped(&words),
         // `hol-guard dashboard` starts Guard's daemon and opens a browser.
-        Some("hol-guard") => words.iter().any(|word| *word == "dashboard"),
+        Some("hol-guard") => words.contains(&"dashboard"),
         _ => false,
     }
 }
