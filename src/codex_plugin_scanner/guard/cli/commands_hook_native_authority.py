@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -19,7 +20,11 @@ from ..adapters.bounded_cli_hook_daemon import (
 from ..adapters.hermes_runtime_hooks import hermes_bridge_response
 from ..config import GuardConfig
 from ..daemon.diagnostics import DaemonDiagnostics
-from ..daemon.hook_availability_policy import availability_harness_response, hook_event_pauses_when_unavailable
+from ..daemon.hook_availability_policy import (
+    availability_harness_response,
+    hook_event_is_permission_request,
+    hook_event_pauses_when_unavailable,
+)
 from ..daemon.hook_request_parsing import runtime_hook_event_name
 from ..daemon.hook_worker import HookWorker
 from ..daemon.runtime_hook_deadline import RuntimeHookDeadline
@@ -178,6 +183,10 @@ def emit_hook_review(
         if canonical == "hermes":
             # The Hermes bridge renders its daemon reply natively; so does the CLI.
             stdout, stderr, exit_code = hermes_bridge_response(response, event_name=event_name, guard_home=guard_home)
+        elif canonical == "copilot" and "behavior" in response and hook_event_is_permission_request(event_name):
+            # Already Copilot's permission wire document (its fail-safe deny
+            # among them); the generic renderer would drop the fields it reads.
+            stdout, stderr, exit_code = json.dumps(response, ensure_ascii=True, separators=(",", ":")), "", 0
         else:
             stdout, stderr, exit_code = _daemon_response_to_native(response, harness=canonical, event_name=event_name)
         stream = output_stream or sys.stdout
