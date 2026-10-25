@@ -29,6 +29,14 @@ fn every_spelling_of_a_directory_search_path_is_seen() {
         "declare -x CDPATH=/ && cd etc && ls",
         "typeset -x cdpath=/ && cd etc && ls",
         "setenv CDPATH / && cd etc && ls",
+        // `readonly` and `local` set the variable as much as `export` does.
+        "readonly CDPATH=/ && cd etc && ls",
+        "local cdpath=/ && cd etc && ls",
+        // Appending to an unset variable sets it, so the name is read with
+        // the `+` off, wherever the assignment stands.
+        "export CDPATH+=/ && cd etc && ls",
+        "CDPATH+=/ cd etc && ls",
+        "declare -x cdpath+=/ && cd etc && ls",
     ] {
         assert!(sets_search_path(command), "{command}");
     }
@@ -48,6 +56,7 @@ fn naming_the_variable_is_not_setting_it() {
         // A different variable with the name inside it is its own name.
         "MY_CDPATH=/ cd app && ls",
         "export CDPATH_NOTES=1 && cd app && ls",
+        "CDPATH_NOTES+=1 cd app && ls",
         // Git's roots are screened separately, not here.
         "GIT_DIR=.git cd app && ls",
     ] {

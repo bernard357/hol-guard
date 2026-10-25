@@ -39,25 +39,37 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
 /// another — `CDPATH=/ cd etc` enters `/etc`. zsh ties the same search to a
 /// lowercase `cdpath` array and `export cdpath=...` there sets both, so the
 /// name is matched without case, in a leading assignment and in the arguments
-/// of the builtins that export one.
+/// of the builtins that set one. `readonly` and `local` set a variable as
+/// much as `export` does, and `NAME+=value` appends to it, which from unset
+/// is the same as setting it, so the name is read with a trailing `+` off.
+/// A leading `CDPATH+=/` is not a name the parser reads as an assignment, so
+/// the segment's own leading words are checked for that spelling too.
 pub(super) fn sets_search_path(segment: &CommandSegmentV1) -> bool {
-    fn is_search_path(name: &str) -> bool {
-        name.trim().eq_ignore_ascii_case("CDPATH")
+    fn is_search_path(word: &str) -> bool {
+        let name = word.split('=').next().unwrap_or(word);
+        name.trim()
+            .trim_end_matches('+')
+            .eq_ignore_ascii_case("CDPATH")
     }
     segment
         .environment_names
         .iter()
         .any(|name| is_search_path(name))
+        || segment
+            .tokens
+            .iter()
+            .take_while(|token| token.contains('='))
+            .any(|token| is_search_path(token))
         || (matches!(
             segment
                 .executable
                 .as_deref()
                 .map(crate::pretool::executable_basename),
-            Some("export" | "declare" | "typeset" | "setenv" | "set")
+            Some("export" | "declare" | "typeset" | "setenv" | "set" | "readonly" | "local")
         ) && segment
             .arguments
             .iter()
-            .any(|argument| is_search_path(argument.split('=').next().unwrap_or(argument))))
+            .any(|argument| is_search_path(argument)))
 }
 
 /// Whether `target`, the only operand of a `cd` or `pushd`, is a directory
