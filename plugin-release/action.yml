@@ -108,6 +108,9 @@ runs:
         PYTHONSAFEPATH: "1"
       run: |
         set -euo pipefail
+        # Hosted runners default to umask 002. Guard refuses a group-writable
+        # native runtime manifest, so install the wheel without group write.
+        umask 022
         PIN_DIR="$GITHUB_ACTION_PATH"
         LOCK_DIR="$GITHUB_ACTION_PATH/../action"
         GUARD_VERSION="$(tr -d '[:space:]' < "$PIN_DIR/guard-version.txt")"
