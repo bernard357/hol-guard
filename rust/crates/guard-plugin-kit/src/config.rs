@@ -13,41 +13,65 @@ const CONFIG_FILES: &[&str] = &[".plugin-scanner.toml", ".codex-plugin-scanner.t
 const MAX_PATTERNS: usize = 64;
 const MAX_PATTERN_LENGTH: usize = 256;
 
-/// Glob patterns from the first config file present. `*` matches any run of
-/// characters, `/` included, and `?` matches one character, as in the
-/// scanner's `ignore_paths`.
-pub(crate) fn exclude_paths(root: &Path) -> Result<Vec<String>, String> {
-    let Some(text) = CONFIG_FILES
-        .iter()
-        .map(|name| root.join(name))
-        .find(|path| path.exists())
-        .map(|path| walk::read_text(&path).ok_or("plugin_kit_config_invalid"))
-        .transpose()?
-    else {
-        return Ok(Vec::new());
-    };
-    let document: toml::Table = text.parse().map_err(|_| "plugin_kit_config_invalid")?;
-    let Some(section) = document.get("plugin_kit") else {
-        return Ok(Vec::new());
-    };
-    let patterns = section
-        .get("exclude_paths")
-        .map(|value| value.as_array().ok_or("plugin_kit_config_invalid"))
-        .transpose()?
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    if patterns.len() > MAX_PATTERNS {
-        return Err("plugin_kit_config_invalid".to_owned());
+/// Paths the repository marks as not part of the plugin.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Excludes(Vec<String>);
+
+impl Excludes {
+    /// Patterns from the first config file present. `*` matches any run of
+    /// characters, `/` included, and `?` matches one character, as in the
+    /// scanner's `ignore_paths`.
+    pub(crate) fn load(root: &Path) -> Result<Self, String> {
+        let Some(text) = CONFIG_FILES
+            .iter()
+            .map(|name| root.join(name))
+            .find(|path| path.exists())
+            .map(|path| walk::read_text(&path).ok_or("plugin_kit_config_invalid"))
+            .transpose()?
+        else {
+            return Ok(Self::default());
+        };
+        let document: toml::Table = text.parse().map_err(|_| "plugin_kit_config_invalid")?;
+        let Some(section) = document.get("plugin_kit") else {
+            return Ok(Self::default());
+        };
+        let section = section.as_table().ok_or("plugin_kit_config_invalid")?;
+        let patterns = section
+            .get("exclude_paths")
+            .map(|value| value.as_array().ok_or("plugin_kit_config_invalid"))
+            .transpose()?
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if patterns.len() > MAX_PATTERNS {
+            return Err("plugin_kit_config_invalid".to_owned());
+        }
+        patterns
+            .iter()
+            .map(|value| match value.as_str() {
+                Some(pattern) if !pattern.is_empty() && pattern.len() <= MAX_PATTERN_LENGTH => {
+                    Ok(pattern.trim_start_matches("./").to_owned())
+                }
+                _ => Err("plugin_kit_config_invalid".to_owned()),
+            })
+            .collect::<Result<_, _>>()
+            .map(Self)
     }
-    patterns
-        .iter()
-        .map(|value| match value.as_str() {
-            Some(pattern) if !pattern.is_empty() && pattern.len() <= MAX_PATTERN_LENGTH => {
-                Ok(pattern.trim_start_matches("./").to_owned())
-            }
-            _ => Err("plugin_kit_config_invalid".to_owned()),
-        })
-        .collect()
+
+    /// Whether the file at `path`, relative to the repository root with `/`
+    /// separators, is excluded.
+    pub(crate) fn file(&self, path: &str) -> bool {
+        self.0.iter().any(|pattern| matches(pattern, path))
+    }
+
+    /// Whether every file under the directory at `path` is excluded, so a
+    /// walk can skip it without counting its entries. That holds when a
+    /// pattern ending in `*` already matches the directory's prefix.
+    pub(crate) fn directory(&self, path: &str) -> bool {
+        let prefix = format!("{path}/");
+        self.0
+            .iter()
+            .any(|pattern| pattern.ends_with('*') && matches(pattern, &prefix))
+    }
 }
 
 /// Whether `path`, relative to the repository root with `/` separators,
@@ -82,7 +106,7 @@ pub(crate) fn matches(pattern: &str, path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::matches;
+    use super::{matches, Excludes};
 
     #[test]
     fn patterns_match_like_the_scanner_ignore_paths() {
@@ -96,5 +120,15 @@ mod tests {
         assert!(!matches("distributions/*", "skills/x/SKILL.md"));
         assert!(!matches("skill-?/SKILL.md", "skill-ab/SKILL.md"));
         assert!(!matches("README.md", "docs/README.md"));
+    }
+
+    #[test]
+    fn only_a_trailing_wildcard_excludes_a_whole_directory() {
+        let excludes = Excludes(vec!["distributions/*".into(), "docs/*.md".into()]);
+        assert!(excludes.directory("distributions"));
+        assert!(excludes.directory("distributions/a"));
+        assert!(!excludes.directory("docs"));
+        assert!(!excludes.directory("skills"));
+        assert!(excludes.file("docs/guide.md"));
     }
 }

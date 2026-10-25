@@ -14,8 +14,9 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::config::Excludes;
 use crate::model::{Diagnostic, Marketplace, Plugin, Source, SourceKind};
-use crate::{config, walk};
+use crate::walk;
 
 pub struct Detection {
     pub sources: Vec<Source>,
@@ -26,19 +27,14 @@ pub struct Detection {
     /// `(server, variable, is_literal)` for each MCP env entry. Values are
     /// never kept; only whether one is a literal rather than a reference.
     pub raw_env: Vec<(String, String, bool)>,
+    /// Paths `[plugin_kit] exclude_paths` leaves out, which packaging honours
+    /// when it copies whole skill and hooks folders.
+    pub(crate) excludes: Excludes,
 }
 
 pub fn detect(root: &Path) -> Result<Detection, String> {
-    let excluded = config::exclude_paths(root)?;
-    let files: Vec<PathBuf> = walk::files(root)?
-        .into_iter()
-        .filter(|file| {
-            let path = walk::display(file);
-            !excluded
-                .iter()
-                .any(|pattern| config::matches(pattern, &path))
-        })
-        .collect();
+    let excludes = Excludes::load(root)?;
+    let files = walk::files(root, "", &excludes)?;
     let mut sources = Vec::new();
     for file in &files {
         if let Some(kind) = classify(file) {
@@ -168,7 +164,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
     }
     if plugin.repository.is_none() {
         plugin.repository =
-            package_repository(root, &base, &mut inputs).or_else(|| git_origin(root));
+            package_repository(root, &base, &known, &mut inputs).or_else(|| git_origin(root));
     }
     if plugin.name.is_none() && plugin.base.is_empty() && !plugin.skills.is_empty() {
         plugin.name = root
@@ -183,6 +179,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
         diagnostics,
         inputs,
         raw_env,
+        excludes,
     })
 }
 
@@ -361,8 +358,17 @@ fn marketplace(
 
 /// The `repository` of a `package.json` beside the plugin root, which npm
 /// packaged MCP servers and extensions usually set.
-fn package_repository(root: &Path, base: &str, inputs: &mut Vec<PathBuf>) -> Option<String> {
+fn package_repository(
+    root: &Path,
+    base: &str,
+    known: &BTreeSet<String>,
+    inputs: &mut Vec<PathBuf>,
+) -> Option<String> {
     let path = Path::new(base).join("package.json");
+    // An excluded or unwalked package.json is not part of the plugin.
+    if !known.contains(&walk::display(&path)) {
+        return None;
+    }
     let document: Value = serde_json::from_str(&walk::read_text(&root.join(&path))?).ok()?;
     let url = match document.get("repository")? {
         Value::String(url) => url.clone(),

@@ -252,6 +252,88 @@ fn excluded_copies_of_a_skill_are_not_part_of_the_plugin() {
 }
 
 #[test]
+fn excluded_files_inside_skill_and_hooks_folders_are_not_packaged() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"skills/pdf-tools/drafts/*\", \"*.local.sh\"]\n",
+        ),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        ("skills/pdf-tools/drafts/notes.md", "# Notes"),
+        ("hooks/hooks.json", r#"{"hooks": {}}"#),
+        ("hooks/run.sh", "echo run"),
+        ("hooks/debug.local.sh", "echo debug"),
+    ]);
+    let paths: Vec<String> = plan(&root, &["claude-code"])
+        .into_iter()
+        .map(|output| output.path)
+        .collect();
+    assert!(
+        paths.contains(&"claude-code/skills/pdf-tools/SKILL.md".to_owned()),
+        "{paths:?}"
+    );
+    assert!(
+        paths.contains(&"claude-code/hooks/run.sh".to_owned()),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .all(|path| !path.contains("drafts") && !path.contains(".local.")),
+        "{paths:?}"
+    );
+}
+
+#[test]
+fn an_excluded_package_json_does_not_name_the_repository() {
+    let manifest =
+        r#"{"name":"pdf-tools","version":"1.0.0","description":"PDF tools.","license":"MIT"}"#;
+    let package = r#"{"name":"pdf-tools","repository":"https://github.com/acme/pdf-tools"}"#;
+    let included = repo(&[
+        (".claude-plugin/plugin.json", manifest),
+        ("package.json", package),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let check = ok(json!({"command": "check", "root": root_str(&included)}));
+    assert_eq!(
+        check["plugin"]["repository"],
+        json!("https://github.com/acme/pdf-tools"),
+        "{check}"
+    );
+    let excluded = repo(&[
+        (".claude-plugin/plugin.json", manifest),
+        ("package.json", package),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"package.json\"]\n",
+        ),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let check = ok(json!({"command": "check", "root": root_str(&excluded)}));
+    assert!(check["plugin"]["repository"].is_null(), "{check}");
+}
+
+#[test]
+fn an_excluded_folder_does_not_count_toward_the_repository_limit() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"distributions/*\"]\n",
+        ),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let copies = root.join("distributions/copies");
+    fs::create_dir_all(&copies).unwrap();
+    for index in 0..20_001 {
+        fs::write(copies.join(format!("{index}.md")), "").unwrap();
+    }
+    let check = ok(json!({"command": "check", "root": root_str(&root)}));
+    assert_eq!(check["summary"]["skills"], json!(1), "{check}");
+}
+
+#[test]
 fn the_scanner_ignore_paths_do_not_drop_plugin_parts() {
     let root = repo(&[
         (".claude-plugin/plugin.json", MANIFEST),
@@ -271,6 +353,7 @@ fn a_malformed_exclude_list_is_an_error() {
     for config in [
         "[plugin_kit]\nexclude_paths = \"distributions/*\"\n",
         "[plugin_kit]\nexclude_paths = [3]\n",
+        "plugin_kit = [\"distributions/*\"]\n",
         "[plugin_kit\n",
     ] {
         let root = repo(&[
