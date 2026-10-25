@@ -20,6 +20,11 @@ def org_home(tmp_path: Path) -> tuple[Path, Path, Path]:
     return home, workspace, sibling
 
 
+@pytest.fixture(autouse=True)
+def _peel_from_the_resident(native_contained_wrapper_runtime: Path) -> None:
+    """Every peel here is the classifier's answer, asked of the session resident."""
+
+
 @pytest.mark.parametrize(
     ("command", "core"),
     [

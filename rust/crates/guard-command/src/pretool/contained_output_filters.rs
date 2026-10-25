@@ -47,11 +47,33 @@ pub(super) fn filter_stage(segment: &CommandSegmentV1, source: &str) -> bool {
 }
 
 pub(super) fn head_tail_arguments(arguments: &[String]) -> bool {
+    head_tail_count(arguments).is_some()
+}
+
+/// The line count a `head`/`tail` stage asks for, spelled either way.
+///
+/// The sink applies the number, not the spelling, so `-5` and `-n 5` reach it
+/// as the same stage.
+pub(super) fn head_tail_count(arguments: &[String]) -> Option<&str> {
     match arguments {
-        [count] => count.strip_prefix('-').is_some_and(bounded_count),
-        [flag, count] => flag == "-n" && bounded_count(count),
-        _ => false,
+        [count] => count.strip_prefix('-').filter(|count| bounded_count(count)),
+        [flag, count] if flag == "-n" && bounded_count(count) => Some(count.as_str()),
+        _ => None,
     }
+}
+
+/// One filter stage as the sink runs it: the program, then its arguments. A
+/// `head`/`tail` stage carries its count alone, whichever way it was spelled.
+pub(super) fn stage_argv(segment: &CommandSegmentV1) -> Option<Vec<String>> {
+    let program = segment.executable.as_deref()?;
+    let arguments = match program {
+        "head" | "tail" => vec![head_tail_count(&segment.arguments)?.to_owned()],
+        _ => segment.arguments.clone(),
+    };
+    let mut argv = Vec::with_capacity(arguments.len() + 1);
+    argv.push(program.to_owned());
+    argv.extend(arguments);
+    Some(argv)
 }
 
 /// A matcher that reads only standard input: switches from `switches`,

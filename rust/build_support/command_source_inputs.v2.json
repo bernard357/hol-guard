@@ -294,6 +294,7 @@
       "src/pretool/contained_output_filters.rs",
       "src/pretool/contained_publish.rs",
       "src/pretool/contained_wrapper.rs",
+      "src/pretool/contained_wrapper_plan.rs",
       "src/pretool/control_flow_flatten.rs",
       "src/pretool/curl_output_targets.rs",
       "src/pretool/curl_reads.rs",

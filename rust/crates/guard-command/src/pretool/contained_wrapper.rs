@@ -16,15 +16,20 @@ fn output_filter(segment: &CommandSegmentV1) -> bool {
         && output_filters::head_tail_arguments(&segment.arguments)
 }
 
-/// How many segments after `core` form the sink's output filter chain: each a
-/// later stage of the same pipeline, joined by a plain `|`. `None` when any
-/// segment after `core` is something else.
-fn filter_chain(model: &CanonicalCommandV1, segments: &[CommandSegmentV1]) -> Option<usize> {
+/// The segments after `core` that form the sink's output filter chain, each
+/// as the argument list the sink runs: a later stage of the same pipeline,
+/// joined by a plain `|`. `None` when any segment after `core` is something
+/// else.
+fn filter_chain(
+    model: &CanonicalCommandV1,
+    segments: &[CommandSegmentV1],
+) -> Option<Vec<Vec<String>>> {
     let (core, filters) = segments.split_first()?;
     if filters.len() > output_filters::MAX_FILTERS {
         return None;
     }
     let mut previous = core;
+    let mut stages = Vec::with_capacity(filters.len());
     for (offset, filter) in filters.iter().enumerate() {
         if filter.pipeline_index != core.pipeline_index + offset + 1
             || text(model, previous.span.end, filter.span.start)? != "|"
@@ -35,9 +40,10 @@ fn filter_chain(model: &CanonicalCommandV1, segments: &[CommandSegmentV1]) -> Op
         {
             return None;
         }
+        stages.push(output_filters::stage_argv(filter)?);
         previous = filter;
     }
-    Some(filters.len())
+    Some(stages)
 }
 
 /// A final `; echo "exit=$?"`: the sink prints the label and status itself.
@@ -45,7 +51,7 @@ fn filter_chain(model: &CanonicalCommandV1, segments: &[CommandSegmentV1]) -> Op
 /// The shell prints a single-quoted or backslash-escaped `$?` literally, and
 /// the Python sink cannot peel those forms. Accept only the source syntax the
 /// sink peels, so those commands stay on the normal review path.
-fn status_echo(model: &CanonicalCommandV1, segment: &CommandSegmentV1) -> bool {
+pub(super) fn status_echo(model: &CanonicalCommandV1, segment: &CommandSegmentV1) -> bool {
     segment.environment_names.is_empty()
         && segment.wrapper_chain.is_empty()
         && !segment.path_overridden
@@ -57,11 +63,14 @@ fn status_echo(model: &CanonicalCommandV1, segment: &CommandSegmentV1) -> bool {
 }
 
 fn status_echo_syntax(source: &str) -> bool {
-    let Some(rest) = source.trim().strip_prefix("echo") else {
-        return false;
-    };
+    status_echo_label(source).is_some()
+}
+
+/// The label the sink prints before the status, without its quotes.
+fn status_echo_label(source: &str) -> Option<&str> {
+    let rest = source.trim().strip_prefix("echo")?;
     if !rest.starts_with([' ', '\t']) {
-        return false;
+        return None;
     }
     let argument = rest.trim();
     let (label, quoted) = if let Some(inner) = argument
@@ -70,23 +79,22 @@ fn status_echo_syntax(source: &str) -> bool {
     {
         (inner, true)
     } else if argument.contains(['\'', '\\', '"']) {
-        return false;
+        return None;
     } else {
         (argument, false)
     };
-    let Some(label) = label.strip_suffix("$?") else {
-        return false;
-    };
-    label.len() <= 32
+    let label = label.strip_suffix("$?")?;
+    let accepted = label.len() <= 32
         && label.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
                 || matches!(byte, b'_' | b'=' | b':' | b'-')
                 || (quoted && byte == b' ')
-        })
+        });
+    accepted.then_some(label)
 }
 
 // Parser spans count Unicode characters, not UTF-8 byte offsets.
-fn text(model: &CanonicalCommandV1, start: usize, end: usize) -> Option<String> {
+pub(super) fn text(model: &CanonicalCommandV1, start: usize, end: usize) -> Option<String> {
     let length = end.checked_sub(start)?;
     let text: String = model
         .normalized_text
@@ -229,29 +237,79 @@ pub(super) fn sink_peels_leading_cd(
     !relative || sibling
 }
 
+/// What the classifier peeled, in the form the execution sink needs to run it.
+///
+/// The sink used to recover these fields by peeling the text a second time.
+/// It now receives them from the classification that already decided the
+/// shape, so one grammar and one sibling-repository rule govern both.
+/// What the execution sink would do with the shape, when the peel is for it
+/// rather than for classification.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SinkContext<'a> {
+    /// The sandbox root the sink runs in.
+    pub workspace: &'a str,
+    /// Whether the sink peels an `&&`-joined relative `cd` that stays inside
+    /// the workspace. Only a host with no workspace sandbox does; everywhere
+    /// else that text stays whole and the sandbox runs it, which is the
+    /// stronger route and is what the Python peel did.
+    pub peels_relative_inside: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContainedPlan {
+    /// The producer the sink runs, with its wrapper removed.
+    pub core: CanonicalCommandV1,
+    /// The producer's source text, which is what the sink executes.
+    pub core_text: String,
+    /// The resolved `cd`/package directory, or `None` when the core runs in
+    /// the directory the command was issued from.
+    pub directory: Option<std::path::PathBuf>,
+    /// The producer ended in `2>&1`, so the sink merges stderr into stdout.
+    pub merge_stderr: bool,
+    /// The label a trailing `; echo "label$?"` prints before the status.
+    pub status_label: Option<String>,
+    /// Each output filter stage, as its program followed by its arguments.
+    pub stages: Vec<Vec<String>>,
+}
+
 /// Peel a verified `cd <workspace or sibling repository dir> &&` prefix
 /// spelled as the sink peels it, a
 /// trailing `2>&1`, a chain of bounded `| tail -N`/`| head -N` and
 /// standard-input `| grep` filters and a final `; echo "<label>$?"`,
 /// returning the sole core invocation.
-/// Classification only: the execution sink peels the same shape and
+/// Classification only: the execution sink runs the peel this returns and
 /// re-authorizes the core in the resolved directory before running it.
 pub(super) fn contained_core(
     model: &CanonicalCommandV1,
     context: super::PathContext<'_>,
 ) -> Option<CanonicalCommandV1> {
+    contained_plan(model, context, None).map(|plan| plan.core)
+}
+
+/// Peel the wrapper the sink runs, keeping every field the sink needs.
+///
+/// `sink` describes the execution sink the peel is for; `None` means
+/// classification, which resolves from the directory the command was issued
+/// from and asks nothing about how a sink would run the result.
+pub(crate) fn contained_plan(
+    model: &CanonicalCommandV1,
+    context: super::PathContext<'_>,
+    sink: Option<SinkContext<'_>>,
+) -> Option<ContainedPlan> {
     // `bun --cwd <dir> run build` is checked as `cd <dir> && bun run build`.
     if let Some(projected) = package_dir::as_cd_list(model, context) {
-        return contained_core(&projected.model, context);
+        return contained_plan(&projected.model, context, sink);
     }
     if model.confidence != "exact" || model.path_overridden || !model.wrapper_chain.is_empty() {
         return None;
     }
     let mut segments = model.segments.as_slice();
     let mut start = 0;
+    let mut directory = None;
     if segments.first()?.executable.as_deref() == Some("cd") {
         let target = super::segment_proof::verified_cwd_compound_context(model, context)?;
-        let workspace = std::fs::canonicalize(context.cwd?).ok()?;
+        let root = sink.map(|sink| sink.workspace).or(context.cwd)?;
+        let workspace = std::fs::canonicalize(root).ok()?;
         let target = std::path::Path::new(&target);
         let inside = within(target, &workspace);
         let sibling = sibling_project_root(target, context.home_dir?);
@@ -268,10 +326,13 @@ pub(super) fn contained_core(
             return None;
         };
         let anchored = spelled.starts_with('~') || std::path::Path::new(spelled).is_absolute();
-        let peeled_inside = inside && relative_inside_peeled(model, segments);
+        let peeled_inside = inside
+            && relative_inside_peeled(model, segments)
+            && sink.is_none_or(|sink| sink.peels_relative_inside);
         if !anchored && !peeled_inside && (inside || sibling.as_deref() != Some(target)) {
             return None;
         }
+        directory = Some(target.to_path_buf());
         start = 1;
     }
     let status = segments.len() >= start + 2
@@ -283,10 +344,15 @@ pub(super) fn contained_core(
             segments[segments.len() - 2].span.end,
             segments[segments.len() - 1].span.start,
         )? == ";";
+    let mut status_label = None;
     if status {
+        let last = segments.last()?;
+        let source = text(model, last.span.start, last.span.end)?;
+        status_label = Some(status_echo_label(&source)?.to_owned());
         segments = &segments[..segments.len() - 1];
     }
-    let filtered = filter_chain(model, segments.get(start..)?)? > 0;
+    let stages = filter_chain(model, segments.get(start..)?)?;
+    let filtered = !stages.is_empty();
     let mut core = segments[start].clone();
     let merged = core
         .arguments
@@ -315,5 +381,12 @@ pub(super) fn contained_core(
     }
     let mut peeled = model.clone();
     peeled.segments = vec![core];
-    Some(peeled)
+    Some(ContainedPlan {
+        core: peeled,
+        core_text: producer.trim().to_owned(),
+        directory,
+        merge_stderr: merged,
+        status_label,
+        stages,
+    })
 }

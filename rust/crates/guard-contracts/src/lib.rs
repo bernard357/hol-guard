@@ -88,6 +88,8 @@ mod approval_persist_select;
 pub use approval_persist_select::*;
 mod approval_scope_select;
 pub use approval_scope_select::*;
+mod contained_wrapper_plan;
+pub use contained_wrapper_plan::*;
 mod artifact_content_hash;
 pub use artifact_content_hash::*;
 mod hook_artifact_facts;

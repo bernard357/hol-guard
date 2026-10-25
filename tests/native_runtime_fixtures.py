@@ -58,12 +58,6 @@ def native_hook_force(monkeypatch: pytest.MonkeyPatch) -> Path:
     return runtime
 
 
-@pytest.fixture
-def native_approval_reuse_runtime(native_hook_force: Path) -> Path:
-    """Run approval reuse assertions with the caller-pinned native authority."""
-    return native_hook_force
-
-
 @pytest.fixture(scope="session")
 def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Session-shared guard home so the resident is spawned once per run."""
@@ -465,6 +459,24 @@ def native_data_flow_runtime(
         "_resolve_digest_home",
         lambda guard_home: guard_home if guard_home is not None else _native_context_home,
     )
+    return _native_context_home
+
+
+@pytest.fixture
+def native_contained_wrapper_runtime(
+    native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Serve the contained wrapper peel from the real resident.
+
+    The sink's peel is the classifier's own answer now: the grammar lives in
+    `contained_wrapper.rs` alone and this side only carries what it returns.
+    There is no Python peel left to fall back to, so these suites ask the
+    session resident rather than a second copy of the rules.
+    """
+
+    from codex_plugin_scanner.guard import native_contained_wrapper_plan
+
+    monkeypatch.setattr(native_contained_wrapper_plan, "_resolve_digest_home", lambda _guard_home: _native_context_home)
     return _native_context_home
 
 

@@ -38,6 +38,11 @@ pub struct PathContext<'a> {
 
 mod brace_group;
 mod contained_wrapper;
+mod contained_wrapper_plan;
+pub use contained_wrapper_plan::{
+    contained_wrapper_plan, ContainedOutput, ContainedWrapperCore, ContainedWrapperPlan,
+    CONTAINED_WRAPPER_PLAN_UNSUPPORTED,
+};
 pub(crate) mod curl_reads;
 pub use curl_reads::bound_curl_read_destinations;
 #[cfg(unix)]

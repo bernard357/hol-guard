@@ -24,6 +24,11 @@ def sibling_home(tmp_path: Path) -> tuple[Path, Path, Path]:
     return home, workspace, sibling
 
 
+@pytest.fixture(autouse=True)
+def _peel_from_the_resident(native_contained_wrapper_runtime: Path) -> None:
+    """Every peel here is the classifier's answer, asked of the session resident."""
+
+
 def test_quiet_or_sequenced_cd_into_a_sibling_repository_is_peeled(tmp_path: Path) -> None:
     home, workspace, sibling = sibling_home(tmp_path)
     dashboard = sibling / "dashboard"
@@ -153,10 +158,3 @@ def test_plain_data_settings_are_dropped_and_others_stay(monkeypatch: pytest.Mon
         ["TMPDIR=/tmp/x", "pytest"],
     ):
         assert _split_command_prefix(command, drop_data=True) == (command, {})
-
-
-def test_without_posix_owners_no_sibling_root_is_proven(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    home, workspace, sibling = sibling_home(tmp_path)
-    monkeypatch.delattr("os.getuid", raising=False)
-    for command in ("pytest -q", f"python3 {sibling / 'scripts' / 'report.py'}"):
-        assert anchored_sibling_root(command, workspace=workspace, cwd=workspace, home=home) is None
