@@ -5,7 +5,8 @@ snapshot path with a cached advisory bundle and no network. They pin the
 behavior a person sees from background assessment: a known risk is reported
 once, an equivalent fixed workspace stays quiet, a feed update or a lockfile
 edit reassesses exactly once, linked worktrees never borrow each other's
-results, and incomplete coverage is never reported as clean.
+results, incomplete coverage is never reported as clean, and restoring
+protection is never mistaken for a fix.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard import workspace_assessment_worker as worker
 from codex_plugin_scanner.guard.config import load_guard_config
 from codex_plugin_scanner.guard.store import GuardStore
+from codex_plugin_scanner.guard.supply_chain_repair import coordinate_supply_chain_repair
 from tests.native_workspace import bind_workspace
 from tests.test_guard_phase06_workspace_audit import WORKSPACE_AUDIT_NOW
 from tests.test_guard_supply_chain_evaluator import WORKSPACE_ID, _bundle_response, _package
@@ -308,3 +310,34 @@ def test_a_symlink_out_of_the_root_is_not_followed(tmp_path: Path, native_binary
     run = _latest(store, keys)
     assert all(item["package_version"] != AFFECTED for item in _minimist(run))
     assert str(outside) not in json.dumps(run)
+
+
+def test_restoring_protection_leaves_the_known_risk_open(tmp_path: Path, native_binary: None, offline: None) -> None:
+    clock = Clock()
+    store = _store(tmp_path)
+    root = tmp_path / "workspace"
+    _write_project(root, AFFECTED)
+    keys = _admit(store, root, clock)
+    assert _run_all(store, clock) == 1
+    before = _latest(store, keys)
+    assert len(_minimist(before)) == 1
+    lock = (root / "package-lock.json").read_bytes()
+
+    # Restore protection repairs package tools and routing and refreshes the
+    # advisory feed; it never edits the project, so it is not a fix.
+    repair = coordinate_supply_chain_repair(
+        repair_package_shims=lambda: None,
+        activate_runtime=lambda: (200, {}),
+        sync_intelligence=lambda: _cache_feed(store, blocked=True, bundle_version="1747699200000-feedface"),
+    )
+    assert repair["repaired"] is True
+    assert (root / "package-lock.json").read_bytes() == lock
+
+    assert worker.observe(store, clock=clock) == 1
+    [queued] = _queued(store, keys)
+    assert queued["trigger_kind"] == "feed_change"
+    assert _run_all(store, clock) == 1
+    after = _latest(store, keys)
+    assert after["snapshot_digest"] == before["snapshot_digest"]
+    [finding] = _minimist(after)
+    assert (finding["decision"], finding["package_version"], finding["fix_version"]) == ("block", AFFECTED, FIXED)
