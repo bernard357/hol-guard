@@ -370,6 +370,48 @@ fn a_notice_under_the_bound_key_is_answered_and_marked_seen() {
 }
 
 #[test]
+fn a_tool_call_notice_stores_its_command_with_credentials_masked() {
+    let (lane, connection) = keyed_lane("permission-notice-masked");
+    let command = "curl -H 'Authorization: Bearer synthetic0secret0token' https://example.invalid";
+    for (session, artifact_type) in [("masked", "tool_call"), ("kept", "package_request")] {
+        let mut sent = notice(session, artifact_type);
+        sent["command"] = json!(command);
+        sent["raw_command_text"] = json!(command);
+        record_notice(&lane, &BOUND_KEY, BOUND_KEY_ID, session, sent);
+    }
+    let notice_row: String = connection
+        .query_row(
+            "select payload_json from sync_state where state_key = 'claude_permission_notice:masked:Bash'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let notice_row: Value = serde_json::from_str(&notice_row).unwrap();
+    for row in [pending(&connection, "masked"), notice_row] {
+        for field in ["command", "raw_command_text"] {
+            let stored = row[field].as_str().unwrap();
+            assert!(!stored.contains("synthetic0secret0token"), "{row}");
+            assert!(stored.contains("Bearer *****"), "{row}");
+        }
+    }
+    // Only a tool call is masked; other artifact types keep the command.
+    assert_eq!(pending(&connection, "kept")["raw_command_text"], command);
+
+    // The masked notice and pending row still agree, so the dialog is asked.
+    let asked = run_as(
+        &lane,
+        "claude-code",
+        Some(HOME),
+        permission_request(json!("masked")),
+    );
+    assert_eq!(asked["outcome"], "answer", "{asked}");
+    assert_eq!(
+        pending(&connection, "masked")["permission_prompt_seen"],
+        true
+    );
+}
+
+#[test]
 fn a_notice_signed_under_another_key_is_left_to_the_daemon_untouched() {
     let (lane, connection) = keyed_lane("permission-notice-foreign");
     record_notice(
