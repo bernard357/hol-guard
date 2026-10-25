@@ -335,3 +335,25 @@ pub(super) fn rewritten_remote_url(config: &GitConfig, url: &str) -> Option<Stri
         None => url.to_owned(),
     })
 }
+
+/// Whether `origin` is the only remote the repository can reach: no other
+/// `remote.<name>.url`, and no `branch.<name>.remote` naming anything else.
+/// A refresh that names no remote resolves one through
+/// `branch.<current>.remote`, and `--all` walks every configured remote, so
+/// both reach only `origin` when this holds. A `branch.<name>.remote` that is
+/// not a configured remote name is a URL Git fetches directly, which the
+/// origin URL proof does not cover either way.
+pub(super) fn only_origin_remote(effective: &GitConfig) -> bool {
+    effective.iter().all(|(key, values)| {
+        if let Some(name) = key
+            .strip_prefix("remote.")
+            .and_then(|rest| rest.strip_suffix(".url"))
+        {
+            return name == "origin";
+        }
+        if key.starts_with("branch.") && key.ends_with(".remote") {
+            return values.iter().all(|value| value.trim() == "origin");
+        }
+        true
+    })
+}

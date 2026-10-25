@@ -222,3 +222,47 @@ fn credential_helper_shapes_are_narrow() {
         vec!["osxkeychain", "!gh auth git-credential"]
     );
 }
+
+#[test]
+fn a_repository_reaches_only_origin_when_nothing_else_names_a_remote() {
+    for entries in [
+        &[(
+            "remote.origin.url",
+            "https://github.com/example-org/app.git",
+        )][..],
+        &[
+            (
+                "remote.origin.url",
+                "https://github.com/example-org/app.git",
+            ),
+            ("branch.main.remote", "origin"),
+            ("branch.main.merge", "refs/heads/main"),
+            ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+        ],
+    ] {
+        assert!(only_origin_remote(&config(entries)), "{entries:?}");
+    }
+}
+
+#[test]
+fn another_remote_or_another_branch_remote_reaches_past_origin() {
+    for entries in [
+        &[
+            (
+                "remote.origin.url",
+                "https://github.com/example-org/app.git",
+            ),
+            ("remote.upstream.url", "https://github.com/other/app.git"),
+        ][..],
+        &[
+            (
+                "remote.origin.url",
+                "https://github.com/example-org/app.git",
+            ),
+            ("branch.main.remote", "upstream"),
+        ],
+        &[("branch.main.remote", "https://example.invalid/app.git")],
+    ] {
+        assert!(!only_origin_remote(&config(entries)), "{entries:?}");
+    }
+}

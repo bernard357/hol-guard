@@ -16,6 +16,8 @@ use std::time::Instant;
 #[path = "git_remote_pull.rs"]
 pub(super) mod pull;
 
+use pull::Operation;
+
 /// The allow reason for a proven refresh, or `None`. The fetch may sit in a
 /// chain after a verified `cd` and beside segments that are benign on their
 /// own, such as `git fetch origin main && git log origin/main --oneline -2`.
@@ -70,8 +72,8 @@ pub(super) fn exact_safe_command(
         }
         let stripped = super::segment_proof::without_stderr_merge(segment);
         let candidate = stripped.as_ref().unwrap_or(segment);
-        if let Some((leading, upstream)) = parse(candidate, context) {
-            let merge = upstream.is_some_and(|shape| !shape.fetches);
+        if let Some((leading, operation)) = parse(candidate, context) {
+            let merge = operation.upstream.is_some_and(|shape| !shape.fetches);
             // Only `git fetch origin` then `git merge --ff-only origin/main`
             // pair; a pull, a second fetch or a second merge stands alone.
             let repeated = if merge {
@@ -83,7 +85,7 @@ pub(super) fn exact_safe_command(
                 || !proven(
                     candidate,
                     leading,
-                    upstream,
+                    operation,
                     context,
                     deadline,
                     execution_environment,
@@ -95,7 +97,7 @@ pub(super) fn exact_safe_command(
                 merged = true;
             } else {
                 fetch_seen = true;
-                pulled |= upstream.is_some();
+                pulled |= operation.upstream.is_some();
             }
             fetch_pipeline = true;
             continue;
@@ -161,7 +163,7 @@ pub(super) fn settle_fast_forward(
         let stripped = super::segment_proof::without_stderr_merge(segment);
         matches!(
             parse(stripped.as_ref().unwrap_or(segment), context),
-            Some((_, Some(shape))) if !shape.fetches
+            Some((_, Operation { upstream: Some(shape), .. })) if !shape.fetches
         )
     });
     // Only the merge rule's own review is lifted: another rule, a permission
@@ -228,13 +230,14 @@ pub(super) fn proven_read(
 fn proven(
     segment: &CommandSegmentV1,
     leading: &[String],
-    upstream: Option<pull::Pull>,
+    operation: Operation,
     context: super::PathContext<'_>,
     deadline: Option<Instant>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
 ) -> bool {
     // The one argument after `merge` that is not an option names its target.
-    let target = upstream
+    let target = operation
+        .upstream
         .filter(|shape| !shape.fetches)
         .and_then(|_| {
             segment
@@ -248,7 +251,7 @@ fn proven(
         Some(prove(
             segment.executable.as_deref()?,
             leading,
-            upstream,
+            operation,
             target,
             context,
             deadline,
@@ -270,8 +273,9 @@ pub(super) fn proven_fetch(
     let segment = stripped.as_ref().unwrap_or(segment);
     matches!(
         parse(segment, context),
-        Some((leading, None))
-            if proven(segment, leading, None, context, deadline, execution_environment)
+        Some((leading, operation))
+            if operation.upstream.is_none()
+                && proven(segment, leading, operation, context, deadline, execution_environment)
     )
 }
 
@@ -290,7 +294,7 @@ pub(super) fn verified(segment: &CommandSegmentV1, context: super::PathContext<'
 pub(super) fn verified_fetch(segment: &CommandSegmentV1, context: super::PathContext<'_>) -> bool {
     let stripped = super::segment_proof::without_stderr_merge(segment);
     let segment = stripped.as_ref().unwrap_or(segment);
-    parse(segment, context).is_some_and(|(_, upstream)| upstream.is_none())
+    parse(segment, context).is_some_and(|(_, operation)| operation.upstream.is_none())
         && super::git_probe::proven(&memo_key(segment, context))
 }
 
@@ -341,11 +345,20 @@ fn parse<'a>(
     }
     let (command, rest) = remaining.split_first()?;
     match command.as_str() {
-        "fetch" => {
-            crate::command_compatibility::git_fetch_origin_shaped(rest).then_some((leading, None))
-        }
-        "pull" => Some((leading, Some(pull::shaped(rest)?))),
-        "merge" => Some((leading, Some(pull::fast_forward_merge(rest)?))),
+        "fetch" => crate::command_compatibility::git_fetch_every_remote(rest).map(|every_remote| {
+            (
+                leading,
+                Operation {
+                    upstream: None,
+                    every_remote,
+                },
+            )
+        }),
+        "pull" => Some((leading, Operation::upstream(pull::shaped(rest)?))),
+        "merge" => Some((
+            leading,
+            Operation::upstream(pull::fast_forward_merge(rest)?),
+        )),
         _ => None,
     }
 }
@@ -353,7 +366,7 @@ fn parse<'a>(
 fn prove(
     executable: &str,
     leading: &[String],
-    upstream: Option<pull::Pull>,
+    operation: Operation,
     target: Option<&str>,
     context: super::PathContext<'_>,
     deadline: Option<Instant>,
@@ -371,7 +384,7 @@ fn prove(
     let Some((effective, repository)) = probe.config() else {
         return false;
     };
-    if let Some(shape) = upstream.filter(|shape| !shape.fetches) {
+    if let Some(shape) = operation.upstream.filter(|shape| !shape.fetches) {
         // Git LFS smudges the pointers a fast-forward checks out from the
         // endpoint it derives from origin, with the credentials Git hands it,
         // so with LFS on the merge needs the fetch's transport proof too.
@@ -386,13 +399,16 @@ fn prove(
     // Initialized submodules are fetched on demand with their own config
     // and hooks, which this probe does not read.
     transport_proven(&effective, &repository, &probe)
+        && (!operation.every_remote || config::only_origin_remote(&effective))
         && !effective.keys().any(|key| key.starts_with("submodule."))
         && probe.hooks_inert_in_a_stable_tree([
             "pre-auto-gc",
             "reference-transaction",
             "post-fetch",
         ])
-        && upstream.is_none_or(|shape| pull::pull_inert(&effective, &repository, shape, &probe))
+        && operation
+            .upstream
+            .is_none_or(|shape| pull::pull_inert(&effective, &repository, shape, &probe))
 }
 
 /// Git LFS takes its endpoint from `lfs.url`, `lfs.pushurl` or
