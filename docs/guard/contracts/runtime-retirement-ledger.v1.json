@@ -8224,10 +8224,28 @@
    ],
    "native_replacements": [
     "rust/crates/guard-command/src/verified_npm.rs",
-    "rust/crates/guard-runtime/src/verified_npm_op.rs"
+    "rust/crates/guard-runtime/src/package_review_plan_op.rs"
    ],
    "base_commit": "e309ad05c1bad4069f8ab4aa0a056c73bad5052f",
-   "remaining_role": "Parses the install command shape and settles the review; the npm proof and the output-filter resolution run in the resident and are applied without being re-derived."
+   "remaining_role": "Settles the review from the package evaluator's verdict; the npm proof and the output-filter resolution run in the resident and are applied without being re-derived."
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/daemon/hook_native_package_review.py",
+   "source_sha256": "edd6b9c6ff38e77c8b2c7ef7314027838bbb5122ed702b74bc1a63fff1978d69",
+   "forbidden_symbols": [
+    "_FILTERED_COMMAND",
+    "_SIMPLE_COMMAND",
+    "_OUTPUT_FILTER",
+    "_filter_programs",
+    "npm_install_proof",
+    "parse_package_intent",
+    "build_package_request_artifact"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-runtime/src/package_review_plan_op.rs"
+   ],
+   "base_commit": "6bf9f88edec5328884d18b3e9afbe1ef8342aada",
+   "remaining_role": "Evaluates the request artifact the resident's package_review_plan op builds and applies the verdict: a block always, an allow only when the resident proved the npm that runs. The command lookup (Copilot toolArgs included), shape check, intent parse and artifact build run in the resident."
   }
  ],
  "retired_bodies": [
