@@ -127,6 +127,7 @@ for (const copy of [
   "GHSA-xxxx-yyyy-zzzz",
   "Assess now",
   "Pause",
+  "Prepare fix",
 ]) {
   assert.ok(markup.includes(copy), `row shows ${copy}`);
 }

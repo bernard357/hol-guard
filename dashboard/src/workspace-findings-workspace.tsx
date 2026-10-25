@@ -14,6 +14,7 @@ import {
   type WorkspaceWorktree,
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
+import { FixCell, FixHistory, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
 const REFRESH_MS = 15_000;
 
@@ -272,12 +273,24 @@ export function WorktreeRow(props: {
           ))}
         </ul>
       )}
-      {assessment && <FindingsTable findings={assessment.findings} />}
+      {assessment && <AssessmentFindings worktree={worktree} assessment={assessment} />}
     </li>
   );
 }
 
-function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+function AssessmentFindings(props: { worktree: WorkspaceWorktree; assessment: WorkspaceAssessment }) {
+  const { findings, runId } = props.assessment;
+  const fixes = useWorktreeFixes(props.worktree, runId);
+  return (
+    <div className="space-y-4">
+      <FindingsTable findings={findings} fixes={fixes} />
+      <FixReview fixes={fixes} findings={findings} />
+      <FixHistory fixes={fixes} findings={findings} />
+    </div>
+  );
+}
+
+function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixes: WorktreeFixes }) {
   if (findings.length === 0) {
     return <p className="text-sm text-slate-600">No dependency findings in the checked files.</p>;
   }
@@ -293,6 +306,7 @@ function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
             <th scope="col" className="px-3 py-2">Decision</th>
             <th scope="col" className="px-3 py-2">Severity</th>
             <th scope="col" className="px-3 py-2">Advisories</th>
+            <th scope="col" className="px-3 py-2">Fix</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -315,6 +329,7 @@ function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
                   <span className="text-slate-500">None listed</span>
                 )}
               </Cell>
+              <Cell label="Fix" wide><FixCell finding={finding} fixes={fixes} /></Cell>
             </tr>
           ))}
         </tbody>
