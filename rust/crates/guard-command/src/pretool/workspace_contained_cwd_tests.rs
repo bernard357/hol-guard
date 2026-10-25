@@ -57,6 +57,11 @@ fn a_command_that_mentions_cdpath_spends_no_descent() {
         "CDPATH=/ cd etc && cat ../etc/passwd",
         "export CDPATH=/ && cd etc && cat ../etc/passwd",
         "CDPATH=/ cd etc && ls ..",
+        // zsh ties the same search to a lowercase `cdpath` array, which an
+        // uppercase-only match read as an ordinary assignment.
+        "cdpath=/ cd etc && cat ../etc/passwd",
+        "export cdpath=/ && cd etc && ls ..",
+        "CdPath=/ cd etc && ls ..",
     ] {
         assert!(!shaped(command, &ws), "{command}");
     }

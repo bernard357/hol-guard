@@ -97,8 +97,13 @@ pub(super) fn depths(model: &CanonicalCommandV1, workspace: &Path) -> Vec<usize>
     if !model.normalized_text.contains("..")
         // A `CDPATH` the command sets sends a bare relative `cd` wherever that
         // search finds the name first, which is not the directory `locations`
-        // joins it onto, so no segment may spend a step.
-        || model.normalized_text.contains("CDPATH")
+        // joins it onto, so no segment may spend a step. zsh ties the same
+        // search to a lowercase `cdpath` array, and `export cdpath=...` in a
+        // zsh harness sets both, so the name is matched without case.
+        || model
+            .normalized_text
+            .to_ascii_lowercase()
+            .contains("cdpath")
         || !model.segments.iter().any(|segment| {
             segment
                 .executable
