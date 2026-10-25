@@ -371,6 +371,8 @@ pub mod shims;
 pub mod strict_json;
 #[path = "../../guard-command/src/supply_chain_bundle.rs"]
 pub mod supply_chain_bundle;
+#[path = "../../guard-command/src/supply_chain_bundle_cache_trust.rs"]
+pub mod supply_chain_bundle_cache_trust;
 #[path = "../../guard-command/src/supply_chain_package_identity.rs"]
 pub mod supply_chain_package_identity;
 #[path = "../../guard-command/src/supply_chain_risk.rs"]

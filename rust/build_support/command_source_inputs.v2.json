@@ -689,6 +689,7 @@
       "src/source_compiler_receipt.rs",
       "src/strict_json.rs",
       "src/supply_chain_bundle.rs",
+      "src/supply_chain_bundle_cache_trust.rs",
       "src/supply_chain_package_eval.rs",
       "src/supply_chain_package_eval/advisory_aliases.rs",
       "src/supply_chain_package_eval/archive_dependencies.rs",

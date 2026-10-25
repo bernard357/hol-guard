@@ -20,8 +20,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::runtime_identity_range::{Interval, SemVer, Upper};
-
 pub(crate) const COMMAND: &str = "runtime-identity-assess";
 pub(crate) const FEATURE: &str = "runtime-identity-assess-v1";
 const RESULT_SCHEMA: &str = "guard.runtime-identity-assessment.v1";
@@ -96,6 +94,8 @@ pub(crate) struct Request {
     advisories: Vec<AdvisoryInput>,
     #[serde(default)]
     scope_complete: bool,
+    #[serde(default)]
+    cached_bundle: Option<bundle::CachedBundleInput>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,6 +146,26 @@ struct AdvisoryInput {
     include_prerelease: bool,
     #[serde(default)]
     backport_build_ids: Vec<String>,
+    /// Empty applies to every platform.
+    #[serde(default)]
+    platforms: Vec<PlatformInput>,
+    /// A component bundled inside the runtime, whose own version the probe
+    /// does not observe.
+    #[serde(default)]
+    bundled_component: Option<String>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    known_exploited: bool,
+    #[serde(default)]
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlatformInput {
+    os: String,
+    arch: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,13 +200,25 @@ struct Artifact<'a> {
 }
 
 pub(crate) fn assess(request: &Request) -> Result<Value, String> {
-    validate_bounds(request)?;
+    let budget = bundle::Budget {
+        artifacts: request.artifacts.len(),
+        supplied: &request.advisories,
+    };
+    let (bundled, advisory_source) =
+        bundle::bundle_advisories(request.cached_bundle.as_ref(), &budget);
+    // An unanchored bundle can report a runtime affected but never clear it.
+    let clear_from = if advisory_source["anchored"] == true {
+        usize::MAX
+    } else {
+        request.advisories.len()
+    };
+    let supplied: Vec<&AdvisoryInput> = request.advisories.iter().chain(&bundled).collect();
+    validate_bounds(request, &supplied)?;
     let artifacts = artifacts_by_id(&request.artifacts)?;
     let locations = locations_by_id(&request.locations, &artifacts)?;
     validate_instances(&request.instances, &artifacts, &locations)?;
-    let advisories = request
-        .advisories
-        .iter()
+    let advisories = supplied
+        .into_iter()
         .map(|advisory| parse_intervals(advisory).map(|intervals| (advisory, intervals)))
         .collect::<Result<Vec<_>, _>>()?;
     let mut advisory_ids = BTreeSet::new();
@@ -202,9 +234,12 @@ pub(crate) fn assess(request: &Request) -> Result<Value, String> {
     for (id, artifact) in &artifacts {
         let mut rows = Vec::new();
         for (index, (advisory, intervals)) in advisories.iter().enumerate() {
-            let Some(found) = match_artifact(artifact, advisory, intervals) else {
+            let Some(mut found) = match_artifact(artifact, advisory, intervals) else {
                 continue;
             };
+            if index >= clear_from && matches!(found, Match::NotAffected(_)) {
+                found = Match::Unknown("advisory_source_unanchored");
+            }
             matches[index].insert(id, found);
             let (status, reason) = match found {
                 Match::Affected(reason) => ("affected", reason),
@@ -228,13 +263,7 @@ pub(crate) fn assess(request: &Request) -> Result<Value, String> {
         .iter()
         .zip(&matches)
         .map(|((advisory, _), by_artifact)| {
-            advisory_verdict(
-                request,
-                &artifacts,
-                &locations,
-                &advisory.advisory_id,
-                by_artifact,
-            )
+            advisory_verdict(request, &artifacts, &locations, advisory, by_artifact)
         })
         .collect::<Vec<_>>();
 
@@ -243,19 +272,21 @@ pub(crate) fn assess(request: &Request) -> Result<Value, String> {
         "scope_complete": request.scope_complete,
         "artifacts": artifact_rows,
         "advisories": advisory_rows,
+        "advisory_source": advisory_source,
     }))
 }
 
-fn validate_bounds(request: &Request) -> Result<(), String> {
+fn validate_bounds(request: &Request, advisories: &[&AdvisoryInput]) -> Result<(), String> {
     let over = request.artifacts.len() > MAX_ARTIFACTS
         || request.locations.len() > MAX_LOCATIONS
         || request.instances.len() > MAX_INSTANCES
-        || request.advisories.len() > MAX_ADVISORIES
-        || request.artifacts.len() * request.advisories.len() > MAX_ARTIFACT_ADVISORY_PAIRS
-        || request
-            .advisories
-            .iter()
-            .any(|a| a.ranges.len() > MAX_RANGES || a.backport_build_ids.len() > MAX_RANGES);
+        || advisories.len() > MAX_ADVISORIES
+        || request.artifacts.len() * advisories.len() > MAX_ARTIFACT_ADVISORY_PAIRS
+        || advisories.iter().any(|a| {
+            a.ranges.len() > MAX_RANGES
+                || a.backport_build_ids.len() > MAX_RANGES
+                || a.platforms.len() > MAX_RANGES
+        });
     if over {
         return Err("runtime_identity_request_too_large".to_owned());
     }
@@ -417,47 +448,13 @@ fn validate_instances(
     Ok(())
 }
 
-fn parse_intervals(advisory: &AdvisoryInput) -> Result<Vec<Interval>, String> {
-    let invalid = || "runtime_identity_advisory_invalid".to_owned();
-    let names_ok = text_ok(&advisory.advisory_id)
-        && text_ok(&advisory.family)
-        && advisory.vendor.as_deref().is_none_or(text_ok)
-        && advisory.backport_build_ids.iter().all(|id| text_ok(id));
-    if !names_ok {
-        return Err(invalid());
-    }
-    if advisory.version_scheme != "semver" {
-        return Ok(Vec::new());
-    }
-    advisory
-        .ranges
-        .iter()
-        .map(|range| {
-            let parse = |text: &Option<String>| match text {
-                None => Ok(None),
-                Some(raw) => SemVer::parse(raw).map(Some).ok_or_else(invalid),
-            };
-            let upper = match (parse(&range.fixed)?, parse(&range.last_affected)?) {
-                (Some(_), Some(_)) => return Err(invalid()),
-                (Some(fixed), None) => Upper::Fixed(fixed),
-                (None, Some(last)) => Upper::LastAffected(last),
-                (None, None) => Upper::Unbounded,
-            };
-            let interval = Interval {
-                introduced: parse(&range.introduced)?,
-                upper,
-            };
-            if !interval.is_ordered() {
-                return Err(invalid());
-            }
-            Ok(interval)
-        })
-        .collect()
-}
-
 #[path = "runtime_identity_verdict.rs"]
 mod verdict;
-use verdict::{advisory_verdict, match_artifact};
+use verdict::{advisory_verdict, match_artifact, parse_intervals};
+
+#[path = "runtime_identity_bundle.rs"]
+mod bundle;
+pub(crate) use bundle::FEATURE as BUNDLE_FEATURE;
 
 #[cfg(test)]
 #[path = "runtime_identity_tests.rs"]
