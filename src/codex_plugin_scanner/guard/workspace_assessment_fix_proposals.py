@@ -53,7 +53,9 @@ _MAX_FIELD_CHARS: Final = 128
 # (today the not-yet-existing secrets detector) is deliberately not listed: the
 # finding comes from the supply-chain detector, so another detector's gap cannot
 # hide it. Unknown or missing coverage is treated as incomplete.
-_BLOCKING_COVERAGE_REASONS: Final = frozenset({"finding_cap", "supply_chain_incomplete", "lockfile_warnings"})
+_BLOCKING_COVERAGE_REASONS: Final = frozenset(
+    {"finding_cap", "supply_chain_incomplete", "lockfile_warnings", "advisory_data_unavailable"}
+)
 _COLUMNS: Final = (
     "proposal_id",
     "codebase_key",

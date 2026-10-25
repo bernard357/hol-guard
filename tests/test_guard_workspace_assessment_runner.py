@@ -152,6 +152,39 @@ def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(
     assert isinstance(reasons, list) and "supply_chain_incomplete" in reasons
 
 
+UNMATCHED = {
+    "decision": "monitor",
+    "ecosystem": "npm",
+    "name": "lodash",
+    "resolvedVersion": "4.17.20",
+    "reasons": [{"code": "no_cached_match", "message": "m", "severity": "low", "source": "guard-local"}],
+}
+
+
+@pytest.mark.parametrize("extra", [[], ["unidentified_package"], ["lockfile_drift"]])
+def test_packages_unchecked_without_an_advisory_bundle_are_a_coverage_gap(extra: list[str]) -> None:
+    # Unconnected, nothing cached: the packages were never compared with any
+    # intelligence, so the run must not read as a clean, complete check, even
+    # when the evaluator also asked for review for another reason.
+    package = {
+        **UNMATCHED,
+        "decision": "ask" if extra else "monitor",
+        "reasons": [*UNMATCHED["reasons"], *({"code": code, "message": "m", "severity": "medium"} for code in extra)],
+    }
+    audit = {**AUDIT, "evaluation": {"bundle_version": None, "cache_status": "miss", "packages": [package]}}
+    coverage = runner.coverage_summary(SCANNED, audit, findings_truncated=False)
+    assert coverage["status"] == "partial"
+    assert coverage["detectors"]["supply_chain"] == "incomplete"
+    assert "advisory_data_unavailable" in coverage["reasons"]
+
+
+def test_no_match_in_a_cached_bundle_is_a_clean_result() -> None:
+    audit = {**AUDIT, "evaluation": {"bundle_version": "2026.10.25", "cache_status": "hit", "packages": [UNMATCHED]}}
+    coverage = runner.coverage_summary(SCANNED, audit, findings_truncated=False)
+    assert coverage["status"] == "complete"
+    assert coverage["reasons"] == []
+
+
 def test_change_during_detectors_supersedes_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     snapshots(monkeypatch, runner, SNAPSHOT, replace(SNAPSHOT, snapshot_digest=digest("content-2")))
