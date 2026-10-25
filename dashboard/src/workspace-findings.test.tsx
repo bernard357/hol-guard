@@ -226,6 +226,28 @@ const cleanMarkup = renderToStaticMarkup(
 );
 assert.ok(cleanMarkup.includes("No dependency or secret findings in the checked files."), "a clean run says secrets were checked");
 assert.ok(!cleanMarkup.includes("not part of this check yet"));
+const noDependencyFiles = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-5",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "no_inputs", secrets: "complete" } },
+        findings: [],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(noDependencyFiles.dependencyFilesFound, false);
+assert.equal(secretsRan.dependencyFilesFound, true);
+const noDependencyMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: noDependencyFiles, busyKey: null, onAction: () => {} }),
+);
+assert.ok(noDependencyMarkup.includes("No dependency files were found"), "a workspace with nothing to audit says so");
+assert.ok(!noDependencyMarkup.includes("No dependency or secret findings"), "an empty audit is never described as clean dependencies");
 const incompleteMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
     worktree,

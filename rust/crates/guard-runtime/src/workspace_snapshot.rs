@@ -219,7 +219,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     );
     let mut walk = Walk {
         secrets: secret_key.map(|key| SecretScan::new(key, &codebase_key, &worktree_key)),
-        skills: request.skills.then(|| SkillScan::new(&worktree_key)),
+        skills: request
+            .skills
+            .then(|| SkillScan::new(&worktree_key, &[&requested, &root])),
         ..Walk::default()
     };
     walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
@@ -258,6 +260,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     }
     if walk.unsupported_dependency_input {
         partial_reasons.push("unsupported_dependency_input");
+    }
+    if walk.undiscovered_dependency_input {
+        partial_reasons.push("undiscovered_dependency_input");
     }
     let incomplete: Vec<&str> = partial_reasons
         .iter()

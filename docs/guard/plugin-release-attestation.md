@@ -45,6 +45,8 @@ jobs:
 
 The job needs `id-token: write` for the OIDC token HOL verifies and `attestations: write` for the GitHub attestation. `security-events: write` is needed only with `upload_sarif: true`. The workflow sends the attested evidence to HOL by default; set `register_release: false` to attest without registering. HOL records every verified registration and shows it on the releases page of the listing whose repository matches; `release_url` is empty when no public listing matches.
 
+When the matching listing has no HOL Blue or Gold membership, the job summary of the repository's first recorded release in 28 days carries one line about HOL Blue. HOL only decides whether the line appears and supplies a link to its own promote page; Guard writes the text and drops any link that is not on `https://hol.org/guard/plugins/promote`. Set `offer_line: false` to turn the line off. It never changes the evidence, the score or the listing.
+
 ## Evidence contract
 
 The evidence records the repository and exact commit SHA, ref, workflow run ID, `hol-guard` version, scan profile, score and grade, highest finding severity, finding count, the Kit check result with its error and warning counts and diagnostic codes, the runtimes the Kit can package for, counts of skills, commands and agents, whether hooks ship, and one entry per MCP server:

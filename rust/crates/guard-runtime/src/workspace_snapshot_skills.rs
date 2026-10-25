@@ -14,10 +14,14 @@
 //! full leaves it incomplete: one larger than the hook-time skill bound, one
 //! that is not UTF-8 text, one the snapshot itself left out, or a symlink or
 //! special file where a skill could be (the snapshot never follows links).
+//! Skill roots nest at any depth, so a link to a directory the walk never
+//! reaches (outside the worktree, or under a skipped directory) could hide
+//! one too; a link whose target the walk reads elsewhere is harmless.
 
 use guard_command::skill_content_risk::detect_skill_content_risk;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::path::{Component, Path, PathBuf};
 
 use crate::runner_authority_detector::SKILL_CONTENT_MAX_BYTES;
 
@@ -55,6 +59,8 @@ struct Finding {
 #[derive(Default)]
 pub(super) struct SkillScan {
     worktree_key: String,
+    /// The worktree root as requested and as resolved, for link targets.
+    roots: Vec<PathBuf>,
     findings: Vec<Finding>,
     files_scanned: usize,
     bytes_scanned: u64,
@@ -67,9 +73,10 @@ pub(super) struct SkillScan {
 }
 
 impl SkillScan {
-    pub(super) fn new(worktree_key: &str) -> Self {
+    pub(super) fn new(worktree_key: &str, roots: &[&Path]) -> Self {
         Self {
             worktree_key: worktree_key.to_owned(),
+            roots: roots.iter().map(|root| root.to_path_buf()).collect(),
             ..Self::default()
         }
     }
@@ -92,13 +99,57 @@ impl SkillScan {
         self.unread += 1;
     }
 
-    /// The snapshot did not follow a symlink or special file at `relative`.
-    /// When a skill could sit behind it, the scan cannot say it saw every
-    /// skill.
-    pub(super) fn left_unfollowed(&mut self, relative: &str) {
+    /// The snapshot did not follow a special file at `relative`. When a
+    /// skill could sit there, the scan cannot say it saw every skill.
+    pub(super) fn left_special(&mut self, relative: &str) {
         if may_hold_skills(relative) {
             self.linked += 1;
         }
+    }
+
+    /// The snapshot did not follow the symlink at `relative` to `target`.
+    /// Besides a link where a skill could sit, a link the walk cannot see
+    /// through could hide a nested skill root.
+    pub(super) fn left_link(&mut self, relative: &str, target: Option<&Path>) {
+        if may_hold_skills(relative) || !target.is_some_and(|target| self.walked(relative, target))
+        {
+            self.linked += 1;
+        }
+    }
+
+    /// Whether the walk reads `target` (linked from `relative`) at its own
+    /// path: it resolves inside the worktree and outside skipped directories.
+    /// A link there to yet another link is judged where that link sits.
+    fn walked(&self, relative: &str, target: &Path) -> bool {
+        let inside = if target.is_absolute() {
+            self.roots
+                .iter()
+                .find_map(|root| target.strip_prefix(root).ok())
+                .map(Path::to_path_buf)
+        } else {
+            Path::new(relative)
+                .parent()
+                .map(|parent| parent.join(target))
+        };
+        let Some(inside) = inside else {
+            return false;
+        };
+        let mut depth = 0usize;
+        for component in inside.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir if depth > 0 => depth -= 1,
+                Component::Normal(name)
+                    if !name
+                        .to_str()
+                        .is_some_and(|name| super::SKIP_DIRS.contains(&name)) =>
+                {
+                    depth += 1
+                }
+                _ => return false,
+            }
+        }
+        true
     }
 
     /// Run the skill rules over the exact bytes that were hashed for `relative`.

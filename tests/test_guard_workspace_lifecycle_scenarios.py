@@ -133,3 +133,22 @@ def test_only_unsupported_lockfiles_are_never_reported_clean(
     assert coverage["status"] == "partial"
     assert coverage["reasons"] == ["snapshot_unsupported_dependency_input"]
     assert coverage["detectors"]["supply_chain"] == "no_inputs"
+
+
+def test_dependency_files_below_audit_discovery_are_never_reported_clean(
+    tmp_path: Path, native_binary: None, offline: None
+) -> None:
+    clock = Clock()
+    store = _store(tmp_path)
+    root = tmp_path / "workspace"
+    package = root / "services" / "api" / "web" / "client"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text('{"dependencies": {"lodash": "4.17.20"}}\n', encoding="utf-8")
+    keys = _admit(store, root, clock)
+    assert _run_all(store, clock) == 1
+    run = _latest(store, keys)
+    assert run["state"] == "partial"
+    assert run["findings"] == []
+    coverage = run["coverage"]
+    assert coverage["reasons"] == ["snapshot_undiscovered_dependency_input"]
+    assert coverage["detectors"]["supply_chain"] == "no_inputs"

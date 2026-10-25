@@ -56,9 +56,12 @@ _MAX_FIELD_CHARS: Final = 128
 _BLOCKING_COVERAGE_REASONS: Final = frozenset(
     {"finding_cap", "supply_chain_incomplete", "lockfile_warnings", "advisory_data_unavailable"}
 )
-# The one snapshot reason that leaves nothing unread: a lockfile from another
-# ecosystem was read and hashed, so it cannot hide a finding in a supported one.
-_READ_SNAPSHOT_REASONS: Final = frozenset({"snapshot_unsupported_dependency_input"})
+# Snapshot reasons that leave nothing unread: the dependency file was read and
+# hashed but never audited (another ecosystem, or below audit discovery), so it
+# cannot hide a finding in a file the audit checked.
+_READ_SNAPSHOT_REASONS: Final = frozenset(
+    {"snapshot_unsupported_dependency_input", "snapshot_undiscovered_dependency_input"}
+)
 _COLUMNS: Final = (
     "proposal_id",
     "codebase_key",

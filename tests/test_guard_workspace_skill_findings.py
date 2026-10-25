@@ -149,6 +149,8 @@ def test_a_skill_scan_at_its_cap_marks_findings_truncated() -> None:
     [
         {"schema": "other"},
         {**SKILLS_COMPLETE, "status": "weird"},
+        {**SKILLS_COMPLETE, "status": []},
+        {**SKILLS_COMPLETE, "status": {}},
         {},
         {key: value for key, value in SKILLS_COMPLETE.items() if key != "findings"},
         {**SKILLS_COMPLETE, "findings": None},

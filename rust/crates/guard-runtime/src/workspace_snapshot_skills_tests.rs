@@ -311,6 +311,8 @@ fn a_link_where_no_skill_could_be_keeps_the_scan_complete() {
     write(root.path(), ".claude/skills/notes/SKILL.md", BENIGN_SKILL);
     write(root.path(), "docs/guide.md", "# Guide\n");
     std::os::unix::fs::symlink(root.path().join("docs"), root.path().join("handbook")).unwrap();
+    fs::create_dir_all(root.path().join("packages")).unwrap();
+    std::os::unix::fs::symlink("../docs", root.path().join("packages/guide")).unwrap();
     std::os::unix::fs::symlink(
         root.path().join("docs/guide.md"),
         root.path().join("packages-skills.md"),
@@ -322,4 +324,34 @@ fn a_link_where_no_skill_could_be_keeps_the_scan_complete() {
     assert_eq!(skills["status"], "complete");
     assert_eq!(skills["skipped"]["linked"], 0);
     assert_eq!(skills["files_scanned"], 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_the_walk_cannot_see_through_could_hide_a_nested_skill_root() {
+    // Skill roots nest at any depth, so a linked directory outside the
+    // worktree, or under a directory the walk skips, could hold one.
+    let outside = tempfile::tempdir().unwrap();
+    write(
+        outside.path(),
+        ".claude/skills/setup/SKILL.md",
+        FETCH_EXEC_SKILL,
+    );
+    for (link, target) in [
+        ("packages/app", outside.path().to_path_buf()),
+        ("packages/app", std::path::PathBuf::from("../../elsewhere")),
+        (
+            "packages/app",
+            std::path::PathBuf::from("../node_modules/app"),
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("packages")).unwrap();
+        std::os::unix::fs::symlink(&target, root.path().join(link)).unwrap();
+
+        let skills = scan(root.path())["skills"].clone();
+
+        assert_eq!(skills["status"], "incomplete", "{}", target.display());
+        assert_eq!(skills["skipped"]["linked"], 1, "{}", target.display());
+    }
 }
