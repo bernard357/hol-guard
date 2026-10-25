@@ -27,7 +27,7 @@ mod report;
 mod updates;
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -35,8 +35,9 @@ use serde_json::{json, Value};
 pub use installed::{discover, InstalledPlugin, RuntimeHomes};
 pub use report::{build_report, normalize_repository_url, IndexEntry, ReportEntry};
 pub use updates::{
-    check_updates, compare_versions, Dismissal, IndexedRelease, ReleaseIndexEntry, UpdateCheck,
-    UpdatePrompt,
+    check_updates, compare_versions, dismiss, parse_release_index, read_dismissals,
+    write_dismissals, Dismissal, IndexedRelease, ReleaseIndexEntry, UpdateCheck, UpdatePrompt,
+    DISMISSALS_FILE,
 };
 
 pub const COMMAND: &str = "plugin-telemetry";
@@ -75,9 +76,21 @@ enum Request {
     Updates {
         homes: Homes,
         index: Vec<IndexEntry>,
-        releases: Vec<ReleaseIndexEntry>,
-        #[serde(default)]
-        dismissed: Vec<Dismissal>,
+        releases: Vec<Value>,
+        #[serde(rename = "guardHome")]
+        guard_home: String,
+    },
+    #[serde(rename = "updates-dismiss")]
+    UpdatesDismiss {
+        #[serde(rename = "guardHome")]
+        guard_home: String,
+        slug: String,
+        version: String,
+    },
+    #[serde(rename = "updates-reset")]
+    UpdatesReset {
+        #[serde(rename = "guardHome")]
+        guard_home: String,
     },
 }
 
@@ -140,11 +153,28 @@ fn handle(request: Request) -> Result<Value, String> {
             homes,
             index,
             releases,
-            dismissed,
+            guard_home,
         } => {
             let installed = discover(&runtime_homes(homes));
+            let releases = parse_release_index(&releases);
+            let dismissed = read_dismissals(Path::new(&guard_home));
             let check = check_updates(&index, &releases, &installed, &dismissed);
             serde_json::to_value(check).map_err(|_| "plugin_updates_failed".to_owned())
+        }
+        Request::UpdatesDismiss {
+            guard_home,
+            slug,
+            version,
+        } => {
+            if slug.is_empty() || slug.len() > 256 || !valid_version(&version, 64) {
+                return Err("plugin_updates_dismissal_invalid".to_owned());
+            }
+            dismiss(Path::new(&guard_home), &slug, &version)?;
+            Ok(json!({ "slug": slug, "version": version, "dismissed": true }))
+        }
+        Request::UpdatesReset { guard_home } => {
+            write_dismissals(Path::new(&guard_home), &[])?;
+            Ok(json!({ "dismissed": 0 }))
         }
     }
 }

@@ -127,37 +127,76 @@ def test_dismissal_hides_a_prompt_until_a_newer_release(
     output = _run(["plugin", "updates", "--json"])[1]
     assert [update["latestVersion"] for update in json.loads(output)["updates"]] == ["1.4.0"]
 
-    assert _run(["plugin", "updates", "reset"])[0] == 0
-    assert plugin_updates.read_dismissals(guard_home) == []
+    exit_code, output, _error = _run(["plugin", "updates", "--json", "reset"])
+    assert (exit_code, json.loads(output)) == (0, {"dismissed": 0})
+    assert json.loads((guard_home / "plugin-updates.json").read_text(encoding="utf-8")) == {"dismissed": []}
 
 
-def test_release_index_keeps_only_the_expected_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = {
-        "schema": 1,
-        "entries": [
-            {
-                "slug": "acme/notes-kit",
-                "releasesUrl": RELEASES_URL,
-                "releases": [{"version": "1.0.0", "maxSeverity": "low", "fixesSecurity": False, "extra": "x"}, 7],
-            },
-            {"slug": 3},
-        ],
-    }
+def test_an_unwritable_guard_home_fails_the_dismissal_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    monkeypatch.setattr(plugin_updates, "resolve_guard_home", lambda override=None: blocker / "home")
+    exit_code, _output, error = _run(["plugin", "updates", "dismiss", "acme/notes-kit", "--version", "1.3.0"])
+    assert exit_code == 2
+    assert "plugin_updates_dismissals_unwritable" in error
+
+
+def test_an_older_cached_copy_is_ignored_when_the_latest_is_installed(
+    guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = user_home / ".claude" / "plugins" / "cache" / "acme" / "notes-kit" / "1.3.0" / ".claude-plugin"
+    manifest.mkdir(parents=True)
+    (manifest / "plugin.json").write_text(
+        json.dumps({"name": "notes-kit", "version": "1.3.0", "repository": "https://github.com/acme/notes-kit"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        plugin_updates, "fetch_release_index", lambda: _releases(("1.3.0", "none", False), ("1.2.0", "none", False))
+    )
+    exit_code, output, _error = _run(["plugin", "updates", "--json"])
+    assert exit_code == 0
+    assert json.loads(output)["updates"] == []
+
+
+def test_a_malformed_release_does_not_hide_other_updates(
+    guard_home: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    releases: list[dict[str, object]] = [
+        {
+            "slug": "acme/notes-kit",
+            "releasesUrl": RELEASES_URL,
+            "releases": [
+                {"version": "1.4.0", "maxSeverity": 7, "fixesSecurity": None},
+                {"version": 2},
+                {"version": "1.3.0", "maxSeverity": "none", "fixesSecurity": False},
+            ],
+        }
+    ]
+    monkeypatch.setattr(plugin_updates, "fetch_release_index", lambda: releases)
+    exit_code, output, error = _run(["plugin", "updates", "--json"])
+    assert (exit_code, error) == (0, "")
+    assert [update["latestVersion"] for update in json.loads(output)["updates"]] == ["1.4.0"]
+
+
+def test_release_index_returns_the_listed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries: list[object] = [
+        {
+            "slug": "acme/notes-kit",
+            "releasesUrl": RELEASES_URL,
+            "releases": [{"version": "1.0.0", "maxSeverity": "low", "fixesSecurity": False, "extra": "x"}, 7],
+        },
+        {"slug": 3},
+        "not an object",
+    ]
 
     requested: list[str] = []
 
     def fake_urlopen(request: object, timeout: float) -> io.BytesIO:
         requested.append(getattr(request, "full_url", ""))
-        return io.BytesIO(json.dumps(payload).encode("utf-8"))
+        return io.BytesIO(json.dumps({"schema": 1, "entries": entries}).encode("utf-8"))
 
     monkeypatch.setattr(plugin_updates, "managed_urlopen", fake_urlopen)
-    assert plugin_updates.fetch_release_index() == [
-        {
-            "slug": "acme/notes-kit",
-            "releasesUrl": RELEASES_URL,
-            "releases": [{"version": "1.0.0", "maxSeverity": "low", "fixesSecurity": False}],
-        }
-    ]
+    assert plugin_updates.fetch_release_index() == entries[:2]
     assert requested == [plugin_updates.RELEASE_INDEX_URL]
 
 
