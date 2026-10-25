@@ -15,30 +15,6 @@ from codex_plugin_scanner.guard.cli.commands_support_command_activity import (
     record_post_hook_command_activity_best_effort,
 )
 from codex_plugin_scanner.guard.store import GuardStore
-from tests.native_command_test_support import RealNativeReviewFixture, real_native_review_fixture
-
-
-@pytest.fixture(autouse=True)
-def _real_native_command_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
-    from codex_plugin_scanner.guard.cli import commands_support_command_activity as activity_support
-    from codex_plugin_scanner.guard.runtime import native_command_evaluation
-
-    fixtures: dict[str, RealNativeReviewFixture] = {}
-
-    def review(command: str, **_kwargs: object) -> dict[str, object]:
-        fixture = fixtures.get(command)
-        if fixture is None:
-            fixture = real_native_review_fixture(command)
-            fixtures[command] = fixture
-        return fixture.payload
-
-    seed = real_native_review_fixture("printf native-fixture")
-    monkeypatch.setattr(native_command_evaluation, "review_pre_tool_native", review)
-    monkeypatch.setattr(
-        activity_support.ExtensionControlRuntimeSnapshot,
-        "from_authority_view",
-        staticmethod(lambda _view: seed.snapshot),
-    )
 
 
 def _command_payload(*, request_id: str | None = "toolcall_abcdef1234567890") -> dict[str, object]:

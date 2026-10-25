@@ -638,7 +638,6 @@
           "src/codex_plugin_scanner/guard/cli/commands_lifecycle_gate.py",
           "src/codex_plugin_scanner/guard/cli/commands_router.py",
           "src/codex_plugin_scanner/guard/cli/commands_support.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_apply_patch_policy.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_claude_approval.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_git_config.py",
