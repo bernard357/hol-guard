@@ -55,8 +55,9 @@ PREPARING = "native discovery preparing"
 # toward a failing preparation.
 _RETRYABLE_FAILURES = frozenset({"native discovery transport unavailable", "native discovery runtime changed"})
 _failures = 0
-# The publication last noted as built for another engine, so the note is made
-# once per publication rather than on every refresh.
+# The publication last noted as built for another engine. The note is made
+# when the current publication changes, not on every refresh; the pointer only
+# moves forward, so a move back to an older publication is noted as a change.
 _noted_engine_mismatch: str | None = None
 
 
@@ -274,7 +275,7 @@ def _engine_mismatch_with_nothing_kept(refresh_error, restore_error):
 
 
 def _note_engine_mismatch(mismatch) -> None:
-    """Say once per publication that it was built for another engine."""
+    """Say once, when the current publication changes, that it was built for another engine."""
 
     global _noted_engine_mismatch
     with _ready_lock:
