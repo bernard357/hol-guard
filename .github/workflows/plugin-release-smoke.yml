@@ -68,7 +68,11 @@ jobs:
           if s.identity is not None:
               m = s.identity.path.with_name("runtime-manifest.json")
               for target in (m, m.parent, m.parent.parent):
-                  st = os.lstat(target)
+                  try:
+                      st = os.lstat(target)
+                  except OSError as exc:
+                      print("lstat-failed", type(exc).__name__, target)
+                      continue
                   print(oct(stat.S_IMODE(st.st_mode)), st.st_uid, st.st_gid, target)
           print("uid", os.getuid(), "groups", os.getgroups())
           PY
