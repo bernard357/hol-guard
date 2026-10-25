@@ -39,7 +39,34 @@ pub(in crate::pretool) fn could_apply(key: &str, git_dir: &Path, home: Option<&s
     // Git compares. `**` is a wildcard too, so a pattern that could match
     // anywhere keeps its head empty and stays under review.
     let literal = &resolved[..resolved.find(['*', '?', '[']).unwrap_or(resolved.len())];
-    fold(git_dir.to_string_lossy().as_ref()).starts_with(&fold(literal))
+    let git_dir = fold(git_dir.to_string_lossy().as_ref());
+    git_dir.starts_with(&fold(literal))
+        || resolved_head(literal).is_some_and(|head| git_dir.starts_with(&fold(&head)))
+}
+
+/// `literal` with every link on the way resolved, or `None` when nothing of
+/// it exists. Git compares the pattern with the repository's real path first
+/// and with its absolute spelling second, and never resolves the pattern
+/// itself, so a head spelled through a link - `/tmp` on macOS, a home
+/// directory kept on another volume - still reaches a Git directory whose
+/// canonical path looks nothing like it. The caller holds the canonical path,
+/// so resolving the head brings the two spellings back together. The head may
+/// name a directory that does not exist yet, so the longest existing ancestor
+/// is resolved and the rest kept as spelled.
+fn resolved_head(literal: &str) -> Option<String> {
+    let mut existing = Path::new(literal);
+    let mut missing = Vec::new();
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(existing) {
+            let mut head = crate::runtime_read_paths::strip_verbatim_prefix(resolved);
+            for component in missing.iter().rev() {
+                head.push(component);
+            }
+            return Some(head.to_string_lossy().into_owned());
+        }
+        missing.push(existing.file_name()?.to_owned());
+        existing = existing.parent()?;
+    }
 }
 
 /// The condition of `<condition>.path`, the rest of an `includeIf` key, or
@@ -156,6 +183,30 @@ mod tests {
             Path::new("/Users/dev/Code/work/app/.git"),
             HOME,
         ));
+    }
+
+    /// macOS reaches the shared temporary directory through a link, so the
+    /// Git directory the caller holds is canonical while the pattern the user
+    /// wrote is not. Git matches the spelling, and so must this.
+    #[cfg(unix)]
+    #[test]
+    fn a_pattern_spelled_through_a_link_still_applies() {
+        let root = std::env::temp_dir().join(format!(
+            "guard-include-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).expect("real");
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("link");
+        let canonical = std::fs::canonicalize(&real).expect("canonical");
+        let key = format!("includeif.gitdir:{}/.path", link.display());
+        assert!(could_apply(&key, &canonical.join("app/.git"), HOME));
+        let distant = std::fs::canonicalize(std::env::temp_dir()).expect("temp");
+        assert!(!could_apply(&key, &distant.join("elsewhere/.git"), HOME));
+        std::fs::remove_dir_all(&root).expect("clean");
     }
 
     #[test]
