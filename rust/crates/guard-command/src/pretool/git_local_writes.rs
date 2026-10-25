@@ -22,6 +22,13 @@
 //! forced push. `git add -f` stays reviewed: it is how an ignored secret file gets
 //! staged. `git branch -M` stays reviewed: it overwrites an existing branch.
 //!
+//! The chain may open with `git fetch origin <branch>`, which `git_remote_ops`
+//! proves on its own terms: it reaches only a GitHub origin through trusted
+//! credential helpers and writes refs and objects, leaving the work tree for
+//! the writes that follow. A warm-cache refresh spells the whole shape out —
+//! `git fetch origin main && git stash push -m msg -- <paths> &&
+//! git merge --ff-only origin/main && git stash pop && git status -sb`.
+//!
 //! The same chain may end by publishing that work: one `git push origin
 //! <branch>` proven by the runtime push verdict, for the branch the chain
 //! creates or the one checked out, and a `gh pr create` the user's GitHub
@@ -79,6 +86,11 @@ const RULES: &[&str] = &[
 
 /// The rule a proven `git push origin <branch>` step may raise.
 const PUSH_RULE: &str = "command.git.push";
+
+/// The rule a proven `git fetch origin <branch>` step may raise. The packaged
+/// catalog ships it disabled, so it records the match without asking for a
+/// review of its own.
+const FETCH_RULE: &str = "command.git.fetch";
 const PROPOSE_PERMISSION: &str = "command.github.permission.propose-remote";
 const READ_PERMISSION: &str = "command.github.permission.read-remote";
 
@@ -185,18 +197,32 @@ fn proven(
         return None;
     }
     // A `gh pr create`, or a GitHub read such as `gh pr list`, the user's
-    // GitHub permissions allow on its own. Nothing else may carry a permission
-    // observation, and a read still needs the read proof below.
+    // GitHub permissions allow on its own. A ruleless permission is the other
+    // form admitted: a Git plumbing read (`git rev-parse`, `git merge-base`)
+    // records one so a disabled extension or permission can still block it,
+    // and it declares no floor of its own. Either way the segment still needs
+    // the read proof below.
     let granted = controls
         .map(|controls| controls.github_granted_segments(&extensions.permission_observations))
         .unwrap_or_default();
     let allowed_alone = |observation: &NativeCommandPermissionObservationV1| {
-        let mut segments = observation.matcher_evidence.iter();
-        matches!(
+        if matches!(
             observation.permission_id.as_str(),
             PROPOSE_PERMISSION | READ_PERMISSION
-        ) && !observation.matcher_evidence.is_empty()
-            && segments.all(|evidence| granted.contains(&evidence.segment_index))
+        ) {
+            return !observation.matcher_evidence.is_empty()
+                && observation
+                    .matcher_evidence
+                    .iter()
+                    .all(|evidence| granted.contains(&evidence.segment_index));
+        }
+        observation.uncertainty_reasons.is_empty()
+            && controls.is_some_and(|controls| {
+                controls.permission_settles_at_allow(
+                    &observation.extension_id,
+                    &observation.permission_id,
+                )
+            })
     };
     if !extensions.permission_observations.iter().all(allowed_alone) {
         return None;
@@ -227,6 +253,7 @@ fn proven(
     let mut stashed = Vec::new();
     let mut starts = Vec::new();
     let mut safe = Vec::new();
+    let mut fetched = Vec::new();
     let mut created: Vec<(usize, &str)> = Vec::new();
     let mut moved = false;
     let mut push: Option<usize> = None;
@@ -282,6 +309,14 @@ fn proven(
             context
         };
         if !(read(index, step) || route.unlinks(model, index, shell)) {
+            // A proven `origin` fetch stands beside the writes: it reaches
+            // only a GitHub origin through trusted helpers, starts no program
+            // of its own, and writes refs and objects alone. It leaves the
+            // work tree as the writes below found it.
+            if super::git_remote_ops::proven_fetch(segment, step, deadline, execution_environment) {
+                fetched.push(index);
+                continue;
+            }
             return None;
         }
         safe.push(index);
@@ -325,6 +360,8 @@ fn proven(
                 && indexes.peek().is_some()
                 && if rule == PUSH_RULE {
                     indexes.all(|index| pushed(&index))
+                } else if rule == FETCH_RULE {
+                    indexes.all(|index| fetched.contains(&index))
                 } else {
                     RULES.contains(&rule) && indexes.all(|index| written(&index))
                 }

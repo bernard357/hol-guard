@@ -9590,6 +9590,40 @@
       "expect": "allow"
     },
     {
+      "id": "neg-git-fetch-other-remote-then-stash-pathspec",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch upstream && git stash push -m \"warm-cache\" -- src/index.ts && git status -sb"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-fetch-stash-pathspec-hooked",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git stash push -m \"warm-cache\" -- src/index.ts && git stash pop && git status -sb"
+      },
+      "cwd": "org_hooked",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-git-fetch-merge-ff-only-then-status-log",
       "fix_area": "git",
       "harnesses": [
