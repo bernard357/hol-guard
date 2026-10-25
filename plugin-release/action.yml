@@ -158,7 +158,7 @@ runs:
         python3 -P -m pip install --no-deps "$WHEEL_PATH"
         # The hosted tool cache leaves installed files group- and world-writable,
         # and Guard refuses a native runtime manifest anyone else can rewrite.
-        GUARD_PACKAGE_DIR="$(python3 -P -c 'import codex_plugin_scanner, pathlib; print(pathlib.Path(codex_plugin_scanner.__file__).parent)')"
+        GUARD_PACKAGE_DIR="$(python3 -P -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("codex_plugin_scanner").origin).parent)')"
         chmod -R go-w "$GUARD_PACKAGE_DIR"
         echo "HOL_GUARD_VERSION=${GUARD_VERSION}" >> "$GITHUB_ENV"
 
