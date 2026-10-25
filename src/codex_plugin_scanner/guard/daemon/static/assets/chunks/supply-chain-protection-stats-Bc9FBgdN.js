@@ -1,7 +1,4 @@
-import { a as resolveFeedStaleness } from "./feed-health-workspace-353JT_AI.js";
-import { r as resolveHomeProtectionStatus } from "./home-protection-module-DYHkHSPd.js";
-import { b as buildSupplyChainStats, r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-CJkxdP0r.js";
-import { d2 as guardActionPresentation, ec as isSupplyChainScannerEvidence, ed as isBlockedGuardAction } from "../guard-dashboard.js";
+import { eg as isBlockedGuardAction, eh as isSupplyChainScannerEvidence, d2 as guardActionPresentation } from "../guard-dashboard.js";
 function readOperation(value) {
   if (!isSupplyChainScannerEvidence(value)) {
     return null;
@@ -176,85 +173,71 @@ function supplyChainEvidenceHref(receiptId, harness) {
   params.set("search", receiptId);
   return `/evidence?${params.toString()}`;
 }
-function resolveSupplyChainIssues(snapshot) {
-  const issues = [];
-  const protection = snapshot.supply_chain?.package_manager_protection;
-  const stats = buildSupplyChainStats(snapshot);
-  const protectionStatus = resolveHomeProtectionStatus(snapshot);
-  const unprotectedManagers = resolveManagerCoverageManagers(protection).filter(
-    (manager) => resolveManagerCoverageStatus(protection, manager) === "unprotected"
-  );
-  const cloudDegraded = resolveSupplyChainCloudDegradedState(snapshot);
-  if (cloudDegraded.active) {
-    issues.push({
-      id: "cloud_connect",
-      title: cloudDegraded.title,
-      detail: cloudDegraded.detail.trim().length > 0 ? cloudDegraded.detail : "Connect Guard Cloud for live package warnings, synced policy, and cross-device evidence.",
-      tone: "attention",
-      actionLabel: "Connect Guard Cloud",
-      action: { kind: "connect" }
-    });
+function resolveManagerCoverageManagers(protection) {
+  if (protection === void 0) {
+    return [];
   }
-  if (protection?.path_status === "missing_from_path") {
-    issues.push({
-      id: "path_missing",
-      title: "Package installs are not being checked yet",
-      detail: "Guard has not activated package protection yet. Turn on protection for your package tools, then finish activation here.",
-      tone: "attention",
-      actionLabel: "Protect package tools",
-      action: { kind: "firewall_unprotected" }
-    });
-  } else if (stats.repairRequiredManagers > 0) {
-    const coverageManagers = new Set(resolveManagerCoverageManagers(protection));
-    const managers = protection !== void 0 ? protection.installed_managers.filter(
-      (manager) => coverageManagers.has(manager) && !protection.protected_managers.includes(manager)
-    ) : [];
-    const managerLabel = managers.length > 0 ? managers.join(", ") : "installed tools";
-    issues.push({
-      id: "path_repair",
-      title: "Fix your shell path before installs can be blocked",
-      detail: `Guard set up protection for ${managerLabel}, but your shell path still needs a quick repair.`,
-      tone: "attention",
-      actionLabel: "Repair PATH in firewall",
-      action: { kind: "firewall_repair" }
-    });
+  return protection.detected_managers ?? [];
+}
+function resolveManagerCoverageStatus(protection, manager) {
+  if (protection === void 0) {
+    return "unprotected";
   }
-  if (protectionStatus === "partial" && stats.protectedManagers > 0 && unprotectedManagers.length > 0) {
-    issues.push({
-      id: "partial_protection",
-      title: "Some package tools are still open",
-      detail: `${stats.protectedManagers} protected, ${unprotectedManagers.length} still open: ${unprotectedManagers.join(", ")}.`,
-      tone: "attention",
-      actionLabel: "Review open tools",
-      action: { kind: "firewall_unprotected" }
-    });
-  } else if (protectionStatus === "unprotected" && unprotectedManagers.length > 0) {
-    issues.push({
-      id: "unprotected_tools",
-      title: "Package installs are not protected yet",
-      detail: `Turn on protection for ${unprotectedManagers.join(", ")} to block risky installs before they run.`,
-      tone: "attention",
-      actionLabel: "Protect package tools",
-      action: { kind: "firewall_unprotected" }
-    });
+  if (protection.protected_managers.includes(manager)) {
+    return "protected";
   }
-  if (snapshot.cloud_state !== "local_only") {
-    const feedStaleness = resolveFeedStaleness(snapshot);
-    if (feedStaleness.stale) {
-      issues.push({
-        id: "stale_intel",
-        title: "Safety check data looks old on this device",
-        detail: `${feedStaleness.ageLabel}. Sync policy or run a workspace audit so Guard evaluates packages against current warnings.`,
-        tone: "attention",
-        actionLabel: "Run workspace audit",
-        action: { kind: "firewall_audit" }
-      });
+  if (protection.installed_managers.includes(manager)) {
+    if (protection.path_status === "restart_required") {
+      return "restart_required";
+    }
+    return "path_repair";
+  }
+  return "unprotected";
+}
+function collectPackageBlockReceipts(snapshot, loadedReceipts) {
+  const blocks = /* @__PURE__ */ new Map();
+  for (const receipt of [...snapshot.latest_receipts ?? [], ...loadedReceipts ?? []]) {
+    if (isPackageBlockReceipt(receipt)) {
+      blocks.set(receipt.receipt_id, receipt);
     }
   }
-  return issues;
+  return [...blocks.values()];
+}
+function buildSupplyChainStats(snapshot, loadedReceipts) {
+  const managedInstalls = snapshot.managed_installs ?? [];
+  const protection = snapshot.supply_chain?.package_manager_protection;
+  const coverageManagers = resolveManagerCoverageManagers(protection);
+  const protectedManagers = coverageManagers.filter(
+    (manager) => resolveManagerCoverageStatus(protection, manager) === "protected"
+  ).length;
+  const stagedManagers = coverageManagers.filter(
+    (manager) => resolveManagerCoverageStatus(protection, manager) === "restart_required"
+  ).length;
+  const repairRequiredManagers = coverageManagers.filter(
+    (manager) => resolveManagerCoverageStatus(protection, manager) === "path_repair"
+  ).length;
+  const unprotectedManagers = coverageManagers.filter(
+    (manager) => resolveManagerCoverageStatus(protection, manager) === "unprotected"
+  ).length;
+  return {
+    totalApps: managedInstalls.length,
+    activeApps: managedInstalls.filter((install) => install.active).length,
+    // Managed installs are connected apps; an inactive one is not a blocked
+    // package. Count the package blocks among the receipts Guard has loaded.
+    preventedInstalls: collectPackageBlockReceipts(snapshot, loadedReceipts).length,
+    protectedManagers,
+    stagedManagers,
+    repairRequiredManagers,
+    unprotectedManagers
+  };
 }
 export {
+  resolveManagerCoverageStatus as a,
+  buildSupplyChainStats as b,
+  resolveSupplyChainCloudDegradedState as c,
   deriveSupplyChainEvidenceRail as d,
-  resolveSupplyChainIssues as r,
+  collectPackageBlockReceipts as e,
+  isPackageBlockReceipt as i,
+  resolveManagerCoverageManagers as r,
   supplyChainEvidenceHref as s
 };

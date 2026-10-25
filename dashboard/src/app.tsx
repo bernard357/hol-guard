@@ -501,6 +501,7 @@ export function App() {
 
   useEffect(() => {
     const needsReceipts =
+      view === "home" ||
       view === "evidence" ||
       view === "app-detail" ||
       view === "supply-chain" ||
@@ -1044,6 +1045,7 @@ export function App() {
           <HomeWorkspace
             requests={requests}
             runtime={runtime}
+            receipts={receipts.kind === "ready" ? receipts.items : undefined}
             policies={policies}
             onOpenInbox={handleOpenInbox}
             onOpenFleet={handleOpenFleet}

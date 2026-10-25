@@ -448,6 +448,7 @@ fn may_inspect(arguments: &[String]) -> bool {
                         | "for-each-ref"
                         | "rev-list"
                         | "stash"
+                        | "submodule"
                 )
             }
         }
