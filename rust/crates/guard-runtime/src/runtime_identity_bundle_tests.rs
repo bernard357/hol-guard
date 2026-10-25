@@ -280,3 +280,123 @@ fn no_cached_bundle_reports_an_absent_source() {
     let reply = run_command(&serde_json::to_vec(&request).expect("request")).expect("reply");
     assert_eq!(reply["result"]["advisory_source"]["state"], json!("absent"));
 }
+
+fn anchored(response: Value) -> Value {
+    let keyring = json!({"workspace_id": WORKSPACE, "keys": response["verificationKeys"]});
+    json!({"response": response, "workspace_id": WORKSPACE, "sync_keyring": keyring, "now": now()})
+}
+
+fn trusted_node(version: &str, arch: &str) -> Value {
+    let mut artifact = node_artifact(version, "macos");
+    artifact["arch"] = json!(arch);
+    artifact["executable_sha256"] = json!("a".repeat(64));
+    artifact["identity_assurance"] = json!("locally_trusted");
+    artifact
+}
+
+#[test]
+fn repeated_ids_and_oversized_sections_are_skipped_not_fatal() {
+    let mut bundled = node_rule();
+    bundled["target"] = json!({
+        "kind": "bundled_component",
+        "component": "openssl",
+        "host": {"family": "node", "vendor": "nodejs.org"},
+        "platforms": [{"os": "*", "arch": "*"}],
+        "versionScheme": "semver"
+    });
+    let repeated = assess(
+        node_artifact("22.12.0", "macos"),
+        cached(signed_response(Some(section(vec![node_rule(), bundled])))),
+    );
+    assert_eq!(repeated["advisory_source"]["entries"], json!(1));
+    assert_eq!(repeated["advisory_source"]["entries_skipped"], json!(1));
+
+    let mut entries: Vec<Value> = (0..1_100)
+        .map(|index| {
+            let mut rule = node_rule();
+            rule["advisoryId"] = json!(format!("CVE-2026-{:05}", index + 20_000));
+            rule["normalizedSeverity"] = json!("low");
+            rule
+        })
+        .collect();
+    let mut worst = node_rule();
+    worst["normalizedSeverity"] = json!("critical");
+    worst["knownExploited"] = json!(true);
+    entries.push(worst);
+    let large = assess(
+        node_artifact("22.12.0", "macos"),
+        cached(signed_response(Some(section(entries)))),
+    );
+    let source = &large["advisory_source"];
+    assert_eq!(source["entries"], json!(1_024));
+    assert_eq!(source["entries_truncated"], json!(77));
+    assert_eq!(source["reason"], json!("section_truncated"));
+    // The cut keeps the most severe entry, wherever it sat in the section.
+    let kept = large["advisories"].as_array().expect("advisories");
+    assert!(kept
+        .iter()
+        .any(|row| row["advisory_id"] == "CVE-2026-111497" && row["severity"] == "critical"));
+}
+
+#[test]
+fn only_an_anchored_bundle_can_clear_a_runtime() {
+    let response = signed_response(Some(section(vec![node_rule()])));
+    let unanchored = assess(trusted_node("22.23.4", "arm64"), cached(response.clone()));
+    assert_eq!(
+        match_of(&unanchored),
+        (json!("unknown"), json!("advisory_source_unanchored"))
+    );
+    assert_eq!(
+        unanchored["advisory_source"]["coverage_reason"],
+        json!("runtime_advisory_bundle_unanchored")
+    );
+    let still_affected = assess(trusted_node("22.12.0", "arm64"), cached(response.clone()));
+    assert_eq!(match_of(&still_affected).0, json!("affected"));
+
+    let anchored = assess(trusted_node("22.23.4", "arm64"), anchored(response));
+    assert_eq!(
+        match_of(&anchored),
+        (json!("not_affected"), json!("outside_ranges"))
+    );
+    let source = &anchored["advisory_source"];
+    assert_eq!(source["advisories_available"], json!(true));
+    assert_eq!(source["coverage_reason"], Value::Null);
+    assert!(source["valid_until"]
+        .as_f64()
+        .is_some_and(|until| until > now()));
+}
+
+#[test]
+fn a_recorded_sync_must_name_this_workspace_and_a_version() {
+    let response = signed_response(Some(section(vec![node_rule()])));
+    let version = response["bundle"]["bundleVersion"].clone();
+    let with = |entitlement: Value| {
+        let mut input = cached(response.clone());
+        input["entitlement"] = entitlement;
+        assess(node_artifact("22.12.0", "macos"), input)["advisory_source"].clone()
+    };
+    let other = with(json!({"workspace_id": "other", "bundle_version": version}));
+    assert_eq!(other["reason"], json!("sync_record_scope_mismatch"));
+    let unversioned = with(json!({"workspace_id": WORKSPACE}));
+    assert_eq!(unversioned["reason"], json!("sync_record_invalid"));
+    assert_eq!(
+        unversioned["coverage_reason"],
+        json!("runtime_advisory_bundle_invalid")
+    );
+    let current = with(json!({"workspace_id": WORKSPACE, "bundle_version": version}));
+    assert_eq!(current["state"], json!("verified"));
+}
+
+#[test]
+fn a_universal_binary_confirms_no_single_architecture() {
+    let mut arm_only = node_rule();
+    arm_only["target"]["platforms"] = json!([{"os": "macos", "arch": "arm64"}]);
+    let result = assess(
+        trusted_node("22.12.0", "universal"),
+        cached(signed_response(Some(section(vec![arm_only])))),
+    );
+    assert_eq!(
+        match_of(&result),
+        (json!("unknown"), json!("platform_unknown"))
+    );
+}

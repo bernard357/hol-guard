@@ -21,8 +21,9 @@ from .runtime_identity_probe import RuntimeProbe
 
 RUNTIME_POSTURE_SCHEMA = "guard.runtime-posture.v1"
 ADVISORIES_UNAVAILABLE = "runtime_advisories_unavailable"
-ADVISORIES_NOT_IN_BUNDLE = "runtime_advisories_not_in_bundle"
 BUNDLE_UNSUPPORTED = "runtime_advisory_bundle_unsupported_by_native_runtime"
+BUNDLE_UNSUPPORTED_COVERAGE = "runtime_advisory_bundle_unsupported"
+BUNDLE_ASSESSMENT_FAILED = "runtime_advisory_bundle_assessment_failed"
 NATIVE_UNAVAILABLE = "runtime_identity_native_unavailable"
 HARNESS_CONFIG_UNREADABLE = "harness_config_unreadable"
 CANDIDATE_LIMIT_REACHED = "runtime_candidate_limit_reached"
@@ -61,7 +62,7 @@ def build_runtime_posture(
         status, error_code = "partial", HARNESS_CONFIG_UNREADABLE
     elif candidates.truncated:
         status, error_code = "partial", CANDIDATE_LIMIT_REACHED
-    if not candidates.candidates:
+    if not candidates.candidates and advisory_bundle is None:
         return {**base, "status": status, "error": error_code, "runtimes": []}
     advisory_rows: list[dict[str, object]] = []
     matches: dict[str, list[object]] = {}
@@ -80,8 +81,15 @@ def build_runtime_posture(
         coverage = dict(_coverage(reason="runtime_assessment_failed"))
     else:
         source = assessment.advisory_source
-        if advisory_bundle is not None:
-            coverage = dict(_coverage(reason=_source_reason(source), available=_source_available(source)))
+        if advisory_bundle is not None and source:
+            # The native runtime decides what the bundle covers; this only relays it.
+            reason = source.get("coverage_reason")
+            coverage = dict(
+                _coverage(
+                    reason=reason if isinstance(reason, str) else None,
+                    available=source.get("advisories_available") is True,
+                )
+            )
         matches = {
             str(row["artifact_id"]): list(found) if isinstance(found := row.get("matches"), list) else []
             for row in assessment.artifacts
@@ -115,26 +123,15 @@ def _assess(request: dict[str, object], advisory_bundle: Mapping[str, object] | 
     try:
         return assess_runtime_identity({**request, "cached_bundle": dict(advisory_bundle)})
     except RuntimeIdentityError as error:
-        if error.code != NATIVE_UNAVAILABLE:
-            raise
-    # An older native runtime cannot verify bundled advisories; observe without them.
+        failure = error.code
+    # The bundle must not cost the observation: report the runtimes without it.
     assessment = assess_runtime_identity(request)
-    return replace(assessment, advisory_source={"state": "unsupported", "reason": BUNDLE_UNSUPPORTED})
-
-
-def _source_available(source: Mapping[str, object] | None) -> bool:
-    entries = source.get("entries") if source else None
-    return bool(source and source.get("state") == "verified" and isinstance(entries, int) and entries > 0)
-
-
-def _source_reason(source: Mapping[str, object] | None) -> str | None:
-    if _source_available(source):
-        return None
-    if not source:
-        return ADVISORIES_UNAVAILABLE
-    if source.get("state") == "verified":
-        return ADVISORIES_NOT_IN_BUNDLE
-    return f"runtime_advisory_bundle_{source.get('state')}"
+    if failure == NATIVE_UNAVAILABLE:
+        # An older native runtime cannot verify bundled advisories.
+        source = {"state": "unsupported", "reason": BUNDLE_UNSUPPORTED, "coverage_reason": BUNDLE_UNSUPPORTED_COVERAGE}
+    else:
+        source = {"state": "invalid", "reason": failure, "coverage_reason": BUNDLE_ASSESSMENT_FAILED}
+    return replace(assessment, advisory_source={**source, "advisories_available": False})
 
 
 def _coverage(*, reason: str | None, available: bool = False) -> dict[str, object]:
@@ -209,8 +206,8 @@ def _runtime_rows(
 
 
 __all__ = [
-    "ADVISORIES_NOT_IN_BUNDLE",
     "ADVISORIES_UNAVAILABLE",
+    "BUNDLE_ASSESSMENT_FAILED",
     "HARNESS_CONFIG_UNREADABLE",
     "RUNTIME_POSTURE_SCHEMA",
     "build_runtime_posture",

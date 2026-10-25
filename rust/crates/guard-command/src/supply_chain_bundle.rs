@@ -35,8 +35,8 @@ use crate::supply_chain_package_identity::{
 // `supply_chain_bundle_base` constants (:7-13).
 // ---------------------------------------------------------------------------
 
-const BUNDLE_MAX_AGE_SECONDS: f64 = 86_400.0 * 7.0;
-const BUNDLE_CLOCK_SKEW_SECONDS: f64 = 300.0;
+pub(crate) const BUNDLE_MAX_AGE_SECONDS: f64 = 86_400.0 * 7.0;
+pub(crate) const BUNDLE_CLOCK_SKEW_SECONDS: f64 = 300.0;
 
 const PACKAGE_ACTION_VALUES: &[&str] = &["allow", "monitor", "warn", "ask", "block"];
 const SEVERITY_VALUES: &[&str] = &["unknown", "low", "medium", "high", "critical"];
