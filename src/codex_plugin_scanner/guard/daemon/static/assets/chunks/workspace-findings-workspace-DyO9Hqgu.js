@@ -673,6 +673,7 @@ const COVERAGE_REASONS = {
   snapshot_depth_cap: "Some folders are nested deeper than one assessment reads.",
   snapshot_visit_cap: "The workspace has more entries than one assessment visits.",
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
+  advisory_data_unavailable: "No threat intel is cached on this device yet, so dependencies were listed but not checked for known vulnerabilities.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
   finding_cap: "There were more findings than one assessment keeps.",
   secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed."
