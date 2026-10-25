@@ -1,4 +1,5 @@
 import { r as reactExports, j as jsxRuntimeExports, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, a4 as HiMiniExclamationTriangle, S as SectionLabel, A as ActionButton, t as HiMiniArrowRight, T as Tag, f as formatRelativeTime, b as HiMiniChevronUp, c as HiMiniChevronDown, s as HiMiniCheckCircle, aA as HiMiniXCircle } from "../guard-dashboard.js";
+import { e as collectPackageBlockReceipts, i as isPackageBlockReceipt } from "./supply-chain-protection-stats-Bc9FBgdN.js";
 function resolveHomeProtectionStatus(snapshot) {
   const protection = snapshot.supply_chain?.package_manager_protection;
   if (!protection) return "unknown";
@@ -11,10 +12,10 @@ function resolveHomeProtectionStatus(snapshot) {
   if (protection.protected_managers.length > 0) return "partial";
   return "unprotected";
 }
-function resolveLastBlockedInstall(managedInstalls) {
-  const inactive = managedInstalls.filter((i) => !i.active);
-  if (inactive.length === 0) return null;
-  return inactive.sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))[0] ?? null;
+function resolveLastBlockedInstall(receipts) {
+  const blocked = receipts.filter(isPackageBlockReceipt);
+  if (blocked.length === 0) return null;
+  return blocked.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] ?? null;
 }
 function resolveIntelStaleness(snapshot) {
   const receipts = snapshot.latest_receipts;
@@ -43,12 +44,15 @@ function ProtectedManagerRow({ manager, protected: isProtected }) {
 }
 function HomeProtectionModule({
   snapshot,
-  managedInstalls,
+  receipts,
   onOpenFleet,
   onOpenSupplyChain
 }) {
   const status = reactExports.useMemo(() => resolveHomeProtectionStatus(snapshot), [snapshot]);
-  const lastBlocked = reactExports.useMemo(() => resolveLastBlockedInstall(managedInstalls), [managedInstalls]);
+  const lastBlocked = reactExports.useMemo(
+    () => resolveLastBlockedInstall(collectPackageBlockReceipts(snapshot, receipts)),
+    [snapshot, receipts]
+  );
   const intelState = reactExports.useMemo(() => resolveIntelStaleness(snapshot), [snapshot]);
   const protection = snapshot.supply_chain?.package_manager_protection;
   const allManagers = reactExports.useMemo(() => {
@@ -128,9 +132,9 @@ function HomeProtectionModule({
                 lastBlocked && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-slate-500", children: [
                   "Last blocked",
                   " ",
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-brand-dark", children: lastBlocked.harness }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-brand-dark", children: lastBlocked.artifact_name ?? lastBlocked.artifact_id }),
                   " ",
-                  formatRelativeTime(lastBlocked.updated_at)
+                  formatRelativeTime(lastBlocked.timestamp)
                 ] })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(

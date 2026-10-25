@@ -174,9 +174,9 @@ fn extension_id(id: &str) -> bool {
 }
 
 /// `--help` for the launcher or a documented subcommand. The parser prints
-/// usage and exits before any subcommand runs. Only known subcommand names are
-/// admitted: a frozen launcher treats a leading word naming a package manager
-/// as a shim script path, which the working directory could supply.
+/// usage and exits before any subcommand runs. The leading word must name a
+/// known subcommand: a frozen launcher treats a leading word naming a package
+/// manager as a shim script path, which the working directory could supply.
 ///
 /// A leading `guard` is the launcher's no-op prefix (`hol-guard guard --help`
 /// runs `hol-guard --help`), so it is dropped before the same check.
@@ -185,12 +185,34 @@ fn help_request(words: &[&str]) -> bool {
         ["guard", rest @ ..] => rest,
         _ => words,
     };
-    let known = |word: &&str| HELP_SUBCOMMANDS.contains(word);
     match words {
-        ["help", rest @ ..] => rest.len() <= 2 && rest.iter().all(known),
-        [rest @ .., "--help" | "-h"] => rest.len() <= 2 && rest.iter().all(known),
+        ["help", rest @ ..] => help_path(rest),
+        [rest @ .., "--help" | "-h"] => help_path(rest),
         _ => false,
     }
+}
+
+/// The subcommand path a help request names. Only the leading word carries the
+/// shim risk the launcher has to rule out, so it is the only one matched
+/// against the known names. A subcommand's own verbs are never enumerated here:
+/// the list would go stale every time the CLI grows one, and `hol-guard command
+/// test --help` would ask for approval while `hol-guard command --help` stays
+/// silent. A verb only has to be shaped like one, which keeps out flags, paths
+/// and anything a value could carry.
+fn help_path(words: &[&str]) -> bool {
+    match words {
+        [] => true,
+        [subcommand] => HELP_SUBCOMMANDS.contains(subcommand),
+        [subcommand, verb] => HELP_SUBCOMMANDS.contains(subcommand) && subcommand_verb(verb),
+        _ => false,
+    }
+}
+
+fn subcommand_verb(word: &str) -> bool {
+    word.starts_with(|first: char| first.is_ascii_alphabetic())
+        && word
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 const HELP_SUBCOMMANDS: &[&str] = &[
@@ -300,6 +322,13 @@ mod tests {
             "approvals --help",
             "approvals list --help",
             "approvals retry-hint --help",
+            "command test --help",
+            "command explain -h",
+            "command extensions --help",
+            "help command test",
+            "guard command test --help",
+            "daemon start --help",
+            "policy set --help",
         ] {
             assert!(safe_hol_guard_arguments(&arguments(command)), "{command}");
         }
@@ -345,6 +374,10 @@ mod tests {
             "status --json --help",
             "help npm",
             "a b c --help",
+            "command ../test --help",
+            "command -x --help",
+            "command test extra --help",
+            "npm test --help",
             "command",
             "command test",
             "command explain",
