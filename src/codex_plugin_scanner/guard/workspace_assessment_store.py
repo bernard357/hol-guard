@@ -68,18 +68,24 @@ class RunOutcome:
     error_code: str | None = None
 
 
-def admit_worktree(store: Any, keys: WorktreeKeys, *, root: str, now_ms: int) -> None:
+def admit_worktree(store: Any, keys: WorktreeKeys, *, root: str, now_ms: int, resume: bool = True) -> bool:
+    """Admit a worktree; ``resume`` also unpauses one admitted before.
+
+    Without ``resume`` an already admitted worktree is left exactly as it is and
+    the call returns False, so an automatic admission never undoes a pause.
+    """
+
+    conflict = "update set private_root = excluded.private_root, paused = 0" if resume else "nothing"
     with store._connect() as connection:
-        connection.execute(
-            """
+        cursor = connection.execute(
+            f"""
             insert into workspace_assessment_state (codebase_key, worktree_key, private_root, admitted_at_ms)
             values (?, ?, ?, ?)
-            on conflict(codebase_key, worktree_key) do update set
-              private_root = excluded.private_root,
-              paused = 0
+            on conflict(codebase_key, worktree_key) do {conflict}
             """,
             (keys.codebase_key, keys.worktree_key, root, now_ms),
         )
+        return cursor.rowcount == 1
 
 
 def set_paused(store: Any, keys: WorktreeKeys, *, paused: bool) -> bool:

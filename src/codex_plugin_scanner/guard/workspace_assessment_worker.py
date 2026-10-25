@@ -1,6 +1,8 @@
 """Background loop for workspace assessments.
 
-Only worktrees a user admitted (from the dashboard or the CLI) are watched.
+Only worktrees a user admitted (from the dashboard or the CLI) or registered a
+harness install for (``install --workspace``) are watched. Guard never takes a
+root from repository text or from a hook's working directory.
 Each poll takes a cheap stat snapshot of every admitted worktree and a digest
 of the cached advisory bundles; a change queues an assessment, and the
 coordinator's debounce and interval decide when it runs. Nothing here runs in
@@ -36,8 +38,14 @@ class WorkspaceAdmissionError(ValueError):
         self.code = code
 
 
-def admit_workspace(store: Any, root: str, *, clock: Callable[[], int] = now_ms) -> dict[str, object]:
-    """Admit a worktree for background assessment and queue its first run."""
+def admit_workspace(
+    store: Any, root: str, *, clock: Callable[[], int] = now_ms, automatic: bool = False
+) -> dict[str, object]:
+    """Admit a worktree for background assessment and queue its first run.
+
+    An ``automatic`` admission leaves a worktree that is already admitted alone,
+    paused or not, and raises ``workspace_already_admitted``.
+    """
 
     path = Path(root)
     if not path.is_absolute():
@@ -54,7 +62,8 @@ def admit_workspace(store: Any, root: str, *, clock: Callable[[], int] = now_ms)
         raise WorkspaceAdmissionError(error.code) from error
     keys = assessments.WorktreeKeys(snapshot.codebase_key, snapshot.worktree_key)
     current = clock()
-    assessments.admit_worktree(store, keys, root=str(resolved), now_ms=current)
+    if not assessments.admit_worktree(store, keys, root=str(resolved), now_ms=current, resume=not automatic):
+        raise WorkspaceAdmissionError("workspace_already_admitted")
     assessments.record_observation(
         store, keys, stat_digest=snapshot.snapshot_digest, feed_digest=feed_context_digest(store)
     )
@@ -62,6 +71,40 @@ def admit_workspace(store: Any, root: str, *, clock: Callable[[], int] = now_ms)
         store, keys, trigger_kind="workspace_open", detector_set_digest=DETECTOR_SET_DIGEST, now_ms=current
     )
     return {"codebase_key": keys.codebase_key, "worktree_key": keys.worktree_key, "run_id": run_id}
+
+
+def admit_registered_workspaces(
+    store: Any, *, attempted: set[str] | None = None, clock: Callable[[], int] = now_ms
+) -> int:
+    """Admit the workspaces active harness installs were registered for.
+
+    Registering an install for a workspace is the authorization. A root that is
+    already admitted is skipped without a snapshot. ``attempted`` remembers
+    roots that could not be admitted, so a rejected root is not walked again on
+    every poll; a root that is missing is retried once it exists.
+    """
+
+    known = {str(item["root"]) for item in assessments.list_worktrees(store)}
+    admitted = 0
+    for install in store.list_managed_installs():
+        workspace = install.get("workspace")
+        if not install.get("active") or not isinstance(workspace, str) or not Path(workspace).is_absolute():
+            continue
+        try:
+            root = str(Path(workspace).resolve(strict=True))
+        except OSError:
+            continue
+        if root in known or (attempted is not None and root in attempted):
+            continue
+        try:
+            admit_workspace(store, root, clock=clock, automatic=True)
+        except WorkspaceAdmissionError:
+            if attempted is not None:
+                attempted.add(root)
+            continue
+        known.add(root)
+        admitted += 1
+    return admitted
 
 
 def queue_manual_run(
@@ -102,9 +145,10 @@ def observe(store: Any, *, clock: Callable[[], int] = now_ms) -> int:
     return queued
 
 
-def poll_once(store: Any, *, owner: str, stop: threading.Event | None = None) -> int:
+def poll_once(store: Any, *, owner: str, stop: threading.Event | None = None, attempted: set[str] | None = None) -> int:
     from .config import load_guard_config
 
+    admit_registered_workspaces(store, attempted=attempted)
     observe(store)
     ran = 0
     config = None
@@ -127,11 +171,12 @@ def start_workspace_assessment_worker(
     """Poll admitted worktrees on a daemon thread until ``stop`` is set."""
 
     owner = f"daemon:{os.getpid()}:{uuid.uuid4().hex[:12]}"
+    attempted: set[str] = set()
 
     def loop() -> None:
         while not stop.wait(interval):
             try:
-                poll_once(store, owner=owner, stop=stop)
+                poll_once(store, owner=owner, stop=stop, attempted=attempted)
             except Exception:
                 on_error("workspace_assessment_poll_failed")
 
