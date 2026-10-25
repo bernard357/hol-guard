@@ -349,6 +349,7 @@
       "src/pretool/git_branch_listing.rs",
       "src/pretool/git_clean_preview.rs",
       "src/pretool/git_clone_local.rs",
+      "src/pretool/git_conditional_include.rs",
       "src/pretool/git_config.rs",
       "src/pretool/git_config_filters.rs",
       "src/pretool/git_config_home_tests.rs",
