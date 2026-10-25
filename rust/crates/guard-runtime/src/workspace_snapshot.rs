@@ -33,7 +33,7 @@ mod secrets;
 mod walk;
 #[cfg(test)]
 use secrets::MAX_SECRET_FINDINGS;
-use secrets::{SecretScan, WalkSkips};
+use secrets::{SecretKey, SecretScan, WalkSkips};
 use walk::{walk_directory, Walk, MAX_WALK_DEPTH};
 
 pub(crate) const COMMAND: &str = "workspace-snapshot";
@@ -114,6 +114,10 @@ pub(crate) struct SnapshotRequest {
     /// Needs `content` mode; the findings never carry the matched text.
     #[serde(default)]
     pub(crate) secrets: bool,
+    /// Per-install secret that keys the finding fingerprints. Required with
+    /// `secrets`; never echoed in the result.
+    #[serde(default)]
+    pub(crate) secret_key: Option<SecretKey>,
 }
 
 struct Limits {
@@ -189,6 +193,11 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if request.secrets && request.mode != SnapshotMode::Content {
         return Err("workspace_snapshot_secrets_need_content".to_owned());
     }
+    let secret_key = match (request.secrets, request.secret_key.as_ref()) {
+        (true, Some(key)) if key.is_usable() => Some(key),
+        (true, _) => return Err("workspace_snapshot_secrets_need_key".to_owned()),
+        (false, _) => None,
+    };
     let mut handle = DirHandle::open_root(&root).ok_or("workspace_snapshot_root_unreadable")?;
     let limits = Limits::from_request(request);
     let git = git_identity(&root);
@@ -198,7 +207,7 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         git.common_dir.as_deref().unwrap_or(root_text.as_str()),
     );
     let mut walk = Walk {
-        secrets: request.secrets.then(|| SecretScan::new(&codebase_key)),
+        secrets: secret_key.map(|key| SecretScan::new(key, &codebase_key, &worktree_key)),
         ..Walk::default()
     };
     walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);

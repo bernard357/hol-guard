@@ -143,15 +143,18 @@ def _enqueue_locked(
     if queued is not None:
         # Coalesce: the queued run now covers the newer generation and the
         # debounce restarts from this trigger. A user request upgrades an
-        # automatic one so it is not held by the debounce.
+        # automatic one so it is not held by the debounce. The run records the
+        # detector set of the daemon that now covers it, which is the set that
+        # will execute it.
         upgraded = trigger_kind if trigger_kind in USER_TRIGGERS else str(queued[1])
         connection.execute(
             """
             update workspace_assessment_runs set
-              dirty_generation = ?, trigger_kind = ?, triggered_at_ms = max(triggered_at_ms, ?)
+              dirty_generation = ?, trigger_kind = ?, triggered_at_ms = max(triggered_at_ms, ?),
+              detector_set_digest = ?
             where run_id = ?
             """,
-            (generation, upgraded, now_ms, queued[0]),
+            (generation, upgraded, now_ms, detector_set_digest, queued[0]),
         )
         return str(queued[0])
     run_id = uuid.uuid4().hex
@@ -177,7 +180,20 @@ def _enqueue_locked(
     return run_id
 
 
-def claim_next(store: Any, *, owner: str, now_ms: int) -> ClaimedRun | None:
+def claim_next(
+    store: Any,
+    *,
+    owner: str,
+    now_ms: int,
+    detector_set_digest: str | None = None,
+) -> ClaimedRun | None:
+    """Lease the next due run.
+
+    ``detector_set_digest`` is the set the caller will execute. A run queued by
+    an older daemon is relabelled with it at claim time, so the stored digest
+    always names the detectors that actually produced the result.
+    """
+
     with store._connect() as connection:
         connection.execute("begin immediate")
         _expire_leases_locked(connection, now_ms=now_ms)
@@ -210,13 +226,15 @@ def claim_next(store: Any, *, owner: str, now_ms: int) -> ClaimedRun | None:
         if row is None:
             return None
         lease_generation = int(row[7]) + 1
+        claimed_digest = detector_set_digest if detector_set_digest is not None else str(row[8])
         connection.execute(
             """
             update workspace_assessment_runs set
-              state = 'running', lease_generation = ?, lease_owner = ?, lease_until_ms = ?, started_at_ms = ?
+              state = 'running', lease_generation = ?, lease_owner = ?, lease_until_ms = ?, started_at_ms = ?,
+              detector_set_digest = ?
             where run_id = ? and state = 'queued'
             """,
-            (lease_generation, owner, now_ms + LEASE_MS, now_ms, row[0]),
+            (lease_generation, owner, now_ms + LEASE_MS, now_ms, claimed_digest, row[0]),
         )
         return ClaimedRun(
             run_id=str(row[0]),
@@ -226,7 +244,7 @@ def claim_next(store: Any, *, owner: str, now_ms: int) -> ClaimedRun | None:
             kind=str(row[5]),
             dirty_generation=int(row[6]),
             lease_generation=lease_generation,
-            detector_set_digest=str(row[8]),
+            detector_set_digest=claimed_digest,
         )
 
 

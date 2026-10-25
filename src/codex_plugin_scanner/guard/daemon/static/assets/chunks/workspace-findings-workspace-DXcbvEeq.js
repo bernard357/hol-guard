@@ -75,7 +75,11 @@ function normalizeFinding(value) {
       packageVersion: null,
       fixVersion: null,
       path,
-      line: line !== null && line >= 1 ? line : null
+      line: line !== null && line >= 1 ? line : null,
+      lines: list(item.lines).flatMap((entry) => {
+        const value2 = count(entry);
+        return value2 !== null && value2 >= 1 ? [value2] : [];
+      })
     };
   }
   const packageName = text(item.package_name);
@@ -88,7 +92,8 @@ function normalizeFinding(value) {
     packageVersion: text(item.package_version),
     fixVersion: text(item.fix_version),
     path: null,
-    line: null
+    line: null,
+    lines: []
   };
 }
 function normalizeAssessment(value) {
@@ -387,6 +392,10 @@ function FindingsSections(props) {
     secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets })
   ] });
 }
+function secretLines(finding) {
+  const lines = finding.lines.length > 0 ? finding.lines : finding.line !== null ? [finding.line] : [];
+  return lines.length > 0 ? `:${lines.join(", ")}` : "";
+}
 function SecretFindingsTable({ findings }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Possible secrets in files" }),
@@ -400,7 +409,7 @@ function SecretFindingsTable({ findings }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Rule", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.ruleIds.join(", ") }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Location", wide: true, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "break-all font-mono text-xs text-slate-700", children: [
         finding.path,
-        finding.line !== null ? `:${finding.line}` : ""
+        secretLines(finding)
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "slate", children: "Not verified" }) })

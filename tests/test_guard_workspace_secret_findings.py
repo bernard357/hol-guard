@@ -34,6 +34,7 @@ from tests.test_guard_workspace_assessment_runner import AUDIT, KEYS, SCANNED, S
 GITHUB_TOKEN = "".join(["ghp_", "AbCdEfGhIjKlMnOpQrStUvWxYz", "012345"])
 AWS_KEY = "".join(["AKIA", "IOSFODNN7", "REALKEY"])
 FINGERPRINT = "0123456789abcdef0123456789abcdef"
+FINDING_ID = "fedcba9876543210fedcba9876543210"
 
 
 def digest(label: str) -> str:
@@ -42,11 +43,14 @@ def digest(label: str) -> str:
 
 def native_finding(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
+        "finding_id": FINDING_ID,
         "rule_id": "github-token",
         "family": "provider",
         "severity": "high",
         "confidence": "high",
         "line": 2,
+        "lines": [2],
+        "occurrences": 1,
         "path": "src/deploy.py",
         "fingerprint": FINGERPRINT,
     }
@@ -79,7 +83,8 @@ def test_detector_set_names_the_secret_detector_and_changes_the_digest() -> None
 
 
 def test_projection_carries_location_and_fingerprint_only() -> None:
-    [finding] = secret_findings.project_secret_findings(KEYS.worktree_key, secrets_result(native_finding()))
+    [finding] = secret_findings.project_secret_findings(secrets_result(native_finding()))
+    assert finding["finding_id"] == FINDING_ID
     assert finding["source_kind"] == "secret"
     assert finding["detector"] == "secrets"
     assert finding["severity"] == "high"
@@ -89,42 +94,64 @@ def test_projection_carries_location_and_fingerprint_only() -> None:
     assert all(finding[name] is None for name in ("ecosystem", "package_name", "package_version", "fix_version"))
 
 
-def test_finding_id_follows_the_secret_not_its_line() -> None:
-    def ident(worktree: str = KEYS.worktree_key, **overrides: object) -> object:
-        [finding] = secret_findings.project_secret_findings(worktree, secrets_result(native_finding(**overrides)))
-        return finding["finding_id"]
+def test_every_location_of_a_repeated_secret_is_kept() -> None:
+    [finding] = secret_findings.project_secret_findings(
+        secrets_result(native_finding(line=2, lines=[2, 9, 31], occurrences=3))
+    )
+    assert (finding["line"], finding["lines"], finding["occurrences"]) == (2, [2, 9, 31], 3)
 
-    assert ident() == ident() == ident(line=40)
-    assert ident() != ident(path="src/other.py")
-    assert ident() != ident(fingerprint="f" * 32)
-    assert ident() != ident(rule_id="aws-access-key")
-    assert ident() != ident(digest("another-worktree"))
+
+def test_a_deeply_nested_path_is_kept() -> None:
+    path = "/".join(["d" * 100] * 12) + "/a.py"
+    assert len(path) > 1200
+    [finding] = secret_findings.project_secret_findings(secrets_result(native_finding(path=path)))
+    assert finding["path"] == path
+    assert secret_findings.secret_coverage(secrets_result(native_finding(path=path)))[0] == "complete"
 
 
 @pytest.mark.parametrize(
     "bad",
     [
+        {"finding_id": "short"},
+        {"finding_id": None},
         {"rule_id": "has space"},
         {"rule_id": None},
         {"path": ""},
         {"path": "a\0b"},
-        {"path": "p" * 2000},
+        {"path": "p" * 5000},
         {"line": 0},
         {"line": True},
         {"line": "3"},
+        {"lines": []},
+        {"lines": [0]},
+        {"lines": list(range(1, 40))},
+        {"occurrences": 0},
         {"fingerprint": "short"},
         {"fingerprint": "G" * 32},
+        {"severity": "catastrophic"},
     ],
 )
-def test_malformed_findings_are_dropped(bad: dict[str, object]) -> None:
-    assert secret_findings.project_secret_findings(KEYS.worktree_key, secrets_result(native_finding(**bad))) == []
+def test_malformed_findings_are_dropped_and_leave_the_detector_incomplete(bad: dict[str, object]) -> None:
+    result = secrets_result(native_finding(**bad))
+    assert secret_findings.project_secret_findings(result) == []
+    status, summary, reasons = secret_findings.secret_coverage(result)
+    assert (status, reasons) == ("incomplete", ["invalid_finding"])
+    assert summary["truncation_reasons"] == ["invalid_finding"]
 
 
-def test_unknown_native_fields_and_severities_are_not_copied() -> None:
-    raw = native_finding(severity="catastrophic", candidate="leaked-value", snippet="x = leaked-value")
-    [finding] = secret_findings.project_secret_findings(KEYS.worktree_key, secrets_result(raw))
-    assert finding["severity"] == "unknown"
+def test_unknown_native_fields_are_not_copied() -> None:
+    raw = native_finding(candidate="leaked-value", snippet="x = leaked-value")
+    [finding] = secret_findings.project_secret_findings(secrets_result(raw))
     assert "leaked-value" not in json.dumps(finding)
+
+
+def test_fingerprint_key_is_created_once_and_kept_in_the_local_store(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    first = secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:00Z")
+    assert len(first) >= 32
+    assert secret_findings.load_fingerprint_key(store, "2026-10-25T00:00:00Z") == first
+    other = secret_findings.load_fingerprint_key(GuardStore(tmp_path / "other"), "2026-10-24T00:00:00Z")
+    assert other != first
 
 
 def test_complete_scan_makes_a_complete_run() -> None:
@@ -135,14 +162,26 @@ def test_complete_scan_makes_a_complete_run() -> None:
     assert not any("secrets" in reason for reason in coverage["reasons"])
 
 
-@pytest.mark.parametrize("reason", ["entry_cap", "max_findings"])
-def test_truncated_scan_keeps_the_run_partial(reason: str) -> None:
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [("entry_cap", ["secrets_incomplete"]), ("max_findings", ["secrets_incomplete", "finding_cap"])],
+)
+def test_truncated_scan_keeps_the_run_partial(reason: str, expected: list[str]) -> None:
     truncated = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=[reason]))
     coverage = runner.coverage_summary(truncated, AUDIT, findings_truncated=False)
     assert coverage["status"] == "partial"
-    assert coverage["reasons"] == ["secrets_incomplete"]
+    assert coverage["reasons"] == expected
     assert coverage["detectors"]["secrets"] == "incomplete"
     assert coverage["secrets"]["truncation_reasons"] == [reason]
+
+
+def test_a_scan_that_hit_its_own_cap_marks_the_findings_list_truncated() -> None:
+    capped = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=["max_findings"]))
+    coverage = runner.coverage_summary(capped, AUDIT, findings_truncated=False)
+    assert coverage["reasons"] == ["secrets_incomplete", "finding_cap"]
+    # Other secret limits leave the run partial without claiming a cut list.
+    walked = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=["entry_cap"]))
+    assert "finding_cap" not in runner.coverage_summary(walked, AUDIT, findings_truncated=False)["reasons"]
 
 
 @pytest.mark.parametrize("payload", [{"schema": "other"}, {**SECRETS_COMPLETE, "status": "weird"}, {}])
@@ -156,7 +195,9 @@ def test_unreadable_secret_result_is_an_error(payload: dict[str, object]) -> Non
 def test_runner_projects_secret_findings_and_stays_complete(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     scanned = replace(SNAPSHOT, secrets=secrets_result(native_finding()))
-    monkeypatch.setattr(runner, "workspace_snapshot", lambda root, *, mode="content", secrets=False: scanned)
+    monkeypatch.setattr(
+        runner, "workspace_snapshot", lambda root, *, mode="content", secrets=False, secret_key=None: scanned
+    )
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     outcome = runner.execute(store, None, claimed)
     assert outcome.state == "completed"
@@ -164,11 +205,32 @@ def test_runner_projects_secret_findings_and_stays_complete(tmp_path: Path, monk
     assert assessments.finish(store, claimed, outcome, now_ms=1_000_000_001)
 
 
+def test_runner_hands_the_native_scan_a_stable_per_install_key(tmp_path: Path, monkeypatch) -> None:
+    store, claimed = queued_run(tmp_path)
+    keys: list[object] = []
+
+    def snapshot(root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None):
+        if secrets:
+            keys.append(secret_key)
+        return replace(SNAPSHOT, secrets=secrets_result(native_finding()))
+
+    monkeypatch.setattr(runner, "workspace_snapshot", snapshot)
+    monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
+    first = runner.execute(store, None, claimed)
+    runner.execute(store, None, claimed)
+    assert len(keys) == 2 and keys[0] == keys[1]
+    assert isinstance(keys[0], str) and len(keys[0]) >= 32
+    assert keys[0] not in json.dumps(first.coverage) + json.dumps(list(first.findings))
+    assert keys[0] == secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:00Z")
+
+
 def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     requested: list[bool] = []
 
-    def snapshot(root: Path, *, mode: str = "content", secrets: bool = False) -> native.WorkspaceSnapshot:
+    def snapshot(
+        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None
+    ) -> native.WorkspaceSnapshot:
         requested.append(secrets)
         if secrets:
             raise native.WorkspaceSnapshotError("workspace_snapshot_secrets_unavailable")
@@ -187,8 +249,13 @@ def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Pat
 def test_merged_findings_stay_bounded_and_most_severe_first() -> None:
     many = [
         secret_findings.project_secret_findings(
-            KEYS.worktree_key,
-            secrets_result(native_finding(fingerprint=f"{index:032x}", severity="low" if index else "critical")),
+            secrets_result(
+                native_finding(
+                    finding_id=f"{index:032x}",
+                    fingerprint=f"{index:032x}",
+                    severity="low" if index else "critical",
+                )
+            ),
         )[0]
         for index in range(runner.MAX_FINDINGS + 20)
     ]
@@ -221,8 +288,10 @@ BENIGN_FILES = {
 }
 
 
-def run_assessment(tmp_path: Path, workspace: Path) -> tuple[GuardStore, dict[str, object]]:
-    store = GuardStore(tmp_path / "guard-home")
+def run_assessment(
+    tmp_path: Path, workspace: Path, store: GuardStore | None = None
+) -> tuple[GuardStore, dict[str, object]]:
+    store = store or GuardStore(tmp_path / "guard-home")
     admitted = worker.admit_workspace(store, str(workspace))
     keys = assessments.WorktreeKeys(str(admitted["codebase_key"]), str(admitted["worktree_key"]))
     assert worker.queue_manual_run(store, keys) == admitted["run_id"]
@@ -286,13 +355,23 @@ def test_benign_files_produce_no_findings(tmp_path: Path, native_binary: None) -
     assert latest["coverage"]["secrets"]["files_scanned"] >= len(BENIGN_FILES)
 
 
+def test_a_repeated_secret_keeps_every_line_end_to_end(tmp_path: Path, native_binary: None) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "config.py").write_text(f"A = {GITHUB_TOKEN}\nB = 1\nC = {GITHUB_TOKEN}\n", encoding="utf-8")
+    _, latest = run_assessment(tmp_path, workspace)
+    [finding] = [item for item in latest["findings"] if item["source_kind"] == "secret"]
+    assert (finding["line"], finding["lines"], finding["occurrences"]) == (1, [1, 3], 2)
+    assert GITHUB_TOKEN not in json.dumps(latest)
+
+
 def test_finding_identity_survives_a_rescan_and_a_moved_line(tmp_path: Path, native_binary: None) -> None:
     workspace = tmp_path / "workspace"
     plant_workspace(workspace)
-    _, first = run_assessment(tmp_path / "one", workspace)
+    store, first = run_assessment(tmp_path, workspace)
     deploy = workspace / "src/deploy.py"
     deploy.write_text("# moved down\n" + deploy.read_text(encoding="utf-8"), encoding="utf-8")
-    _, second = run_assessment(tmp_path / "two", workspace)
+    _, second = run_assessment(tmp_path, workspace, store)
 
     def ids(latest: dict[str, object]) -> dict[str, tuple[object, ...]]:
         return {

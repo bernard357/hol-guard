@@ -55,8 +55,12 @@ def workspace_snapshot(
     *,
     mode: Literal["content", "stat"] = "content",
     secrets: bool = False,
+    secret_key: str | None = None,
 ) -> WorkspaceSnapshot:
     """Snapshot ``root``; ``secrets`` also scans the hashed bytes for secrets.
+
+    ``secret_key`` is the per-install secret that keys secret fingerprints. It
+    goes to the native process on stdin only and is never part of a result.
 
     A native runtime without the secret scan raises
     ``workspace_snapshot_secrets_unavailable`` so the caller can fall back to a
@@ -66,6 +70,8 @@ def workspace_snapshot(
     request: dict[str, object] = {"root": str(root), "mode": mode}
     if secrets:
         request["secrets"] = True
+        if secret_key is not None:
+            request["secret_key"] = secret_key
     reply = _native_request(request, needs_secrets=secrets)
     if reply.get("ok") is not True:
         error = reply.get("error")

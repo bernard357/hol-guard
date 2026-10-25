@@ -40,6 +40,8 @@ export type WorkspaceFinding = {
   /** Root-relative file path of a secret finding. Guard never receives the secret itself. */
   path: string | null;
   line: number | null;
+  /** Every line the same secret appears on in that file, first to last. */
+  lines: number[];
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -148,6 +150,10 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
       fixVersion: null,
       path,
       line: line !== null && line >= 1 ? line : null,
+      lines: list(item.lines).flatMap((entry) => {
+        const value = count(entry);
+        return value !== null && value >= 1 ? [value] : [];
+      }),
     };
   }
   const packageName = text(item.package_name);
@@ -161,6 +167,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     fixVersion: text(item.fix_version),
     path: null,
     line: null,
+    lines: [],
   };
 }
 

@@ -3,7 +3,7 @@ import { r as resolveSupplyChainIssues } from "./supply-chain-issues-BLapd7LV.js
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-DYHkHSPd.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
 import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-COty1p6U.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-Csyr-k80.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-CKe-L_Zd.js";
 import "./feed-health-workspace-B4WCTrqZ.js";
 const PROTECTION_BADGE = {
   protected: "Protected",

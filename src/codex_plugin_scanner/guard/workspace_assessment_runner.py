@@ -27,7 +27,7 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
-from .workspace_secret_findings import SECRET_DETECTOR, project_secret_findings, secret_coverage
+from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 
 DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR)
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
@@ -54,7 +54,7 @@ def now_ms() -> int:
 def run_next(store: Any, config: Any, *, owner: str, clock: Callable[[], int] = now_ms) -> bool:
     """Claim and run one due assessment; return whether one ran."""
 
-    claimed = assessments.claim_next(store, owner=owner, now_ms=clock())
+    claimed = assessments.claim_next(store, owner=owner, now_ms=clock(), detector_set_digest=DETECTOR_SET_DIGEST)
     if claimed is None:
         return False
     outcome = execute(store, config, claimed)
@@ -72,10 +72,11 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
     root = Path(run.private_root)
     try:
         feed_digest = feed_context_digest(store)
+        secret_key = load_fingerprint_key(store, datetime.now(timezone.utc).isoformat())
     except sqlite3.Error:
         return assessments.RunOutcome(state="failed", error_code="feed_context_unavailable")
     try:
-        before = _snapshot_with_secrets(root)
+        before = _snapshot_with_secrets(root, secret_key)
     except WorkspaceSnapshotError as error:
         return assessments.RunOutcome(state="failed", error_code=error.code)
     if before.worktree_key != run.keys.worktree_key or before.codebase_key != run.keys.codebase_key:
@@ -104,9 +105,7 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             feed_context_digest=feed_digest,
         )
     supply_findings, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
-    findings, merge_truncated = merge_findings(
-        supply_findings, project_secret_findings(run.keys.worktree_key, before.secrets)
-    )
+    findings, merge_truncated = merge_findings(supply_findings, project_secret_findings(before.secrets))
     truncated = supply_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
     coverage = coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused)
@@ -120,11 +119,11 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
     )
 
 
-def _snapshot_with_secrets(root: Path) -> WorkspaceSnapshot:
+def _snapshot_with_secrets(root: Path, secret_key: str) -> WorkspaceSnapshot:
     """Snapshot with the secret scan, or without it on a runtime that lacks it."""
 
     try:
-        return workspace_snapshot(root, mode="content", secrets=True)
+        return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key)
     except WorkspaceSnapshotError as error:
         if error.code != "workspace_snapshot_secrets_unavailable":
             raise
@@ -181,8 +180,6 @@ def coverage_summary(
         reasons.append("supply_chain_incomplete")
     if payload.get("lockfile_warnings"):
         reasons.append("lockfile_warnings")
-    if findings_truncated:
-        reasons.append("finding_cap")
     # A detector that did not run, or did not cover every file, leaves its
     # findings unknown, so the run is partial until every detector has covered
     # the whole snapshot.
@@ -191,9 +188,14 @@ def coverage_summary(
         secrets_status = "not_run"
         reasons.append(f"detector_not_run:{SECRET_DETECTOR}")
     else:
-        secrets_status, secrets, _ = secret_coverage(snapshot.secrets)
+        secrets_status, secrets, secret_reasons = secret_coverage(snapshot.secrets)
         if secrets_status != "complete":
             reasons.append("secrets_incomplete")
+        # A scan that stopped at its own cap lists only some secrets, so the
+        # findings list is as truncated as one cut by the merge bounds.
+        findings_truncated = findings_truncated or "max_findings" in secret_reasons
+    if findings_truncated:
+        reasons.append("finding_cap")
     return {
         "status": "partial" if reasons else "complete",
         "reasons": reasons,

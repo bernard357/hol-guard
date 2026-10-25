@@ -15,6 +15,10 @@ fn aws_key() -> String {
     ["AKIA", "IOSFODNN7", "REALKEY"].concat()
 }
 
+fn key(label: &str) -> SecretKey {
+    serde_json::from_value(Value::String(format!("{label:0<48}"))).unwrap()
+}
+
 fn request(root: &Path) -> SnapshotRequest {
     SnapshotRequest {
         root: root.to_str().unwrap().to_owned(),
@@ -24,6 +28,7 @@ fn request(root: &Path) -> SnapshotRequest {
         max_file_bytes: 0,
         max_visited_entries: 0,
         secrets: true,
+        secret_key: Some(key("install-one")),
     }
 }
 
@@ -106,8 +111,11 @@ fn no_secret_value_or_fragment_reaches_the_serialized_result() {
             [
                 "confidence",
                 "family",
+                "finding_id",
                 "fingerprint",
                 "line",
+                "lines",
+                "occurrences",
                 "path",
                 "rule_id",
                 "severity"
@@ -150,9 +158,138 @@ fn fingerprints_are_stable_per_secret_and_distinct_between_secrets() {
 
 #[test]
 fn fingerprints_differ_between_repositories() {
-    let one = SecretScan::new("one");
-    let other = SecretScan::new("other");
-    assert_ne!(one.fingerprint_key, other.fingerprint_key);
+    let install = key("install-one");
+    let one = SecretScan::new(&install, "one", "tree");
+    let other = SecretScan::new(&install, "other", "tree");
+    assert_ne!(*one.fingerprint_key, *other.fingerprint_key);
+}
+
+#[test]
+fn fingerprints_depend_on_the_private_key_not_only_the_codebase() {
+    let dir = planted();
+    let first = scan(dir.path());
+    let mut other_install = request(dir.path());
+    other_install.secret_key = Some(key("install-two"));
+    let second = snapshot(&other_install).unwrap();
+    // The result publishes the codebase key; the fingerprint must not follow
+    // from it alone.
+    assert_eq!(first["codebase_key"], second["codebase_key"]);
+    let print = |result: &Value| findings(result)[0]["fingerprint"].clone();
+    assert_ne!(print(&first), print(&second));
+    let again = scan(dir.path());
+    assert_eq!(print(&first), print(&again));
+}
+
+#[test]
+fn the_private_key_never_reaches_a_result_or_a_debug_rendering() {
+    let dir = planted();
+    let supplied = request(dir.path());
+    let text = format!("{supplied:?}");
+    assert!(text.contains("<redacted>"));
+    assert!(!text.contains("install-one"));
+    let result = serde_json::to_string(&snapshot(&supplied).unwrap()).unwrap();
+    assert!(!result.contains("install-one"));
+}
+
+#[test]
+fn secrets_need_a_usable_private_key() {
+    let dir = planted();
+    let mut missing = request(dir.path());
+    missing.secret_key = None;
+    assert_eq!(
+        snapshot(&missing).unwrap_err(),
+        "workspace_snapshot_secrets_need_key"
+    );
+    let mut short = request(dir.path());
+    short.secret_key = Some(serde_json::from_value(Value::String("short".to_owned())).unwrap());
+    assert_eq!(
+        snapshot(&short).unwrap_err(),
+        "workspace_snapshot_secrets_need_key"
+    );
+}
+
+#[test]
+fn a_repeated_secret_is_one_finding_with_every_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let token = github_token();
+    let body = format!("A = {token}\nB = 1\nC = {token}\nD = {token}\n");
+    fs::write(dir.path().join("config.py"), &body).unwrap();
+    let first = scan(dir.path());
+    let [finding] = findings(&first).as_slice() else {
+        panic!("expected one grouped finding: {:?}", findings(&first));
+    };
+    assert_eq!(finding["lines"], serde_json::json!([1, 3, 4]));
+    assert_eq!(finding["line"], 1);
+    assert_eq!(finding["occurrences"], 3);
+    assert_eq!(secrets(&first)["status"], "complete");
+    // Moving the lines keeps the finding identity.
+    fs::write(dir.path().join("config.py"), format!("# top\n{body}")).unwrap();
+    let moved = scan(dir.path());
+    assert_eq!(findings(&moved)[0]["finding_id"], finding["finding_id"]);
+    assert_eq!(findings(&moved)[0]["lines"], serde_json::json!([2, 4, 5]));
+    // The same value in another file is a separate finding.
+    fs::write(dir.path().join("other.py"), format!("A = {token}\n")).unwrap();
+    let two = scan(dir.path());
+    assert_eq!(findings(&two).len(), 2);
+    assert_eq!(
+        findings(&two)[0]["fingerprint"],
+        findings(&two)[1]["fingerprint"]
+    );
+    assert_ne!(
+        findings(&two)[0]["finding_id"],
+        findings(&two)[1]["finding_id"]
+    );
+}
+
+#[test]
+fn finding_ids_are_scoped_to_the_worktree() {
+    let one = tempfile::tempdir().unwrap();
+    let two = tempfile::tempdir().unwrap();
+    for dir in [&one, &two] {
+        fs::write(dir.path().join("a.py"), format!("A = {}\n", github_token())).unwrap();
+    }
+    let a = scan(one.path());
+    let b = scan(two.path());
+    assert_ne!(findings(&a)[0]["finding_id"], findings(&b)[0]["finding_id"]);
+    assert_eq!(findings(&a)[0]["finding_id"].as_str().unwrap().len(), 32);
+}
+
+fn direct_scan() -> SecretScan {
+    SecretScan::new(&key("install-one"), "codebase", "worktree")
+}
+
+fn no_skips() -> WalkSkips {
+    WalkSkips {
+        sensitive: 0,
+        oversize: 0,
+    }
+}
+
+// Paths past the platform's single-call limit cannot be created on every
+// system, so these drive the scan with the path the walk would hand it.
+#[test]
+fn a_secret_under_a_deep_path_is_reported_in_full() {
+    let path = format!("{}/a.py", vec!["d".repeat(100); 12].join("/"));
+    assert!(path.len() > 1200);
+    let mut scan = direct_scan();
+    assert!(scan.admits(&path));
+    scan.observe(&path, format!("A = {}\n", github_token()).as_bytes());
+    let report = scan.report(&no_skips(), &[]);
+    let found = report["findings"].as_array().unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["path"], path.as_str());
+    assert_eq!(report["status"], "complete");
+}
+
+#[test]
+fn a_path_past_the_bound_is_left_unread_and_leaves_the_scan_incomplete() {
+    let path = format!("{}/a.py", "d".repeat(super::secrets::MAX_PATH_BYTES));
+    let mut scan = direct_scan();
+    assert!(!scan.admits(&path));
+    let report = scan.report(&no_skips(), &[]);
+    assert!(report["findings"].as_array().unwrap().is_empty());
+    assert_eq!(report["status"], "incomplete");
+    assert_eq!(report["truncation_reasons"][0], "path_too_long");
 }
 
 #[test]

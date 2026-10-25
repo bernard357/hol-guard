@@ -1,58 +1,77 @@
 """Project the native secret scan into workspace findings and coverage.
 
-The native snapshot has already redacted every finding: it carries a rule id,
-a root-relative path, a line and a keyed fingerprint, never the matched text.
-This module only validates that shape and reshapes it. Anything that does not
-match the expected shape is dropped rather than copied, so a malformed reply
-cannot smuggle free text into stored findings.
+The native snapshot decides everything about a secret finding: it redacts the
+matched text, normalizes the severity, groups repeats of one secret in a file,
+derives the stable ``finding_id`` and decides whether the scan was complete.
+This module only checks that the reply has that shape and copies it into the
+stored finding. A reply that does not match is dropped rather than copied, so a
+malformed reply cannot smuggle free text into stored findings, and a dropped
+finding leaves the detector incomplete instead of silently complete.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
+import secrets
 from collections.abc import Mapping
-from typing import Final
+from typing import Any, Final
 
 SECRET_DETECTOR: Final = "secrets"
 SECRETS_RESULT_SCHEMA: Final = "guard.workspace-secrets.v1"
 MAX_SECRET_FINDINGS: Final = 500
+FINGERPRINT_KEY_STATE_KEY: Final = "workspace_secret_fingerprint_key"
 
+_FINDING_ID = re.compile(r"[0-9a-f]{32}")
 _RULE_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _FINGERPRINT = re.compile(r"[0-9a-f]{32}")
 _REASON = re.compile(r"[a-z0-9_]{1,40}")
-_SEVERITIES: Final = frozenset({"critical", "high", "medium", "low", "info"})
-_MAX_PATH_CHARS: Final = 1024
+_SEVERITIES: Final = frozenset({"critical", "high", "medium", "low", "info", "unknown"})
+# The native scan leaves a longer path unread and reports it as a truncation,
+# so every path it reports fits here.
+_MAX_PATH_CHARS: Final = 4096
+_MAX_LINES: Final = 16
 _SKIP_KINDS: Final = ("credential_store", "not_text", "oversize")
 
 
-def project_secret_findings(worktree_key: str, result: object) -> list[dict[str, object]]:
-    """Return one finding per distinct secret location in the native result."""
+def load_fingerprint_key(store: Any, now: str) -> str:
+    """Read (or create) the per-install secret that keys secret fingerprints.
 
-    raw = result.get("findings") if isinstance(result, Mapping) else None
-    if not isinstance(raw, list):
-        return []
-    findings: dict[str, dict[str, object]] = {}
-    for item in raw[:MAX_SECRET_FINDINGS]:
-        finding = _finding(worktree_key, item)
-        if finding is not None:
-            findings.setdefault(str(finding["finding_id"]), finding)
-    return list(findings.values())
+    The native scan keys each fingerprint with it, so a stored fingerprint
+    cannot be used to test guessed values without this key. It stays in the
+    local store and is handed to the native process on stdin only.
+    """
+
+    raw = store.get_sync_payload(FINGERPRINT_KEY_STATE_KEY)
+    existing = raw.get("key") if isinstance(raw, dict) else None
+    if isinstance(existing, str) and len(existing) >= 32:
+        return existing
+    created = secrets.token_hex(32)
+    store.set_sync_payload(FINGERPRINT_KEY_STATE_KEY, {"key": created}, now)
+    return created
+
+
+def project_secret_findings(result: object) -> list[dict[str, object]]:
+    """Return the well-formed findings of a native secret result."""
+
+    return _projection(result)[0]
 
 
 def secret_coverage(result: object) -> tuple[str, dict[str, object], list[str]]:
     """Return the detector status, a coverage summary and any truncation reasons.
 
-    The status is ``complete`` only for a well-formed result that scanned every
-    file it was given; a missing or malformed result is an ``error``.
+    The status is the native one for a well-formed result; a missing or
+    malformed result is an ``error``, and a finding that fails validation makes
+    an otherwise complete scan ``incomplete``.
     """
 
     if not isinstance(result, Mapping) or result.get("schema") != SECRETS_RESULT_SCHEMA:
         return "error", {}, ["unreadable_result"]
-    reasons = _reasons(result.get("truncation_reasons"))
     status = result.get("status")
     if status not in {"complete", "incomplete"}:
         return "error", {}, ["unreadable_result"]
+    reasons = _reasons(result.get("truncation_reasons"))
+    if _projection(result)[1]:
+        reasons = sorted({*reasons, "invalid_finding"})
     if status == "incomplete" and not reasons:
         reasons = ["incomplete"]
     skipped = result.get("skipped")
@@ -62,41 +81,52 @@ def secret_coverage(result: object) -> tuple[str, dict[str, object], list[str]]:
         "skipped": {kind: _count(skipped.get(kind)) if isinstance(skipped, Mapping) else 0 for kind in _SKIP_KINDS},
         "truncation_reasons": reasons,
     }
-    return ("complete" if status == "complete" and not reasons else "incomplete"), summary, reasons
+    return ("incomplete" if reasons else "complete"), summary, reasons
 
 
-def _finding(worktree_key: str, item: object) -> dict[str, object] | None:
+def _projection(result: object) -> tuple[list[dict[str, object]], int]:
+    raw = result.get("findings") if isinstance(result, Mapping) else None
+    if not isinstance(raw, list):
+        return [], 0
+    findings = [finding for item in raw[:MAX_SECRET_FINDINGS] if (finding := _finding(item)) is not None]
+    return findings, len(raw[:MAX_SECRET_FINDINGS]) - len(findings) + max(0, len(raw) - MAX_SECRET_FINDINGS)
+
+
+def _finding(item: object) -> dict[str, object] | None:
     if not isinstance(item, Mapping):
         return None
+    finding_id = item.get("finding_id")
     rule_id = item.get("rule_id")
     path = item.get("path")
     line = item.get("line")
+    lines = item.get("lines")
+    occurrences = item.get("occurrences")
     fingerprint = item.get("fingerprint")
+    severity = item.get("severity")
     if (
-        not isinstance(rule_id, str)
+        not isinstance(finding_id, str)
+        or not _FINDING_ID.fullmatch(finding_id)
+        or not isinstance(rule_id, str)
         or not _RULE_ID.fullmatch(rule_id)
         or not isinstance(path, str)
         or not path
         or len(path) > _MAX_PATH_CHARS
         or "\0" in path
-        or isinstance(line, bool)
-        or not isinstance(line, int)
-        or line < 1
+        or not _is_line(line)
+        or not isinstance(lines, list)
+        or not 1 <= len(lines) <= _MAX_LINES
+        or not all(_is_line(value) for value in lines)
+        or not _is_count(occurrences)
         or not isinstance(fingerprint, str)
         or not _FINGERPRINT.fullmatch(fingerprint)
+        or severity not in _SEVERITIES
     ):
         return None
-    severity = str(item.get("severity") or "").lower()
-    # The line is left out of the identity so the same secret keeps its
-    # finding when surrounding lines move.
-    finding_id = hashlib.sha256(
-        "\0".join(("guard.workspace-finding.v1", worktree_key, "secret", rule_id, path, fingerprint)).encode("utf-8")
-    ).hexdigest()[:32]
     return {
         "finding_id": finding_id,
         "source_kind": "secret",
         "detector": SECRET_DETECTOR,
-        "severity": severity if severity in _SEVERITIES else "unknown",
+        "severity": severity,
         "decision": "warn",
         "ecosystem": None,
         "package_name": None,
@@ -106,10 +136,20 @@ def _finding(worktree_key: str, item: object) -> dict[str, object] | None:
         "advisory_ids": [],
         "path": path,
         "line": line,
+        "lines": list(lines),
+        "occurrences": occurrences,
         "fingerprint": fingerprint,
         "validation_state": "unvalidated",
         "lifecycle_state": "open",
     }
+
+
+def _is_line(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _is_count(value: object) -> bool:
+    return _is_line(value)
 
 
 def _reasons(value: object) -> list[str]:
@@ -125,6 +165,7 @@ def _count(value: object) -> int:
 __all__ = [
     "MAX_SECRET_FINDINGS",
     "SECRET_DETECTOR",
+    "load_fingerprint_key",
     "project_secret_findings",
     "secret_coverage",
 ]

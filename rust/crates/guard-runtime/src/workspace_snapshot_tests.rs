@@ -14,6 +14,7 @@ fn request(root: &Path, mode: SnapshotMode) -> SnapshotRequest {
         max_file_bytes: 0,
         max_visited_entries: 0,
         secrets: false,
+        secret_key: None,
     }
 }
 

@@ -55,6 +55,7 @@ const state = normalizeWorkspaceFindingsState(
             rule_ids: ["github-token"],
             path: "src/deploy.py",
             line: 2,
+            lines: [2, 9, 0, "x", 31],
             fingerprint: "0".repeat(32),
             validation_state: "unvalidated",
             package_name: null,
@@ -96,6 +97,8 @@ assert.deepEqual(
   ["secret", ["github-token"], "src/deploy.py", 2, null],
   "a secret finding is read as a rule and a file location, with no package",
 );
+assert.deepEqual(secretFinding.lines, [2, 9, 31], "every line of a repeated secret is kept, malformed entries dropped");
+assert.deepEqual(assessment.findings[0].lines, [], "a dependency finding has no lines");
 
 const [onlyNotRun] = normalizeWorkspaceFindingsState(
   { worktrees: [], runs: [] },

@@ -303,6 +303,11 @@ function FindingsSections(props: { findings: WorkspaceFinding[]; secretsChecked:
   );
 }
 
+function secretLines(finding: WorkspaceFinding): string {
+  const lines = finding.lines.length > 0 ? finding.lines : finding.line !== null ? [finding.line] : [];
+  return lines.length > 0 ? `:${lines.join(", ")}` : "";
+}
+
 function SecretFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -325,7 +330,7 @@ function SecretFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
               <Cell label="Location" wide>
                 <span className="break-all font-mono text-xs text-slate-700">
                   {finding.path}
-                  {finding.line !== null ? `:${finding.line}` : ""}
+                  {secretLines(finding)}
                 </span>
               </Cell>
               <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
