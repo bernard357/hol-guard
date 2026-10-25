@@ -53,7 +53,7 @@ def _parse_result(result: object) -> RuntimeProbe:
     observations = result.get("observations")
     if not (isinstance(artifacts, list) and isinstance(locations, list) and isinstance(observations, list)):
         raise RuntimeIdentityError("runtime_identity_probe_failed")
-    artifact_ids = {row.get("artifact_id") for row in artifacts if isinstance(row, dict)}
+    artifact_ids: set[object] = {row.get("artifact_id") for row in artifacts if isinstance(row, dict)}
     if not (
         all(_artifact_ok(row) for row in artifacts)
         and all(_location_ok(row, artifact_ids) for row in locations)
