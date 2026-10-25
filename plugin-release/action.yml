@@ -108,9 +108,6 @@ runs:
         PYTHONSAFEPATH: "1"
       run: |
         set -euo pipefail
-        # Hosted runners default to umask 002. Guard refuses a group-writable
-        # native runtime manifest, so install the wheel without group write.
-        umask 022
         PIN_DIR="$GITHUB_ACTION_PATH"
         LOCK_DIR="$GITHUB_ACTION_PATH/../action"
         GUARD_VERSION="$(tr -d '[:space:]' < "$PIN_DIR/guard-version.txt")"
@@ -159,6 +156,10 @@ runs:
         fi
         python3 -P -m pip install --no-deps --require-hashes --only-binary=:all: -r "$LOCK_DIR/scanner-runtime-requirements.txt"
         python3 -P -m pip install --no-deps "$WHEEL_PATH"
+        # The hosted tool cache leaves installed files group- and world-writable,
+        # and Guard refuses a native runtime manifest anyone else can rewrite.
+        GUARD_PACKAGE_DIR="$(python3 -P -c 'import codex_plugin_scanner, pathlib; print(pathlib.Path(codex_plugin_scanner.__file__).parent)')"
+        chmod -R go-w "$GUARD_PACKAGE_DIR"
         echo "HOL_GUARD_VERSION=${GUARD_VERSION}" >> "$GITHUB_ENV"
 
     - name: Scan release to SARIF
