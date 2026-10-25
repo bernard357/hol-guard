@@ -497,29 +497,7 @@ def _cli_gate() -> None:
         raise RuntimeError("CLI native authority helper is missing")
     calls = _ordered_call_names(fn)
     if "try_native_hook_authority" not in calls:
-        if "run_native_hook_pipeline" not in calls:
-            raise RuntimeError("CLI hook path is missing native authority routing")
-        pipeline_path = Path("src/codex_plugin_scanner/guard/cli/commands_hook_native_pipeline.py")
-        pipeline_tree = ast.parse(_read(pipeline_path), filename=str(pipeline_path))
-        pipeline_fn = next(
-            (
-                node
-                for node in pipeline_tree.body
-                if isinstance(node, ast.FunctionDef) and node.name == "run_native_hook_pipeline"
-            ),
-            None,
-        )
-        if pipeline_fn is None:
-            raise RuntimeError("CLI native pipeline dispatcher is missing")
-        pipeline_calls = _ordered_call_names(pipeline_fn) + [
-            child.func.attr
-            for child in ast.walk(pipeline_fn)
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
-        ]
-        if "native_hook_route" not in pipeline_calls or "run_route_plan" not in pipeline_calls:
-            raise RuntimeError("CLI native pipeline does not take its route from the resident")
-        # The native edge call lives in the route's `native_edge` handler, which
-        # the pretool graph gate above checks.
+        raise RuntimeError("CLI hook path is missing native authority routing")
     for retired in ("_try_source_ref_fast_path", "record_python_semantic_hook_route", "evaluate_source_file_ref"):
         if retired in calls:
             raise RuntimeError(f"CLI hook path still calls retired Python route {retired}")
