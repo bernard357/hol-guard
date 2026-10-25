@@ -2,8 +2,9 @@
 
 One state row per admitted worktree carries its dirty generation; one run row
 per assessment attempt carries the snapshot it was bound to, its lease and its
-bounded result. Customer source never lands here: findings hold package
-coordinates and rule identifiers only. A fix proposal row binds one reviewed
+bounded result. A worktree watched only because a harness install registered
+it is marked, so its admission ends with the install. Customer source never
+lands here: findings hold package coordinates and rule identifiers only. A fix proposal row binds one reviewed
 manifest edit to the snapshot it was prepared against; it holds a bounded
 diff of the edit and the byte offsets to apply it, never the manifest itself.
 """
@@ -38,6 +39,15 @@ _STATEMENTS: Final = (
         admitted_at_ms INTEGER NOT NULL CHECK (admitted_at_ms >= 0),
         PRIMARY KEY (codebase_key, worktree_key),
         CHECK (last_completed_generation >= 0 AND last_completed_generation <= dirty_generation)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS workspace_assessment_install_admissions (
+        codebase_key TEXT NOT NULL,
+        worktree_key TEXT NOT NULL,
+        PRIMARY KEY (codebase_key, worktree_key),
+        FOREIGN KEY (codebase_key, worktree_key)
+            REFERENCES workspace_assessment_state(codebase_key, worktree_key) ON DELETE CASCADE
     )
     """,
     """
