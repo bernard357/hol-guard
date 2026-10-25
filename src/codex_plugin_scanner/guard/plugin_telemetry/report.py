@@ -90,7 +90,7 @@ def fetch_index() -> list[dict[str, object]]:
     ]
 
 
-def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
+def _native_request(request: Mapping[str, object], *, feature: str = PLUGIN_TELEMETRY_FEATURE) -> dict[str, Any]:
     from ..codex_hook_launch_runtime import run_isolated_hook_process
     from ..native_runtime import native_runtime_status
 
@@ -100,9 +100,9 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
         or not status.compatible
         or status.identity is None
         or status.capabilities is None
-        or PLUGIN_TELEMETRY_FEATURE not in status.capabilities.features
+        or feature not in status.capabilities.features
     ):
-        raise PluginTelemetryError("Plugin install counts need the Guard native runtime. Run: pip install -U hol-guard")
+        raise PluginTelemetryError("This command needs a newer Guard native runtime. Run: pip install -U hol-guard")
     runtime = status.identity.path
     input_text = json.dumps(dict(request), sort_keys=True, separators=(",", ":"))
     if len(input_text.encode("utf-8")) > _NATIVE_REQUEST_LIMIT_BYTES:
