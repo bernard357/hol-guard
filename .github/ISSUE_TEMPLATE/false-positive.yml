@@ -61,6 +61,4 @@ body:
     id: version
     attributes:
       label: Guard version
-      description: Output of `hol-guard --version`.
-    validations:
-      required: true
+      description: Output of `hol-guard --version` (or `plugin-scanner --version`). Leave blank if you only saw the flag on the marketplace page.
