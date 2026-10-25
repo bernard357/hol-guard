@@ -9,7 +9,9 @@ plugins leaves the device.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ..plugin_telemetry.report import PluginTelemetryError
 from ..plugin_telemetry.updates import check_updates, dismiss_update
@@ -19,20 +21,28 @@ _FIELD_LIMIT = 512
 
 
 def _guard_home(handler: object) -> Path:
-    return Path(handler.server.store.guard_home)  # type: ignore[attr-defined]
+    server = getattr(handler, "server", None)
+    return Path(getattr(getattr(server, "store", None), "guard_home", ""))
+
+
+def _writer(handler: object) -> Callable[..., Any]:
+    write_json = getattr(handler, "_write_json", None)
+    if not callable(write_json):
+        raise TypeError("daemon handler cannot write JSON")
+    return write_json
 
 
 def handle_plugin_updates_read(handler: object) -> None:
     try:
         payload = check_updates(_guard_home(handler))
     except PluginTelemetryError as error:
-        handler._write_json(  # type: ignore[attr-defined]
+        _writer(handler)(
             {"error": "plugin_updates_unavailable", "message": str(error)},
             status=503,
             extra_headers=_NO_STORE,
         )
         return
-    handler._write_json(payload, extra_headers=_NO_STORE)  # type: ignore[attr-defined]
+    _writer(handler)(payload, extra_headers=_NO_STORE)
 
 
 def _field(payload: dict[str, object], name: str) -> str | None:
@@ -49,7 +59,7 @@ def handle_plugin_updates_dismiss(handler: object, payload: dict[str, object]) -
     slug = _field(payload, "slug")
     version = _field(payload, "version")
     if slug is None or version is None:
-        handler._write_json(  # type: ignore[attr-defined]
+        _writer(handler)(
             {"error": "invalid_plugin_update", "message": "Name the listing slug and the version to dismiss."},
             status=400,
             extra_headers=_NO_STORE,
@@ -58,10 +68,10 @@ def handle_plugin_updates_dismiss(handler: object, payload: dict[str, object]) -
     try:
         result = dismiss_update(_guard_home(handler), slug, version)
     except PluginTelemetryError as error:
-        handler._write_json(  # type: ignore[attr-defined]
+        _writer(handler)(
             {"error": "plugin_updates_unavailable", "message": str(error)},
             status=503,
             extra_headers=_NO_STORE,
         )
         return
-    handler._write_json(result, extra_headers=_NO_STORE)  # type: ignore[attr-defined]
+    _writer(handler)(result, extra_headers=_NO_STORE)
