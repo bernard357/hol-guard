@@ -5,19 +5,31 @@
 //! cached-bundle check passes (workspace scope, payload hash, signature, key
 //! state, freshness and rollback), so a bundle with a bad signature, another
 //! workspace's scope or an older version than the last sync never supplies
-//! advisories. Unknown target kinds and malformed entries are skipped and
-//! counted rather than guessed at.
+//! advisories. A recorded sync must name this workspace and a bundle version,
+//! as package evaluation requires. Unknown target kinds, malformed entries,
+//! repeated advisory ids and entries past the request bounds are skipped and
+//! counted rather than guessed at or allowed to fail the assessment.
+//!
+//! A bundle verified only against its own advertised keyring (no recorded
+//! sync keyring anchored it) can report a runtime affected but never clear
+//! one, the same limit package evaluation puts on such a bundle.
+
+use std::collections::BTreeSet;
 
 use guard_command::supply_chain_bundle::{
     load_supply_chain_bundle_response, SupplyChainBundleError,
 };
 use guard_command::supply_chain_bundle_cache_trust::{
-    validate_cached_supply_chain_bundle, CachedBundleRejection,
+    cached_supply_chain_bundle_valid_until, validate_cached_supply_chain_bundle,
+    CachedBundleRejection,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{parse_intervals, AdvisoryInput, PlatformInput, RangeInput, MAX_RANGES};
+use super::{
+    parse_intervals, AdvisoryInput, PlatformInput, RangeInput, MAX_ADVISORIES,
+    MAX_ARTIFACT_ADVISORY_PAIRS, MAX_RANGES,
+};
 
 pub(crate) const FEATURE: &str = "runtime-identity-assess-bundle-v1";
 const SECTION_KEY: &str = "runtimeAdvisories";
@@ -30,8 +42,9 @@ pub(crate) struct CachedBundleInput {
     workspace_id: String,
     #[serde(default)]
     sync_keyring: Option<Value>,
+    /// The recorded `supply_chain_bundle_entitlement` sync payload, if any.
     #[serde(default)]
-    synced_bundle_version: Option<String>,
+    entitlement: Option<Value>,
     #[serde(default)]
     now: Option<f64>,
 }
@@ -90,13 +103,31 @@ struct Host {
     vendor: String,
 }
 
+/// The room a request leaves for bundled advisories: the caller's own
+/// advisories and artifacts count against the same bounds.
+pub(crate) struct Budget<'a> {
+    pub(crate) artifacts: usize,
+    pub(crate) supplied: &'a [AdvisoryInput],
+}
+
+impl Budget<'_> {
+    fn capacity(&self) -> usize {
+        MAX_ADVISORIES
+            .min(MAX_ARTIFACT_ADVISORY_PAIRS / self.artifacts.max(1))
+            .saturating_sub(self.supplied.len())
+    }
+}
+
 /// The advisories the cached bundle supplies, and a report of where they came
 /// from. Advisories are empty unless the source state is `verified`.
-pub(crate) fn bundle_advisories(input: Option<&CachedBundleInput>) -> (Vec<AdvisoryInput>, Value) {
+pub(crate) fn bundle_advisories(
+    input: Option<&CachedBundleInput>,
+    budget: &Budget<'_>,
+) -> (Vec<AdvisoryInput>, Value) {
     let Some(input) = input else {
         return (Vec::new(), source("absent", None, None));
     };
-    evaluate(input, input.now)
+    evaluate(input, input.now, budget)
 }
 
 /// Launch admission keeps an expired bundle's rules for positive matches only:
@@ -105,7 +136,11 @@ pub(crate) fn bundle_advisories(input: Option<&CachedBundleInput>) -> (Vec<Advis
 /// signature, key state and rollback are still enforced; only freshness is
 /// relaxed, and the report stays `stale` so callers never clear on it.
 pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> LaunchAdvisories {
-    let (advisories, source) = bundle_advisories(input);
+    let budget = Budget {
+        artifacts: 1,
+        supplied: &[],
+    };
+    let (advisories, source) = bundle_advisories(input, &budget);
     let current = LaunchAdvisories { advisories, source };
     let (Some(input), Some("bundle_expired")) = (input, current.source["reason"].as_str()) else {
         return current;
@@ -116,7 +151,7 @@ pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> Lau
     else {
         return current;
     };
-    let (advisories, mut source) = evaluate(input, Some(expired_at));
+    let (advisories, mut source) = evaluate(input, Some(expired_at), &budget);
     if source["state"] != "verified" {
         return current;
     }
@@ -138,19 +173,27 @@ impl CachedBundleInput {
         response: Value,
         workspace_id: String,
         sync_keyring: Option<Value>,
-        synced_bundle_version: Option<String>,
+        entitlement: Option<Value>,
     ) -> Self {
         Self {
             response,
             workspace_id,
             sync_keyring,
-            synced_bundle_version,
+            entitlement,
             now: None,
         }
     }
 }
 
-fn evaluate(input: &CachedBundleInput, now: Option<f64>) -> (Vec<AdvisoryInput>, Value) {
+fn evaluate(
+    input: &CachedBundleInput,
+    now: Option<f64>,
+    budget: &Budget<'_>,
+) -> (Vec<AdvisoryInput>, Value) {
+    let synced_version = match synced_bundle_version(input) {
+        Ok(version) => version,
+        Err(reason) => return (Vec::new(), source("invalid", Some(reason), None)),
+    };
     let typed = match load_supply_chain_bundle_response(&input.response) {
         Ok(typed) => typed,
         Err(_) => {
@@ -165,7 +208,7 @@ fn evaluate(input: &CachedBundleInput, now: Option<f64>) -> (Vec<AdvisoryInput>,
         &input.workspace_id,
         now,
         input.sync_keyring.as_ref(),
-        input.synced_bundle_version.as_deref(),
+        synced_version.as_deref(),
     ) {
         Ok(anchored) => anchored,
         Err(rejection) => {
@@ -174,16 +217,21 @@ fn evaluate(input: &CachedBundleInput, now: Option<f64>) -> (Vec<AdvisoryInput>,
         }
     };
     let bundle_version = typed.bundle.bundle_version.as_str();
+    let valid_until = cached_supply_chain_bundle_valid_until(&typed.bundle);
     let verified = |reason: Option<&str>, extra: Value| {
         let mut report = source("verified", reason, Some(bundle_version));
         report["anchored"] = json!(anchored);
+        report["valid_until"] = json!(valid_until);
         if let (Some(report), Value::Object(extra)) = (report.as_object_mut(), extra) {
             report.extend(extra);
         }
         report
     };
     let Some(raw) = typed.signed_bundle.get(SECTION_KEY) else {
-        return (Vec::new(), verified(Some("section_absent"), json!({})));
+        return (
+            Vec::new(),
+            with_coverage(verified(Some("section_absent"), json!({}))),
+        );
     };
     let Ok(section) = Section::deserialize(raw) else {
         return (
@@ -205,22 +253,64 @@ fn evaluate(input: &CachedBundleInput, now: Option<f64>) -> (Vec<AdvisoryInput>,
             ),
         );
     }
-    let advisories: Vec<AdvisoryInput> = section
+    let mut usable_entries: Vec<AdvisoryInput> = section
         .entries
         .iter()
         .filter_map(|raw| Entry::deserialize(raw).ok().map(advisory_input))
         .filter(usable)
         .collect();
-    let skipped = section.entries.len() - advisories.len();
+    // When the bounds force a cut, the most severe entries are kept.
+    usable_entries.sort_by_key(|advisory| std::cmp::Reverse(importance(advisory)));
+    let mut seen: BTreeSet<String> = budget
+        .supplied
+        .iter()
+        .map(|advisory| advisory.advisory_id.clone())
+        .collect();
+    let unique: Vec<AdvisoryInput> = usable_entries
+        .into_iter()
+        .filter(|advisory| seen.insert(advisory.advisory_id.clone()))
+        .collect();
+    let truncated = unique.len().saturating_sub(budget.capacity());
+    let advisories: Vec<AdvisoryInput> = unique.into_iter().take(budget.capacity()).collect();
     let report = verified(
-        None,
+        (truncated > 0).then_some("section_truncated"),
         json!({
             "ruleset_version": section.ruleset_version,
             "entries": advisories.len(),
-            "entries_skipped": skipped,
+            "entries_skipped": section.entries.len() - advisories.len(),
+            "entries_truncated": truncated,
         }),
     );
-    (advisories, report)
+    (advisories, with_coverage(report))
+}
+
+/// Mirrors package evaluation: a recorded sync must belong to this workspace
+/// and name the version it synced, or the cache cannot be checked for rollback.
+fn synced_bundle_version(input: &CachedBundleInput) -> Result<Option<String>, &'static str> {
+    let Some(entitlement) = input.entitlement.as_ref().filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    if entitlement.get("workspace_id").and_then(Value::as_str) != Some(&input.workspace_id) {
+        return Err("sync_record_scope_mismatch");
+    }
+    entitlement
+        .get("bundle_version")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(|version| Some(version.to_owned()))
+        .ok_or("sync_record_invalid")
+}
+
+fn importance(advisory: &AdvisoryInput) -> (bool, u8) {
+    let severity = match advisory.severity.as_deref() {
+        Some("critical") => 4,
+        Some("high") => 3,
+        Some("medium" | "moderate") => 2,
+        Some("low") => 1,
+        _ => 0,
+    };
+    (advisory.known_exploited, severity)
 }
 
 fn advisory_input(entry: Entry) -> AdvisoryInput {
@@ -294,15 +384,36 @@ fn rejection_state(rejection: &CachedBundleRejection) -> (&'static str, &'static
 }
 
 fn source(state: &str, reason: Option<&str>, bundle_version: Option<&str>) -> Value {
-    json!({
+    with_coverage(json!({
         "state": state,
         "reason": reason,
         "bundle_version": bundle_version,
         "anchored": false,
+        "valid_until": null,
         "ruleset_version": null,
         "entries": 0,
         "entries_skipped": 0,
-    })
+        "entries_truncated": 0,
+    }))
+}
+
+/// Adds the coverage a report gives callers: whether advisories were
+/// available, and if not, why. Callers relay these rather than deciding.
+fn with_coverage(mut report: Value) -> Value {
+    let state = report["state"].as_str().unwrap_or("invalid").to_owned();
+    let entries = report["entries"].as_u64().unwrap_or(0);
+    let available = state == "verified" && entries > 0;
+    let reason = match (available, state.as_str()) {
+        (true, _) if report["anchored"] != true => {
+            Some("runtime_advisory_bundle_unanchored".to_owned())
+        }
+        (true, _) => None,
+        (false, "verified") => Some("runtime_advisories_not_in_bundle".to_owned()),
+        (false, state) => Some(format!("runtime_advisory_bundle_{state}")),
+    };
+    report["advisories_available"] = json!(available);
+    report["coverage_reason"] = json!(reason);
+    report
 }
 
 #[cfg(test)]

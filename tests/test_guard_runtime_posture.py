@@ -280,6 +280,26 @@ def test_cli_json_shape(
     assert payload["runtimes"][0]["family"] == "node"
 
 
+def test_cli_unreadable_store_costs_the_advisories_not_the_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, native_runtime: Path
+) -> None:
+    from codex_plugin_scanner.guard import runtime_advisory_bundle
+
+    def locked(*_args: object, **_kwargs: object) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(runtime_advisory_bundle, "cached_advisory_bundle", locked)
+    node = _nvm_node(tmp_path)
+    _patch_detections(monkeypatch, [_detection("node")], path=str(node.parent))
+
+    code = main(["guard", "runtime", "posture", "--json", *_guard_args(tmp_path)])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["coverage"]["reason"] == runtime_advisory_bundle.BUNDLE_UNREADABLE
+    assert payload["runtimes"][0]["family"] == "node"
+
+
 def test_cli_human_output_is_honest_about_coverage(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, native_runtime: Path
 ) -> None:

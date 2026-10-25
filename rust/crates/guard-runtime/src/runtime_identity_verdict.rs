@@ -74,12 +74,16 @@ pub(super) fn match_artifact(
 
 /// `None` when the artifact's platform is listed, `Some(None)` when it is
 /// clearly another platform, and an unknown match when the probe could not
-/// tell which platform it runs on.
+/// tell which platform it runs on. A wildcard covers every value, unknown
+/// included. A universal (multi-architecture) binary may run any slice it
+/// carries, so it confirms no single architecture.
 fn platform_mismatch(input: &ArtifactInput, advisory: &AdvisoryInput) -> Option<Option<Match>> {
+    let unconfirmed =
+        |have: &str| have.eq_ignore_ascii_case("unknown") || have.eq_ignore_ascii_case("universal");
     let fits = |want: &str, have: &str, unknown_fits: bool| {
         want == "*"
-            || want.eq_ignore_ascii_case(have)
-            || (unknown_fits && have.eq_ignore_ascii_case("unknown"))
+            || (want.eq_ignore_ascii_case(have) && !unconfirmed(have))
+            || (unknown_fits && unconfirmed(have))
     };
     let listed = |unknown_fits: bool| {
         advisory.platforms.iter().any(|platform| {

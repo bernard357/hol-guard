@@ -12,7 +12,8 @@ use serde_json::Value;
 
 use crate::supply_chain_bundle::{
     load_supply_chain_verification_keys, verify_supply_chain_bundle_response, RingRsaPssVerify,
-    SupplyChainBundleError, SupplyChainBundleResponse,
+    SupplyChainBundle, SupplyChainBundleError, SupplyChainBundleResponse,
+    BUNDLE_CLOCK_SKEW_SECONDS, BUNDLE_MAX_AGE_SECONDS,
 };
 
 /// Why a cached bundle cannot be used.
@@ -112,4 +113,13 @@ pub fn validate_cached_supply_chain_bundle(
         }
     }
     Ok(!keys.is_empty())
+}
+
+/// The last moment the freshness check still accepts `bundle`: its signed
+/// expiry or its maximum age, whichever comes first, with the clock skew the
+/// check allows. A cached result built from the bundle is stale after it.
+pub fn cached_supply_chain_bundle_valid_until(bundle: &SupplyChainBundle) -> Option<f64> {
+    let expires = bundle.expires_at_timestamp().ok()? + BUNDLE_CLOCK_SKEW_SECONDS;
+    let aged = bundle.generated_at_timestamp().ok()? + BUNDLE_MAX_AGE_SECONDS;
+    Some(expires.min(aged))
 }

@@ -32,7 +32,7 @@ static ADVISORIES: Mutex<Option<(StoreKey, Instant, Arc<LaunchAdvisories>)>> = M
 
 /// The verified (or stale, positive-only) advisories for this Guard home's
 /// workspace. `None` when Guard is not connected or has no cached bundle for
-/// it, or a recorded sync names another workspace.
+/// it; a bundle the shared check refuses supplies no advisories.
 pub(super) fn advisories(guard_home: &Path) -> Option<Arc<LaunchAdvisories>> {
     let connection = open_read_only_cached(&guard_home.join(STORE_FILE_NAME)).ok()??;
     if !table_exists(&connection, "sync_state").ok()?
@@ -68,22 +68,10 @@ pub(super) fn advisories(guard_home: &Path) -> Option<Arc<LaunchAdvisories>> {
     Some(advisories)
 }
 
-/// The native cached-bundle input, as the posture loader builds it.
+/// The native cached-bundle input, as the posture loader builds it. The
+/// recorded sync is passed through as-is; the shared check refuses a cache it
+/// cannot vouch for.
 fn bundle_input(connection: &Connection, workspace: String) -> Option<CachedBundleInput> {
-    let mut synced_version = None;
-    if let Some(entitlement) = sync_payload(connection, ENTITLEMENT_KEY) {
-        if entitlement.is_object() {
-            // A recorded sync for another workspace cannot vouch for this cache.
-            if entitlement.get("workspace_id").and_then(Value::as_str) != Some(&workspace) {
-                return None;
-            }
-            synced_version = entitlement
-                .get("bundle_version")
-                .and_then(Value::as_str)
-                .filter(|version| !version.is_empty())
-                .map(str::to_owned);
-        }
-    }
     let response: String = connection
         .prepare_cached(&format!(
             "select response_json from {BUNDLE_TABLE} where workspace_id = ?1 limit 1"
@@ -92,12 +80,11 @@ fn bundle_input(connection: &Connection, workspace: String) -> Option<CachedBund
         .ok()?;
     let mut response: Value = serde_json::from_str(&response).ok()?;
     response.as_object_mut()?.remove("cached_at");
-    let keyring = sync_payload(connection, KEYRING_KEY);
     Some(CachedBundleInput::new(
         response,
         workspace,
-        keyring,
-        synced_version,
+        sync_payload(connection, KEYRING_KEY),
+        sync_payload(connection, ENTITLEMENT_KEY),
     ))
 }
 

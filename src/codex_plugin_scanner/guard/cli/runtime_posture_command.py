@@ -45,7 +45,7 @@ def run_runtime_posture_command(
     output_stream: TextIO | None = None,
 ) -> int:
     from ..adapters.harness_mcp_discovery import configured_harness_detections
-    from ..runtime_advisory_bundle import cached_advisory_bundle
+    from ..runtime_advisory_bundle import BUNDLE_UNREADABLE, cached_advisory_bundle
     from ..runtime_posture import build_runtime_posture
     from ..store import GuardStore
 
@@ -56,7 +56,11 @@ def run_runtime_posture_command(
     detections = configured_harness_detections(
         context.home_dir, context.guard_home, context.workspace_dir, skipped=skipped
     )
-    advisory_bundle, bundle_reason = cached_advisory_bundle(GuardStore(context.guard_home))
+    try:
+        advisory_bundle, bundle_reason = cached_advisory_bundle(GuardStore(context.guard_home))
+    except Exception:
+        # A locked or damaged store costs the advisories, not the observation.
+        advisory_bundle, bundle_reason = None, BUNDLE_UNREADABLE
     payload = build_runtime_posture(
         detections,
         generated_at=datetime.now(timezone.utc).isoformat(),

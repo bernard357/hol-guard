@@ -17,7 +17,6 @@ from codex_plugin_scanner.guard import runtime_posture
 from codex_plugin_scanner.guard.cli.runtime_posture_command import render_runtime_posture
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
 from codex_plugin_scanner.guard.runtime_advisory_bundle import (
-    BUNDLE_SCOPE_MISMATCH,
     NOT_CACHED,
     NOT_CONNECTED,
     cached_advisory_bundle,
@@ -28,7 +27,7 @@ from codex_plugin_scanner.guard.runtime_identity_assessment import (
     RuntimeIdentityError,
 )
 from codex_plugin_scanner.guard.runtime_posture import (
-    ADVISORIES_NOT_IN_BUNDLE,
+    BUNDLE_ASSESSMENT_FAILED,
     BUNDLE_UNSUPPORTED,
     build_runtime_posture,
 )
@@ -72,19 +71,27 @@ def test_loader_hands_over_the_stored_response_and_sync_context() -> None:
         "response": {"bundle": {"bundleVersion": "v7"}, "signature": "s"},
         "workspace_id": WORKSPACE,
         "sync_keyring": keyring,
-        "synced_bundle_version": "v7",
+        "entitlement": {"workspace_id": WORKSPACE, "bundle_version": "v7"},
         "now": 42.0,
     }
+
+
+def test_loader_leaves_the_entitlement_check_to_the_native_runtime() -> None:
+    # A record naming another workspace is handed over as stored; the native
+    # runtime refuses it with the same check package evaluation applies.
+    entitlement = {"workspace_id": "other"}
+    store = FakeStore(payloads={"supply_chain_bundle_entitlement": entitlement}, cached={"bundle": {}})
+
+    bundle, reason = cached_advisory_bundle(store)
+
+    assert reason is None and bundle is not None
+    assert bundle["entitlement"] == entitlement
 
 
 @pytest.mark.parametrize(
     ("store", "expected"),
     [
         (FakeStore(workspace=None), NOT_CONNECTED),
-        (
-            FakeStore(payloads={"supply_chain_bundle_entitlement": {"workspace_id": "other"}}, cached={"bundle": {}}),
-            BUNDLE_SCOPE_MISMATCH,
-        ),
         (FakeStore(cached=None), NOT_CACHED),
     ],
 )
@@ -198,25 +205,56 @@ def test_older_native_runtime_falls_back_to_observation_only(
 
     assert ["cached_bundle" in request for request in seen] == [True, False]
     assert payload["status"] == "ok"
-    assert payload["advisory_source"] == {"state": "unsupported", "reason": BUNDLE_UNSUPPORTED}
+    assert payload["advisory_source"] == {
+        "state": "unsupported",
+        "reason": BUNDLE_UNSUPPORTED,
+        "coverage_reason": "runtime_advisory_bundle_unsupported",
+        "advisories_available": False,
+    }
     assert payload["coverage"]["advisories_available"] is False
     assert payload["coverage"]["reason"] == "runtime_advisory_bundle_unsupported"
 
 
-def test_other_bundle_failures_are_not_retried_without_the_bundle(
+def test_any_bundle_failure_still_reports_the_runtimes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_runtime: Path
 ) -> None:
+    # An oversized or otherwise rejected bundle request costs the advisories,
+    # never the observation of the runtimes themselves.
     calls: list[dict[str, object]] = []
 
     def assess(request: dict[str, object]) -> RuntimeIdentityAssessment:
         calls.append(request)
+        if "cached_bundle" in request:
+            raise RuntimeIdentityError("runtime_identity_input_too_large")
+        return _assessment({"state": "absent"})
+
+    monkeypatch.setattr(runtime_posture, "assess_runtime_identity", assess)
+
+    payload = _posture(tmp_path, advisory_bundle=BUNDLE_INPUT)
+
+    assert ["cached_bundle" in request for request in calls] == [True, False]
+    assert payload["status"] == "ok"
+    assert payload["runtimes"]
+    assert payload["advisory_source"]["reason"] == "runtime_identity_input_too_large"
+    assert payload["coverage"] | {"statement": ""} == {
+        "mode": "observed_only",
+        "instances_enumerated": False,
+        "advisories_available": False,
+        "reason": BUNDLE_ASSESSMENT_FAILED,
+        "statement": "",
+    }
+
+
+def test_assessment_that_fails_without_the_bundle_too_is_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_runtime: Path
+) -> None:
+    def assess(request: dict[str, object]) -> RuntimeIdentityAssessment:
         raise RuntimeIdentityError("runtime_identity_failed")
 
     monkeypatch.setattr(runtime_posture, "assess_runtime_identity", assess)
 
     payload = _posture(tmp_path, advisory_bundle=BUNDLE_INPUT)
 
-    assert len(calls) == 1
     assert payload["status"] == "partial"
     assert payload["coverage"]["reason"] == "runtime_assessment_failed"
 
@@ -224,13 +262,22 @@ def test_other_bundle_failures_are_not_retried_without_the_bundle(
 @pytest.mark.parametrize(
     ("source", "available", "reason"),
     [
-        ({"state": "verified", "entries": 2, "bundle_version": "v7"}, True, None),
-        ({"state": "verified", "entries": 0, "reason": "section_absent"}, False, ADVISORIES_NOT_IN_BUNDLE),
-        ({"state": "invalid", "reason": "signature_invalid"}, False, "runtime_advisory_bundle_invalid"),
-        ({"state": "stale", "reason": "bundle_expired"}, False, "runtime_advisory_bundle_stale"),
+        ({"state": "verified", "entries": 2, "advisories_available": True, "coverage_reason": None}, True, None),
+        (
+            {"state": "verified", "entries": 0, "advisories_available": False, "coverage_reason": "not_in_bundle"},
+            False,
+            "not_in_bundle",
+        ),
+        (
+            {"state": "invalid", "advisories_available": False, "coverage_reason": "bundle_invalid"},
+            False,
+            "bundle_invalid",
+        ),
+        # Only the native report decides availability; a verified state alone is not enough.
+        ({"state": "verified", "entries": 3}, False, None),
     ],
 )
-def test_coverage_follows_the_native_source_report(
+def test_coverage_relays_the_native_source_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     native_runtime: Path,
@@ -247,6 +294,24 @@ def test_coverage_follows_the_native_source_report(
     assert payload["advisory_source"] == source
 
 
+def test_an_empty_inventory_still_reports_the_bundle_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = {"state": "verified", "entries": 2, "advisories_available": True, "coverage_reason": None}
+    seen: list[dict[str, object]] = []
+
+    def assess(request: dict[str, object]) -> RuntimeIdentityAssessment:
+        seen.append(request)
+        return _assessment(source)
+
+    monkeypatch.setattr(runtime_posture, "assess_runtime_identity", assess)
+
+    payload = build_runtime_posture([], generated_at=NOW, environment={"PATH": ""}, advisory_bundle=BUNDLE_INPUT)
+
+    assert seen[0]["artifacts"] == []
+    assert payload["runtimes"] == []
+    assert payload["advisory_source"] == source
+    assert payload["coverage"]["advisories_available"] is True
+
+
 def test_loader_reason_is_reported_when_there_is_no_bundle(tmp_path: Path, native_runtime: Path) -> None:
     payload = _posture(tmp_path, advisory_bundle=None, advisory_bundle_reason=NOT_CONNECTED)
 
@@ -260,7 +325,7 @@ def test_affected_rows_carry_rule_metadata_and_render(
     def verdict(advisory_id: str, value: str, reasons: tuple[str, ...]) -> RuntimeAdvisoryVerdict:
         return RuntimeAdvisoryVerdict(advisory_id, value, reasons, (), (), (), "high", value == "affected", "Title")
 
-    source = {"state": "verified", "entries": 3, "bundle_version": "v7"}
+    source = {"state": "verified", "entries": 3, "bundle_version": "v7", "advisories_available": True}
     rows = (
         verdict("ADV-1", "affected", ("in_range",)),
         verdict("ADV-2", "unknown", ("vendor_unknown",)),

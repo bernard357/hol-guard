@@ -310,3 +310,44 @@ def test_a_newly_synced_bundle_is_rematched_before_the_cache_expires(
     fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=20))
 
     assert [call[0] for call in calls] == [None, _bundle("v7"), _bundle("v8")]  # type: ignore[index]
+
+
+def test_cached_matches_lapse_when_their_bundle_does(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expires = (NOW + timedelta(minutes=10)).timestamp()
+    calls: list[object] = []
+
+    def observe(_context: object, now: object, _advisory: object) -> dict[str, object]:
+        calls.append(now)
+        return _posture([_runtime()], advisory_source={"state": "verified", "valid_until": expires})
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: (_bundle("v7"), None))
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=9))
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=10))
+
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("field", ["workspace_id", "sync_keyring", "entitlement"])
+def test_a_changed_verification_input_is_rematched(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    advisory = [(_bundle("v7"), None)]
+    calls: list[object] = []
+
+    def observe(_context: object, _now: object, current: object) -> dict[str, object]:
+        calls.append(current)
+        return _posture([_runtime()])
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: advisory[0])
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+    advisory[0] = ({**_bundle("v7"), field: {"changed": True}}, None)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=1))
+
+    assert len(calls) == 2

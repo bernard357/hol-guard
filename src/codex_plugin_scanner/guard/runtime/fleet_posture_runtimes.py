@@ -8,12 +8,14 @@ no runtime is reported safe.
 
 Observing launches hashes executables, which is too slow to repeat on every
 receipt sync, so the section is cached in the store for an hour. The cache entry
-is bound to the workspace it observed and to the key its location digests were
-made with, so a sync for another workspace or after a key change observes again.
+is bound to the workspace it observed, the key its location digests were made
+with and the cached bundle's verification inputs, so a sync for another workspace,
+a key change or a new bundle observes again; it also lapses when the bundle does.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Mapping
@@ -61,43 +63,63 @@ def runtimes_section(
             and isinstance(section := cached.get("section"), dict)
         ):
             fetched = parse_timestamp(cached.get("at"))
-            if fetched is not None and 0 <= (now - fetched).total_seconds() < ttl_seconds:
+            valid_until = cached.get("valid_until")
+            # Matches from a bundle are good only until that bundle expires.
+            fresh_bundle = valid_until is None or (
+                isinstance(valid_until, (int, float)) and now.timestamp() < valid_until
+            )
+            if fetched is not None and fresh_bundle and 0 <= (now - fetched).total_seconds() < ttl_seconds:
                 return cast("dict[str, object]", section)
     try:
-        section = project_runtime_posture(_observe(context, now, advisory), hash_key=hash_key)
+        posture = _observe(context, now, advisory)
+        section = project_runtime_posture(posture, hash_key=hash_key)
     except Exception:
         _LOGGER.debug("fleet posture: runtime posture could not be observed", exc_info=True)
         return None
     if ttl_seconds > 0:
+        source = posture.get("advisory_source")
+        valid_until = source.get("valid_until") if isinstance(source, Mapping) else None
+        entry: dict[str, object] = {"at": iso(now), "scope": scope, "section": section}
+        entry["valid_until"] = valid_until if isinstance(valid_until, (int, float)) else None
         try:
-            store.set_sync_payload(RUNTIMES_STATE_KEY, {"at": iso(now), "scope": scope, "section": section}, iso(now))
+            store.set_sync_payload(RUNTIMES_STATE_KEY, entry, iso(now))
         except Exception:
             _LOGGER.debug("fleet posture: runtime posture cache could not be saved", exc_info=True)
     return section
 
 
 def _advisory_bundle(store: GuardStore) -> tuple[Mapping[str, object] | None, str | None]:
-    from ..runtime_advisory_bundle import cached_advisory_bundle
+    from ..runtime_advisory_bundle import BUNDLE_UNREADABLE, cached_advisory_bundle
 
     try:
         return cached_advisory_bundle(store)
     except Exception:
         _LOGGER.debug("fleet posture: cached advisory bundle could not be read", exc_info=True)
-        return None, None
+        return None, BUNDLE_UNREADABLE
 
 
 def _cache_scope(
     context: HarnessContext, hash_key: bytes, advisory: tuple[Mapping[str, object] | None, str | None]
 ) -> str:
     # Keyed, so the stored scope names no path and changes whenever the key does.
-    # A newly synced bundle changes the scope too, so advisories are rematched
-    # on the next report instead of waiting out the cache.
+    # Every input native verification reads (the Cloud workspace, the recorded
+    # keyring and entitlement, and the bundle itself) is part of the scope, so a
+    # workspace switch, key change or new sync rematches on the next report.
     workspace = str(context.workspace_dir.resolve()) if context.workspace_dir is not None else ""
     bundle, reason = advisory
-    response = bundle.get("response") if bundle is not None else None
-    signed = response.get("bundle") if isinstance(response, Mapping) else None
-    version = signed.get("bundleVersion") if isinstance(signed, Mapping) else None
-    tag = f"bundle:{version}" if isinstance(version, str) else f"none:{reason}"
+    if bundle is None:
+        tag = f"none:{reason}"
+    else:
+        response = bundle.get("response")
+        signed = response.get("bundle") if isinstance(response, Mapping) else None
+        inputs = {
+            "workspace_id": bundle.get("workspace_id"),
+            "sync_keyring": bundle.get("sync_keyring"),
+            "entitlement": bundle.get("entitlement"),
+            "signed": signed,
+            "signature": response.get("signature") if isinstance(response, Mapping) else None,
+        }
+        tag = "bundle:" + json.dumps(inputs, sort_keys=True, default=str)
     return keyed_digest(hash_key, f"fleet-posture-runtimes\0{workspace}\0{tag}")
 
 

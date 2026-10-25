@@ -200,7 +200,12 @@ struct Artifact<'a> {
 }
 
 pub(crate) fn assess(request: &Request) -> Result<Value, String> {
-    let (bundled, advisory_source) = bundle::bundle_advisories(request.cached_bundle.as_ref());
+    let budget = bundle::Budget {
+        artifacts: request.artifacts.len(),
+        supplied: &request.advisories,
+    };
+    let (bundled, advisory_source) =
+        bundle::bundle_advisories(request.cached_bundle.as_ref(), &budget);
     assess_with(request, &bundled, &advisory_source)
 }
 
@@ -225,6 +230,12 @@ fn assess_with(
     bundled: &[AdvisoryInput],
     advisory_source: &Value,
 ) -> Result<Value, String> {
+    // An unanchored bundle can report a runtime affected but never clear it.
+    let clear_from = if advisory_source["anchored"] == true {
+        usize::MAX
+    } else {
+        request.advisories.len()
+    };
     let supplied: Vec<&AdvisoryInput> = request.advisories.iter().chain(bundled).collect();
     validate_bounds(request, &supplied)?;
     let artifacts = artifacts_by_id(&request.artifacts)?;
@@ -247,9 +258,12 @@ fn assess_with(
     for (id, artifact) in &artifacts {
         let mut rows = Vec::new();
         for (index, (advisory, intervals)) in advisories.iter().enumerate() {
-            let Some(found) = match_artifact(artifact, advisory, intervals) else {
+            let Some(mut found) = match_artifact(artifact, advisory, intervals) else {
                 continue;
             };
+            if index >= clear_from && matches!(found, Match::NotAffected(_)) {
+                found = Match::Unknown("advisory_source_unanchored");
+            }
             matches[index].insert(id, found);
             let (status, reason) = match found {
                 Match::Affected(reason) => ("affected", reason),
