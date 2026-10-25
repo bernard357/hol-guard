@@ -26,14 +26,27 @@ pub(super) fn parse_scoped(output: &[u8]) -> Option<(GitConfig, GitConfig)> {
         if key.is_empty() {
             return None;
         }
-        let key = key.to_ascii_lowercase();
-        if matches!(scope, "local" | "worktree") {
-            repository
-                .entry(key.clone())
-                .or_default()
-                .push(value.to_owned());
+        // Git lowercases a key's section and variable but keeps the case of a
+        // subsection, so `remote.Origin` and `remote.origin` are two remotes.
+        // Every exact lookup reads the lowercased key, so that one is always
+        // recorded; a remote whose name is not already lowercase is recorded a
+        // second time under its own spelling, so a reader counting remotes
+        // sees it rather than the one it was folded onto.
+        let lowered = key.to_ascii_lowercase();
+        let spelled = key
+            .strip_prefix("remote.")
+            .and_then(|rest| rest.rsplit_once('.'))
+            .map(|(name, variable)| format!("remote.{name}.{}", variable.to_ascii_lowercase()))
+            .filter(|spelled| *spelled != lowered);
+        for key in std::iter::once(lowered).chain(spelled) {
+            if matches!(scope, "local" | "worktree") {
+                repository
+                    .entry(key.clone())
+                    .or_default()
+                    .push(value.to_owned());
+            }
+            effective.entry(key).or_default().push(value.to_owned());
         }
-        effective.entry(key).or_default().push(value.to_owned());
     }
     Some((effective, repository))
 }

@@ -294,6 +294,15 @@ fn another_remote_or_another_branch_remote_reaches_past_origin() {
             ),
             ("remote.x.fetch", "+refs/heads/*:refs/remotes/x/*"),
         ],
+        // Git keeps a subsection's case, so this is a second remote, and
+        // `--all` fetches a URL the origin proof never read.
+        &[
+            (
+                "remote.origin.url",
+                "https://github.com/example-org/app.git",
+            ),
+            ("remote.Origin.url", "https://example.invalid/app.git"),
+        ],
     ] {
         assert!(!only_origin_remote(&config(entries)), "{entries:?}");
     }
