@@ -54,7 +54,9 @@ pub(crate) mod port_probes;
 pub(crate) mod rsync_local;
 mod workspace_contained;
 #[cfg(unix)]
-pub(crate) use contained_exact_shape::exact_shape as workspace_exact_shape;
+pub(crate) use contained_exact_shape::{
+    exact_shape as workspace_exact_shape, runs_whole as workspace_runs_whole,
+};
 #[cfg(unix)]
 pub(crate) use workspace_contained::Shape;
 #[cfg(unix)]

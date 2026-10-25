@@ -35,7 +35,7 @@ pub(crate) fn exact_shape(text: &str, workspace: &Path) -> Option<Shape> {
     }
 }
 
-fn runs_whole(shape: &Shape) -> bool {
+pub(crate) fn runs_whole(shape: &Shape) -> bool {
     shape.bootstrap.is_none() && shape.prefix.is_none() && shape.remainder.is_none()
 }
 

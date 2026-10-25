@@ -4,7 +4,9 @@ use super::*;
 use crate::pretool::generic::contained_publish;
 use crate::pretool::workspace_git_config::{linked_git_dirs, workspace_write_denials};
 use crate::pretool::workspace_git_environment::GitVariables;
-use crate::pretool::{workspace_exact_shape as exact_shape, WORKSPACE_PROFILE};
+use crate::pretool::{
+    workspace_exact_shape as exact_shape, workspace_runs_whole as runs_whole, WORKSPACE_PROFILE,
+};
 use crate::{parse_command, CommandModelRequestV1};
 use serde::Deserialize;
 use serde_json::{json, Value};

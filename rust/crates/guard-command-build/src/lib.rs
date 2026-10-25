@@ -118,6 +118,9 @@ mod executable_flag_contract;
 pub mod extension_control;
 #[path = "../../guard-command/src/false_positive_rules.rs"]
 pub mod false_positive_rules;
+#[cfg(unix)]
+#[path = "../../guard-command/src/forwarded_settings.rs"]
+pub mod forwarded_settings;
 #[path = "../../guard-command/src/github_additional_commands.rs"]
 mod github_additional_commands;
 #[path = "../../guard-command/src/github_capability_contract.rs"]
@@ -175,6 +178,8 @@ pub mod ordered_json;
 pub mod package_approval;
 #[path = "../../guard-command/src/package_execution_context.rs"]
 pub mod package_execution_context;
+#[path = "../../guard-command/src/package_extension_ids.rs"]
+pub mod package_extension_ids;
 #[path = "../../guard-command/src/package_intent_common.rs"]
 pub mod package_intent_common;
 #[path = "../../guard-command/src/package_intent_parser.rs"]
@@ -334,6 +339,9 @@ pub mod target_identities;
 pub mod typescript_launch_evidence;
 #[path = "../../guard-command/src/workspace_inventory.rs"]
 pub mod workspace_inventory;
+#[cfg(unix)]
+#[path = "../../guard-command/src/workspace_roots.rs"]
+pub mod workspace_roots;
 use guard_hook_payload::{
     hook_adapter_cline_tables, hook_adapter_prepare_cursor, hook_adapter_pyjson,
     hook_adapter_pytext,
