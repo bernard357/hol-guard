@@ -10,15 +10,42 @@ The supported claim is intentionally narrow:
 
 ## Pieces
 
-- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its PyPI provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off. The `fail_on_severity` and `fail_on_check_errors` gates run after the attestation, so a release that fails a gate still gets an attested record of why.
+- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off. The `fail_on_severity` and `fail_on_check_errors` gates run after the attestation, so a release that fails a gate still gets an attested record of why.
 - `src/codex_plugin_scanner/plugin_release_evidence.py` defines the evidence contract.
 - `src/codex_plugin_scanner/plugin_release_runner.py` runs the evidence, registration and summary steps.
 
-The composite runs the evidence code from the installed wheel, so it needs a `hol-guard` release that contains these modules. The release pin (`plugin-release/guard-version.txt` and `plugin-release/guard-sha256.txt`) and the trusted reusable workflow `.github/workflows/plugin-release.yml` land after that release, the same way `guarded-repository.yml` pins its composite.
+The composite runs the evidence code from the installed wheel, so it needs a `hol-guard` release that contains these modules. `plugin-release/guard-version.txt` and `plugin-release/guard-sha256.txt` pin that wheel. A stable pin is downloaded from PyPI and its PyPI provenance is verified. An alpha pin (`X.Y.ZaN`) is downloaded from the `alpha/vX.Y.ZaN` GitHub prerelease, because alpha native wheels are not published to PyPI, and its GitHub attestation must name this repository's `publish.yml` on `main` as the signer. Either way the SHA-256 must match the pin. `.github/workflows/plugin-release-smoke.yml` runs the composite on a Plugin Kit fixture when a pull request from a branch in this repository changes the pin or the locks. Pull requests from forks skip it, because the job installs the pinned Guard release with repository permissions; a maintainer runs it for a fork change with `workflow_dispatch` on the fork's commit after review. The trusted reusable workflow `.github/workflows/plugin-release.yml` pins this composite by commit, the same way `guarded-repository.yml` pins its composite.
 
 ## Trusted workflow
 
 HOL accepts registration only from the reusable workflow. Its verifier checks the GitHub OIDC `job_workflow_ref` and `job_workflow_sha`, so a caller workflow that runs the composite directly cannot register forged evidence.
+
+A plugin repository calls it from its release workflow, pinned by commit SHA:
+
+```yaml
+name: Release
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  hol-plugin-release:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      security-events: write
+    uses: hashgraph-online/hol-guard/.github/workflows/plugin-release.yml@<commit-sha>
+    with:
+      plugin_dir: "."
+```
+
+The job needs `id-token: write` for the OIDC token HOL verifies and `attestations: write` for the GitHub attestation. `security-events: write` is needed only with `upload_sarif: true`. The workflow sends the attested evidence to HOL by default; set `register_release: false` to attest without registering. HOL records every verified registration and shows it on the releases page of the listing whose repository matches; `release_url` is empty when no public listing matches.
+
+When the matching listing has no HOL Blue or Gold membership, the job summary of the repository's first recorded release in 28 days carries one line about HOL Blue. HOL only decides whether the line appears and supplies a link to its own promote page; Guard writes the text and drops any link that is not on `https://hol.org/guard/plugins/promote`. Set `offer_line: false` to turn the line off. It never changes the evidence, the score or the listing.
 
 ## Evidence contract
 

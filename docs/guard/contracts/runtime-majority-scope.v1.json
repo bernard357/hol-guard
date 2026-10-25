@@ -252,7 +252,7 @@
       {
         "id": "workspace-assessment-async",
         "category": "async_control_plane",
-        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted or registered a harness install for, queues runs in SQLite and runs the local supply-chain audit and the native secret scan against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
+        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted or registered a harness install for, queues runs in SQLite and runs the local supply-chain audit and the native secret scan against a native content snapshot, and matches the runtimes the worktree's configured tools would launch, identified by the native runtime probe without running them, against cached runtime advisories as observation-only findings. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
         "path": [
           "src/codex_plugin_scanner/guard/workspace_assessment_*.py",
           "src/codex_plugin_scanner/guard/workspace_secret_findings.py",
@@ -578,8 +578,6 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/adapters/_modules/cline/__init__.py",
-          "src/codex_plugin_scanner/guard/adapters/_modules/devin/__init__.py",
           "src/codex_plugin_scanner/guard/adapters/_modules/pi/__init__.py",
           "src/codex_plugin_scanner/guard/adapters/_modules/zcode/__init__.py"
         ],
@@ -636,12 +634,10 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/cli/codex_live_hook_completion.py",
           "src/codex_plugin_scanner/guard/cli/commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_lifecycle_gate.py",
           "src/codex_plugin_scanner/guard/cli/commands_router.py",
           "src/codex_plugin_scanner/guard/cli/commands_support.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_apply_patch_policy.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_claude_approval.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_git_config.py",
@@ -649,7 +645,6 @@
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_prompt_attachments.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_reads.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_connect.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_observe_queue.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_permission_store.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_prompts.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_runtime_artifact_policy.py",
@@ -749,7 +744,6 @@
           "src/codex_plugin_scanner/guard/consumer/service.py",
           "src/codex_plugin_scanner/guard/consumer/native_decision_projection.py",
           "src/codex_plugin_scanner/guard/store_approval_projection.py",
-          "src/codex_plugin_scanner/guard/cli/commands_hook_decision_copy.py",
           "src/codex_plugin_scanner/guard/inventory_item_description.py",
           "src/codex_plugin_scanner/guard/local_cli_grant_decision.py",
           "src/codex_plugin_scanner/guard/local_cli_hook.py",
@@ -859,7 +853,7 @@
           "src/codex_plugin_scanner/guard/runtime/github_workflow_runtime.py",
           "src/codex_plugin_scanner/guard/runtime/github_workflow_approval_record.py"
         ],
-        "reason": "Reviewed: GitHub workflow capability preflight and approval records. commands_hook_native_eval.py imports github_workflow_runtime to resolve the workflow capability preflight on a native hook call, and commands_support_runtime_policy.py reads GitHubWorkflowApprovalRecord when it resolves runtime policy, so both are hook-path runtime and stay counted. approvals.py used to pull them in eagerly; they are now reached only through these lazy hook-path imports."
+        "reason": "Reviewed: GitHub workflow capability preflight and approval records. approvals.py issues the workflow capability when an approval resolves, approval_once_eligibility.py reads whether a workflow approval needs local one-shot authority, and commands_support_runtime_policy.py reads GitHubWorkflowApprovalRecord when it resolves runtime policy, so both are approval-path runtime and stay counted."
       },
       {
         "path": [
@@ -915,7 +909,7 @@
         "path": [
           "src/codex_plugin_scanner/guard/cli/native_hook_exit_code.py"
         ],
-        "reason": "Reviewed and retained in runtime scope: the per-harness verdict exit-status table. The JSON document now carries the status the resident's directive decided, so commands_support_hook_payload no longer imports this table at load; commands_hook_native_availability still reaches it lazily to map a native-unavailable fail-closed deny onto the harness's own exit contract. That fallback runs exactly when the resident cannot answer, so the table stays counted as runtime until the native runtime owns the unavailable lane too."
+        "reason": "Reviewed and retained in runtime scope: the per-harness verdict exit-status table. The JSON document now carries the status the resident's directive decided, so commands_support_hook_payload no longer imports this table at load; commands_hook_native_authority uses it to give every hook answer, the fail-safe one included, the harness's own exit contract, so the table stays counted as runtime."
       },
       {
         "path": [
@@ -924,6 +918,12 @@
           "src/codex_plugin_scanner/guard/runtime/jsonc.py"
         ],
         "reason": "Reviewed and retained in runtime scope: the retired Python literal-cd parser imported these at load, so they counted as eager. They are now reached lazily: direct_vitest presents the resident's direct local tool context to the support-artifact command, and package_evidence_common with its bounded JSONC decoder reads lockfile integrity for the contained Node tool lane. They run while Guard prepares a contained run, so they stay counted as runtime."
+      },
+      {
+        "path": [
+          "src/codex_plugin_scanner/guard/daemon/claude_turn_events.py"
+        ],
+        "reason": "Reviewed and retained in runtime scope: the resident hook worker reaches this lazily for Claude Code PostToolUse and Stop. It records the user's answer to the HOL Guard approval question and discards a session's unanswered prompts when the turn ends; the native edge still decides every verdict."
       }
     ],
     "tests": {
@@ -2171,7 +2171,7 @@
           ".zcode",
           ".paseo"
         ],
-        "evidence": "Adapter registry: _adapters() imports each module named in the literal _ADAPTER_SPECS table with import_module(module_name, __package__) and instantiates the named class. Targets list every module in that table (.pi holds two classes). Decision: follow. Adapters normalize harness payloads into hook requests and get_adapter(harness).approval_flow() is called from hook handling (commands_hook_native_review and commands_hook_native_copilot), so the registry is on the hook path and hook-path authority is never excluded. The modules listed in the adapter registry reviewed_runtime entry join the scope. Install, setup and config methods keep their reviewed function-level exclusions (install_config, not hook path)."
+        "evidence": "Adapter registry: _adapters() imports each module named in the literal _ADAPTER_SPECS table with import_module(module_name, __package__) and instantiates the named class. Targets list every module in that table (.pi holds two classes). Decision: follow. Adapters normalize harness payloads into hook requests and get_adapter(harness).approval_flow() is called from hook handling (commands_hook_native_review), so the registry is on the hook path and hook-path authority is never excluded. The modules listed in the adapter registry reviewed_runtime entry join the scope. Install, setup and config methods keep their reviewed function-level exclusions (install_config, not hook path)."
       },
       {
         "path": "src/codex_plugin_scanner/guard/cli/_commands_shared.py",

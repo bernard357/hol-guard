@@ -52,6 +52,7 @@ POSTURE_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
     "extra_careful": {
         "local_secret_read": "require-reapproval",
@@ -74,6 +75,7 @@ POSTURE_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
 }
 
@@ -122,12 +124,6 @@ def dual_write_from_posture(
 
 def resolve_posture_defaults(posture: str) -> dict[str, GuardAction] | None:
     return POSTURE_RISK_ACTIONS.get(posture)
-
-
-def is_high_confidence(confidence: object) -> bool:
-    if not isinstance(confidence, str):
-        return False
-    return confidence.strip().lower() in HIGH_CONFIDENCE_LABELS
 
 
 def posture_label(posture: str) -> str:

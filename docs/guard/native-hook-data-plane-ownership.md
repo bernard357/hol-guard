@@ -521,18 +521,12 @@ Current material gaps include:
   the opaque challenge and forward the external artifact, but it never signs,
   authorizes, or persists approval state.
 - Rust owns the reuse of a saved approval on the artifact hook: the resident
-  (`artifact_reuse_step`) answers a plan of effects (claim, revalidate, settled)
-  and Python only runs them. A claim that wins is always followed by its
-  revalidation with no resident call between the two, and a resident that
-  fails or answers a malformed plan fails closed to the host outage. The one
-  Python decision left is the package fallback floor, which never ends weaker
-  than the recomputed action.
-- Rust owns the CLI hook's verdict for Claude Code's permission dialog: the
-  resident (`claude_permission_verdict`) picks no decision, the Guard approval
-  question, a review that defers to Claude's dialog, or a deny, and asks for
-  the runtime artifact's policy only when the verdict rests on it. Python
-  gathers that policy, renders the reason, copy and envelope, and answers a
-  verdict the resident cannot supply with the host outage response.
+  (`artifact_reuse_step`) answers a plan of effects (claim, revalidate,
+  settled). The CLI executor that ran this plan, and its package fallback
+  floor, are gone: the CLI hook answers through the daemon review path.
+- The CLI hook answers Claude Code's permission dialog through the daemon
+  review path, as the bridge does. No Python caller asks the resident's
+  `claude_permission_verdict` or `hook_route` any more.
 
 ## No-environment production contract
 

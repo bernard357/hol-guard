@@ -29,6 +29,15 @@ Every command accepts `--json` for the full machine-readable result.
 
 When several manifests describe the same plugin, the shallowest one wins and the others fill in missing fields. The repository comes from the manifest, then `package.json`, then the `origin` remote in `.git/config`.
 
+Files that are not part of the plugin, such as copies of its skills kept for other marketplaces, can be left out in `.plugin-scanner.toml`:
+
+```toml
+[plugin_kit]
+exclude_paths = ["distributions/*"]
+```
+
+`*` matches any run of characters, including `/`, and `?` matches one character. A matching file is not read by `check` and is not copied by `package`, including files inside a skill or hooks folder, and a folder matched by a pattern ending in `*` is skipped without counting toward the walk limit. A `[plugin_kit]` value that is not a table, or an `exclude_paths` that is not a list of patterns, is an error. The scanner's `[scanner] ignore_paths` only hides findings and does not change what the Kit checks or packages.
+
 ## Runtimes the Kit writes
 
 | Runtime | Output | Carries |

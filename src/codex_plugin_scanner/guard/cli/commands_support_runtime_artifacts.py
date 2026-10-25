@@ -9,7 +9,6 @@ from typing import Any
 from ..daemon.native_review_allow_hint import reviewed_command_extension_allow_hint
 from ..native_codex_tool_output import codex_tool_output_native
 from ..native_context import bound_context_digest_home
-from ..native_data_flow import DataFlowArtifactNaming
 from ..native_path_anchor import anchor_to_process_directory
 from ..native_prompt import merge_prompt_artifacts
 from ..native_rich_command_model import NativeCommandModelError
@@ -415,33 +414,6 @@ def _runtime_protected_file_write_paths(
     return protected_paths
 
 
-def _runtime_data_flow_naming(
-    *,
-    harness: str,
-    payload: dict[str, object],
-    action_envelope: GuardActionEnvelope | None,
-    home_dir: Path,
-    workspace: Path | None,
-) -> DataFlowArtifactNaming | None:
-    """How the resident should name the artifact for this action's data flow.
-
-    The naming is this side's to supply because only this side knows which
-    policy file a review would cite and whether the scope is the project or the
-    global install. An event that carries no action gets none: there is nothing
-    to review, so the resident is asked for the signals alone.
-    """
-
-    if action_envelope is None:
-        return None
-    canonical_harness = _canonical_harness_name(harness)
-    return DataFlowArtifactNaming(
-        harness=canonical_harness,
-        config_path=str(_runtime_policy_path(canonical_harness, home_dir, workspace, payload=payload)),
-        source_scope=_coalesce_string(payload.get("source_scope"), "project"),
-        tool_name=action_envelope.tool_name,
-    )
-
-
 _CODEX_PROMPT_SECRET_KEY_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PASS", "API_KEY", "API-KEY", "AUTH", "CREDENTIAL")
 
 
@@ -530,6 +502,5 @@ __all__ = [
     "_hook_runtime_artifact",
     "_merged_prompt_runtime_artifact",
     "_optional_string",
-    "_runtime_data_flow_naming",
     "_string_list",
 ]

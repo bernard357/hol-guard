@@ -7,6 +7,9 @@ use sha2::{Digest, Sha256};
 
 use super::secrets::SecretScan;
 use super::{Limits, SnapshotMode, SKIP_DIRS};
+use crate::workspace_inventory_files::{
+    LOCKFILE_CANDIDATES, MANIFEST_CANDIDATES, MAX_DEPTH as AUDIT_DISCOVERY_DEPTH,
+};
 use crate::workspace_snapshot_file::{hash_stable, DirHandle, HashError, Kind, Node};
 
 /// Directories nested deeper than this below the root are recorded, not
@@ -43,6 +46,22 @@ const DETECTOR_INPUT_BASENAMES: [&str; 25] = [
     "Gemfile.lock",
 ];
 
+/// Lockfiles of ecosystems no detector reads yet. Their dependencies go
+/// unchecked, so a snapshot that holds one is partial rather than clean.
+const UNSUPPORTED_DEPENDENCY_BASENAMES: [&str; 11] = [
+    "mix.lock",
+    "pubspec.lock",
+    "Package.resolved",
+    "Podfile.lock",
+    "packages.lock.json",
+    "paket.lock",
+    "deno.lock",
+    "renv.lock",
+    "cabal.project.freeze",
+    "stack.yaml.lock",
+    "conan.lock",
+];
+
 #[derive(Default)]
 pub(super) struct Walk {
     /// `path\0size\0sha256` (content) or `path\0size\0mtime\0ino` (stat).
@@ -62,6 +81,8 @@ pub(super) struct Walk {
     pub(super) oversize_detector_input: bool,
     pub(super) depth_cap_hit: bool,
     pub(super) visit_cap_hit: bool,
+    pub(super) unsupported_dependency_input: bool,
+    pub(super) undiscovered_dependency_input: bool,
     /// Present when the caller asked for secret detection over the bytes the
     /// walk hashes.
     pub(super) secrets: Option<SecretScan>,
@@ -182,6 +203,13 @@ pub(super) fn walk_directory(
     }
 }
 
+/// The workspace audit only discovers dependency files a few directories
+/// below the root, so a deeper one is never checked.
+fn is_beyond_audit_discovery(child: &str, name: &str) -> bool {
+    (MANIFEST_CANDIDATES.contains(&name) || LOCKFILE_CANDIDATES.contains(&name))
+        && child.matches('/').count() > AUDIT_DISCOVERY_DEPTH
+}
+
 #[allow(clippy::too_many_arguments)]
 fn admit_file(
     directory: &DirHandle,
@@ -193,6 +221,12 @@ fn admit_file(
     limits: &Limits,
     walk: &mut Walk,
 ) {
+    if UNSUPPORTED_DEPENDENCY_BASENAMES.contains(&name) {
+        walk.unsupported_dependency_input = true;
+    }
+    if is_beyond_audit_discovery(child, name) {
+        walk.undiscovered_dependency_input = true;
+    }
     if walk.entries.len() >= limits.entries {
         walk.entry_cap_hit = true;
         return;

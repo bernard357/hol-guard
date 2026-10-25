@@ -9,9 +9,11 @@ import pytest
 
 from codex_plugin_scanner.guard import native_supply_chain_egress as egress
 from codex_plugin_scanner.guard import native_workspace_snapshot as native
+from codex_plugin_scanner.guard import workspace_assessment_pressure as pressure
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard import workspace_assessment_worker as worker
+from codex_plugin_scanner.guard import workspace_runtime_findings as runtimes
 from codex_plugin_scanner.guard.daemon import workspace_assessment_api as api
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -71,6 +73,14 @@ AUDIT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def no_launched_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Runtime observation has its own tests; here the tools launch nothing.
+    posture = {"status": "ok", "coverage": {"advisories_available": False}, "runtimes": [], "advisories": []}
+    monkeypatch.setattr(runner, "observe_workspace_runtimes", lambda store, root: posture)
+    monkeypatch.setattr(runtimes, "observe_workspace_runtimes", lambda store, root, *, home_dir=None: posture)
+
+
 def queued_run(tmp_path: Path) -> tuple[GuardStore, assessments.ClaimedRun]:
     store = GuardStore(tmp_path / "home")
     assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
@@ -98,14 +108,18 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
     store, claimed = queued_run(tmp_path)
     modes = snapshots(monkeypatch, runner, SCANNED)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert modes == ["content", "content"]
     # Both detectors covered the whole snapshot, so the run is complete.
     assert outcome.state == "completed"
     assert outcome.snapshot_digest == SNAPSHOT.snapshot_digest
     assert outcome.coverage is not None and outcome.coverage["status"] == "complete"
     assert outcome.coverage["reasons"] == []
-    assert outcome.coverage["detectors"] == {"supply_chain": "complete", "secrets": "complete"}
+    assert outcome.coverage["detectors"] == {
+        "supply_chain": "complete",
+        "secrets": "complete",
+        "runtime_identity_v1": "no_inputs",
+    }
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
     assert finding["package_version"] == "1.2.8"
@@ -131,7 +145,7 @@ def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(
     }
     audit = {**AUDIT, "evaluation": {"packages": [BLOCKED_PACKAGE, unanswered]}}
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: audit)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert [finding["package_name"] for finding in outcome.findings] == ["minimist"]
     assert outcome.coverage is not None
     detectors, reasons = outcome.coverage["detectors"], outcome.coverage["reasons"]
@@ -139,11 +153,44 @@ def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(
     assert isinstance(reasons, list) and "supply_chain_incomplete" in reasons
 
 
+UNMATCHED = {
+    "decision": "monitor",
+    "ecosystem": "npm",
+    "name": "lodash",
+    "resolvedVersion": "4.17.20",
+    "reasons": [{"code": "no_cached_match", "message": "m", "severity": "low", "source": "guard-local"}],
+}
+
+
+@pytest.mark.parametrize("extra", [[], ["unidentified_package"], ["lockfile_drift"]])
+def test_packages_unchecked_without_an_advisory_bundle_are_a_coverage_gap(extra: list[str]) -> None:
+    # Unconnected, nothing cached: the packages were never compared with any
+    # intelligence, so the run must not read as a clean, complete check, even
+    # when the evaluator also asked for review for another reason.
+    package = {
+        **UNMATCHED,
+        "decision": "ask" if extra else "monitor",
+        "reasons": [*UNMATCHED["reasons"], *({"code": code, "message": "m", "severity": "medium"} for code in extra)],
+    }
+    audit = {**AUDIT, "evaluation": {"bundle_version": None, "cache_status": "miss", "packages": [package]}}
+    coverage = runner.coverage_summary(SCANNED, audit, findings_truncated=False)
+    assert coverage["status"] == "partial"
+    assert coverage["detectors"]["supply_chain"] == "incomplete"
+    assert "advisory_data_unavailable" in coverage["reasons"]
+
+
+def test_no_match_in_a_cached_bundle_is_a_clean_result() -> None:
+    audit = {**AUDIT, "evaluation": {"bundle_version": "2026.10.25", "cache_status": "hit", "packages": [UNMATCHED]}}
+    coverage = runner.coverage_summary(SCANNED, audit, findings_truncated=False)
+    assert coverage["status"] == "complete"
+    assert coverage["reasons"] == []
+
+
 def test_change_during_detectors_supersedes_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     snapshots(monkeypatch, runner, SNAPSHOT, replace(SNAPSHOT, snapshot_digest=digest("content-2")))
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert (outcome.state, outcome.findings) == ("superseded", ())
 
 
@@ -151,7 +198,7 @@ def test_replaced_worktree_fails_without_running_detectors(tmp_path: Path, monke
     store, claimed = queued_run(tmp_path)
     snapshots(monkeypatch, runner, replace(SNAPSHOT, worktree_key=digest("someone-else")))
     monkeypatch.setattr(runner, "_local_audit", pytest.fail)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert (outcome.state, outcome.error_code) == ("failed", "workspace_identity_changed")
 
 
@@ -163,7 +210,7 @@ def test_detector_failure_is_reported_without_details(tmp_path: Path, monkeypatc
         raise RuntimeError(f"cannot read {root}/secret")
 
     monkeypatch.setattr(runner, "_local_audit", broken)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert (outcome.state, outcome.error_code) == ("failed", "supply_chain_detector_failed")
     assert assessments.finish(store, claimed, outcome, now_ms=T0 + 1)
 
@@ -175,7 +222,7 @@ def test_snapshot_failure_fails_the_run(tmp_path: Path, monkeypatch) -> None:
         raise native.WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
 
     monkeypatch.setattr(runner, "workspace_snapshot", unavailable)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert (outcome.state, outcome.error_code) == ("failed", "workspace_snapshot_native_unavailable")
 
 
@@ -200,6 +247,13 @@ def test_workspace_without_manifests_reports_no_inputs() -> None:
     assert coverage["detectors"]["supply_chain"] == "no_inputs"
 
 
+def test_a_lockfile_without_packages_is_not_reported_as_no_inputs() -> None:
+    payload = {"audit_status": "incomplete", "manifest_paths": [], "lockfile_paths": ["poetry.lock"]}
+    coverage = runner.coverage_summary(SNAPSHOT, payload, findings_truncated=False)
+    assert coverage["detectors"]["supply_chain"] == "incomplete"
+    assert "supply_chain_incomplete" in coverage["reasons"]
+
+
 def test_refused_offline_lookup_leaves_supply_chain_incomplete() -> None:
     coverage = runner.coverage_summary(SNAPSHOT, AUDIT, findings_truncated=False, egress_refused=1)
     assert coverage["detectors"]["supply_chain"] == "incomplete"
@@ -221,7 +275,7 @@ def test_only_automatic_runs_are_offline(tmp_path: Path, monkeypatch, trigger: s
         return AUDIT
 
     monkeypatch.setattr(runner, "_local_audit", audit)
-    runner.execute(store, None, claimed)
+    runner.execute(store, None, claimed, clock=lambda: T0)
     assert seen == [offline]
 
 
@@ -233,7 +287,7 @@ def test_unreadable_feed_cache_fails_the_run(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setattr(runner, "feed_context_digest", broken)
     monkeypatch.setattr(runner, "workspace_snapshot", pytest.fail)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert (outcome.state, outcome.error_code) == ("failed", "feed_context_unavailable")
 
 
@@ -263,7 +317,7 @@ def test_oversized_result_is_recorded_as_failure(tmp_path: Path, monkeypatch) ->
         findings=[{"package_name": "x" * 1024}] * 400,
     )
     monkeypatch.setattr(assessments, "claim_next", lambda store, owner, now_ms, **_: claimed)
-    monkeypatch.setattr(runner, "execute", lambda store, config, run: huge)
+    monkeypatch.setattr(runner, "execute", lambda store, config, run, **_: huge)
     assert runner.run_next(store, None, owner="test", clock=lambda: T0 + 1)
     run = assessments.get_run(store, claimed.run_id)
     assert run is not None and (run["state"], run["error_code"]) == ("failed", "assessment_result_too_large")
@@ -439,7 +493,87 @@ def test_run_next_claims_with_the_running_detector_set(tmp_path: Path, monkeypat
     monkeypatch.setattr(
         runner,
         "execute",
-        lambda store, config, run: seen.append(run.detector_set_digest) or assessments.RunOutcome(state="failed"),
+        lambda store, config, run, **_: seen.append(run.detector_set_digest) or assessments.RunOutcome(state="failed"),
     )
     assert runner.run_next(store, None, owner="test", clock=lambda: T0)
     assert seen == [runner.DETECTOR_SET_DIGEST]
+
+
+def test_automatic_runs_wait_while_the_host_is_busy(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    snapshots(monkeypatch, worker, replace(SNAPSHOT, mode="stat"))
+    worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
+    ran: list[str] = []
+
+    def fake_execute(_store, _config, run: assessments.ClaimedRun, **_) -> assessments.RunOutcome:
+        ran.append(run.trigger_kind)
+        return assessments.RunOutcome(state="failed", error_code="test")
+
+    monkeypatch.setattr(runner, "execute", fake_execute)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: pressure.RESOURCE_PRESSURE)
+    observed: list[bool] = []
+    monkeypatch.setattr(worker, "observe", lambda _store: observed.append(True))
+    assert worker.poll_once(store, owner="test") == 0
+    # The workspace_open run stays queued and nothing was observed.
+    assert ran == [] and observed == []
+    assert [run["state"] for run in assessments.recent_runs(store)] == ["queued"]
+    handler = FakeHandler(store)
+    api.handle_workspace_assessment_get(handler, api.ASSESSMENTS_PATH)
+    assert handler.responses[-1][1]["deferred_reason"] == "resource_pressure"
+    # A run the user asked for still starts under pressure.
+    keys = assessments.WorktreeKeys(KEYS.codebase_key, KEYS.worktree_key)
+    worker.queue_manual_run(store, keys, clock=lambda: T0)
+    assert worker.poll_once(store, owner="test") == 1 and ran == ["manual"]
+    # Once the host is quiet the deferral clears and observation resumes.
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: None)
+    worker.poll_once(store, owner="test")
+    assert observed == [True]
+    api.handle_workspace_assessment_get(handler, api.ASSESSMENTS_PATH)
+    assert handler.responses[-1][1]["deferred_reason"] is None
+
+
+def test_each_claim_in_a_poll_rechecks_host_pressure(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    monkeypatch.setattr(worker, "admit_registered_workspaces", lambda store, attempted=None: 0)
+    monkeypatch.setattr(worker, "observe", lambda _store: 0)
+    samples = iter([None, pressure.RESOURCE_PRESSURE])
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: next(samples))
+    claims: list[bool] = []
+
+    def fake_run_next(_store, _config, *, owner: str, user_only: bool = False) -> bool:
+        claims.append(user_only)
+        return True
+
+    monkeypatch.setattr(worker, "run_next", fake_run_next)
+    monkeypatch.setattr(worker, "_MAX_RUNS_PER_POLL", 2)
+    assert worker.poll_once(store, owner="test") == 2
+    # The host got busy during the first run, so the second claim takes only user runs.
+    assert claims == [False, True]
+    assert pressure.deferral_reason(store) == pressure.RESOURCE_PRESSURE
+    pressure.record_deferral(store, None)
+
+
+def test_user_only_claim_leaves_automatic_runs_queued(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    assessments.enqueue(
+        store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0
+    )
+    due = T0 + assessments.MAX_DEBOUNCE_WAIT_MS
+    assert assessments.claim_next(store, owner="test", now_ms=due, user_only=True) is None
+    assert assessments.claim_next(store, owner="test", now_ms=due) is not None
+
+
+@pytest.mark.parametrize(("load", "expected"), [((7.9, 0, 0), None), ((12.0, 0, 0), "resource_pressure")])
+def test_host_pressure_follows_load_per_cpu(monkeypatch, load, expected) -> None:
+    monkeypatch.setattr(pressure.os, "getloadavg", lambda: load)
+    monkeypatch.setattr(pressure.os, "cpu_count", lambda: 8)
+    assert pressure.host_resource_pressure() == expected
+
+
+def test_host_without_load_average_reports_no_pressure(monkeypatch) -> None:
+    def unavailable() -> tuple[float, float, float]:
+        raise OSError("no load average")
+
+    monkeypatch.setattr(pressure.os, "getloadavg", unavailable)
+    assert pressure.host_resource_pressure() is None

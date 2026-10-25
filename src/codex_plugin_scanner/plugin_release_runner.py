@@ -74,7 +74,7 @@ def evidence_step() -> int:
 
 def register_step() -> int:
     if _env("REGISTER_RELEASE") != "true":
-        _write_outputs({"release_status": "disabled", "release_url": ""})
+        _write_outputs({"release_status": "disabled", "release_url": "", "offer_url": ""})
         return 0
     try:
         result = register_plugin_release_evidence(
@@ -86,17 +86,32 @@ def register_step() -> int:
             oidc_request_token=os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", ""),
         )
     except Exception as error:  # Registration is best effort; the attested evidence still stands.
-        print(f"HOL Plugin Release registration unavailable: {type(error).__name__}")
+        status_code = getattr(error, "code", None)
+        detail = f" {status_code}" if isinstance(status_code, int) else ""
+        print(f"HOL Plugin Release registration unavailable: {type(error).__name__}{detail}")
         result = {"status": "unavailable"}
     status = result.get("status")
     url = result.get("releaseUrl")
+    offer = result.get("offerUrl")
+    allowed = _env("OFFER_LINE", "true") != "false"
+    offer_url = offer if allowed and isinstance(offer, str) and _is_offer_url(offer) else ""
     _write_outputs(
         {
             "release_status": status if isinstance(status, str) else "unavailable",
             "release_url": url if isinstance(url, str) and url.startswith("https://") else "",
+            "offer_url": offer_url,
         }
     )
     return 0
+
+
+_OFFER_URL = re.compile(r"https://hol\.org/guard/plugins/promote\?[A-Za-z0-9._~%=&-]{1,300}")
+
+
+def _is_offer_url(value: object) -> bool:
+    """HOL may only point the line at its own promote page; the text is ours."""
+
+    return isinstance(value, str) and _OFFER_URL.fullmatch(value) is not None
 
 
 _SEVERITY_ORDER = ("none", "info", "low", "medium", "high", "critical")
@@ -109,7 +124,9 @@ def _plain(value: object, *, limit: int = 100) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#+!|~&-])", r"\\\1", text)
 
 
-def _summary_lines(evidence: Mapping[str, object], *, attestation_url: str, status: str, url: str) -> list[str]:
+def _summary_lines(
+    evidence: Mapping[str, object], *, attestation_url: str, status: str, url: str, offer_url: str = ""
+) -> list[str]:
     runtimes = evidence.get("runtimes")
     supported = [
         str(item.get("runtime"))
@@ -139,6 +156,11 @@ def _summary_lines(evidence: Mapping[str, object], *, attestation_url: str, stat
         lines.append(f"- HOL listing: {status}, {url}")
     else:
         lines.append(f"- HOL listing: {status}")
+    if _is_offer_url(offer_url):
+        lines.append(
+            f"- HOL Blue adds full owner insights and the checkmark to this listing: {offer_url} "
+            "(at most once in 28 days; set `offer_line: false` to hide it)"
+        )
     lines.extend(["", f"_{evidence.get('claim')}_", ""])
     return lines
 
@@ -152,6 +174,7 @@ def summary_step() -> int:
         attestation_url=_env("ATTESTATION_URL"),
         status=_env("RELEASE_STATUS") or "unavailable",
         url=_env("RELEASE_URL"),
+        offer_url=_env("OFFER_URL"),
     )
     summary_path = _env("GITHUB_STEP_SUMMARY")
     if summary_path:

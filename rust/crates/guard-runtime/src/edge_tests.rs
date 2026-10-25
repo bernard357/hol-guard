@@ -254,6 +254,28 @@ fn prompt_injection_alias_is_reviewed_without_returning_prompt_content() {
 }
 
 #[test]
+fn reads_hermes_tool_call_hook_names_as_tool_events() {
+    let bytes = evaluate_isolated(envelope(
+        "PreToolUse",
+        serde_json::json!({
+            "hook_event_name": "pre_tool_call",
+            "tool_name": "terminal",
+            "tool_input": {"command": "pwd"}
+        }),
+    ))
+    .unwrap();
+    let result: GuardHookEdgeResultV2 = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(result.event_name, "PreToolUse");
+
+    let error = evaluate_isolated(envelope(
+        "PreToolUse",
+        serde_json::json!({"hook_event_name": "post_tool_call"}),
+    ))
+    .unwrap_err();
+    assert_eq!(error, "native_hook_event_mismatch");
+}
+
+#[test]
 fn rejects_declared_and_payload_event_mismatch() {
     let error = evaluate_isolated(envelope(
         "PreToolUse",

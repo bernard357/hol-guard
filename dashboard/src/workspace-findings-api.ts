@@ -22,7 +22,10 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret";
+export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime";
+
+/** An executable a configured tool would launch that matches a runtime advisory. */
+export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
 
 export type WorkspaceFinding = {
   findingId: string;
@@ -37,11 +40,16 @@ export type WorkspaceFinding = {
   packageVersion: string | null;
   fixVersion: string | null;
   advisoryIds: string[];
-  /** Root-relative file path of a secret finding. Guard never receives the secret itself. */
+  /**
+   * Root-relative file path of a secret finding, or the executable path of a
+   * runtime finding. Guard never receives the secret itself.
+   */
   path: string | null;
   line: number | null;
   /** Every line the same secret appears on in that file, first to last. */
   lines: number[];
+  /** Set only for a runtime finding; observation only, so it has no fix. */
+  runtime: WorkspaceRuntime | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -49,6 +57,8 @@ export type WorkspaceAssessment = WorktreeKeys & {
   partial: boolean;
   reasons: string[];
   notRun: string[];
+  /** False when the workspace has no dependency files, so there was nothing to audit. */
+  dependencyFilesFound: boolean;
   finishedAtMs: number | null;
   findings: WorkspaceFinding[];
 };
@@ -61,6 +71,8 @@ export type WorkspaceFindingsState = {
   assessments: WorkspaceAssessment[];
   /** Whether the daemon already tracks the folder asked about; null when none was asked about. */
   suggestedRootTracked: boolean | null;
+  /** Set while a busy device holds automatic checks back; checks the user starts still run. */
+  deferredReason: string | null;
 };
 
 const RUN_STATES = new Set<string>(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -154,6 +166,29 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         const value = count(entry);
         return value !== null && value >= 1 ? [value] : [];
       }),
+      runtime: null,
+    };
+  }
+  if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
+    const family = text(item.runtime_family);
+    const path = text(item.path);
+    if (family === null || path === null || common.advisoryIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "runtime",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: {
+        family,
+        version: text(item.runtime_version),
+        title: text(item.title),
+        knownExploited: item.known_exploited === true,
+      },
     };
   }
   const packageName = text(item.package_name);
@@ -168,6 +203,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     path: null,
     line: null,
     lines: [],
+    runtime: null,
   };
 }
 
@@ -193,6 +229,7 @@ function normalizeAssessment(value: unknown): WorkspaceAssessment | null {
     partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
+    dependencyFilesFound: detectors.supply_chain !== "no_inputs",
     finishedAtMs: count(item.finished_at_ms),
     findings: list(item.findings)
       .map(normalizeFinding)
@@ -213,6 +250,7 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
       .map(normalizeAssessment)
       .filter((entry): entry is WorkspaceAssessment => entry !== null),
     suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null,
+    deferredReason: text(history.deferred_reason),
   };
 }
 

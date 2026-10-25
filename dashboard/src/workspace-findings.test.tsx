@@ -62,6 +62,23 @@ const state = normalizeWorkspaceFindingsState(
           },
           { finding_id: "secret-no-path", source_kind: "secret", rule_ids: ["github-token"], path: "", line: 1 },
           { finding_id: "secret-no-rule", source_kind: "secret", rule_ids: [], path: "a.txt", line: 1 },
+          {
+            finding_id: "r".repeat(32),
+            source_kind: "agent_inventory",
+            detector: "runtime_identity_v1",
+            severity: "high",
+            decision: "warn",
+            runtime_family: "node",
+            runtime_version: "20.11.1",
+            path: "/Users/dev/.nvm/versions/node/v20.11.1/bin/node",
+            rule_ids: ["restart_required"],
+            advisory_ids: ["GHSA-node-0001"],
+            title: "Path traversal in node",
+            known_exploited: true,
+            package_name: null,
+          },
+          { finding_id: "runtime-no-advisory", source_kind: "agent_inventory", detector: "runtime_identity_v1", runtime_family: "node", path: "/bin/node" },
+          { finding_id: "inventory-other", source_kind: "agent_inventory", detector: "something_else", advisory_ids: ["X"], path: "/bin/node" },
         ],
       },
     ],
@@ -78,6 +95,11 @@ assert.equal(
   normalizeWorkspaceFindingsState({}, { worktrees: [], suggested_root_tracked: true }).suggestedRootTracked,
   true,
 );
+assert.equal(state.deferredReason, null, "no deferral unless the daemon reports one");
+assert.equal(
+  normalizeWorkspaceFindingsState({ deferred_reason: "resource_pressure" }, { worktrees: [] }).deferredReason,
+  "resource_pressure",
+);
 assert.equal(state.worktrees.length, 1, "worktrees without both keys are dropped");
 assert.deepEqual(
   state.runs.map((run) => run.runId),
@@ -89,7 +111,7 @@ const [assessment] = state.assessments;
 assert.deepEqual(assessment.reasons, ["snapshot_unstable"], "detector gaps are reported separately from coverage gaps");
 assert.deepEqual(assessment.notRun, ["secrets"]);
 assert.equal(assessment.partial, true);
-assert.equal(assessment.findings.length, 2, "findings with neither a package nor a secret location are dropped");
+assert.equal(assessment.findings.length, 3, "findings with neither a package, a secret location nor a matched runtime are dropped");
 assert.deepEqual(assessment.findings[0].advisoryIds, ["GHSA-xxxx-yyyy-zzzz"]);
 const secretFinding = assessment.findings[1];
 assert.deepEqual(
@@ -99,6 +121,19 @@ assert.deepEqual(
 );
 assert.deepEqual(secretFinding.lines, [2, 9, 31], "every line of a repeated secret is kept, malformed entries dropped");
 assert.deepEqual(assessment.findings[0].lines, [], "a dependency finding has no lines");
+assert.equal(assessment.findings[0].runtime, null);
+const runtimeFinding = assessment.findings[2];
+assert.deepEqual(
+  [runtimeFinding.kind, runtimeFinding.packageName, runtimeFinding.path, runtimeFinding.ruleIds, runtimeFinding.runtime],
+  [
+    "runtime",
+    null,
+    "/Users/dev/.nvm/versions/node/v20.11.1/bin/node",
+    ["restart_required"],
+    { family: "node", version: "20.11.1", title: "Path traversal in node", knownExploited: true },
+  ],
+  "a runtime finding names the launched executable and the advisory, with no package",
+);
 
 const [onlyNotRun] = normalizeWorkspaceFindingsState(
   { worktrees: [], runs: [] },
@@ -136,6 +171,9 @@ assert.equal(
   "Partial coverage",
   "an expired lease is retried, so the last assessed result still stands",
 );
+const timedOut = worktreeStatus(worktree, { ...failedRun, errorCode: "assessment_timed_out" }, assessment);
+assert.equal(timedOut.label, "Assessment failed", "a run stopped after its retry is not retried again");
+assert.match(timedOut.detail ?? "", /took too long twice/);
 
 const markup = renderToStaticMarkup(
   createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment, busyKey: null, onAction: () => {} }),
@@ -155,9 +193,16 @@ for (const copy of [
   "Assess now",
   "Pause",
   "Prepare fix",
+  "/Users/dev/.nvm/versions/node/v20.11.1/bin/node",
+  "20.11.1",
+  "Restart needed",
+  "Known exploited",
+  "GHSA-node-0001",
+  "Path traversal in node",
 ]) {
   assert.ok(markup.includes(copy), `row shows ${copy}`);
 }
+assert.equal(markup.match(/Prepare fix/g)?.length, 1, "a runtime finding is observation only and offers no fix");
 
 const secretsRan = normalizeWorkspaceFindingsState(
   { worktrees: [], runs: [] },
@@ -181,6 +226,28 @@ const cleanMarkup = renderToStaticMarkup(
 );
 assert.ok(cleanMarkup.includes("No dependency or secret findings in the checked files."), "a clean run says secrets were checked");
 assert.ok(!cleanMarkup.includes("not part of this check yet"));
+const noDependencyFiles = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-5",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "no_inputs", secrets: "complete" } },
+        findings: [],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(noDependencyFiles.dependencyFilesFound, false);
+assert.equal(secretsRan.dependencyFilesFound, true);
+const noDependencyMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: noDependencyFiles, busyKey: null, onAction: () => {} }),
+);
+assert.ok(noDependencyMarkup.includes("No dependency files were found"), "a workspace with nothing to audit says so");
+assert.ok(!noDependencyMarkup.includes("No dependency or secret findings"), "an empty audit is never described as clean dependencies");
 const incompleteMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
     worktree,
@@ -191,6 +258,17 @@ const incompleteMarkup = renderToStaticMarkup(
   }),
 );
 assert.ok(incompleteMarkup.includes("Secret scanning did not cover every file"), "truncation is named to the operator");
+const runtimeGapMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, {
+    worktree,
+    newestRun: partialRun,
+    assessment: { ...secretsRan, partial: true, reasons: ["runtime_advisories_unavailable"], notRun: ["runtime_identity_v1"] },
+    busyKey: null,
+    onAction: () => {},
+  }),
+);
+assert.ok(runtimeGapMarkup.includes("Guard has no runtime advisories cached"), "unchecked runtimes are never shown as clean");
+assert.ok(runtimeGapMarkup.includes("Runtime checking is not part of this check yet."));
 
 const paused = renderToStaticMarkup(
   createElement(WorktreeRow, {

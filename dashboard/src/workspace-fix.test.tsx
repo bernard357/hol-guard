@@ -69,6 +69,7 @@ const finding: WorkspaceFinding = {
   path: null,
   line: null,
   lines: [],
+  runtime: null,
 };
 
 function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {

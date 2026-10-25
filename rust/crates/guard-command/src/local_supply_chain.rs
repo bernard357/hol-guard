@@ -1086,6 +1086,7 @@ pub const VALID_RISK_ACTION_KEYS: &[&str] = &[
     "package_custom_registry",
     "package_install",
     "low_trust_artifact",
+    "runtime_known_vulnerable",
 ];
 
 /// `DEFAULT_SECURITY_LEVEL` (config.py).
@@ -1677,6 +1678,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "warn"),
+                ("runtime_known_vulnerable", "warn"),
             ],
         ),
         (
@@ -1702,6 +1704,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "warn"),
+                ("runtime_known_vulnerable", "warn"),
             ],
         ),
         (
@@ -1727,6 +1730,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
         (
@@ -1752,6 +1756,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "block"),
             ],
         ),
         (
@@ -1777,6 +1782,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "block"),
                 ("package_install", "block"),
                 ("low_trust_artifact", "block"),
+                ("runtime_known_vulnerable", "block"),
             ],
         ),
         (
@@ -1802,6 +1808,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
     ];
@@ -1854,6 +1861,7 @@ fn posture_risk_rows(posture: &str) -> Option<&'static [(&'static str, &'static 
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
         (
@@ -1879,6 +1887,7 @@ fn posture_risk_rows(posture: &str) -> Option<&'static [(&'static str, &'static 
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
     ];

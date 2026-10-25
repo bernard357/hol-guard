@@ -31,6 +31,10 @@ inputs:
     description: "Send the evidence to HOL. Only the trusted reusable workflow is accepted by HOL."
     required: false
     default: "false"
+  offer_line:
+    description: "Allow one HOL Blue line in the job summary, at most once in 28 days, for a listing without a membership"
+    required: false
+    default: "true"
   release_endpoint:
     description: "HTTPS HOL Plugin Release endpoint"
     required: false
@@ -103,6 +107,7 @@ runs:
     - name: Install verified HOL Guard
       shell: bash
       env:
+        GITHUB_TOKEN_FOR_ATTESTATION: ${{ github.token }}
         PYTHONNOUSERSITE: "1"
         PYTHONSAFEPATH: "1"
       run: |
@@ -118,11 +123,21 @@ runs:
         fi
         DIST_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/hol-plugin-release-XXXXXX")"
         python3 -P -m pip install --require-hashes --only-binary=:all: -r "$LOCK_DIR/pypi-attestations-requirements.txt"
-        python3 -P -m pip download --only-binary=:all: --no-deps \
-          --platform manylinux_2_17_x86_64 --python-version 3.12 \
-          --dest "$DIST_DIR" "hol-guard==${GUARD_VERSION}"
-        WHEEL_PATH="$(find "$DIST_DIR" -maxdepth 1 -name "hol_guard-${GUARD_VERSION}-*manylinux*x86_64.whl" -print)"
-        if [ -z "$WHEEL_PATH" ] || [ "$(printf '%s\n' "$WHEEL_PATH" | wc -l)" -ne 1 ]; then
+        if [[ "$GUARD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+a[0-9]+$ ]]; then
+          # Alpha native wheels ship only on the GitHub prerelease, never on PyPI.
+          # The pinned hash decides; the attestation must come from this repository's publish workflow.
+          WHEEL_NAME="hol_guard-${GUARD_VERSION}-py3-none-manylinux_2_17_x86_64.whl"
+          WHEEL_PATH="$DIST_DIR/$WHEEL_NAME"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$WHEEL_PATH" \
+            "https://github.com/hashgraph-online/hol-guard/releases/download/alpha/v${GUARD_VERSION}/${WHEEL_NAME}"
+        else
+          python3 -P -m pip download --only-binary=:all: --no-deps \
+            --platform manylinux_2_17_x86_64 --python-version 3.12 \
+            --dest "$DIST_DIR" "hol-guard==${GUARD_VERSION}"
+          WHEEL_PATH="$(find "$DIST_DIR" -maxdepth 1 -name "hol_guard-${GUARD_VERSION}-*manylinux*x86_64.whl" -print)"
+        fi
+        if [ -z "$WHEEL_PATH" ] || [ ! -f "$WHEEL_PATH" ] || [ "$(printf '%s\n' "$WHEEL_PATH" | wc -l)" -ne 1 ]; then
           echo "Expected exactly one Linux x86_64 hol-guard ${GUARD_VERSION} wheel." >&2
           exit 1
         fi
@@ -131,12 +146,24 @@ runs:
           echo "Downloaded hol-guard wheel SHA-256 does not match guard-sha256.txt." >&2
           exit 1
         fi
-        if ! python3 -P -m pypi_attestations verify pypi --repository "https://github.com/hashgraph-online/hol-guard" "$WHEEL_PATH"; then
+        if [[ "$GUARD_VERSION" =~ a[0-9]+$ ]]; then
+          if ! GH_TOKEN="$GITHUB_TOKEN_FOR_ATTESTATION" gh attestation verify "$WHEEL_PATH" \
+            --repo hashgraph-online/hol-guard \
+            --signer-workflow hashgraph-online/hol-guard/.github/workflows/publish.yml \
+            --source-ref refs/heads/main > /dev/null; then
+            echo "Failed to verify the GitHub attestation for hol-guard==${GUARD_VERSION}." >&2
+            exit 1
+          fi
+        elif ! python3 -P -m pypi_attestations verify pypi --repository "https://github.com/hashgraph-online/hol-guard" "$WHEEL_PATH"; then
           echo "Failed to verify PyPI provenance for hol-guard==${GUARD_VERSION}." >&2
           exit 1
         fi
         python3 -P -m pip install --no-deps --require-hashes --only-binary=:all: -r "$LOCK_DIR/scanner-runtime-requirements.txt"
         python3 -P -m pip install --no-deps "$WHEEL_PATH"
+        # The hosted tool cache leaves installed files group- and world-writable,
+        # and Guard refuses a native runtime manifest anyone else can rewrite.
+        GUARD_PACKAGE_DIR="$(python3 -P -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("codex_plugin_scanner").origin).parent)')"
+        chmod -R go-w "$GUARD_PACKAGE_DIR"
         echo "HOL_GUARD_VERSION=${GUARD_VERSION}" >> "$GITHUB_ENV"
 
     - name: Scan release to SARIF
@@ -221,6 +248,7 @@ runs:
       env:
         REGISTER_RELEASE: ${{ inputs.register_release }}
         RELEASE_ENDPOINT: ${{ inputs.release_endpoint }}
+        OFFER_LINE: ${{ inputs.offer_line }}
         EVIDENCE_PATH: ${{ steps.evidence.outputs.evidence_path }}
         ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
@@ -235,6 +263,7 @@ runs:
         ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         RELEASE_STATUS: ${{ steps.register.outputs.release_status }}
         RELEASE_URL: ${{ steps.register.outputs.release_url }}
+        OFFER_URL: ${{ steps.register.outputs.offer_url }}
         FAIL_ON_CHECK_ERRORS: ${{ inputs.fail_on_check_errors }}
         FAIL_ON_SEVERITY: ${{ inputs.fail_on_severity }}
         PYTHONNOUSERSITE: "1"

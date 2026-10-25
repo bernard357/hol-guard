@@ -61,6 +61,22 @@ impl CompiledNativeCommandControls {
             || rule_floor(rule, extension.required) == "allow"
     }
 
+    /// Whether a ruleless permission observation asks for nothing beyond
+    /// allow. Such an observation declares no floor of its own: it records
+    /// that a segment touched the permission so a disabled extension or
+    /// permission can still block the command, and nothing more. A proof
+    /// that lifts one rule's review uses this to tell the permissions it is
+    /// not lifting, so a Git plumbing read beside the reviewed step does not
+    /// hold the proof back.
+    pub(crate) fn permission_settles_at_allow(
+        &self,
+        extension_id: &str,
+        permission_id: &str,
+    ) -> bool {
+        !self.blocked_extensions.contains(extension_id)
+            && !self.blocked_permissions.contains(permission_id)
+    }
+
     /// Whether the user's authenticated Allow for every segment's extension
     /// permissions settles a command whose delegated floor is already allow.
     /// Guard self-protection, secret access and exfiltration, configured Git
@@ -87,7 +103,12 @@ impl CompiledNativeCommandControls {
                             .segments
                             .iter()
                             .all(|segment| settles_enabled_uncertainty(segment, context)))
-                    && self.explicit_permissions_cover_command(model, batch, context)
+                    && self.explicit_permissions_cover_command(
+                        model,
+                        &batch.observations,
+                        &batch.permission_observations,
+                        context,
+                    )
             })
     }
 }

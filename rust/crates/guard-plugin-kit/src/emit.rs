@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 mod servers;
 
 use crate::check::is_kebab;
+use crate::config::Excludes;
 use crate::model::Plugin;
 use crate::walk;
 
@@ -134,9 +135,10 @@ pub fn dropped(runtime: Runtime, plugin: &Plugin) -> Vec<&'static str> {
 /// The files to write for each runtime, under `<runtime>/`, in path order.
 /// Every source file copied into the package is added to `sources`, relative
 /// to `root`, so the provenance digest covers it.
-pub fn plan(
+pub(crate) fn plan(
     root: &Path,
     plugin: &Plugin,
+    excludes: &Excludes,
     runtimes: &[Runtime],
     sources: &mut BTreeSet<PathBuf>,
 ) -> Result<Vec<Output>, String> {
@@ -224,7 +226,7 @@ pub fn plan(
             }
             Runtime::AgentSkills => {}
         }
-        let copies = copies(runtime, root, plugin, &mut budget, sources)?;
+        let copies = copies(runtime, root, plugin, excludes, &mut budget, sources)?;
         for (path, content) in copies {
             outputs.insert(format!("{prefix}/{path}"), content);
         }
@@ -247,6 +249,7 @@ fn copies(
     runtime: Runtime,
     root: &Path,
     plugin: &Plugin,
+    excludes: &Excludes,
     budget: &mut Budget,
     sources: &mut BTreeSet<PathBuf>,
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
@@ -266,7 +269,7 @@ fn copies(
                 found.push((dir.join("SKILL.md"), format!("skills/{slug}/SKILL.md")));
                 continue;
             }
-            for file in walk::files(&dir)? {
+            for file in walk::files(&dir, &skill.dir, excludes)? {
                 found.push((
                     dir.join(&file),
                     format!("skills/{slug}/{}", walk::display(&file)),
@@ -289,12 +292,12 @@ fn copies(
         if let Some(hooks) = &plugin.hooks {
             // Hook commands usually call scripts beside them, so the whole
             // hooks folder travels with hooks.json.
-            let dir = root
-                .join(hooks)
+            let folder = Path::new(hooks)
                 .parent()
-                .map(Path::to_path_buf)
+                .map(walk::display)
                 .unwrap_or_default();
-            for file in walk::files(&dir)? {
+            let dir = root.join(&folder);
+            for file in walk::files(&dir, &folder, excludes)? {
                 found.push((dir.join(&file), format!("hooks/{}", walk::display(&file))));
             }
         }
