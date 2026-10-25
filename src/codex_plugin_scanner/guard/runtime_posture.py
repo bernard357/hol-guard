@@ -11,15 +11,19 @@ Unknown stays unknown; the report makes no safety claim.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from .models import HarnessDetection
-from .runtime_identity_assessment import RuntimeIdentityError, assess_runtime_identity
+from .runtime_identity_assessment import RuntimeIdentityAssessment, RuntimeIdentityError, assess_runtime_identity
 from .runtime_identity_candidates import RuntimeCandidates, collect_runtime_candidates
 from .runtime_identity_probe import RuntimeProbe
 
 RUNTIME_POSTURE_SCHEMA = "guard.runtime-posture.v1"
 ADVISORIES_UNAVAILABLE = "runtime_advisories_unavailable"
+ADVISORIES_NOT_IN_BUNDLE = "runtime_advisories_not_in_bundle"
+BUNDLE_UNSUPPORTED = "runtime_advisory_bundle_unsupported_by_native_runtime"
+NATIVE_UNAVAILABLE = "runtime_identity_native_unavailable"
 HARNESS_CONFIG_UNREADABLE = "harness_config_unreadable"
 CANDIDATE_LIMIT_REACHED = "runtime_candidate_limit_reached"
 COVERAGE_STATEMENT = (
@@ -35,7 +39,10 @@ def build_runtime_posture(
     environment: Mapping[str, str] | None = None,
     workspace_dir: Path | None = None,
     skipped_harnesses: Sequence[str] = (),
+    advisory_bundle: Mapping[str, object] | None = None,
+    advisory_bundle_reason: str | None = None,
 ) -> dict[str, object]:
+    """``advisory_bundle`` is the native ``cached_bundle`` input; the native runtime verifies it."""
     try:
         candidates, probe = collect_runtime_candidates(detections, environment=environment, workspace_dir=workspace_dir)
     except ValueError as error:
@@ -58,20 +65,23 @@ def build_runtime_posture(
         return {**base, "status": status, "error": error_code, "runtimes": []}
     advisory_rows: list[dict[str, object]] = []
     matches: dict[str, list[object]] = {}
-    coverage = dict(_coverage(reason=ADVISORIES_UNAVAILABLE))
+    coverage = dict(_coverage(reason=advisory_bundle_reason or ADVISORIES_UNAVAILABLE))
+    source: dict[str, object] | None = None
+    request: dict[str, object] = {
+        "artifacts": list(probe.artifacts),
+        "locations": list(probe.locations),
+        "advisories": [],
+        "scope_complete": False,
+    }
     try:
-        assessment = assess_runtime_identity(
-            {
-                "artifacts": list(probe.artifacts),
-                "locations": list(probe.locations),
-                "advisories": [],
-                "scope_complete": False,
-            }
-        )
+        assessment = _assess(request, advisory_bundle)
     except RuntimeIdentityError as error:
         status, error_code = "partial", error.code
         coverage = dict(_coverage(reason="runtime_assessment_failed"))
     else:
+        source = assessment.advisory_source
+        if advisory_bundle is not None:
+            coverage = dict(_coverage(reason=_source_reason(source), available=_source_available(source)))
         matches = {
             str(row["artifact_id"]): list(found) if isinstance(found := row.get("matches"), list) else []
             for row in assessment.artifacts
@@ -82,6 +92,9 @@ def build_runtime_posture(
                 "verdict": row.verdict,
                 "reasons": list(row.reasons),
                 "affected_artifact_ids": list(row.affected_artifact_ids),
+                "severity": row.severity,
+                "known_exploited": row.known_exploited,
+                "title": row.title,
             }
             for row in assessment.advisories
         ]
@@ -90,16 +103,45 @@ def build_runtime_posture(
         "status": status,
         "error": error_code,
         "coverage": coverage,
+        "advisory_source": source,
         "runtimes": _runtime_rows(probe, candidates, matches),
         "advisories": advisory_rows,
     }
 
 
-def _coverage(*, reason: str) -> dict[str, object]:
+def _assess(request: dict[str, object], advisory_bundle: Mapping[str, object] | None) -> RuntimeIdentityAssessment:
+    if advisory_bundle is None:
+        return assess_runtime_identity(request)
+    try:
+        return assess_runtime_identity({**request, "cached_bundle": dict(advisory_bundle)})
+    except RuntimeIdentityError as error:
+        if error.code != NATIVE_UNAVAILABLE:
+            raise
+    # An older native runtime cannot verify bundled advisories; observe without them.
+    assessment = assess_runtime_identity(request)
+    return replace(assessment, advisory_source={"state": "unsupported", "reason": BUNDLE_UNSUPPORTED})
+
+
+def _source_available(source: Mapping[str, object] | None) -> bool:
+    entries = source.get("entries") if source else None
+    return bool(source and source.get("state") == "verified" and isinstance(entries, int) and entries > 0)
+
+
+def _source_reason(source: Mapping[str, object] | None) -> str | None:
+    if _source_available(source):
+        return None
+    if not source:
+        return ADVISORIES_UNAVAILABLE
+    if source.get("state") == "verified":
+        return ADVISORIES_NOT_IN_BUNDLE
+    return f"runtime_advisory_bundle_{source.get('state')}"
+
+
+def _coverage(*, reason: str | None, available: bool = False) -> dict[str, object]:
     return {
         "mode": "observed_only",
         "instances_enumerated": False,
-        "advisories_available": False,
+        "advisories_available": available,
         "reason": reason,
         "statement": COVERAGE_STATEMENT,
     }
@@ -167,6 +209,7 @@ def _runtime_rows(
 
 
 __all__ = [
+    "ADVISORIES_NOT_IN_BUNDLE",
     "ADVISORIES_UNAVAILABLE",
     "HARNESS_CONFIG_UNREADABLE",
     "RUNTIME_POSTURE_SCHEMA",

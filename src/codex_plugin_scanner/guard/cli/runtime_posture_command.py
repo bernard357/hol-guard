@@ -1,8 +1,10 @@
 """``hol-guard runtime posture``: runtimes configured tools would launch, read only.
 
 Prints the executables configured MCP servers launch with their inferred family,
-version and identity assurance. Nothing is started, no running process is
-enumerated, and no setting, approval or policy changes. Unknown stays unknown.
+version and identity assurance, matched against runtime advisories from the
+locally cached, signed supply-chain bundle when one is present. Nothing is
+started, no running process is enumerated, no Cloud call is made, and no
+setting, approval or policy changes. Unknown stays unknown.
 """
 
 from __future__ import annotations
@@ -43,7 +45,9 @@ def run_runtime_posture_command(
     output_stream: TextIO | None = None,
 ) -> int:
     from ..adapters.harness_mcp_discovery import configured_harness_detections
+    from ..runtime_advisory_bundle import cached_advisory_bundle
     from ..runtime_posture import build_runtime_posture
+    from ..store import GuardStore
 
     stream = output_stream if output_stream is not None else sys.stdout
     if getattr(args, "runtime_command", None) not in (None, "posture"):
@@ -52,11 +56,14 @@ def run_runtime_posture_command(
     detections = configured_harness_detections(
         context.home_dir, context.guard_home, context.workspace_dir, skipped=skipped
     )
+    advisory_bundle, bundle_reason = cached_advisory_bundle(GuardStore(context.guard_home))
     payload = build_runtime_posture(
         detections,
         generated_at=datetime.now(timezone.utc).isoformat(),
         workspace_dir=context.workspace_dir,
         skipped_harnesses=skipped,
+        advisory_bundle=advisory_bundle,
+        advisory_bundle_reason=bundle_reason,
     )
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))
@@ -90,7 +97,10 @@ def render_runtime_posture(payload: dict[str, object]) -> str:
         lines.append(f"  {label}: {item['command']} ({item['harness']} / {item['server']})")
     if payload.get("candidate_limit_reached"):
         lines.append("  Candidate limit reached; some launch executables were not inspected.")
-    lines.append(f"Coverage: observed_only; scope complete: no; advisories: unavailable ({reason}).")
+    available = isinstance(coverage, dict) and coverage.get("advisories_available") is True
+    advisories = f"cached bundle {_bundle_label(payload)}" if available else f"unavailable ({reason})"
+    lines.append(f"Coverage: observed_only; scope complete: no; advisories: {advisories}.")
+    lines.extend(_render_advisories(payload.get("advisories")))
     lines.append("Unknown versions stay unknown. No runtime is reported safe.")
     return "\n".join(lines) + "\n"
 
@@ -108,6 +118,30 @@ def _render_row(row: object) -> list[str]:
     users = sorted({f"{item['harness']}/{item['server']}" for item in launched}) if isinstance(launched, list) else []
     if users:
         lines.append(f"    launched by: {', '.join(users)}")
+    return lines
+
+
+def _bundle_label(payload: dict[str, object]) -> str:
+    source = payload.get("advisory_source")
+    version = source.get("bundle_version") if isinstance(source, dict) else None
+    return str(version) if version else "(unversioned)"
+
+
+def _render_advisories(advisories: object) -> list[str]:
+    rows = [row for row in advisories if isinstance(row, dict)] if isinstance(advisories, list) else []
+    lines: list[str] = []
+    for row in rows:
+        verdict = row.get("verdict")
+        # Only advisories that still need attention are listed.
+        if verdict in ("not_affected", "not_observed", "fixed_verified"):
+            continue
+        severity = f" [{row['severity']}]" if row.get("severity") else ""
+        exploited = " known exploited" if row.get("known_exploited") else ""
+        reasons = row.get("reasons")
+        why = ", ".join(str(item) for item in reasons) if isinstance(reasons, list) and reasons else "unknown"
+        label = f"undetermined ({why})" if verdict == "unknown" else str(verdict).replace("_", " ")
+        title = f": {row['title']}" if row.get("title") else ""
+        lines.append(f"  {row['advisory_id']}{severity}{exploited} {label}{title}")
     return lines
 
 

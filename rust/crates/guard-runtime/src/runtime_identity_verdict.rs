@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{json, Value};
 
 use super::{
-    AdvisoryInput, Artifact, Coverage, InstanceInput, InstanceState, LocationInput, LocationState,
-    Match, Request,
+    text_ok, AdvisoryInput, Artifact, ArtifactInput, Coverage, InstanceInput, InstanceState,
+    LocationInput, LocationState, Match, Request,
 };
-use crate::runtime_identity_range::{Interval, SemVer};
+use crate::runtime_identity_range::{Interval, SemVer, Upper};
 
 /// `None` when the advisory is about a different runtime entirely.
 pub(super) fn match_artifact(
@@ -26,6 +26,15 @@ pub(super) fn match_artifact(
             Some(observed) if !observed.eq_ignore_ascii_case(vendor) => return None,
             Some(_) => {}
         }
+    }
+    if !advisory.platforms.is_empty() {
+        if let Some(found) = platform_mismatch(input, advisory) {
+            return found;
+        }
+    }
+    // The probe reads the runtime's version, not a bundled copy's.
+    if advisory.bundled_component.is_some() {
+        return Some(Match::Unknown("component_version_unobserved"));
     }
     // An advisory that names no vendor still flags every in-range build of
     // the family, but its ranges cannot clear a build: another vendor's
@@ -63,11 +72,35 @@ pub(super) fn match_artifact(
     })
 }
 
+/// `None` when the artifact's platform is listed, `Some(None)` when it is
+/// clearly another platform, and an unknown match when the probe could not
+/// tell which platform it runs on.
+fn platform_mismatch(input: &ArtifactInput, advisory: &AdvisoryInput) -> Option<Option<Match>> {
+    let fits = |want: &str, have: &str, unknown_fits: bool| {
+        want == "*"
+            || want.eq_ignore_ascii_case(have)
+            || (unknown_fits && have.eq_ignore_ascii_case("unknown"))
+    };
+    let listed = |unknown_fits: bool| {
+        advisory.platforms.iter().any(|platform| {
+            fits(&platform.os, &input.os, unknown_fits)
+                && fits(&platform.arch, &input.arch, unknown_fits)
+        })
+    };
+    if listed(false) {
+        None
+    } else if listed(true) {
+        Some(Some(Match::Unknown("platform_unknown")))
+    } else {
+        Some(None)
+    }
+}
+
 pub(super) fn advisory_verdict(
     request: &Request,
     artifacts: &BTreeMap<&str, Artifact<'_>>,
     locations: &BTreeMap<&str, &LocationInput>,
-    advisory_id: &str,
+    advisory: &AdvisoryInput,
     by_artifact: &BTreeMap<&str, Match>,
 ) -> Value {
     let ids_where = |wanted: fn(&Match) -> bool| -> BTreeSet<&str> {
@@ -218,7 +251,10 @@ pub(super) fn advisory_verdict(
     };
 
     json!({
-        "advisory_id": advisory_id,
+        "advisory_id": advisory.advisory_id,
+        "severity": advisory.severity,
+        "known_exploited": advisory.known_exploited,
+        "title": advisory.title,
         "verdict": verdict,
         "reasons": reasons,
         "affected_artifact_ids": affected,
@@ -228,4 +264,42 @@ pub(super) fn advisory_verdict(
             .collect::<Vec<_>>(),
         "replacement_instance_ids": replacements,
     })
+}
+
+pub(super) fn parse_intervals(advisory: &AdvisoryInput) -> Result<Vec<Interval>, String> {
+    let invalid = || "runtime_identity_advisory_invalid".to_owned();
+    let names_ok = text_ok(&advisory.advisory_id)
+        && text_ok(&advisory.family)
+        && advisory.vendor.as_deref().is_none_or(text_ok)
+        && advisory.backport_build_ids.iter().all(|id| text_ok(id));
+    if !names_ok {
+        return Err(invalid());
+    }
+    if advisory.version_scheme != "semver" {
+        return Ok(Vec::new());
+    }
+    advisory
+        .ranges
+        .iter()
+        .map(|range| {
+            let parse = |text: &Option<String>| match text {
+                None => Ok(None),
+                Some(raw) => SemVer::parse(raw).map(Some).ok_or_else(invalid),
+            };
+            let upper = match (parse(&range.fixed)?, parse(&range.last_affected)?) {
+                (Some(_), Some(_)) => return Err(invalid()),
+                (Some(fixed), None) => Upper::Fixed(fixed),
+                (None, Some(last)) => Upper::LastAffected(last),
+                (None, None) => Upper::Unbounded,
+            };
+            let interval = Interval {
+                introduced: parse(&range.introduced)?,
+                upper,
+            };
+            if !interval.is_ordered() {
+                return Err(invalid());
+            }
+            Ok(interval)
+        })
+        .collect()
 }
