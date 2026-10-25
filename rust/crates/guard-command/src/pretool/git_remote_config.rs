@@ -336,18 +336,24 @@ pub(super) fn rewritten_remote_url(config: &GitConfig, url: &str) -> Option<Stri
     })
 }
 
-/// Whether `origin` is the only remote the repository can reach: no other
-/// `remote.<name>.url`, and no `branch.<name>.remote` naming anything else.
-/// A refresh that names no remote resolves one through
+/// Whether `origin` is the only remote the repository can reach: no key in
+/// another remote's subsection, and no `branch.<name>.remote` naming anything
+/// else. A refresh that names no remote resolves one through
 /// `branch.<current>.remote`, and `--all` walks every configured remote, so
 /// both reach only `origin` when this holds. A `branch.<name>.remote` that is
 /// not a configured remote name is a URL Git fetches directly, which the
 /// origin URL proof does not cover either way.
+///
+/// Any `remote.<name>.<variable>` key builds a remote, not just `.url`: a
+/// remote with no URL falls back to its own name as a local path, and one
+/// with `uploadpack` or `vcs` names a program `--all` would run. A key with
+/// no subsection, such as `remote.pushdefault`, configures no remote.
 pub(super) fn only_origin_remote(effective: &GitConfig) -> bool {
     effective.iter().all(|(key, values)| {
         if let Some(name) = key
             .strip_prefix("remote.")
-            .and_then(|rest| rest.strip_suffix(".url"))
+            .and_then(|rest| rest.rsplit_once('.'))
+            .map(|(name, _)| name)
         {
             return name == "origin";
         }
@@ -356,4 +362,22 @@ pub(super) fn only_origin_remote(effective: &GitConfig) -> bool {
         }
         true
     })
+}
+
+/// Remotes can also be files under `remotes/` or `branches/` in the common
+/// directory, which the configuration listing never shows. A directory this
+/// cannot read counts as holding one.
+pub(super) fn legacy_remotes_absent(common_dir: &std::path::Path) -> Option<bool> {
+    for directory in ["remotes", "branches"] {
+        match std::fs::read_dir(common_dir.join(directory)) {
+            Ok(mut entries) => {
+                if entries.next().is_some() {
+                    return Some(false);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    Some(true)
 }

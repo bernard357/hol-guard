@@ -26479,8 +26479,7 @@
         "command": "git fetch --prune-tags"
       },
       "cwd": "org_app",
-      "expect": "not_allow",
-      "contained_ok": true
+      "expect": "not_allow"
     },
     {
       "id": "neg-git-fetch-named-other-remote",
@@ -26495,8 +26494,7 @@
         "command": "git fetch upstream"
       },
       "cwd": "org_app",
-      "expect": "not_allow",
-      "contained_ok": true
+      "expect": "not_allow"
     }
   ],
   "mcp_cases": [

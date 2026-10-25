@@ -8,14 +8,20 @@
 //! pull split in two. It reaches no remote, so it needs only the work tree
 //! half of the pull proof: what a fast-forward checkout could start.
 
-use super::git_remote_config as config;
 use super::git_session_probe::Probe;
 use crate::{CanonicalCommandV1, CommandSegmentV1};
 use std::time::Instant;
 
+#[path = "git_remote_proof.rs"]
+mod proof;
+
 #[path = "git_remote_pull.rs"]
 pub(super) mod pull;
 
+use proof::{
+    every_remote_is_origin, fast_forward_inert, lfs_endpoint_overridden, lfsconfig_absent,
+    tracks_origin, transport_proven,
+};
 use pull::Operation;
 
 /// The allow reason for a proven refresh, or `None`. The fetch may sit in a
@@ -399,7 +405,7 @@ fn prove(
     // Initialized submodules are fetched on demand with their own config
     // and hooks, which this probe does not read.
     transport_proven(&effective, &repository, &probe)
-        && (!operation.every_remote || config::only_origin_remote(&effective))
+        && (!operation.every_remote || every_remote_is_origin(&effective, &probe))
         && !effective.keys().any(|key| key.starts_with("submodule."))
         && probe.hooks_inert_in_a_stable_tree([
             "pre-auto-gc",
@@ -409,108 +415,4 @@ fn prove(
         && operation
             .upstream
             .is_none_or(|shape| pull::pull_inert(&effective, &repository, shape, &probe))
-}
-
-/// Git LFS takes its endpoint from `lfs.url`, `lfs.pushurl` or
-/// `remote.<name>.lfsurl`, and how it authenticates there from
-/// `lfs.<url>.access`, rather than from origin's URL.
-fn lfs_endpoint_overridden(effective: &config::GitConfig) -> bool {
-    effective.keys().any(|key| {
-        let key = key.to_ascii_lowercase();
-        key == "lfs.url"
-            || key == "lfs.pushurl"
-            || (key.starts_with("remote.") && key.ends_with(".lfsurl"))
-            || (key.starts_with("lfs.") && key.ends_with(".access"))
-    })
-}
-
-/// No `.lfsconfig` names those keys from the work tree, the current commit
-/// or the commit the fast-forward checks out. A probe that fails counts as
-/// one being there.
-fn lfsconfig_absent(probe: &Probe, target: &str) -> bool {
-    let Some(top) = probe.text(&["rev-parse", "--show-toplevel"]) else {
-        return false;
-    };
-    if std::fs::symlink_metadata(std::path::Path::new(&top).join(".lfsconfig")).is_ok() {
-        return false;
-    }
-    ["HEAD", target].iter().all(|commit| {
-        probe
-            .output(&[
-                "ls-tree",
-                "--full-tree",
-                "--name-only",
-                "--end-of-options",
-                commit,
-                "--",
-                ".lfsconfig",
-            ])
-            .is_some_and(|listed| listed.iter().all(u8::is_ascii_whitespace))
-    })
-}
-
-/// The network half of the proof: every origin URL reaches GitHub, no
-/// configuration routes the transport through a program, credential helpers
-/// are trusted, and no `pager.fetch` names a program for the fetch's output.
-fn transport_proven(
-    effective: &config::GitConfig,
-    repository: &config::GitConfig,
-    probe: &Probe,
-) -> bool {
-    let urls = effective
-        .get("remote.origin.url")
-        .map_or(&[][..], Vec::as_slice);
-    !urls.is_empty()
-        && urls.iter().all(|url| {
-            config::rewritten_remote_url(effective, url.trim())
-                .is_some_and(|url| config::safe_github_remote_url(&url))
-        })
-        && !config::fetch_config_routes_execution(effective)
-        && probe.credential_helpers_trusted(&config::credential_helpers(effective))
-        && !config::config_weakens_transport(effective)
-        && !config::repository_config_routes_transport(repository)
-        && !pull::pager_enabled(effective, "fetch")
-}
-
-/// Whether Git resolves the merge target to origin's remote-tracking ref,
-/// rather than a ref such as a tag or local branch spelled `origin/<branch>`
-/// that Git would pick first.
-fn tracks_origin(probe: &Probe, target: &str) -> bool {
-    let Some(full) = probe.text(&[
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        "--symbolic-full-name",
-        target,
-    ]) else {
-        return false;
-    };
-    if target.starts_with("origin/") {
-        full == format!("refs/remotes/{target}")
-    } else {
-        full.starts_with("refs/remotes/origin/")
-    }
-}
-
-/// The work tree half of the pull proof, for a fast-forward merge that
-/// fetches nothing: the checkout, ref update and automatic maintenance start
-/// no program. A partial clone would fetch the blobs it checks out from a
-/// remote this proof has not read, submodules carry their own hooks, and a
-/// virtual file system names a program Git runs on every index read.
-fn fast_forward_inert(
-    effective: &config::GitConfig,
-    repository: &config::GitConfig,
-    shape: pull::Pull,
-    probe: &Probe,
-) -> bool {
-    !effective.iter().any(|(key, values)| {
-        matches!(
-            key.as_str(),
-            "extensions.partialclone" | "core.virtualfilesystem"
-        ) || key.starts_with("submodule.")
-            || (key.starts_with("remote.")
-                && key.ends_with(".promisor")
-                && values.iter().any(|value| !pull::disabled(value)))
-    }) && probe.hooks_inert(["reference-transaction", "pre-auto-gc"])
-        && pull::pull_inert(effective, repository, shape, probe)
 }
