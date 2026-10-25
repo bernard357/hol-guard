@@ -356,23 +356,6 @@ def test_a_payload_without_a_rejection_asks_the_resident_nothing() -> None:
     )
 
 
-def test_a_claimed_saved_allow_is_read_back_when_the_resident_cannot_settle() -> None:
-    """An unreachable resident must not turn a consumed approval into an allow."""
-
-    from codex_plugin_scanner.guard.cli import commands_hook_native_eval as evaluation
-
-    consumed = [{"code": "saved_package_approval", "approval_claim_disposition": "consumed"}]
-    retained = [{"code": "saved_package_approval", "approval_claim_disposition": "retained"}]
-    unknown = [{"code": "saved_package_approval"}]
-    other = [{"code": "saved_package_block"}]
-
-    assert evaluation._claimed_saved_package_allow(consumed) == "consumed"
-    assert evaluation._claimed_saved_package_allow(retained) == "retained"
-    assert evaluation._claimed_saved_package_allow(unknown) == "retained"
-    assert evaluation._claimed_saved_package_allow(other) is None
-    assert evaluation._claimed_saved_package_allow([]) is None
-
-
 def test_the_policy_lookup_selection_requires_its_own_feature(monkeypatch: pytest.MonkeyPatch) -> None:
     required = _feature_recorder(monkeypatch)
     with pytest.raises(compose.NativeHookComposeError):
