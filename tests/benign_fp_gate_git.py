@@ -115,6 +115,18 @@ def _stopped_rebase(org: Path, home: Path, name: str, *options: str) -> None:
     _git(worktree, "add", "README.md", home=home)
 
 
+def signed_checkout_include(home: Path) -> str:
+    """The conditional include that makes the signed checkout's own signing settings a restatement.
+
+    A lane that rewrites the fixture's global config has to keep this line, or
+    the repository's `gpg.program` stops matching the user's own choice and
+    the checkout stands for a different shape than the one it was built for.
+    """
+    repository = home / "Code" / "signed" / "app-signed"
+    user_signing = home / ".config" / "git" / "signed-lane.cfg"
+    return f'[includeIf "gitdir:{repository}/"]\n\tpath = {user_signing}\n'
+
+
 def _signed_checkout(home: Path) -> None:
     """A checkout whose own config file carries the signing and pager settings a team hook writes.
 
@@ -151,7 +163,7 @@ def _signed_checkout(home: Path) -> None:
     user_signing = home / ".config" / "git" / "signed-lane.cfg"
     _write(user_signing, f"[gpg]\n\tformat = openpgp\n\tprogram = {signing_program}\n[commit]\n\tgpgsign = true\n")
     with (home / ".gitconfig").open("a", encoding="utf-8") as handle:
-        handle.write(f'[includeIf "gitdir:{repository}/"]\n\tpath = {user_signing}\n')
+        handle.write(signed_checkout_include(home))
     for key, value in (
         ("commit.gpgsign", "true"),
         ("tag.gpgsign", "true"),
