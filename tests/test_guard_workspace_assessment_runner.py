@@ -148,14 +148,21 @@ UNMATCHED = {
 }
 
 
-def test_packages_unchecked_without_an_advisory_bundle_are_a_coverage_gap() -> None:
+@pytest.mark.parametrize("extra", [[], ["unidentified_package"], ["lockfile_drift"]])
+def test_packages_unchecked_without_an_advisory_bundle_are_a_coverage_gap(extra: list[str]) -> None:
     # Unconnected, nothing cached: the packages were never compared with any
-    # intelligence, so the run must not read as a clean, complete check.
-    audit = {**AUDIT, "evaluation": {"bundle_version": None, "cache_status": "miss", "packages": [UNMATCHED]}}
+    # intelligence, so the run must not read as a clean, complete check, even
+    # when the evaluator also asked for review for another reason.
+    package = {
+        **UNMATCHED,
+        "decision": "ask" if extra else "monitor",
+        "reasons": [*UNMATCHED["reasons"], *({"code": code, "message": "m", "severity": "medium"} for code in extra)],
+    }
+    audit = {**AUDIT, "evaluation": {"bundle_version": None, "cache_status": "miss", "packages": [package]}}
     coverage = runner.coverage_summary(SCANNED, audit, findings_truncated=False)
     assert coverage["status"] == "partial"
     assert coverage["detectors"]["supply_chain"] == "incomplete"
-    assert coverage["reasons"] == ["advisory_data_unavailable"]
+    assert "advisory_data_unavailable" in coverage["reasons"]
 
 
 def test_no_match_in_a_cached_bundle_is_a_clean_result() -> None:

@@ -345,7 +345,9 @@ def _unchecked_packages(payload: Mapping[str, object]) -> int:
     evaluation = payload.get("evaluation")
     if not isinstance(evaluation, Mapping) or evaluation.get("bundle_version") is not None:
         return 0
-    return sum(1 for package in _packages(payload) if _reason_codes(package) == {_NO_CACHED_MATCH})
+    # The evaluator can add review reasons (an unidentified package, a lockfile
+    # drift) beside the miss; none of them means advisories were consulted.
+    return sum(1 for package in _packages(payload) if _NO_CACHED_MATCH in _reason_codes(package))
 
 
 def _max_severity(reasons: list[Mapping[str, object]]) -> str:
