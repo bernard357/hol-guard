@@ -64,5 +64,12 @@ jobs:
           print("reason", getattr(s, "reason", None), getattr(s, "detail", None))
           c = s.capabilities
           print("plugin-kit-v1", None if c is None else "plugin-kit-v1" in c.features)
+          import os, stat
+          if s.identity is not None:
+              m = s.identity.path.with_name("runtime-manifest.json")
+              for target in (m, m.parent, m.parent.parent):
+                  st = os.lstat(target)
+                  print(oct(stat.S_IMODE(st.st_mode)), st.st_uid, st.st_gid, target)
+          print("uid", os.getuid(), "groups", os.getgroups())
           PY
           sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
