@@ -15,7 +15,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::Value;
 
 use crate::model::{Diagnostic, Marketplace, Plugin, Source, SourceKind};
-use crate::walk;
+use crate::{config, walk};
 
 pub struct Detection {
     pub sources: Vec<Source>,
@@ -29,7 +29,16 @@ pub struct Detection {
 }
 
 pub fn detect(root: &Path) -> Result<Detection, String> {
-    let files = walk::files(root)?;
+    let excluded = config::exclude_paths(root)?;
+    let files: Vec<PathBuf> = walk::files(root)?
+        .into_iter()
+        .filter(|file| {
+            let path = walk::display(file);
+            !excluded
+                .iter()
+                .any(|pattern| config::matches(pattern, &path))
+        })
+        .collect();
     let mut sources = Vec::new();
     for file in &files {
         if let Some(kind) = classify(file) {

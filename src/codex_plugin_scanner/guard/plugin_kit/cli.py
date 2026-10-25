@@ -26,6 +26,7 @@ _ERRORS = {
     "plugin_kit_root_invalid": "The path is not a readable folder.",
     "plugin_kit_root_unreadable": "The folder could not be read.",
     "plugin_kit_repository_too_large": "The repository has too many files to inspect.",
+    "plugin_kit_config_invalid": "[plugin_kit] exclude_paths in .plugin-scanner.toml must be a list of path patterns.",
     "plugin_kit_unknown_runtime": "Unknown runtime. Choose from: "
     + ", ".join(
         (

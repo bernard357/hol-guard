@@ -230,6 +230,59 @@ fn skills_with_the_same_name_are_an_error() {
 }
 
 #[test]
+fn excluded_copies_of_a_skill_are_not_part_of_the_plugin() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"distributions/*\"]\n",
+        ),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        ("distributions/marketplace/skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let check = ok(json!({"command": "check", "root": root_str(&root)}));
+    assert!(
+        !codes(&check).contains(&"skill_name_duplicate".to_owned()),
+        "{check}"
+    );
+    assert_eq!(check["summary"]["skills"], json!(1), "{check}");
+    assert!(plan(&root, &["claude-code"])
+        .iter()
+        .all(|output| !output.path.contains("distributions")));
+}
+
+#[test]
+fn the_scanner_ignore_paths_do_not_drop_plugin_parts() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (
+            ".plugin-scanner.toml",
+            "[scanner]\nignore_paths = [\"examples/*\"]\n",
+        ),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        ("examples/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let check = ok(json!({"command": "check", "root": root_str(&root)}));
+    assert!(codes(&check).contains(&"skill_name_duplicate".to_owned()));
+}
+
+#[test]
+fn a_malformed_exclude_list_is_an_error() {
+    for config in [
+        "[plugin_kit]\nexclude_paths = \"distributions/*\"\n",
+        "[plugin_kit]\nexclude_paths = [3]\n",
+        "[plugin_kit\n",
+    ] {
+        let root = repo(&[
+            (".plugin-scanner.toml", config),
+            ("skills/pdf-tools/SKILL.md", SKILL),
+        ]);
+        let code = error(json!({"command": "check", "root": root_str(&root)}));
+        assert_eq!(code, "plugin_kit_config_invalid", "{config}");
+    }
+}
+
+#[test]
 fn nested_commands_and_agents_keep_their_folders() {
     let root = repo(&[
         (".claude-plugin/plugin.json", MANIFEST),

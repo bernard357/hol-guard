@@ -7,6 +7,7 @@
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
 
 mod check;
+mod config;
 mod detect;
 mod emit;
 mod init;
