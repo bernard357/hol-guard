@@ -65,14 +65,8 @@ pub(in crate::pretool) fn agent_root_listing(
         && (!recursive || walk(agent, &[], &[], false, false))
 }
 
-/// A user skill directory, `~/.agents`, the `skills` tree of any tool's own
-/// home directory, or the matching tree a checkout carries itself, named for
-/// a listing that prints names only (`ls` without recursion, `find` without
-/// actions). Agents look
-/// up skill scripts this way; the operand must clear the same word screens as
-/// the `.agent` root and resolve to a directory the skill rules admit.
 /// The operand names a skill root, and that root is a link to the home
-/// directory or an ancestor. `skill_listing_root` already rejects it; a
+/// directory or an ancestor. [`skill_listing_root`] already rejects it; a
 /// bounded directory read must reject it too, or `find` allows the listing.
 pub(in crate::pretool) fn skill_link_resolves_over_home(
     value: &str,
@@ -143,7 +137,25 @@ fn fold_parents(path: &Path) -> std::path::PathBuf {
     folded
 }
 
-pub(in crate::pretool) fn skill_listing_root(value: &str, context: ReadContext<'_>) -> bool {
+/// A user skill directory, `~/.agents`, the `skills` tree of any tool's own
+/// home directory, or the matching tree a checkout carries itself, named for
+/// a listing that prints names only (`ls` without recursion, `find` without
+/// actions). Agents look up skill scripts this way; the operand must clear
+/// the same word screens as the `.agent` root and resolve to a directory the
+/// skill rules admit.
+///
+/// `recursive` says the lister descends. The rules below screen the operand's
+/// own components: a hidden folder or a credential store named as the root is
+/// refused. A descending lister prints those same names from inside the tree,
+/// so it must clear the bounded metadata walk as well, exactly as `ls -R` of
+/// the `.agent` root does. `find` prints every hidden entry it reaches, so it
+/// asks for the walk whatever depth its expression bounds; `ls` without `-R`
+/// prints no hidden name and descends nowhere, so it does not.
+pub(in crate::pretool) fn skill_listing_root(
+    value: &str,
+    context: ReadContext<'_>,
+    recursive: bool,
+) -> bool {
     if value.is_empty()
         || value.len() > 4096
         || value.starts_with('-')
@@ -164,6 +176,7 @@ pub(in crate::pretool) fn skill_listing_root(value: &str, context: ReadContext<'
                     context.home_dir,
                 ) || home_tool_skill_tree(&canonical, context.home_dir)
                     || project_skill_tree(&canonical, context))
+                && (!recursive || walk(canonical, &[], &[], false, false))
         })
 }
 

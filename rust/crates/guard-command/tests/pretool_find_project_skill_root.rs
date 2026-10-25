@@ -2,7 +2,8 @@
 //! project's skills by walking it. A plain listing of the session folder
 //! already prints those names, so the names-only walk that prints the same
 //! ones is ordinary work. An `.agents` folder holding state of its own, and a
-//! hidden or credential-named folder below the tree, both keep review.
+//! hidden or credential-named folder below the tree, both keep review,
+//! whether the walk names one as its root or reaches it from above.
 use crate::pretool_home_layout_reads::{assert_decision, layout};
 use std::path::Path;
 
@@ -56,7 +57,29 @@ fn a_hidden_or_credential_named_folder_below_the_project_tree_still_asks() {
     for command in [
         "find .agents/skills/.private -type f",
         "find .agents/skills/credentials -type f",
+        // `find` prints a hidden name it reaches, so screening only the root
+        // would let the walk above print the very names the two roots above
+        // are refused for.
+        "find .agents/skills -type f",
+        "find .agents/skills -type d",
+        "find .agents -maxdepth 3 -type f -print",
+        "find .agents/skills -maxdepth 1 -type d",
     ] {
         assert_decision(&checkout, &layout.home, command, false);
+    }
+}
+
+/// `ls` prints no hidden name and descends nowhere, so the same tree it
+/// refuses to `find` is still ordinary work to list.
+#[test]
+fn a_plain_listing_of_the_same_tree_stays_silent() {
+    let layout = layout("project-skill-plain-listing");
+    let checkout = layout.org.join("app-portal");
+    project(&checkout);
+    for directory in [".agents/skills/.private", ".agents/skills/credentials"] {
+        std::fs::create_dir_all(checkout.join(directory)).unwrap();
+    }
+    for command in ["ls .agents/skills", "ls .agents"] {
+        assert_decision(&checkout, &layout.home, command, true);
     }
 }
