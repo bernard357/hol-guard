@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -306,3 +307,16 @@ def test_rust_cache_probe_distinguishes_partial_restores(
     assert output.read_text(encoding="utf-8").splitlines() == [f"restored={expected}"]
     if artifact not in (None, "empty"):
         assert (target / artifact).read_text(encoding="utf-8") == "cached dependency"
+
+
+@pytest.mark.parametrize("profile", ["release", "dev"])
+def test_build_dependencies_stay_optimized(profile: str) -> None:
+    """Keep build scripts optimized: Cargo defaults them to opt-level 0 even in release.
+
+    guard-command-catalog-data's build script compresses the whole command-source
+    corpus at zstd level 19 on every build. At Cargo's default, zstd-sys's C is
+    compiled with -O0 and that one step dominated the native build on Linux,
+    macOS and Windows alike.
+    """
+    manifest = tomllib.loads((ROOT / "rust/Cargo.toml").read_text(encoding="utf-8"))
+    assert manifest["profile"][profile]["build-override"]["opt-level"] == 3
