@@ -50,6 +50,7 @@ def test_value_error_exit_falls_back_to_usage_error() -> None:
 def test_missing_runtime_explains_available_installation_path(
     supported: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Missing runtimes name either in-place repair or unsupported-platform guidance."""
     from codex_plugin_scanner.guard.cli import update_native_wheel
 
     monkeypatch.setattr(update_native_wheel, "bundled_native_runtime_missing", lambda: True)
@@ -63,10 +64,13 @@ def test_missing_runtime_explains_available_installation_path(
     assert "native_guard_config_unavailable" in captured.err
     assert "usage:" not in captured.err
     if supported:
-        assert "Install the matching native wheel for this Guard version" in captured.err
+        assert "Run `hol-guard update` to repair this installation" in captured.err
+        assert "matching native wheel for this Guard version" in captured.err
+        assert "same Python environment" in captured.err
         assert "https://github.com/hashgraph-online/hol-guard/releases" in captured.err
         assert "No published" not in captured.err
     else:
+        assert "hol-guard update" not in captured.err
         assert "No published HOL Guard native wheel matches this Python platform (linux-aarch64)" in captured.err
         assert "universal Python wheel cannot provide protection" in captured.err
         assert "get-started.md#platform-support" in captured.err
@@ -75,11 +79,13 @@ def test_missing_runtime_explains_available_installation_path(
 def test_existing_unhealthy_runtime_does_not_report_missing_platform_support(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """An installed but unhealthy runtime must not be described as absent."""
     from codex_plugin_scanner.guard.cli import update_native_wheel
 
     monkeypatch.setattr(update_native_wheel, "bundled_native_runtime_missing", lambda: False)
 
     def unexpected_platform_probe() -> bool:
+        """Reject platform probing when the bundled runtime already exists."""
         pytest.fail("An existing runtime failure is not evidence of an unsupported platform")
 
     monkeypatch.setattr(update_native_wheel, "native_platform_supported", unexpected_platform_probe)

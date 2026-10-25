@@ -22,8 +22,9 @@ def _missing_runtime_hint() -> str | None:
         return None
     if native_platform_supported():
         return (
-            "The bundled native runtime is missing. Install the matching native wheel for this Guard version "
-            "from https://github.com/hashgraph-online/hol-guard/releases and retry."
+            "The bundled native runtime is missing. Run `hol-guard update` to repair this installation. "
+            "If repair cannot recover it, install the matching native wheel for this Guard version "
+            "from https://github.com/hashgraph-online/hol-guard/releases into the same Python environment and retry."
         )
     return (
         f"No published HOL Guard native wheel matches this Python platform ({sysconfig.get_platform()}). "
@@ -33,17 +34,21 @@ def _missing_runtime_hint() -> str | None:
     )
 
 
-def report_native_unavailable(parser: argparse.ArgumentParser, exc: ValueError) -> int | None:
+def report_native_unavailable(
+    parser: argparse.ArgumentParser, exc: ValueError, *, error_prefix: str | None = None
+) -> int | None:
     """Print a native-runtime failure and return its exit code, or None for other errors.
 
     Argparse's ``parser.error`` prints the usage banner and reads like a bad
     command line, which hid a stale update marker behind every command.
+    Callers with an existing error-line contract can retain its prefix.
     """
 
     message = str(exc)
     if _NATIVE_UNAVAILABLE_PATTERN.fullmatch(message) is None:
         return None
-    print(f"{parser.prog}: error: {message}", file=sys.stderr)
+    prefix = error_prefix if error_prefix is not None else f"{parser.prog}: error"
+    print(f"{prefix}: {message}", file=sys.stderr)
     if message == "native_guard_config_unavailable" and (hint := _missing_runtime_hint()) is not None:
         print(f"{parser.prog}: hint: {hint}", file=sys.stderr)
     if any(code in message for code in _REPAIR_HINT_CODES):
