@@ -50,6 +50,7 @@ export type AppView =
   | "audit"
   | "policy"
   | "feed-health"
+  | "workspaces"
   | "about"
   | "releases"
   | "protection-repair";
@@ -160,7 +161,7 @@ export function ShellHeader(props: {
   );
 }
 
-const hubViews = new Set(["audit", "feed-health"]);
+const hubViews = new Set(["audit", "feed-health", "workspaces"]);
 
 const sidebarLinks = [
   { href: "/", label: "Home", view: "home", icon: HiMiniHome },
@@ -372,7 +373,7 @@ export function Badge(props: {
   );
 }
 
-type TagTone =
+export type TagTone =
   | "blue"
   | "green"
   | "purple"

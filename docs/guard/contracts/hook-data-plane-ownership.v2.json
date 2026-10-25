@@ -429,6 +429,8 @@
     "src/codex_plugin_scanner/guard/native_supply_chain_posture.py",
     "src/codex_plugin_scanner/guard/native_package_audit_projection.py",
     "src/codex_plugin_scanner/guard/native_workspace_inventory.py",
+    "src/codex_plugin_scanner/guard/native_workspace_snapshot.py",
+    "src/codex_plugin_scanner/guard/native_workspace_fix.py",
     "src/codex_plugin_scanner/guard/native_codex_hook_identity.py",
     "src/codex_plugin_scanner/guard/native_inventory_source_evidence.py",
     "src/codex_plugin_scanner/guard/native_inventory_item_classification.py",
@@ -678,7 +680,8 @@
     "rust/crates/guard-pack-compiler/**",
     "rust/crates/guard-runtime-pyjson/**",
     "rust/crates/guard-adapter-detection/**",
-    "rust/crates/guard-plugin-kit/**"
+    "rust/crates/guard-plugin-kit/**",
+    "rust/crates/guard-plugin-telemetry/**"
    ],
    "current": "strict raw hook-envelope v2 parsing, harness/event normalization, bounded generic PreToolUse action classification, command parser floors, authenticated effective-policy floor joins for PreToolUse and PostToolUse, external-Ed25519 V3 and root-authenticated WebAuthn V4 native approval challenge/validation/consume with resident-memory replay fencing, supported PostToolUse authority, native resident framing/authentication, OS-bound process identity, and bounded lifecycle supervision",
    "target": "all supported hook parsing, classification, policy, approval validation, and final decisions"

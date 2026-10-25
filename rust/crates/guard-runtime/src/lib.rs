@@ -708,6 +708,13 @@ mod runner_sync_url;
 mod runtime_artifact_identity_op;
 mod runtime_cli;
 mod runtime_detector_run_op;
+mod runtime_identity;
+mod runtime_identity_launch;
+mod runtime_identity_launch_shebang;
+mod runtime_identity_probe;
+mod runtime_identity_probe_format;
+mod runtime_identity_probe_layout;
+mod runtime_identity_range;
 mod secrets_cli;
 mod sensitive_request_op;
 #[cfg(all(test, unix))]
@@ -758,9 +765,16 @@ mod windows_node_build;
 mod windows_pytest;
 #[cfg(windows)]
 mod windows_readonly;
+mod workspace_fix;
+mod workspace_fix_diff;
+mod workspace_fix_fs;
+mod workspace_fix_manifest;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
 mod workspace_scan_targets;
+mod workspace_snapshot;
+mod workspace_snapshot_file;
+mod workspace_snapshot_git;
 mod zcode_artifacts;
 #[path = "adapters/detection/zcode_detect.rs"]
 mod zcode_detect;

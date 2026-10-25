@@ -678,6 +678,8 @@
       "src/shims/pyfs_nt.rs",
       "src/shims/status.rs",
       "src/shims/template.rs",
+      "src/shims/tool_dirs.rs",
+      "src/shims/tool_dirs_tests.rs",
       "src/shims/values.rs",
       "src/shims/winpath/mod.rs",
       "src/source_cli.rs",
