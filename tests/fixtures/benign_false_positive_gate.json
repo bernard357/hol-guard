@@ -26254,6 +26254,93 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "git-switch-existing-branch",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git switch feat/other-branch"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "git-checkout-existing-branch",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git checkout feat/other-branch"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "git-switch-detaches-at-head",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git switch --detach HEAD"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-checkout-force-overwrites-work",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git checkout -f feat/other-branch"
+      },
+      "cwd": "parent",
+      "expect": "not_allow",
+      "contained_ok": true
+    },
+    {
+      "id": "neg-git-checkout-pathspec-discards-file",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git checkout -- README.md"
+      },
+      "cwd": "parent",
+      "expect": "not_allow",
+      "contained_ok": true
     }
   ],
   "mcp_cases": [

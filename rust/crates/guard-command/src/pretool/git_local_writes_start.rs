@@ -15,16 +15,39 @@ use std::path::Path;
 /// Paths the proof checks before it gives up and keeps the review.
 const MAX_ADDED_PATHS: usize = 20_000;
 
-/// The start point of `checkout -b NAME START` or `switch -c NAME START`.
+/// The commit a checkout moves the working tree to: the start point of
+/// `checkout -b NAME START` or `switch -c NAME START`, or the branch or commit
+/// a plain `checkout`/`switch` moves to. The proof below is the same either
+/// way, because Git refuses rather than overwrite a tracked or untracked file
+/// and replaces only an ignored one silently.
 pub(super) fn start_point(arguments: &[String]) -> Option<&str> {
-    let [command, flag, name, start] = arguments else {
-        return None;
-    };
-    let branch = [command.clone(), flag.clone(), name.clone()];
-    (matches!(command.as_str(), "checkout" | "switch")
-        && super::super::workspace_contained::keeping_arguments(&branch)
-        && reference(start))
-    .then_some(start.as_str())
+    let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        [command, flag, name, start] if matches!(*command, "checkout" | "switch") => {
+            let branch = [command.to_string(), flag.to_string(), name.to_string()];
+            (super::super::workspace_contained::keeping_arguments(&branch) && reference(start))
+                .then_some(*start)
+        }
+        // `--detach` alone leaves `HEAD` where it is, detached.
+        [command, "--detach"] if matches!(*command, "checkout" | "switch") => Some("HEAD"),
+        [command, "--detach", target] | [command, target]
+            if matches!(*command, "checkout" | "switch") =>
+        {
+            moved_to(target)
+        }
+        _ => None,
+    }
+}
+
+/// The commit a one-word `checkout`/`switch` names. `-` is the branch Git
+/// left last, which it spells `@{-1}`. A pathspec reaches here too, and the
+/// proof refuses it: it names no commit.
+fn moved_to(target: &str) -> Option<&str> {
+    match target {
+        "-" => Some("@{-1}"),
+        value if reference(value) => Some(value),
+        _ => None,
+    }
 }
 
 /// A ref name or remote-tracking ref, never an option or a revision
@@ -113,3 +136,7 @@ fn absent_below(top: &Path, path: &Path) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+#[path = "git_local_writes_start_tests.rs"]
+mod tests;
