@@ -5,11 +5,32 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import sysconfig
 
 # The reason after the colon comes from the native transport and may carry
 # brackets, commas and parentheses (for example "[pipe,2 attempt(s),...]").
 _NATIVE_UNAVAILABLE_PATTERN = re.compile(r"native_[a-z0-9_]+_unavailable(?::[^\r\n]{1,1024})?")
 _REPAIR_HINT_CODES = ("native_resident_runtime_identity_mismatch", "native_resident_update")
+
+
+def _missing_runtime_hint() -> str | None:
+    """Render installation guidance using the updater's existing wheel inventory."""
+
+    from .guard.cli.update_native_wheel import bundled_native_runtime_missing, native_platform_supported
+
+    if not bundled_native_runtime_missing():
+        return None
+    if native_platform_supported():
+        return (
+            "The bundled native runtime is missing. Install the matching native wheel for this Guard version "
+            "from https://github.com/hashgraph-online/hol-guard/releases and retry."
+        )
+    return (
+        f"No published HOL Guard native wheel matches this Python platform ({sysconfig.get_platform()}). "
+        "The universal Python wheel cannot provide protection on its own. "
+        "See https://github.com/hashgraph-online/hol-guard/blob/main/docs/guard/get-started.md#platform-support "
+        "for the supported installation paths."
+    )
 
 
 def report_native_unavailable(parser: argparse.ArgumentParser, exc: ValueError) -> int | None:
@@ -23,6 +44,8 @@ def report_native_unavailable(parser: argparse.ArgumentParser, exc: ValueError) 
     if _NATIVE_UNAVAILABLE_PATTERN.fullmatch(message) is None:
         return None
     print(f"{parser.prog}: error: {message}", file=sys.stderr)
+    if message == "native_guard_config_unavailable" and (hint := _missing_runtime_hint()) is not None:
+        print(f"{parser.prog}: hint: {hint}", file=sys.stderr)
     if any(code in message for code in _REPAIR_HINT_CODES):
         print(
             f"{parser.prog}: hint: run `hol-guard daemon repair` to recover an interrupted runtime update.",
