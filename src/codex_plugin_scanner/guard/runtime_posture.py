@@ -21,6 +21,7 @@ from .runtime_identity_probe import RuntimeProbe
 RUNTIME_POSTURE_SCHEMA = "guard.runtime-posture.v1"
 ADVISORIES_UNAVAILABLE = "runtime_advisories_unavailable"
 HARNESS_CONFIG_UNREADABLE = "harness_config_unreadable"
+CANDIDATE_LIMIT_REACHED = "runtime_candidate_limit_reached"
 COVERAGE_STATEMENT = (
     "Observed only: executables configured tools would launch, described without running them. "
     "Running processes are not enumerated and no runtime is reported safe."
@@ -46,9 +47,13 @@ def build_runtime_posture(
         base = {**_base_payload(generated_at, None), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
         return {**base, "status": "unavailable", "error": error.code, "runtimes": []}
     base = {**_base_payload(generated_at, candidates), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
-    # A harness whose config could not be read leaves the inventory incomplete,
-    # which is not the same as having no servers.
-    status, error_code = ("partial", HARNESS_CONFIG_UNREADABLE) if skipped_harnesses else ("ok", None)
+    # A harness whose config could not be read, or launches past the candidate
+    # limit, leave the inventory incomplete, which is not the same as having no servers.
+    status, error_code = "ok", None
+    if skipped_harnesses:
+        status, error_code = "partial", HARNESS_CONFIG_UNREADABLE
+    elif candidates.truncated:
+        status, error_code = "partial", CANDIDATE_LIMIT_REACHED
     if not candidates.candidates:
         return {**base, "status": status, "error": error_code, "runtimes": []}
     advisory_rows: list[dict[str, object]] = []

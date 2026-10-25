@@ -190,23 +190,21 @@ fn observe(requested: &str, hashing: &mut Hashing) -> Outcome {
     };
     // `canonicalize` follows links, so this is the file itself. Checked before
     // opening so a FIFO or device is never read.
-    let length = match fs::metadata(&resolved) {
-        Ok(meta) if meta.is_file() => meta.len(),
+    match fs::metadata(&resolved) {
+        Ok(meta) if meta.is_file() => {}
         Ok(_) => return unknown("not_regular_file"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Outcome::Missing,
         Err(_) => return unknown("unreadable"),
-    };
-    if length > MAX_HASH_BYTES {
-        return unknown("too_large");
     }
     if !hashing.done.contains_key(&resolved_text) {
-        if length > hashing.remaining {
-            return unknown("hash_budget_exhausted");
+        match hash_and_format(&resolved, hashing.remaining) {
+            Hashed::TooLarge => return unknown("too_large"),
+            Hashed::OverBudget => return unknown("hash_budget_exhausted"),
+            Hashed::Read { charged, digest } => {
+                hashing.remaining -= charged;
+                hashing.done.insert(resolved_text.clone(), digest);
+            }
         }
-        hashing.remaining -= length;
-        hashing
-            .done
-            .insert(resolved_text.clone(), hash_and_format(&resolved));
     }
     let Some((sha256, format)) = hashing.done[&resolved_text].clone() else {
         return unknown("unreadable");
@@ -228,19 +226,54 @@ pub(crate) fn open_read_only(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-fn hash_and_format(path: &Path) -> Option<(String, Format)> {
-    let file = open_read_only(path).ok()?;
-    if !file.metadata().ok()?.is_file() {
-        return None;
+enum Hashed {
+    TooLarge,
+    OverBudget,
+    /// `charged` is every byte actually read; `digest` is set only for a complete read.
+    Read {
+        charged: u64,
+        digest: Option<(String, Format)>,
+    },
+}
+
+fn hash_and_format(path: &Path, remaining: u64) -> Hashed {
+    let unreadable = Hashed::Read {
+        charged: 0,
+        digest: None,
+    };
+    let Ok(file) = open_read_only(path) else {
+        return unreadable;
+    };
+    // The size comes from the opened file, not the path, so a swap between the
+    // two cannot make the read larger than what is charged.
+    let length = match file.metadata() {
+        Ok(meta) if meta.is_file() => meta.len(),
+        _ => return unreadable,
+    };
+    if length > MAX_HASH_BYTES {
+        return Hashed::TooLarge;
     }
-    // One more byte than the cap, so a file that grew past it is noticed.
-    let mut reader = file.take(MAX_HASH_BYTES + 1);
+    // The whole file plus one byte that must come back empty, which proves EOF.
+    // Without it an empty or shrunk read would pass for a complete one.
+    let limit = length + 1;
+    if limit > remaining {
+        return Hashed::OverBudget;
+    }
+    let mut reader = file.take(limit);
     let mut hasher = Sha256::new();
     let mut header = Vec::with_capacity(HEADER_BYTES);
     let mut buffer = [0_u8; 64 * 1024];
     let mut total: u64 = 0;
     loop {
-        let read = reader.read(&mut buffer).ok()?;
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(_) => {
+                return Hashed::Read {
+                    charged: total,
+                    digest: None,
+                }
+            }
+        };
         if read == 0 {
             break;
         }
@@ -251,10 +284,12 @@ fn hash_and_format(path: &Path) -> Option<(String, Format)> {
         }
         hasher.update(&buffer[..read]);
     }
-    if total > MAX_HASH_BYTES {
-        return None;
+    // A file that grew or shrank while it was read is not the file measured.
+    let digest = (total == length).then(|| (hex::encode(hasher.finalize()), sniff(&header)));
+    Hashed::Read {
+        charged: total,
+        digest,
     }
-    Some((hex::encode(hasher.finalize()), sniff(&header)))
 }
 
 fn artifact(resolved: &str, sha256: &str, format: &Format) -> Value {

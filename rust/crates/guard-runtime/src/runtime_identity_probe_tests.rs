@@ -426,6 +426,38 @@ fn hashing_stops_when_the_request_budget_is_spent() {
 }
 
 #[test]
+fn hashing_charges_bytes_read_and_needs_room_to_prove_eof() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = write(dir.path(), "empty/node", b"");
+    let mut hashing = Hashing {
+        remaining: 0,
+        ..Hashing::default()
+    };
+    match observe(empty.to_str().unwrap(), &mut hashing) {
+        Outcome::Unknown { reason, .. } => assert_eq!(reason, "hash_budget_exhausted"),
+        _ => panic!("an empty file was hashed without an EOF read"),
+    }
+    hashing.remaining = 1;
+    assert!(matches!(
+        observe(empty.to_str().unwrap(), &mut hashing),
+        Outcome::Present { .. }
+    ));
+    assert_eq!(hashing.remaining, 1);
+    let full = write(dir.path(), "full/node", b"1234");
+    hashing.remaining = 4;
+    match observe(full.to_str().unwrap(), &mut hashing) {
+        Outcome::Unknown { reason, .. } => assert_eq!(reason, "hash_budget_exhausted"),
+        _ => panic!("a file was hashed without room for the EOF read"),
+    }
+    hashing.remaining = 5;
+    assert!(matches!(
+        observe(full.to_str().unwrap(), &mut hashing),
+        Outcome::Present { .. }
+    ));
+    assert_eq!(hashing.remaining, 1);
+}
+
+#[test]
 fn requests_are_validated_and_bounded() {
     let malformed = json!({"paths": ["a"], "extra": 1}).to_string();
     assert_eq!(

@@ -166,6 +166,29 @@ def test_unreadable_harness_config_is_partial_not_an_empty_inventory(
     assert len(found["runtimes"]) == 1
 
 
+def test_candidate_limit_truncation_is_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_runtime: Path
+) -> None:
+    first = _nvm_node(tmp_path)
+    second = _nvm_node(tmp_path, "18.0.0")
+    collect = runtime_posture.collect_runtime_candidates
+    monkeypatch.setattr(
+        runtime_posture,
+        "collect_runtime_candidates",
+        lambda *args, **kwargs: collect(*args, **kwargs, limit=1),
+    )
+
+    payload = build_runtime_posture(
+        [_detection(str(first), "one"), _detection(str(second), "two")],
+        generated_at=NOW,
+        environment={"PATH": ""},
+    )
+
+    assert (payload["status"], payload["error"]) == ("partial", "runtime_candidate_limit_reached")
+    assert payload["candidate_limit_reached"] is True
+    assert len(payload["runtimes"]) == 1
+
+
 def test_native_unavailable_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_posture, "collect_runtime_candidates", _native_unavailable)
 
