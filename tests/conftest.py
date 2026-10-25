@@ -430,6 +430,7 @@ def _isolate_daemon_background_refresh_workers(
         "daemon_aibom_refresh": "_start_aibom_inventory_refresh",
         "daemon_bundle_refresh": "_start_supply_chain_bundle_refresh",
         "daemon_headless_refresh": "_start_headless_cloud_sync",
+        "daemon_plugin_telemetry": "_start_plugin_telemetry",
     }
     for marker, method_name in worker_markers.items():
         if request.node.get_closest_marker(marker) is None:
