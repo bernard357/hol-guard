@@ -1,4 +1,86 @@
-import { j as jsxRuntimeExports, A as ActionButton, S as SectionLabel, a4 as HiMiniExclamationTriangle, d as HiMiniArrowPath, s as HiMiniCheckCircle, ei as HiMiniSignal, aA as HiMiniXCircle, ct as HiMiniClock, f as formatRelativeTime, a6 as Badge, T as Tag } from "../guard-dashboard.js";
+import { s as HiMiniCheckCircle, bS as HiMiniInformationCircle, a4 as HiMiniExclamationTriangle, j as jsxRuntimeExports, A as ActionButton, S as SectionLabel, d as HiMiniArrowPath, ej as HiMiniSignal, aA as HiMiniXCircle, ct as HiMiniClock, f as formatRelativeTime, a6 as Badge, T as Tag } from "../guard-dashboard.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CMXvC-ZB.js";
+function bundleRefreshKey(snapshot) {
+  return [
+    snapshot.cloud_policy_bundle_hash ?? "",
+    snapshot.cloud_policy_last_ack_at ?? "",
+    snapshot.cloud_sync_health?.last_synced_at ?? ""
+  ].join("|");
+}
+const MINUTE_MS = 6e4;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+function formatSpan(spanMs) {
+  if (spanMs < MINUTE_MS) return "less than a minute";
+  if (spanMs < HOUR_MS) return `${Math.floor(spanMs / MINUTE_MS)}m`;
+  if (spanMs < DAY_MS) return `${Math.floor(spanMs / HOUR_MS)}h`;
+  return `${Math.floor(spanMs / DAY_MS)}d`;
+}
+function formatBundleExpiry(expiresAt, nowMs) {
+  const expiry = Date.parse(expiresAt);
+  if (Number.isNaN(expiry)) return null;
+  const delta = expiry - nowMs;
+  if (delta > 0) return `in ${formatSpan(delta)}`;
+  const span = formatSpan(-delta);
+  return span === "less than a minute" ? "just now" : `${span} ago`;
+}
+function isBundleExpired(bundle, nowMs) {
+  const expiry = Date.parse(bundle.expiresAt);
+  return !Number.isNaN(expiry) && expiry <= nowMs;
+}
+function resolveIntelFreshness(input) {
+  const { cloudState, load, nowMs } = input;
+  if (cloudState === "local_only") {
+    return {
+      kind: "sample",
+      label: "Sample data",
+      description: "Guard checks installs against bundled sample advisories. Connect Guard Cloud for a signed live feed.",
+      tone: "slate"
+    };
+  }
+  if (load.phase === "loading") {
+    return {
+      kind: "loading",
+      label: "Checking",
+      description: "Reading the advisory bundle cached on this device.",
+      tone: "slate"
+    };
+  }
+  if (load.phase === "error") {
+    return {
+      kind: "unavailable",
+      label: "Unavailable",
+      description: `Guard could not read the advisory bundle. ${load.message}`.trim(),
+      tone: "attention"
+    };
+  }
+  const bundle = load.bundle;
+  if (bundle === null) {
+    return {
+      kind: "none",
+      label: "Not synced",
+      description: "Guard Cloud is connected, but no signed advisory bundle is cached on this device yet. Sync from the Supply Chain tab to fetch it.",
+      tone: "attention"
+    };
+  }
+  const expiry = formatBundleExpiry(bundle.expiresAt, nowMs);
+  if (isBundleExpired(bundle, nowMs)) {
+    return {
+      kind: "expired",
+      label: "Expired",
+      description: `Bundle ${bundle.bundleVersion} expired ${expiry ?? "earlier"}. Sync from the Supply Chain tab to refresh it.`,
+      tone: "attention"
+    };
+  }
+  const generated = Date.parse(bundle.generatedAt);
+  const generatedText = Number.isNaN(generated) ? `Bundle ${bundle.bundleVersion}` : `Bundle ${bundle.bundleVersion} generated ${formatSpan(Math.max(0, nowMs - generated))} ago`;
+  return {
+    kind: "current",
+    label: "Fresh",
+    description: expiry === null ? `${generatedText}.` : `${generatedText}, expires ${expiry}.`,
+    tone: "green"
+  };
+}
 function resolveFeedSourceMode(cloudState) {
   if (cloudState === "local_only") return "sample";
   if (cloudState === "paired_waiting") return "full";
@@ -27,6 +109,33 @@ function FeedSourceBadge({ mode }) {
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "attention", children: "Sample only (local-only mode)" });
 }
+function LiveFeedNotice({ freshness }) {
+  if (freshness.kind === "loading") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniClock, { className: "mt-0.5 h-4 w-4 shrink-0 text-slate-400", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: "Checking the intel feed" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600 mt-0.5", children: freshness.description })
+      ] })
+    ] });
+  }
+  if (freshness.kind === "current") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-brand-green/20 bg-brand-green/[0.04] px-3 py-2.5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniCheckCircle, { className: "mt-0.5 h-4 w-4 shrink-0 text-brand-green", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: "Live feed active" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600 mt-0.5", children: "Guard Cloud is connected and Guard is receiving its signed intel bundle." })
+      ] })
+    ] });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5", role: "alert", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "mt-0.5 h-4 w-4 shrink-0 text-amber-600", "aria-hidden": "true" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-amber-800", children: "Live feed connected, intel not current" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-amber-700 mt-0.5", children: freshness.description })
+    ] })
+  ] });
+}
 function FeedHealthCard({ label, value, tone, description, icon: Icon }) {
   const toneClasses = {
     green: "border-brand-green/20 bg-brand-green/[0.04]",
@@ -52,6 +161,13 @@ function FeedHealthCard({ label, value, tone, description, icon: Icon }) {
 function FeedHealthWorkspace({ snapshot, onOpenSettings }) {
   const sourceMode = resolveFeedSourceMode(snapshot.cloud_state);
   const staleState = resolveFeedStaleness(snapshot);
+  const bundleLoad = useSupplyChainBundle(bundleRefreshKey(snapshot));
+  const freshness = resolveIntelFreshness({
+    cloudState: snapshot.cloud_state,
+    load: bundleLoad,
+    nowMs: Date.now()
+  });
+  const FreshnessIcon = freshness.kind === "current" ? HiMiniCheckCircle : freshness.kind === "loading" || freshness.kind === "sample" ? HiMiniInformationCircle : HiMiniExclamationTriangle;
   const daemonRunning = snapshot.runtime_state !== null;
   const cloudLabel = snapshot.cloud_state_label;
   const cloudDetail = snapshot.cloud_state_detail;
@@ -85,23 +201,17 @@ function FeedHealthWorkspace({ snapshot, onOpenSettings }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600 mt-0.5", children: "Guard Cloud is connected. Local Guard is finishing the first shared proof automatically." })
         ] })
       ] }),
-      sourceMode === "live" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-brand-green/20 bg-brand-green/[0.04] px-3 py-2.5", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniCheckCircle, { className: "mt-0.5 h-4 w-4 shrink-0 text-brand-green", "aria-hidden": "true" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: "Live feed active" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600 mt-0.5", children: "Guard is receiving live cloud intel. Threat data is up to date." })
-        ] })
-      ] })
+      sourceMode === "live" && /* @__PURE__ */ jsxRuntimeExports.jsx(LiveFeedNotice, { freshness })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid gap-4 sm:grid-cols-2", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         FeedHealthCard,
         {
           label: "Feed freshness",
-          value: staleState.stale ? "Stale" : "Fresh",
-          tone: staleState.stale ? "attention" : "green",
-          description: staleState.ageLabel,
-          icon: staleState.stale ? HiMiniExclamationTriangle : HiMiniCheckCircle
+          value: freshness.label,
+          tone: freshness.tone,
+          description: freshness.description,
+          icon: FreshnessIcon
         }
       ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -149,8 +259,17 @@ function FeedHealthWorkspace({ snapshot, onOpenSettings }) {
     ] })
   ] });
 }
-export {
+const feedHealthWorkspace = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
   FeedHealthWorkspace,
   resolveFeedSourceMode,
   resolveFeedStaleness
+}, Symbol.toStringTag, { value: "Module" }));
+export {
+  resolveFeedStaleness as a,
+  bundleRefreshKey as b,
+  feedHealthWorkspace as c,
+  formatBundleExpiry as f,
+  isBundleExpired as i,
+  resolveIntelFreshness as r
 };

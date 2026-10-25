@@ -9016,6 +9016,91 @@
       "expect": "allow"
     },
     {
+      "id": "session-git-fetch-merge-ff-only-then-status",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git merge --ff-only origin/main && git status -sb"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "session-git-fetch-merge-ff-only-then-log",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin && git merge --ff-only origin/main && git log -1 --oneline"
+      },
+      "cwd": "org_wt",
+      "expect": "allow"
+    },
+    {
+      "id": "session-git-fetch-merge-ff-only-then-status-log",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git merge --ff-only origin/main && git log -1 --oneline && git status -sb"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-fetch-merge-ff-only-then-write",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git merge --ff-only origin/main && rm -rf build"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-fetch-merge-ff-only-then-status-hooked",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin main && git merge --ff-only origin/main && git status -sb"
+      },
+      "cwd": "org_hooked",
+      "expect": "not_allow"
+    },
+    {
       "id": "queue-sibling-git-c-merge-ff-only-origin-main",
       "fix_area": "git",
       "harnesses": [

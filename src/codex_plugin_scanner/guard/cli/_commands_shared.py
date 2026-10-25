@@ -182,7 +182,6 @@ from ..runtime.secret_file_requests import (
     extract_sensitive_file_write_request,
     extract_sensitive_file_write_request_artifact,
     extract_sensitive_tool_action_request,
-    literal_cd_execution_context,
 )
 from ..runtime.secret_sensitivity import (
     SecretContentMatch,

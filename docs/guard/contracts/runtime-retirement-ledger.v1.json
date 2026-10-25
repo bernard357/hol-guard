@@ -113,7 +113,12 @@
   "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/read_only_filters.py",
   "src/codex_plugin_scanner/guard/runtime/extension_control_resolver.py",
   "src/codex_plugin_scanner/guard/inventory_contract_scans.py",
-  "src/codex_plugin_scanner/guard/runtime/skill_paths.py"
+  "src/codex_plugin_scanner/guard/runtime/skill_paths.py",
+  "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/shell_quote_parsing.py",
+  "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/docker_requests.py",
+  "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/shell_tokenization.py",
+  "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/shell_static_safety.py",
+  "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/shell_quote_tokens.py"
  ],
  "retired_tests": [
   {
@@ -7352,6 +7357,24 @@
    "replacement_nodes": [],
    "status": "obsolete_implementation_assertion",
    "rationale": "Compared PI_INLINE_RESOURCE_SCHEMES to a literal copy of itself. No production module imported runtime/skill_paths.py; skill:// document resolution is resolve_known_skill_doc_path in codex_output_source_paths.rs."
+  },
+  {
+   "old_node": "tests/test_guard_shell_static_path_boundaries.py::test_windows_root_and_drive_relative_operands_cannot_supply_containment_proof",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Nothing in the product called the Python literal-cd parser: cli/_commands_shared.py imported literal_cd_execution_context but never used it, so the shell_static_safety, shell_quote_parsing, shell_quote_tokens, shell_tokenization and docker_requests chain was unreachable. This test pinned the dead Python _shell_token_escapes_root under PureWindowsPath. The native static-safety helpers in sfrs_static_safety.rs stay pinned by the recorded vectors in sfrs_conformance.rs."
+  },
+  {
+   "old_node": "tests/test_guard_risk.py::test_script_has_aliased_risky_import_ignores_null_byte_parse_failures",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Nothing in the product called the Python literal-cd parser: cli/_commands_shared.py imported literal_cd_execution_context but never used it, so the shell_static_safety, shell_quote_parsing, shell_quote_tokens, shell_tokenization and docker_requests chain was unreachable. This test pinned the dead Python _script_has_aliased_risky_import treating a NUL byte as a parse failure."
+  },
+  {
+   "old_node": "tests/test_guard_risk.py::test_path_text_is_within_root_text_preserves_windows_case_insensitivity",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Nothing in the product called the Python literal-cd parser: cli/_commands_shared.py imported literal_cd_execution_context but never used it, so the shell_static_safety, shell_quote_parsing, shell_quote_tokens, shell_tokenization and docker_requests chain was unreachable. This test pinned the dead Python _path_text_is_within_root_text under a faked os.path.normcase."
   }
  ],
  "preserved_tests": [

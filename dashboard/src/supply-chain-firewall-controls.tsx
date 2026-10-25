@@ -61,6 +61,21 @@ function GlobalActionsBar({ anyPending, pendingOp, onAudit, onSync }: GlobalActi
   );
 }
 
+const FAILURE_SUBJECTS: Record<FirewallOpKey, string> = {
+  install: "Enabling protection",
+  repair: "Repairing protection",
+  test: "The intercept test",
+  remove: "Removing protection",
+  audit: "The audit",
+  sync: "The sync",
+  fix_all: "Restoring protection",
+};
+
+export function describeFirewallFailure(failed: FirewallFailedOp): string {
+  const subject = FAILURE_SUBJECTS[failed.op] ?? "The action";
+  return `${subject} failed${failed.manager !== null ? ` for ${failed.manager}` : ""}`;
+}
+
 function FailureBanner({ failed }: { failed: FirewallFailedOp }) {
   return (
     <div
@@ -71,7 +86,7 @@ function FailureBanner({ failed }: { failed: FirewallFailedOp }) {
       <HiMiniExclamationTriangle className="mt-0.5 h-4 w-4 shrink-0 text-brand-attention" aria-hidden="true" />
       <div className="min-w-0">
         <p className="text-sm font-medium text-brand-dark">
-          {failed.op} failed{failed.manager !== null ? ` for ${failed.manager}` : ""}
+          {describeFirewallFailure(failed)}
         </p>
         <p className="mt-0.5 text-xs text-slate-600">{failed.message}</p>
       </div>

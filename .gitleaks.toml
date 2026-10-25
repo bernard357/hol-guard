@@ -44,6 +44,13 @@ regexes = [
 id = "generic-api-key"
 
 [[rules.allowlists]]
+description = "Historical synthetic packaged-binary scanner fixture, not a credential"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)tests/test_security_binaries\.py$''']
+regexes = ['''^[\t\r\n ]*SECRET_LINE = 'const token = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";\\n'[\t\r\n ]*$''']
+
+[[rules.allowlists]]
 description = "Pinned public token-fixture SHA-256, not a credential"
 condition = "AND"
 regexTarget = "line"
