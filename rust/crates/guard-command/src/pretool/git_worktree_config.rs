@@ -64,7 +64,9 @@ pub(super) fn safe_worktree_config(output: &[u8], home: &Path) -> Option<Option<
         }
         if key == "worktree.guessremote" {
             // The last value Git reads wins, exactly as it resolves the key.
-            facts.guess_remote = super::super::git_config::enabled_boolean(value);
+            // Git reads the key as a boolean, where any non-zero integer and
+            // an empty value are true, so only an explicit false clears it.
+            facts.guess_remote = !super::super::git_config::disabled_boolean(value);
             continue;
         }
         let global_scope = matches!(scope, "global" | "system" | "unknown");
@@ -291,6 +293,12 @@ mod tests {
             panic!("the setting is ordinary developer config");
         };
         assert!(!facts.guess_remote, "the last value Git reads wins");
+        for value in ["2", "-1", ""] {
+            let Some(Some(facts)) = judged(&[("global", "worktree.guessRemote", value)]) else {
+                panic!("the setting is ordinary developer config");
+            };
+            assert!(facts.guess_remote, "Git reads {value:?} as true");
+        }
         let Some(Some(facts)) = judged(&[("global", "user.name", "Example")]) else {
             panic!("the setting is ordinary developer config");
         };
