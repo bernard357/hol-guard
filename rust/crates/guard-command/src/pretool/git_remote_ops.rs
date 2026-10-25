@@ -319,7 +319,7 @@ fn memo_key(
 fn parse<'a>(
     segment: &'a CommandSegmentV1,
     context: super::PathContext<'_>,
-) -> Option<(&'a [String], Option<pull::Pull>)> {
+) -> Option<(&'a [String], Operation)> {
     let executable = segment.executable.as_deref()?;
     if executable != "git"
         || segment.pipeline_index != 0
