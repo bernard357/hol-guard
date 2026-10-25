@@ -449,6 +449,53 @@ fn dependency_symlink_is_quiet_only_between_checkouts_of_one_repository() {
 }
 
 #[test]
+fn a_checkout_proves_the_branch_it_takes_not_a_tag_of_one_name() {
+    const WRITE: &str = "native_exact_safe_git_local_write";
+    let session = session("switch-tag");
+    let home = &session.home;
+    let worktree = &session.worktree;
+    // Git refuses rather than overwrite a tracked or untracked file, so the
+    // only file a checkout replaces silently is an ignored one.
+    std::fs::write(worktree.join(".gitignore"), "node_modules/\ngenerated/\n").unwrap();
+    git(home, worktree, &["add", ".gitignore"]);
+    git(
+        home,
+        worktree,
+        &["commit", "--quiet", "-m", "chore: ignore generated output"],
+    );
+    // A tag at `HEAD` adds nothing. The branch of the same name adds the
+    // ignored path, and a plain checkout takes the branch.
+    git(home, worktree, &["tag", "release"]);
+    git(home, worktree, &["switch", "--quiet", "-c", "release"]);
+    std::fs::create_dir_all(worktree.join("generated")).unwrap();
+    std::fs::write(worktree.join("generated/report.txt"), "recorded\n").unwrap();
+    git(home, worktree, &["add", "-f", "generated/report.txt"]);
+    git(
+        home,
+        worktree,
+        &["commit", "--quiet", "-m", "chore: record the report"],
+    );
+    git(home, worktree, &["switch", "--quiet", "fix/report-lane"]);
+    std::fs::create_dir_all(worktree.join("generated")).unwrap();
+    std::fs::write(worktree.join("generated/report.txt"), "working\n").unwrap();
+
+    let result = session.evaluate_at("git switch release", worktree);
+    assert_ne!(
+        (result.minimum_action.as_str(), result.reason_code.as_str()),
+        ("allow", WRITE),
+        "a tag of the branch's name proved the wrong commit"
+    );
+    assert_ne!(
+        result.reason_code, "native_workspace_containment_required",
+        "a contained run still replaces the ignored file"
+    );
+    // The branch the work tree is already on adds nothing, so it stays quiet.
+    session
+        .quiet_at("git switch fix/report-lane", worktree, WRITE)
+        .unwrap();
+}
+
+#[test]
 fn local_writes_in_a_linked_worktree_are_quiet_only_without_programs() {
     const WRITE: &str = "native_exact_safe_git_local_write";
     let session = session("writes");

@@ -26457,8 +26457,7 @@
         "command": "git checkout -f feat/other-branch"
       },
       "cwd": "parent",
-      "expect": "not_allow",
-      "contained_ok": true
+      "expect": "not_allow"
     },
     {
       "id": "neg-git-checkout-pathspec-discards-file",
@@ -26475,8 +26474,7 @@
         "command": "git checkout -- README.md"
       },
       "cwd": "parent",
-      "expect": "not_allow",
-      "contained_ok": true
+      "expect": "not_allow"
     }
   ],
   "mcp_cases": [

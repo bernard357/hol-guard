@@ -163,11 +163,6 @@ def test_only_the_marked_cases_may_pass_on_containment() -> None:
         # A ref write under the worktree's own admin directory, which a contained run
         # keeps inside the sandbox.
         "neg-git-branch-create",
-        # A checkout that discards uncommitted work: a contained run writes only
-        # the sandbox's copy of the work tree, so the files the user still holds
-        # stay as they are.
-        "neg-git-checkout-force-overwrites-work",
-        "neg-git-checkout-pathspec-discards-file",
         # The sandbox has no network for the push to reach the remote over, and no home access
         # for the widened search, so a contained run sends nothing and prints no key.
         "neg-git-push-to-tmp-chain",

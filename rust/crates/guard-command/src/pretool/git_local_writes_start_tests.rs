@@ -4,17 +4,27 @@ fn words(line: &str) -> Vec<String> {
     line.split(' ').map(str::to_string).collect()
 }
 
+/// The target `start_point` names, written as the proof resolves it: a plain
+/// branch target through `refs/heads/`, every other form as the bare name.
 fn point(line: &str) -> Option<String> {
-    super::start_point(&words(line)).map(str::to_string)
+    super::start_point(&words(line)).map(|target| {
+        if target.branch {
+            format!("refs/heads/{}", target.name)
+        } else {
+            target.name
+        }
+    })
 }
 
 #[test]
 fn a_plain_switch_names_the_branch_it_moves_to() {
-    assert_eq!(point("switch main").as_deref(), Some("main"));
-    assert_eq!(point("checkout main").as_deref(), Some("main"));
+    // A tag of the same name resolves first in Git's revision order, but a
+    // checkout takes the local branch, so the proof reads that ref.
+    assert_eq!(point("switch main").as_deref(), Some("refs/heads/main"));
+    assert_eq!(point("checkout main").as_deref(), Some("refs/heads/main"));
     assert_eq!(
         point("switch feat/signed-lane").as_deref(),
-        Some("feat/signed-lane")
+        Some("refs/heads/feat/signed-lane")
     );
 }
 
@@ -28,7 +38,9 @@ fn the_previous_branch_is_the_ref_git_spells_it() {
 fn a_detaching_checkout_names_the_commit_it_detaches_at() {
     assert_eq!(point("switch --detach").as_deref(), Some("HEAD"));
     assert_eq!(point("switch --detach HEAD").as_deref(), Some("HEAD"));
+    // Detaching moves to the commit the name resolves to, branch or not.
     assert_eq!(point("checkout --detach v1.2.0").as_deref(), Some("v1.2.0"));
+    assert_eq!(point("checkout --detach main").as_deref(), Some("main"));
 }
 
 #[test]
