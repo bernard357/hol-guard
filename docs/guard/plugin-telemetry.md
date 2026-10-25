@@ -29,3 +29,16 @@ HOL does not store the sender's IP address with a report, keeps reports for 13 w
 ## When reports are sent
 
 The daemon checks every six hours and sends at most one report per ISO week, only while counts are on. `send` sends this week's report immediately; `send --dry-run` builds the report, with a throwaway key if counts are off, and prints it.
+
+## Update prompts
+
+`hol-guard plugin updates` lists installed plugins that have a newer release checked on HOL, the releases plugin authors record with the HOL Plugin Release workflow. It is separate from install counts and works whether counts are on or off.
+
+```bash
+hol-guard plugin updates                                   # list newer checked releases
+hol-guard plugin updates --json
+hol-guard plugin updates dismiss <slug> --version <latest> # hide one prompt until a newer release
+hol-guard plugin updates reset                             # show dismissed prompts again
+```
+
+Guard downloads the public listing index and the public release index, and the native runtime compares the installed versions with them on your machine. Nothing about your installed plugins is sent. A prompt is marked urgent when a newer release fixes a high or critical scanner finding, or when the installed release had one. Dismissals are stored in `plugin-updates.json` in the Guard home and apply only to the version you dismissed.

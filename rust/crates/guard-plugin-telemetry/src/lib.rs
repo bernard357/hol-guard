@@ -17,21 +17,32 @@
 //! `hol-guard telemetry plugins` sends one JSON request on stdin to
 //! `hol-guard-runtime plugin-telemetry --stdin` and gets one response back:
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
+//!
+//! The same command answers `hol-guard plugin updates` with the `updates`
+//! request: it compares installed versions with the public release index on
+//! the device and sends nothing.
 
 mod installed;
 mod report;
+mod updates;
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub use installed::{discover, InstalledPlugin, RuntimeHomes};
 pub use report::{build_report, normalize_repository_url, IndexEntry, ReportEntry};
+pub use updates::{
+    check_updates, compare_versions, dismiss, parse_release_index, read_dismissals,
+    write_dismissals, Dismissal, IndexedRelease, ReleaseIndexEntry, UpdateCheck, UpdatePrompt,
+    DISMISSALS_FILE,
+};
 
 pub const COMMAND: &str = "plugin-telemetry";
 pub const FEATURE: &str = "plugin-telemetry-v1";
+pub const UPDATES_FEATURE: &str = "plugin-updates-v1";
 pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_ENTRIES: usize = 200;
 
@@ -62,6 +73,34 @@ enum Request {
         #[serde(rename = "guardVersion")]
         guard_version: String,
     },
+    Updates {
+        homes: Homes,
+        index: Vec<IndexEntry>,
+        releases: Vec<Value>,
+        #[serde(rename = "guardHome")]
+        guard_home: String,
+    },
+    #[serde(rename = "updates-dismiss")]
+    UpdatesDismiss {
+        #[serde(rename = "guardHome")]
+        guard_home: String,
+        slug: String,
+        version: String,
+    },
+    #[serde(rename = "updates-reset")]
+    UpdatesReset {
+        #[serde(rename = "guardHome")]
+        guard_home: String,
+    },
+}
+
+fn runtime_homes(homes: Homes) -> RuntimeHomes {
+    RuntimeHomes {
+        claude: homes.claude.map(PathBuf::from),
+        codex: homes.codex.map(PathBuf::from),
+        gemini: homes.gemini.map(PathBuf::from),
+        cursor: homes.cursor.map(PathBuf::from),
+    }
 }
 
 /// Runs one request and wraps the outcome in the native response envelope.
@@ -72,15 +111,6 @@ pub fn run_request(bytes: &[u8]) -> Value {
     {
         Ok(result) => json!({"ok": true, "result": result}),
         Err(error) => json!({"ok": false, "error": error}),
-    }
-}
-
-fn runtime_homes(homes: Homes) -> RuntimeHomes {
-    RuntimeHomes {
-        claude: homes.claude.map(PathBuf::from),
-        codex: homes.codex.map(PathBuf::from),
-        gemini: homes.gemini.map(PathBuf::from),
-        cursor: homes.cursor.map(PathBuf::from),
     }
 }
 
@@ -118,6 +148,33 @@ fn handle(request: Request) -> Result<Value, String> {
                     "entries": entries,
                 },
             }))
+        }
+        Request::Updates {
+            homes,
+            index,
+            releases,
+            guard_home,
+        } => {
+            let installed = discover(&runtime_homes(homes));
+            let releases = parse_release_index(&releases);
+            let dismissed = read_dismissals(Path::new(&guard_home));
+            let check = check_updates(&index, &releases, &installed, &dismissed);
+            serde_json::to_value(check).map_err(|_| "plugin_updates_failed".to_owned())
+        }
+        Request::UpdatesDismiss {
+            guard_home,
+            slug,
+            version,
+        } => {
+            if slug.is_empty() || slug.len() > 256 || !valid_version(&version, 64) {
+                return Err("plugin_updates_dismissal_invalid".to_owned());
+            }
+            dismiss(Path::new(&guard_home), &slug, &version)?;
+            Ok(json!({ "slug": slug, "version": version, "dismissed": true }))
+        }
+        Request::UpdatesReset { guard_home } => {
+            write_dismissals(Path::new(&guard_home), &[])?;
+            Ok(json!({ "dismissed": 0 }))
         }
     }
 }
