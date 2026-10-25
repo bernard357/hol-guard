@@ -98,6 +98,7 @@ from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_verification_key,
     sign_policy_bundle,
 )
+from tests.sandbox_route_diagnostics import sandbox_route_context
 from tests.support.network import stub_authenticated_urlopen
 
 # A credential-shaped literal in source output, assembled so that repository
@@ -15962,7 +15963,10 @@ def test_guard_hook_codex_requires_sandbox_for_simple_pytest_command(tmp_path, c
     )
 
     assert rc == 0
-    assert output["policy_action"] == "sandbox-required", (output.get("reason_code"), output.get("reason"))
+    assert output["policy_action"] == "sandbox-required", (
+        output.get("reason_code"),
+        sandbox_route_context(workspace_dir),
+    )
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "approval_requests" not in output
 
@@ -16015,7 +16019,10 @@ def test_guard_hook_codex_requires_sandbox_for_pytest_exit_code_echo(tmp_path, c
     )
 
     assert rc == 0
-    assert output["policy_action"] == "sandbox-required", (output.get("reason_code"), output.get("reason"))
+    assert output["policy_action"] == "sandbox-required", (
+        output.get("reason_code"),
+        sandbox_route_context(workspace_dir),
+    )
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "approval_requests" not in output
 
