@@ -17420,6 +17420,134 @@
       "expect": "allow"
     },
     {
+      "id": "walkup-npx-tsc-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx tsc --noEmit"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-npx-vitest-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-npx-eslint-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx eslint ."
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-npm-exec-tsc-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm exec tsc --noEmit"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-npx-tsc",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && npx tsc --noEmit"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-uv-run-pytest-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "uv run pytest -q"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cargo-test-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cargo test"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-go-build-from-subdirectory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "go build ./..."
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
       "id": "neg-toolchain-npm-exec-workspace-filter",
       "fix_area": "shell",
       "harnesses": [

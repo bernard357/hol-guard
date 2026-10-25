@@ -21,6 +21,48 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
         && (path.is_relative() || path.starts_with(workspace))
 }
 
+/// Whether `found` holds for any directory a tool's own project lookup would
+/// read from `directory`: that directory first, then each parent up to the
+/// workspace root and no further. `npx`, `cargo`, `go` and `uv` all resolve
+/// the project they act on by ascending from where they run, so a run that
+/// stands in a subdirectory of the workspace reaches the manifest, the
+/// installed tool or the environment the workspace root holds. Bounding the
+/// walk at that root is what keeps the proof inside the sandbox: nothing
+/// above the workspace is ever read, so the admission still rests on what the
+/// workspace itself holds.
+///
+/// `directory` is checked wherever it points, which is what the single-
+/// directory checks did. The walk only starts when it stays below the
+/// workspace with no parent step in it, so a path that already climbed out
+/// cannot carry the ascent further out.
+pub(super) fn found_from(
+    directory: &Path,
+    workspace: &Path,
+    found: impl Fn(&Path) -> bool,
+) -> bool {
+    if found(directory) {
+        return true;
+    }
+    if !directory.starts_with(workspace)
+        || directory
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    let mut probe = directory;
+    while probe != workspace {
+        let Some(parent) = probe.parent() else {
+            return false;
+        };
+        probe = parent;
+        if found(probe) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Whether `target`, the only operand of a `cd` or `pushd`, is a directory
 /// the sandbox bounds. `temp_fixed` says nothing rebinds `TMPDIR`, so the
 /// stand-in for `"$(mktemp -d)"` is a directory `mktemp` creates under the
@@ -79,3 +121,9 @@ pub(super) fn assigns_private(model: &CanonicalCommandV1, segment: &CommandSegme
 #[cfg(all(test, unix))]
 #[path = "workspace_contained_cd_tests.rs"]
 mod tests;
+
+// [`found_from`] reads paths rather than shell text, so its bound is checked
+// on every platform the sandbox runs on.
+#[cfg(test)]
+#[path = "workspace_contained_cd_walk_tests.rs"]
+mod walk_tests;

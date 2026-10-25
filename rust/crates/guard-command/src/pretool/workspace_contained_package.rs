@@ -287,6 +287,12 @@ fn declares_dependencies(path: &Path) -> bool {
 /// sandbox has no network for; those commands keep the admission they have.
 /// An operand uv has to write, fetch or install for keeps it for the same
 /// reason.
+/// A member of a uv workspace has no `.venv` of its own: uv resolves the
+/// workspace root by ascending and runs the environment that root holds, so
+/// the search ascends the same way and stops at that root. A nested project
+/// that is not a member is admitted on it too; uv would sync its own instead,
+/// which the sandbox's missing network turns into an error the caller sees
+/// rather than anything the run reaches.
 fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Path) -> bool {
     let Some(uv) = uv_command(arguments, directory, workspace) else {
         return false;
@@ -309,7 +315,7 @@ fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Path) -> bool
             return false;
         }
     }
-    uv.project.join(".venv").is_dir()
+    super::cd::found_from(&uv.project, workspace, |probe| probe.join(".venv").is_dir())
 }
 
 /// Whether `name` runs Maven, by either spelling the JVM extension claims.
@@ -375,7 +381,7 @@ pub(super) fn local_package_work(
                 .map(String::as_str)
                 .take_while(|argument| *argument != "--")
                 .collect();
-            return super::compiled::local_go_work(&arguments, directory);
+            return super::compiled::local_go_work(&arguments, directory, workspace);
         }
         if maven_executable(&name) {
             let Some(directory) = directory.as_deref() else {
@@ -399,7 +405,7 @@ pub(super) fn local_package_work(
                 .map(String::as_str)
                 .take_while(|argument| *argument != "--")
                 .collect();
-            return super::compiled::local_cargo_work(&arguments, directory);
+            return super::compiled::local_cargo_work(&arguments, directory, workspace);
         }
         if PYTHON_MANAGERS.contains(&name.as_str()) {
             let Some(directory) = directory.as_deref() else {
