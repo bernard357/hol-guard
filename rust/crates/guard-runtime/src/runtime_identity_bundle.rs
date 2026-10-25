@@ -168,6 +168,18 @@ pub(crate) struct LaunchAdvisories {
     pub(crate) source: Value,
 }
 
+#[cfg(test)]
+impl LaunchAdvisories {
+    /// Advisories in request form, as if taken from a bundle reported by
+    /// `source`.
+    pub(crate) fn for_tests(advisories: Value, source: Value) -> Self {
+        Self {
+            advisories: serde_json::from_value(advisories).expect("advisories"),
+            source,
+        }
+    }
+}
+
 impl CachedBundleInput {
     pub(crate) fn new(
         response: Value,

@@ -187,10 +187,10 @@ fn spoofed_version_never_exceeds_self_reported() {
     });
     let reply = crate::runtime_identity::run_command(request.to_string().as_bytes()).unwrap();
     assert_eq!(reply["ok"], true, "{reply}");
-    let status = reply["result"]["artifacts"][0]["matches"][0]["status"]
-        .as_str()
-        .unwrap();
-    assert_ne!(status, "not_affected");
+    // Another vendor's rule yields no match row at all; either way it is
+    // never cleared.
+    let status = reply["result"]["artifacts"][0]["matches"][0]["status"].as_str();
+    assert_ne!(status, Some("not_affected"));
     assert_ne!(
         reply["result"]["advisories"][0]["verdict"],
         "fixed_verified"

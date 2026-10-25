@@ -2,7 +2,7 @@ import { j as jsxRuntimeExports, S as SectionLabel, H as HiMiniChevronRight, f a
 import { H as HomeProtectionModule } from "./home-protection-module-DYHkHSPd.js";
 import { B as BrandHero, a as BrandHeroFacts, b as BrandHeroBadge, u as useReducedMotion, c as brandMarkSvg } from "./brand-hero-COty1p6U.js";
 import { A as ABOUT_LOCAL_SECTION_TITLE, a as ABOUT_LOCAL_SECTION_BODY } from "./about-content-Dr9zFg1V.js";
-import { S as SUPPORTED_APPS_FULL } from "./app-catalog-BU3dzTBu.js";
+import { S as SUPPORTED_APPS_FULL } from "./app-catalog-By01oDVd.js";
 function redactQueueArtifactName(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();

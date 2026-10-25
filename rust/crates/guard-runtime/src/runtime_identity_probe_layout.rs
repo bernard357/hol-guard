@@ -42,7 +42,8 @@ pub(crate) fn hint_for(resolved: &str) -> Hint {
         (Some(named), None) => Some(named),
         (None, laid_out) => laid_out,
     };
-    let vendor = (family == "node" && laid_out && version.is_some()).then_some(NODE_UPSTREAM_VENDOR);
+    let vendor =
+        (family == "node" && laid_out && version.is_some()).then_some(NODE_UPSTREAM_VENDOR);
     Hint {
         family: Some(family),
         version,

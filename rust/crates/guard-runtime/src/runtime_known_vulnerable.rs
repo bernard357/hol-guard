@@ -34,7 +34,7 @@ pub(crate) fn is_review_finding(reason_code: &str) -> bool {
     reason_code == FINDING
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Finding {
     advisory_id: String,
     severity: String,
@@ -88,16 +88,23 @@ pub(crate) fn apply_to_envelope(
     let Some(command) = command_text(&envelope.raw_payload) else {
         return result;
     };
-    let launches = runtime_launches(&command, envelope);
+    let source_info = &envelope.source;
+    let launches = runtime_launches(
+        &command,
+        source_info.cwd.as_deref().map(Path::new),
+        Path::new(&source_info.home_dir),
+        source_info
+            .execution_environment
+            .as_ref()
+            .map(|environment| environment.path.as_str()),
+    );
     if launches.is_empty() {
         return result;
     }
     let Some(advisories) = source::advisories(Path::new(&envelope.source.guard_home)) else {
         return result;
     };
-    let finding = launches
-        .iter()
-        .find_map(|path| affected(path, &advisories));
+    let finding = launches.iter().find_map(|path| affected(path, &advisories));
     match finding {
         Some(finding) => raise(result, &finding, &action, snapshot.mode == "observe"),
         None => result,
@@ -125,14 +132,12 @@ fn command_text(payload: &Value) -> Option<String> {
 /// would: a bare name through the hook's `PATH`, a relative one from `cwd`.
 /// A segment that overrides `PATH` is skipped; Guard cannot say which file it
 /// would run.
-fn runtime_launches(command: &str, envelope: &GuardHookEnvelopeV2) -> Vec<PathBuf> {
-    let cwd = envelope.source.cwd.as_deref().map(Path::new);
-    let home = Path::new(&envelope.source.home_dir);
-    let search_path = envelope
-        .source
-        .execution_environment
-        .as_ref()
-        .map(|environment| environment.path.as_str());
+fn runtime_launches(
+    command: &str,
+    cwd: Option<&Path>,
+    home: &Path,
+    search_path: Option<&str>,
+) -> Vec<PathBuf> {
     let mut texts = vec![command.to_owned()];
     let mut launches = Vec::new();
     let mut parsed = 0;
@@ -150,7 +155,12 @@ fn runtime_launches(command: &str, envelope: &GuardHookEnvelopeV2) -> Vec<PathBu
             "guard-shell",
             true,
         );
-        texts.extend(model.embedded_commands.iter().map(|embedded| embedded.text.clone()));
+        texts.extend(
+            model
+                .embedded_commands
+                .iter()
+                .map(|embedded| embedded.text.clone()),
+        );
         for segment in &model.segments {
             if segment.path_overridden {
                 continue;
@@ -205,7 +215,15 @@ fn resolve(executable: &str, cwd: Option<&Path>, search_path: Option<&str>) -> O
 /// to be affected by.
 fn affected(path: &Path, advisories: &LaunchAdvisories) -> Option<Finding> {
     let (resolved_path, artifact) = source::probe(path)?;
-    let report = crate::runtime_identity::assess_launch(&artifact, advisories).ok()?;
+    affected_artifact(resolved_path, &artifact, advisories)
+}
+
+fn affected_artifact(
+    resolved_path: String,
+    artifact: &Value,
+    advisories: &LaunchAdvisories,
+) -> Option<Finding> {
+    let report = crate::runtime_identity::assess_launch(artifact, advisories).ok()?;
     let affected_ids: Vec<&str> = report["artifacts"]
         .as_array()?
         .iter()

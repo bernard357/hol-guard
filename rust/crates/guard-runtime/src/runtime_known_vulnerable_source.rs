@@ -112,7 +112,11 @@ fn bundle_stamp(connection: &Connection, workspace: &str) -> Option<String> {
             "select cached_at || ':' || length(response_json) from {BUNDLE_TABLE} \
              where workspace_id = ?1 limit 1"
         ))
-        .and_then(|mut statement| statement.query_row([workspace], |row| row.get(0)).optional())
+        .and_then(|mut statement| {
+            statement
+                .query_row([workspace], |row| row.get(0))
+                .optional()
+        })
         .ok()?
 }
 
