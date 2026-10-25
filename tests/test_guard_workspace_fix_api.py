@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,18 +29,15 @@ from tests.workspace_fix_support import (
     MANIFEST,
     assess,
     digest,
+    native_binary,  # noqa: F401
     seeded_store,
     write_manifest,
 )
 
+pytestmark = pytest.mark.usefixtures("native_binary")
+
 PATH = "/v1/supply-chain/workspace-fix-proposals"
 BODY = {"codebase_key": KEYS.codebase_key, "worktree_key": KEYS.worktree_key, "finding_id": FINDING_ID}
-
-
-@pytest.fixture
-def native_binary() -> None:
-    if not Path(os.environ.get("HOL_GUARD_NATIVE_BINARY") or "").is_file():
-        pytest.skip("needs HOL_GUARD_NATIVE_BINARY for the compiled runtime")
 
 
 @contextmanager
@@ -71,9 +67,7 @@ def _raw(port: int, token: str, *, length: int, origin: str | None = None) -> by
         client.close()
 
 
-def test_routes_refuse_anonymous_foreign_origin_scoped_and_oversized_requests(
-    tmp_path: Path, native_binary: None
-) -> None:
+def test_routes_refuse_anonymous_foreign_origin_scoped_and_oversized_requests(tmp_path: Path) -> None:
     with _daemon(tmp_path) as (daemon, store, manifest, token):
         before = manifest.read_bytes()
         proposal_path = f"{PATH}/{'a' * 32}/apply"
@@ -104,7 +98,7 @@ def test_routes_refuse_anonymous_foreign_origin_scoped_and_oversized_requests(
     assert oversized.split(b"\r\n", 1)[0].split()[1] == b"413"
 
 
-def test_malformed_requests_are_rejected_before_any_work(tmp_path: Path, native_binary: None) -> None:
+def test_malformed_requests_are_rejected_before_any_work(tmp_path: Path) -> None:
     with _daemon(tmp_path) as (daemon, _store, manifest, token):
         before = manifest.read_bytes()
         bad_keys = _read_json_response(_request(daemon.port, PATH, token=token, payload={"finding_id": FINDING_ID}))
@@ -120,7 +114,7 @@ def test_malformed_requests_are_rejected_before_any_work(tmp_path: Path, native_
     assert no_keys == (400, {"error": "invalid_worktree"})
 
 
-def test_prepare_apply_and_verify_over_the_daemon(tmp_path: Path, native_binary: None) -> None:
+def test_prepare_apply_and_verify_over_the_daemon(tmp_path: Path) -> None:
     with _daemon(tmp_path) as (daemon, store, manifest, token):
         status, prepared = _read_json_response(_request(daemon.port, PATH, token=token, payload=BODY))
         assert status == 201
@@ -158,7 +152,7 @@ def test_prepare_apply_and_verify_over_the_daemon(tmp_path: Path, native_binary:
     assert again == (409, {"error": "fix_proposal_not_prepared", "state": "verified_fixed"})
 
 
-def test_stale_apply_over_the_daemon_is_a_409_and_leaves_the_file_alone(tmp_path: Path, native_binary: None) -> None:
+def test_stale_apply_over_the_daemon_is_a_409_and_leaves_the_file_alone(tmp_path: Path) -> None:
     with _daemon(tmp_path) as (daemon, _store, manifest, token):
         _, prepared = _read_json_response(_request(daemon.port, PATH, token=token, payload=BODY))
         [proposal] = prepared["proposals"]
@@ -168,10 +162,10 @@ def test_stale_apply_over_the_daemon_is_a_409_and_leaves_the_file_alone(tmp_path
             _request(daemon.port, f"{PATH}/{proposal['proposal_id']}/apply", token=token)
         )
         assert manifest.read_bytes() == edited
-    assert (status, body) == (409, {"error": "fix_proposal_stale"})
+    assert (status, body) == (409, {"error": "fix_proposal_stale", "reason": "manifest_changed"})
 
 
-def test_unsupported_findings_return_a_reason_over_the_daemon(tmp_path: Path, native_binary: None) -> None:
+def test_unsupported_findings_return_a_reason_over_the_daemon(tmp_path: Path) -> None:
     with _daemon(tmp_path) as (daemon, store, _manifest, token):
         other = "e" * 32
         assess(
@@ -193,3 +187,30 @@ def test_unsupported_findings_return_a_reason_over_the_daemon(tmp_path: Path, na
         )
     assert (status, body["error"], body["reason"]) == (422, "fix_unsupported", "transitive_dependency")
     assert json.dumps(body).count(str(tmp_path)) == 0, "responses carry no local paths"
+
+
+@pytest.mark.parametrize("limit", ["%C2%B2", "%D9%A5", "-3", "1.5", "", "9" * 40])
+def test_a_limit_that_is_not_ascii_digits_falls_back_to_the_default(tmp_path: Path, limit: str) -> None:
+    with _daemon(tmp_path) as (daemon, _store, _manifest, token):
+        query = f"?codebase_key={KEYS.codebase_key}&worktree_key={KEYS.worktree_key}&limit={limit}"
+        status, listing = _read_json_response(_request(daemon.port, PATH + query, method="GET", token=token))
+    assert (status, listing) == (200, {"proposals": []})
+
+
+def test_apply_on_a_paused_worktree_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    with _daemon(tmp_path) as (daemon, store, manifest, token):
+        _, prepared = _read_json_response(_request(daemon.port, PATH, token=token, payload=BODY))
+        [proposal] = prepared["proposals"]
+        assert prepared["truncated"] is False
+        assert assessments.set_paused(store, KEYS, paused=True)
+        before = manifest.read_bytes()
+        status, body = _read_json_response(
+            _request(daemon.port, f"{PATH}/{proposal['proposal_id']}/apply", token=token)
+        )
+        assert manifest.read_bytes() == before
+        assert assessments.set_paused(store, KEYS, paused=False)
+        resumed, applied = _read_json_response(
+            _request(daemon.port, f"{PATH}/{proposal['proposal_id']}/apply", token=token)
+        )
+    assert (status, body) == (409, {"error": "worktree_paused"})
+    assert resumed == 200 and applied["verification_queued"] is True and applied["verification_run_id"]

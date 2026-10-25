@@ -252,10 +252,11 @@
       {
         "id": "workspace-assessment-async",
         "category": "async_control_plane",
-        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command.",
+        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
         "path": [
           "src/codex_plugin_scanner/guard/workspace_assessment_*.py",
           "src/codex_plugin_scanner/guard/native_workspace_snapshot.py",
+          "src/codex_plugin_scanner/guard/native_workspace_fix.py",
           "src/codex_plugin_scanner/guard/store_workspace_assessment_schema.py",
           "src/codex_plugin_scanner/guard/daemon/workspace_assessment_api.py"
         ]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import stat
 from pathlib import Path
 
@@ -12,7 +11,6 @@ import pytest
 from codex_plugin_scanner.guard import store_connection_schema as connection_schema
 from codex_plugin_scanner.guard import workspace_assessment_fix_proposals as fixes
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
-from codex_plugin_scanner.guard.workspace_assessment_fix_manifest import FixUnsupportedError, plan_edits
 from tests.workspace_fix_support import (
     COMPLETE_SUPPLY_CHAIN,
     FINDING_ID,
@@ -23,9 +21,12 @@ from tests.workspace_fix_support import (
     assess,
     digest,
     finding,
+    native_binary,  # noqa: F401
     seeded_store,
     write_manifest,
 )
+
+pytestmark = pytest.mark.usefixtures("native_binary")
 
 NOW = T0 + 10_000
 
@@ -201,31 +202,18 @@ def test_apply_replaces_the_manifest_atomically_keeps_its_mode_and_queues_verifi
     (root / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n", encoding="utf-8")
     [proposal] = _prepare(store)["proposals"]
     inode_before = manifest.stat().st_ino
-    replaced: list[str] = []
-    real_replace = os.replace
 
-    def spy(source, destination, *args, **kwargs):
-        # The shared writer swaps by name inside the manifest's own directory.
-        replaced.append((os.fspath(source), os.fspath(destination), kwargs.get("src_dir_fd") is not None))
-        assert os.path.dirname(os.fspath(source)) == os.path.dirname(os.fspath(destination))
-        return real_replace(source, destination, *args, **kwargs)
-
-    os.replace = spy
-    try:
-        result = fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 5)
-    finally:
-        os.replace = real_replace
+    result = fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 5)
 
     assert manifest.read_bytes() == FIXED_MANIFEST.replace("\n", "\r\n").encode()
-    assert len(replaced) == 1
-    assert replaced[0][1] == "package.json" and replaced[0][0] != "package.json"
     assert manifest.stat().st_ino != inode_before
     assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
-    assert [p.name for p in root.iterdir() if p.name.startswith(".")] == []
+    assert sorted(p.name for p in root.iterdir()) == ["package.json", "pnpm-lock.yaml"], "no scratch files left"
     assert result["lockfile_update_required"] is True
     assert result["lockfiles"] == ["pnpm-lock.yaml"]
     assert result["proposal"]["state"] == "applied"
     assert result["proposal"]["applied_at_ms"] == NOW + 5
+    assert result["verification_queued"] is True
     run_id = result["verification_run_id"]
     assert run_id
     with store._connect() as connection:
@@ -233,6 +221,82 @@ def test_apply_replaces_the_manifest_atomically_keeps_its_mode_and_queues_verifi
             "select trigger_kind, state from workspace_assessment_runs where run_id = ?", (run_id,)
         ).fetchone()
     assert tuple(row) == ("fix_verification", "queued")
+
+
+def test_apply_on_a_paused_worktree_writes_nothing_and_claims_no_verification(tmp_path: Path) -> None:
+    store, _root, manifest = _prepared(tmp_path)
+    [proposal] = _prepare(store)["proposals"]
+    before = manifest.read_bytes()
+    assert assessments.set_paused(store, KEYS, paused=True)
+
+    with pytest.raises(fixes.FixProposalError) as caught:
+        fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 5)
+
+    assert (caught.value.code, caught.value.status) == ("worktree_paused", 409)
+    assert manifest.read_bytes() == before
+    [listed] = fixes.list_proposals(store, KEYS, now_ms=NOW + 6)
+    assert listed["state"] == "prepared"
+    with store._connect() as connection:
+        queued = connection.execute(
+            "select count(*) from workspace_assessment_runs where trigger_kind = 'fix_verification'"
+        ).fetchone()[0]
+    assert queued == 0
+
+    assert assessments.set_paused(store, KEYS, paused=False)
+    resumed = fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 7)
+    assert resumed["verification_queued"] is True
+
+
+def test_prepare_always_reports_whether_the_manifest_scan_was_truncated(tmp_path: Path) -> None:
+    store, _root, _manifest = _prepared(tmp_path)
+    assert _prepare(store)["truncated"] is False
+
+    root = tmp_path / "many"
+    for index in range(201):
+        (root / f"p{index:03}").mkdir(parents=True)
+        (root / f"p{index:03}" / "package.json").write_text("{}", encoding="utf-8")
+    write_manifest(root)
+    other = seeded_store(tmp_path / "second", root)
+    assess(other, snapshot="before", at=T0 + 100)
+    assert fixes.prepare(other, KEYS, FINDING_ID, now_ms=NOW)["truncated"] is True
+
+
+def test_prepare_persists_the_package_identity_for_later_verification(tmp_path: Path) -> None:
+    store, _root, _manifest = _prepared(tmp_path)
+    [proposal] = _prepare(store)["proposals"]
+    assert (proposal["ecosystem"], proposal["package_name"], proposal["fix_version"]) == ("npm", "minimist", "1.2.9")
+    assert proposal["advisory_ids"] == ["GHSA-demo-0001"]
+    assert proposal["rule_ids"] == ["known-malicious"]
+
+
+def test_manifests_outside_the_assessment_inventory_get_no_proposal(tmp_path: Path) -> None:
+    root = tmp_path / "work"
+    write_manifest(root / "a" / "b" / "c" / "d" / "deep")
+    write_manifest(root / "packages" / "app")
+    store = seeded_store(tmp_path, root)
+    assess(store, snapshot="before", at=T0 + 100)
+
+    result = _prepare(store)
+
+    assert [p["manifest_path"] for p in result["proposals"]] == ["packages/app/package.json"]
+
+
+def test_a_fix_version_with_a_trailing_newline_is_refused(tmp_path: Path) -> None:
+    store, _root, manifest = _prepared(tmp_path, finding_overrides={"fix_version": "1.2.9\n"})
+    before = manifest.read_bytes()
+    with pytest.raises(fixes.FixProposalError) as caught:
+        _prepare(store)
+    assert caught.value.detail["reason"] == "fix_version_not_plain_semver"
+    assert manifest.read_bytes() == before
+
+
+def test_a_spec_with_a_trailing_newline_is_refused_so_no_invalid_json_is_written(tmp_path: Path) -> None:
+    store, _root, manifest = _prepared(tmp_path, spec="^1.2.0\\n")
+    before = manifest.read_bytes()
+    with pytest.raises(fixes.FixProposalError) as caught:
+        _prepare(store)
+    assert caught.value.detail["reason"] == "spec_not_plain_semver"
+    assert manifest.read_bytes() == before
 
 
 def test_stale_apply_is_a_conflict_and_writes_nothing(tmp_path: Path) -> None:
@@ -245,6 +309,7 @@ def test_stale_apply_is_a_conflict_and_writes_nothing(tmp_path: Path) -> None:
         fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 5)
 
     assert (caught.value.code, caught.value.status) == ("fix_proposal_stale", 409)
+    assert caught.value.detail["reason"] == "manifest_changed"
     assert manifest.read_bytes() == edited
     [listed] = fixes.list_proposals(store, KEYS, now_ms=NOW + 6)
     assert listed["state"] == "stale"
@@ -357,6 +422,49 @@ def test_a_run_that_started_before_the_apply_does_not_count(tmp_path: Path) -> N
     assert _state(store, proposal["proposal_id"]) == "applied"
 
 
+def test_a_run_that_started_in_the_same_millisecond_as_the_apply_does_not_count(tmp_path: Path) -> None:
+    store, _root, _manifest = _prepared(tmp_path)
+    [proposal] = _prepare(store)["proposals"]
+    assess(store, snapshot="same-ms", at=T0 + 5_000, findings=[])
+    fixes.apply(store, proposal["proposal_id"], now_ms=T0 + 5_000)
+    assert _state(store, proposal["proposal_id"]) == "applied"
+
+
+def test_a_package_still_vulnerable_after_the_edit_is_still_present_despite_a_new_finding_id(tmp_path: Path) -> None:
+    store, proposal_id = _applied(tmp_path)
+    # The finding id hashes the resolved version, so the id changes after the edit.
+    _verification_run(
+        store,
+        snapshot="after",
+        findings=[finding(finding_id="1" * 32, package_version="1.2.9", rule_ids=["known-malicious"])],
+    )
+    assert _state(store, proposal_id) == "still_present"
+
+
+def test_a_package_still_below_the_fix_version_is_still_present_even_with_other_ids(tmp_path: Path) -> None:
+    store, proposal_id = _applied(tmp_path)
+    _verification_run(
+        store,
+        snapshot="after",
+        findings=[finding(finding_id="2" * 32, package_version="1.2.3", rule_ids=["other"], advisory_ids=["X"])],
+    )
+    assert _state(store, proposal_id) == "still_present"
+
+
+def test_unrelated_findings_do_not_block_a_verified_fix(tmp_path: Path) -> None:
+    store, proposal_id = _applied(tmp_path)
+    _verification_run(
+        store,
+        snapshot="after",
+        findings=[
+            finding(finding_id="3" * 32, package_name="other", rule_ids=["known-malicious"]),
+            finding(finding_id="4" * 32, ecosystem="pypi", rule_ids=["known-malicious"]),
+            finding(finding_id="5" * 32, package_version="1.3.0", rule_ids=["new-rule"], advisory_ids=["Y"]),
+        ],
+    )
+    assert _state(store, proposal_id) == "verified_fixed"
+
+
 def test_list_is_bounded(tmp_path: Path) -> None:
     store, _root, manifest = _prepared(tmp_path)
     for _ in range(3):
@@ -374,17 +482,3 @@ def test_migration_34_adds_the_proposal_table_without_touching_other_tables(tmp_
         tables = {row[0] for row in connection.execute("select name from sqlite_master where type = 'table'")}
     assert 34 in versions
     assert {"workspace_fix_proposals", "workspace_assessment_runs", "workspace_assessment_state"} <= tables
-
-
-def test_plan_edits_leaves_unmatched_and_malformed_manifests_alone() -> None:
-    with pytest.raises(FixUnsupportedError) as invalid:
-        plan_edits('{"dependencies": {"minimist": "^1.2.0",}}', "minimist", "1.2.9")
-    assert invalid.value.code == "manifest_invalid_json"
-    with pytest.raises(FixUnsupportedError) as duplicate:
-        plan_edits('{"dependencies": {"minimist": "^1.0.0", "minimist": "^1.1.0"}}', "minimist", "1.2.9")
-    assert duplicate.value.code == "manifest_duplicate_declaration"
-    with pytest.raises(FixUnsupportedError) as odd:
-        plan_edits('{"dependencies": {"minimist": "^1.2.0"}}', "minimist", "latest")
-    assert odd.value.code == "fix_version_not_plain_semver"
-    [edit] = plan_edits('{"optionalDependencies":{"minimist":"1.0.0"}}', "minimist", "1.2.9")
-    assert (edit.section, edit.to_spec) == ("optionalDependencies", "1.2.9")

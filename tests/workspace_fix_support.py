@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
+
+import pytest
 
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard.store import GuardStore
+
+
+@pytest.fixture
+def native_binary() -> None:
+    """Fix planning and applying run in the compiled runtime, so these tests need it."""
+
+    if not Path(os.environ.get("HOL_GUARD_NATIVE_BINARY") or "").is_file():
+        pytest.skip("needs HOL_GUARD_NATIVE_BINARY for the compiled runtime")
+
 
 DETECTORS = "d" * 64
 T0 = 1_000_000_000
@@ -54,6 +66,7 @@ def finding(**overrides: object) -> dict[str, object]:
         "package_version": "1.2.8",
         "fix_version": "1.2.9",
         "rule_ids": ["known-malicious"],
+        "advisory_ids": ["GHSA-demo-0001"],
         **overrides,
     }
 

@@ -106,6 +106,16 @@ _FIX_PROPOSAL_STATEMENTS: Final = (
         codebase_key TEXT NOT NULL,
         worktree_key TEXT NOT NULL,
         finding_id TEXT NOT NULL CHECK (length(finding_id) = 32),
+        ecosystem TEXT NOT NULL CHECK (length(ecosystem) BETWEEN 1 AND 64),
+        package_name TEXT NOT NULL CHECK (length(package_name) BETWEEN 1 AND 256),
+        fix_version TEXT NOT NULL CHECK (length(fix_version) BETWEEN 1 AND 128),
+        advisory_ids_json TEXT NOT NULL CHECK (
+            json_valid(advisory_ids_json) AND json_type(advisory_ids_json) = 'array'
+            AND length(advisory_ids_json) <= 16384
+        ),
+        rule_ids_json TEXT NOT NULL CHECK (
+            json_valid(rule_ids_json) AND json_type(rule_ids_json) = 'array' AND length(rule_ids_json) <= 16384
+        ),
         source_run_id TEXT NOT NULL CHECK (length(source_run_id) <= 64),
         snapshot_digest TEXT NOT NULL CHECK (length(snapshot_digest) = 64),
         manifest_path TEXT NOT NULL CHECK (length(manifest_path) <= 1024),

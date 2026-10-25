@@ -148,10 +148,12 @@ def _list_fix_proposals(handler: WorkspaceAssessmentHandler, query: str) -> None
         handler._write_json({"error": "invalid_worktree"}, status=400)
         return
     limit = params.get("limit", "")
+    # str.isdigit() accepts Unicode digits that int() then rejects or misreads.
+    valid_limit = 0 < len(limit) <= 9 and all("0" <= char <= "9" for char in limit)
     proposals = fixes.list_proposals(
         handler.server.store,
         keys,
-        limit=int(limit) if limit.isdigit() else fixes.MAX_LISTED_PROPOSALS,
+        limit=int(limit) if valid_limit else fixes.MAX_LISTED_PROPOSALS,
         now_ms=_now_ms(),
     )
     handler._write_json({"proposals": proposals})

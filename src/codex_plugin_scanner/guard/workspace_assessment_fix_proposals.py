@@ -4,43 +4,49 @@ A proposal is one minimal ``package.json`` version-spec edit that moves a
 directly declared npm dependency to a finding's fix version. It moves through
 three separate steps and never runs on its own:
 
-* prepare reads manifests under the admitted root and stores the edit, its
+* prepare asks the native ``workspace-fix`` command for the edits (it reads
+  only manifests the assessment inventory covers) and stores each edit, its
   diff, and the hashes of the manifest before and after;
-* apply is the user's explicit approval. It refuses (and marks the proposal
-  stale) unless the manifest still has the prepared hash, so a user's own
-  edits are never overwritten, and it queues a ``fix_verification`` run;
+* apply is the user's explicit approval. The native command replaces the
+  manifest only if it still has the prepared hash and otherwise the proposal
+  goes stale, so a user's own edits are never overwritten; a verification run
+  is then queued;
 * verification marks the proposal fixed only after a later, complete
-  supply-chain run on a different snapshot no longer reports the finding.
+  supply-chain run, started after the apply, no longer reports the finding.
 
+Python keeps the request handling, the stored state and the state machine; the
+manifest scan, edit planning, diff, hashing and file replacement are native.
 Guard does not run a package manager or any project code, so the lockfile is
 left for the user to update with their own tooling.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
+import re
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Final
 
+from . import native_workspace_fix as native
 from . import workspace_assessment_store as assessments
-from .workspace_assessment_fix_files import (
-    ManifestAccessError,
-    discover_manifests,
-    lockfiles_for,
-    read_manifest,
-    write_manifest,
-)
-from .workspace_assessment_fix_manifest import FixEdit, FixUnsupportedError, apply_edits, plan_edits, unified_diff
+from .store_workspace_assessment_schema import MAX_FIX_DIFF_BYTES
 from .workspace_assessment_worker import queue_manual_run
 
 MAX_LISTED_PROPOSALS: Final = 100
 MAX_PROPOSALS_PER_PREPARE: Final = 20
-# Errors that say the file, not the dependency, was the problem. A manifest that
-# declares the package for real explains a refusal better, so these rank last.
-_STRUCTURAL_REASONS: Final = frozenset({"manifest_invalid_json", "manifest_too_deep", "manifest_not_utf8"})
+_EDIT_KEYS: Final = ("section", "start", "end", "from_spec", "to_spec")
+_VERSION: Final = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?\Z")
+_ROOT_UNAVAILABLE: Final = frozenset(
+    {
+        "workspace_fix_root_not_absolute",
+        "workspace_fix_root_missing",
+        "workspace_fix_root_not_directory",
+        "workspace_fix_root_not_utf8",
+    }
+)
+_MAX_FIELD_CHARS: Final = 128
 # Absence of a finding only means "fixed" if the supply-chain detector looked at
 # everything. These coverage reasons say it did not; any snapshot_* reason says
 # the snapshot behind the run was itself partial. A detector_not_run:* reason
@@ -53,6 +59,11 @@ _COLUMNS: Final = (
     "codebase_key",
     "worktree_key",
     "finding_id",
+    "ecosystem",
+    "package_name",
+    "fix_version",
+    "advisory_ids_json",
+    "rule_ids_json",
     "source_run_id",
     "snapshot_digest",
     "manifest_path",
@@ -85,7 +96,7 @@ class FixProposalError(Exception):
 def prepare(store: Any, keys: assessments.WorktreeKeys, finding_id: str, *, now_ms: int) -> dict[str, object]:
     """Store a proposal for each direct declaration of the finding's package."""
 
-    root = _worktree_root(store, keys)
+    root, _paused = _worktree(store, keys)
     run = assessments.latest_assessed_run(store, keys)
     if run is None:
         raise FixProposalError("no_assessed_run", 409)
@@ -100,45 +111,37 @@ def prepare(store: Any, keys: assessments.WorktreeKeys, finding_id: str, *, now_
         raise FixProposalError("fix_unsupported", 422, reason="unsupported_ecosystem")
     if not isinstance(fix_version, str) or not fix_version:
         raise FixProposalError("fix_unsupported", 422, reason="no_fix_version")
-    if not isinstance(package, str) or not package:
+    if not isinstance(package, str) or not package or len(fix_version) > _MAX_FIELD_CHARS or len(package) > 256:
         raise FixProposalError("fix_unsupported", 422, reason="finding_incomplete")
-    manifests, truncated = discover_manifests(root)
-    planned: list[dict[str, object]] = []
-    declared_refusals: list[tuple[str, str]] = []
-    other_refusals: list[tuple[str, str]] = []
-    for relative in manifests:
-        try:
-            raw, _mode = read_manifest(root, relative)
-            text = raw.decode("utf-8")
-            edits = plan_edits(text, package, fix_version)
-            updated = apply_edits(text, edits)
-            diff = unified_diff(text, updated, relative)
-        except UnicodeDecodeError:
-            other_refusals.append((relative, "manifest_not_utf8"))
-        except ManifestAccessError as error:
-            other_refusals.append((relative, error.code))
-        except FixUnsupportedError as error:
-            if error.code in _STRUCTURAL_REASONS:
-                other_refusals.append((relative, error.code))
-            elif error.code != "not_declared":
-                declared_refusals.append((relative, error.code))
-        else:
-            planned.append(
-                {
-                    "manifest_path": relative,
-                    "base_sha256": hashlib.sha256(raw).hexdigest(),
-                    "new_sha256": hashlib.sha256(updated.encode("utf-8")).hexdigest(),
-                    "edits": edits,
-                    "diff": diff,
-                }
-            )
-    skipped = [*declared_refusals, *other_refusals]
-    if not planned:
-        reason = skipped[0][1] if skipped else ("manifest_scan_incomplete" if truncated else "transitive_dependency")
-        raise FixProposalError("fix_unsupported", 422, reason=reason, skipped=_skipped_payload(skipped))
-    skipped.extend((str(item["manifest_path"]), "too_many_manifests") for item in planned[MAX_PROPOSALS_PER_PREPARE:])
-    stored = _store_prepared(store, keys, finding_id, run, planned[:MAX_PROPOSALS_PER_PREPARE], now_ms=now_ms)
-    return {"proposals": stored, "skipped": _skipped_payload(skipped)}
+    try:
+        planned = native.plan(
+            root,
+            package=package,
+            fix_version=fix_version,
+            max_proposals=MAX_PROPOSALS_PER_PREPARE,
+            max_diff_bytes=MAX_FIX_DIFF_BYTES,
+        )
+    except native.WorkspaceFixError as error:
+        raise _native_failure(error) from error
+    proposals = [item for item in planned["proposals"] if isinstance(item, dict)]  # type: ignore[attr-defined]
+    skipped = _skipped_payload(planned["skipped"])
+    truncated = planned["truncated"] is True
+    if not proposals:
+        reason = (
+            skipped[0]["reason"] if skipped else ("manifest_scan_incomplete" if truncated else "transitive_dependency")
+        )
+        raise FixProposalError("fix_unsupported", 422, reason=reason, skipped=skipped, truncated=truncated)
+    identity = {
+        "ecosystem": "npm",
+        "package_name": package,
+        "fix_version": fix_version,
+        "advisory_ids": _id_list(finding.get("advisory_ids")),
+        "rule_ids": _id_list(finding.get("rule_ids")),
+    }
+    stored = _store_prepared(store, keys, finding_id, run, proposals, identity, now_ms=now_ms)
+    # `truncated` means the manifest scan stopped early, so a proposal list is
+    # still incomplete even when it is not empty.
+    return {"proposals": stored, "skipped": skipped, "truncated": truncated}
 
 
 def apply(store: Any, proposal_id: str, *, now_ms: int) -> dict[str, object]:
@@ -153,36 +156,38 @@ def apply(store: Any, proposal_id: str, *, now_ms: int) -> dict[str, object]:
         if row["state"] != "prepared":
             raise FixProposalError("fix_proposal_not_prepared", 409, state=row["state"])
         keys = assessments.WorktreeKeys(str(row["codebase_key"]), str(row["worktree_key"]))
-        root = _worktree_root(store, keys)
+        root, paused = _worktree(store, keys)
+        if paused:
+            # A paused worktree cannot queue the verification run that decides
+            # whether the fix worked, so nothing is written until it resumes.
+            raise FixProposalError("worktree_paused", 409)
         relative = str(row["manifest_path"])
         try:
-            current, mode = read_manifest(root, relative)
-        except ManifestAccessError as error:
-            _set_state(store, proposal_id, "stale", now_ms=now_ms)
-            raise FixProposalError("fix_proposal_stale", 409, reason=error.code) from error
-        updated: bytes | None = None
-        if hashlib.sha256(current).hexdigest() == row["base_sha256"]:
-            try:
-                text = current.decode("utf-8")
-                updated = apply_edits(text, _stored_edits(row)).encode("utf-8")
-            except (UnicodeDecodeError, FixUnsupportedError):
-                updated = None
-        if updated is None or hashlib.sha256(updated).hexdigest() != row["new_sha256"]:
+            outcome = native.apply(
+                root,
+                manifest_path=relative,
+                base_sha256=str(row["base_sha256"]),
+                new_sha256=str(row["new_sha256"]),
+                edits=_stored_edits(row),
+            )
+        except native.WorkspaceFixError as error:
+            raise _native_failure(error) from error
+        if outcome["status"] == "stale":
             # The file moved on since the review (or no longer matches what was
-            # reviewed): nothing is written, so the user's own edits stay.
+            # reviewed): nothing was written, so the user's own edits stay.
             _set_state(store, proposal_id, "stale", now_ms=now_ms)
-            raise FixProposalError("fix_proposal_stale", 409)
-        try:
-            write_manifest(root, relative, updated, mode=mode)
-        except OSError as error:
-            raise FixProposalError("fix_apply_failed", 500) from error
+            detail: dict[str, object] = {"reason": outcome.get("reason")}
+            if isinstance(outcome.get("preserved_path"), str):
+                detail["preserved_path"] = outcome["preserved_path"]
+            raise FixProposalError("fix_proposal_stale", 409, **detail)
         _set_state(store, proposal_id, "applied", now_ms=now_ms, applied=True)
     queued = queue_manual_run(store, keys, trigger_kind="fix_verification", clock=lambda: now_ms)
-    applied = _payload(_fetch(store, proposal_id) or row)
+    lockfiles = outcome.get("lockfiles")
     return {
-        "proposal": applied,
+        "proposal": _payload(_fetch(store, proposal_id) or row),
         "lockfile_update_required": True,
-        "lockfiles": lockfiles_for(root, relative),
+        "lockfiles": [item for item in lockfiles if isinstance(item, str)] if isinstance(lockfiles, list) else [],
+        "verification_queued": queued is not None,
         "verification_run_id": queued,
     }
 
@@ -217,25 +222,28 @@ def verify_proposals(store: Any, keys: assessments.WorktreeKeys, *, now_ms: int)
     run = assessments.latest_assessed_run(store, keys)
     if run is None or not _supply_chain_verifiable(run["coverage"]):
         return
-    findings = run["findings"] if isinstance(run["findings"], list) else []
-    present = {item.get("finding_id") for item in findings if isinstance(item, dict)}
+    findings = [item for item in run["findings"] if isinstance(item, dict)] if isinstance(run["findings"], list) else []
     started = run["started_at_ms"]
     with store._connect() as connection:
         connection.execute("begin immediate")
         rows = connection.execute(
             """
-            select proposal_id, finding_id, snapshot_digest, applied_at_ms, state, verification_run_id
+            select proposal_id, ecosystem, package_name, fix_version, advisory_ids_json, rule_ids_json,
+                   snapshot_digest, applied_at_ms, state, verification_run_id
             from workspace_fix_proposals
             where codebase_key = ? and worktree_key = ? and state in ('applied', 'still_present')
             """,
             (keys.codebase_key, keys.worktree_key),
         ).fetchall()
-        for proposal_id, finding_id, snapshot_digest, applied_at, state, verified_run in rows:
-            # A run that started before the apply may have read the old manifest.
-            if run["snapshot_digest"] == snapshot_digest or not isinstance(started, int) or started < applied_at:
+        for proposal_id, ecosystem, package, fix_version, advisories, rules, digest, applied_at, state, prior in rows:
+            # A run that started at or before the apply may have read the old manifest.
+            if run["snapshot_digest"] == digest or not isinstance(started, int) or started <= applied_at:
                 continue
-            outcome = "still_present" if finding_id in present else "verified_fixed"
-            if outcome == state and verified_run == run["run_id"]:
+            identity = (ecosystem, package, fix_version, set(json.loads(advisories)), set(json.loads(rules)))
+            outcome = (
+                "still_present" if any(_same_issue(finding, *identity) for finding in findings) else "verified_fixed"
+            )
+            if outcome == state and prior == run["run_id"]:
                 continue
             connection.execute(
                 """
@@ -246,6 +254,37 @@ def verify_proposals(store: Any, keys: assessments.WorktreeKeys, *, now_ms: int)
                 """,
                 (outcome, now_ms, run["run_id"], now_ms, proposal_id),
             )
+
+
+def _same_issue(
+    finding: dict[str, Any], ecosystem: str, package: str, fix_version: str, advisories: set[str], rules: set[str]
+) -> bool:
+    """Whether a later finding is the problem the proposal set out to fix.
+
+    A finding id also hashes the resolved version, so a package that is still
+    vulnerable after the edit gets a new id. Identity is the package plus
+    either an overlapping advisory or rule id, or a version still below the fix.
+    """
+
+    if finding.get("ecosystem") != ecosystem or finding.get("package_name") != package:
+        return False
+    if advisories & _id_set(finding.get("advisory_ids")) or rules & _id_set(finding.get("rule_ids")):
+        return True
+    return _below(finding.get("package_version"), fix_version)
+
+
+def _id_set(value: object) -> set[str]:
+    return {item for item in value if isinstance(item, str)} if isinstance(value, list) else set()
+
+
+def _below(version: object, fix_version: str) -> bool:
+    """Whether ``version`` is older than ``fix_version``; unreadable versions count as older."""
+
+    found, target = (_VERSION.match(version) if isinstance(version, str) else None), _VERSION.match(fix_version)
+    if found is None or target is None:
+        return True
+    left, right = tuple(int(part) for part in found.groups()[:3]), tuple(int(part) for part in target.groups()[:3])
+    return left < right or (left == right and found.group(4) is not None and target.group(4) is None)
 
 
 def _supply_chain_verifiable(coverage: object) -> bool:
@@ -265,6 +304,7 @@ def _store_prepared(
     finding_id: str,
     run: dict[str, object],
     planned: list[dict[str, object]],
+    identity: dict[str, object],
     *,
     now_ms: int,
 ) -> list[dict[str, object]]:
@@ -300,7 +340,6 @@ def _store_prepared(
                 continue
             proposal_id = uuid.uuid4().hex
             edits = item["edits"]
-            assert isinstance(edits, list)
             connection.execute(
                 f"insert into workspace_fix_proposals ({_SELECT}) values ({', '.join('?' for _ in _COLUMNS)})",
                 (
@@ -308,6 +347,11 @@ def _store_prepared(
                     keys.codebase_key,
                     keys.worktree_key,
                     finding_id,
+                    identity["ecosystem"],
+                    identity["package_name"],
+                    identity["fix_version"],
+                    json.dumps(identity["advisory_ids"], separators=(",", ":")),
+                    json.dumps(identity["rule_ids"], separators=(",", ":")),
                     run["run_id"],
                     run["snapshot_digest"],
                     item["manifest_path"],
@@ -327,15 +371,15 @@ def _store_prepared(
     return [_payload(row) for proposal_id in ids if (row := _fetch(store, proposal_id)) is not None]
 
 
-def _worktree_root(store: Any, keys: assessments.WorktreeKeys) -> Path:
+def _worktree(store: Any, keys: assessments.WorktreeKeys) -> tuple[Path, bool]:
     with store._connect() as connection:
         row = connection.execute(
-            "select private_root from workspace_assessment_state where codebase_key = ? and worktree_key = ?",
+            "select private_root, paused from workspace_assessment_state where codebase_key = ? and worktree_key = ?",
             (keys.codebase_key, keys.worktree_key),
         ).fetchone()
     if row is None:
         raise FixProposalError("worktree_not_found", 404)
-    return Path(str(row[0]))
+    return Path(str(row[0])), bool(row[1])
 
 
 def _fetch(store: Any, proposal_id: str) -> dict[str, Any] | None:
@@ -360,23 +404,27 @@ def _set_state(store: Any, proposal_id: str, state: str, *, now_ms: int, applied
 
 
 def _edit_record(edit: object) -> dict[str, object]:
-    assert isinstance(edit, FixEdit)
-    return {
-        "section": edit.section,
-        "start": edit.start,
-        "end": edit.end,
-        "from_spec": edit.from_spec,
-        "to_spec": edit.to_spec,
-    }
+    if not isinstance(edit, dict) or set(edit) != set(_EDIT_KEYS):
+        raise FixProposalError("workspace_fix_failed", 500)
+    return {key: edit[key] for key in _EDIT_KEYS}
 
 
-def _stored_edits(row: dict[str, Any]) -> list[FixEdit]:
-    return [
-        FixEdit(
-            str(item["section"]), int(item["start"]), int(item["end"]), str(item["from_spec"]), str(item["to_spec"])
-        )
-        for item in json.loads(str(row["edits_json"]))
-    ]
+def _stored_edits(row: dict[str, Any]) -> list[dict[str, object]]:
+    return [_edit_record(item) for item in json.loads(str(row["edits_json"]))]
+
+
+def _id_list(value: object) -> list[str]:
+    return sorted(_id_set(value))
+
+
+def _native_failure(error: native.WorkspaceFixError) -> FixProposalError:
+    if error.code == "workspace_fix_native_unavailable":
+        return FixProposalError("fix_native_unavailable", 503)
+    if error.code in _ROOT_UNAVAILABLE:
+        return FixProposalError("worktree_unavailable", 409)
+    if error.code == "fix_apply_failed":
+        return FixProposalError("fix_apply_failed", 500)
+    return FixProposalError("workspace_fix_failed", 500)
 
 
 def _payload(row: dict[str, Any]) -> dict[str, object]:
@@ -385,6 +433,11 @@ def _payload(row: dict[str, Any]) -> dict[str, object]:
         "codebase_key": row["codebase_key"],
         "worktree_key": row["worktree_key"],
         "finding_id": row["finding_id"],
+        "ecosystem": row["ecosystem"],
+        "package_name": row["package_name"],
+        "fix_version": row["fix_version"],
+        "advisory_ids": json.loads(str(row["advisory_ids_json"])),
+        "rule_ids": json.loads(str(row["rule_ids_json"])),
         "source_run_id": row["source_run_id"],
         "snapshot_digest": row["snapshot_digest"],
         "manifest_path": row["manifest_path"],
@@ -405,8 +458,13 @@ def _payload(row: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _skipped_payload(skipped: list[tuple[str, str]]) -> list[dict[str, str]]:
-    return [{"manifest_path": path, "reason": reason} for path, reason in skipped[:MAX_PROPOSALS_PER_PREPARE]]
+def _skipped_payload(skipped: object) -> list[dict[str, str]]:
+    items = skipped if isinstance(skipped, list) else []
+    return [
+        {"manifest_path": str(item["manifest_path"]), "reason": str(item["reason"])}
+        for item in items[:MAX_PROPOSALS_PER_PREPARE]
+        if isinstance(item, dict) and "manifest_path" in item and "reason" in item
+    ]
 
 
 __all__ = [
