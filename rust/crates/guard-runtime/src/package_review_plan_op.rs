@@ -106,18 +106,21 @@ fn review_command(payload: &Map<String, Value>) -> Option<String> {
         },
         _ => None,
     };
-    [tool_input, arguments, Some(payload), tool_args.as_ref()]
+    [tool_input, arguments, Some(payload)]
         .into_iter()
         .flatten()
-        .find_map(|candidate| {
-            COMMAND_FIELDS.iter().find_map(|key| {
-                candidate
-                    .get(*key)
-                    .and_then(Value::as_str)
-                    .filter(|value| !python_strip(value).is_empty())
-            })
-        })
-        .map(str::to_owned)
+        .find_map(command_field)
+        .or_else(|| tool_args.as_ref().and_then(command_field))
+}
+
+fn command_field(candidate: &Map<String, Value>) -> Option<String> {
+    COMMAND_FIELDS.iter().find_map(|key| {
+        candidate
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !python_strip(value).is_empty())
+            .map(str::to_owned)
+    })
 }
 
 fn filter_programs(filters: &str) -> Vec<String> {
