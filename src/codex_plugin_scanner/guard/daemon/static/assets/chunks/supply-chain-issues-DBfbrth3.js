@@ -1,4 +1,4 @@
-import { a as resolveFeedStaleness } from "./feed-health-workspace-353JT_AI.js";
+import { a as resolveFeedStaleness } from "./feed-health-workspace-s8nmOx74.js";
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-DYHkHSPd.js";
 import { b as buildSupplyChainStats, r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-CJkxdP0r.js";
 import { d2 as guardActionPresentation, ec as isSupplyChainScannerEvidence, ed as isBlockedGuardAction } from "../guard-dashboard.js";

@@ -269,6 +269,20 @@ export function deriveFrontendAuditResults(
   return results;
 }
 
+/**
+ * The header badge counts open critical and high results, so it must not call
+ * them all critical: the Critical filter would then show fewer rows.
+ */
+export function auditPriorityBadgeLabel(
+  results: readonly AuditResult[],
+  resolvedIds: ReadonlySet<string>,
+): string | null {
+  const count = results.filter(
+    (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id),
+  ).length;
+  return count > 0 ? `${count} high priority` : null;
+}
+
 function severityBadgeTone(
   severity: AuditSeverity,
 ): "destructive" | "attention" | "warning" | "info" | "default" {
@@ -557,14 +571,8 @@ export function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession 
     [snapshot.managed_installs],
   );
 
-  const criticalCount = useMemo(
-    () =>
-      baseResults.filter(
-        (r) =>
-          (r.severity === "critical" || r.severity === "high") &&
-          !r.resolved &&
-          !resolvedIds.has(r.id),
-      ).length,
+  const priorityBadge = useMemo(
+    () => auditPriorityBadgeLabel(baseResults, resolvedIds),
     [baseResults, resolvedIds],
   );
 
@@ -594,8 +602,8 @@ export function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession 
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {criticalCount > 0 && (
-            <Badge tone="destructive">{criticalCount} critical</Badge>
+          {priorityBadge && (
+            <Badge tone="destructive">{priorityBadge}</Badge>
           )}
           {openCount > 0 ? (
             <Badge tone="attention">{openCount} open</Badge>
