@@ -68,6 +68,40 @@ def test_native_failure_preserves_codex_wire_response(
         assert result == 0
 
 
+@pytest.mark.parametrize("failure", ("worker_none", "worker_raise"))
+def test_native_failure_keeps_copilot_permission_wire_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    guard_home = tmp_path / "guard-home"
+    context = HarnessContext(home_dir=tmp_path / "home", workspace_dir=None, guard_home=guard_home)
+    payload = {"hookName": "permissionRequest", "toolName": "bash", "toolArgs": {"command": "rm -rf build"}}
+
+    def unavailable(**_kwargs):
+        if failure == "worker_raise":
+            raise RuntimeError("injected native failure")
+        return None
+
+    monkeypatch.setattr(cli, "try_native_hook_authority", unavailable)
+    result = cli.route_native_hook(
+        Mock(harness="copilot", json=False),
+        config=None,
+        context=context,
+        payload=payload,
+        runtime_workspace=None,
+        store=GuardStore(guard_home),
+    )
+    response = json.loads(capsys.readouterr().out)
+    # Copilot reads a permission answer from these top-level fields; the
+    # generic hookSpecificOutput envelope would leave the request undecided.
+    assert response["behavior"] == "deny"
+    assert response["message"]
+    assert "hookSpecificOutput" not in response
+    assert result == 0
+
+
 @pytest.mark.parametrize("event", ("PreToolUse", "PermissionRequest"))
 @pytest.mark.parametrize("json_requested", (False, True))
 def test_pipeline_unavailable_preserves_codex_wire_response(

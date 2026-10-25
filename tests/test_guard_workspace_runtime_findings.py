@@ -7,6 +7,7 @@ and coverage never claims runtimes were checked when advisories were missing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -167,6 +168,23 @@ def test_a_replaced_runtime_queues_a_reassessment(tmp_path: Path, monkeypatch) -
     current["digest"] = digest("runtime-2")
     worker.observe(store, clock=lambda: T0)
     assert assessments.list_worktrees(store)[0]["dirty_generation"] == before + 1
+
+
+def test_a_context_recorded_before_the_upgrade_queues_one_reassessment(tmp_path: Path, monkeypatch) -> None:
+    # A worktree assessed by the previous release keeps its digests; its stored
+    # result predates the unsupported-lockfile coverage reason, so it must rerun.
+    store = GuardStore(tmp_path / "home")
+    snapshots(monkeypatch, worker, replace(SNAPSHOT, mode="stat"))
+    runtime = digest("runtime-1")
+    monkeypatch.setattr(worker, "observed_runtime_digest", lambda store, key, root, *, now_ms: runtime)
+    worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
+    worker.observe(store, clock=lambda: T0)
+    previous = f"guard.workspace-context.v1\0{runner.feed_context_digest(store)}\0{runtime}"
+    assessments.record_observation(store, KEYS, feed_digest=hashlib.sha256(previous.encode()).hexdigest())
+    before = assessments.list_worktrees(store)[0]["dirty_generation"]
+    worker.observe(store, clock=lambda: T0)
+    assert assessments.list_worktrees(store)[0]["dirty_generation"] == before + 1
+    assert worker.observe(store, clock=lambda: T0) == 0, "only once"
 
 
 def test_a_run_reports_runtime_findings_and_coverage(tmp_path: Path, monkeypatch) -> None:

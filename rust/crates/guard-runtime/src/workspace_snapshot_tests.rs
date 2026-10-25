@@ -144,6 +144,23 @@ fn oversize_detector_input_is_partial_but_oversize_asset_is_only_excluded() {
 }
 
 #[test]
+fn an_unsupported_lockfile_leaves_the_snapshot_partial() {
+    let dir = project();
+    let clean = snapshot(&request(dir.path(), SnapshotMode::Content)).unwrap();
+    assert_eq!(clean["coverage"], "complete");
+    fs::create_dir(dir.path().join("app")).unwrap();
+    fs::write(dir.path().join("app").join("pubspec.lock"), "packages:\n").unwrap();
+    for mode in [SnapshotMode::Content, SnapshotMode::Stat] {
+        let result = snapshot(&request(dir.path(), mode)).unwrap();
+        assert_eq!(result["coverage"], "partial");
+        assert_eq!(
+            result["partial_reasons"],
+            serde_json::json!(["unsupported_dependency_input"])
+        );
+    }
+}
+
+#[test]
 fn stat_mode_reads_no_content_and_tracks_additions() {
     let dir = project();
     let first = snapshot(&request(dir.path(), SnapshotMode::Stat)).unwrap();

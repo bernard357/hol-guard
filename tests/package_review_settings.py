@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 PACKAGE_REVIEW_KEYS = (
     "package_unknown",
@@ -36,3 +39,17 @@ def review_package_signals(guard_home: Path, *keys: str, action: str = "require-
         updated = f"{existing}{separator}[risk_actions]\n{lines}"
     config.write_text(updated, encoding="utf-8")
     return config
+
+
+def prove_npm_install(monkeypatch: pytest.MonkeyPatch, version: str = "11.9.0") -> None:
+    """Stand in for the resident's npm proof so the daemon settles an install.
+
+    The daemon applies the package evaluator's verdict only when the resident
+    proves the npm that runs; that proof depends on the host's npm layout and is
+    covered by the Rust tests, so hook tests supply it the same on every host.
+    """
+
+    from codex_plugin_scanner.guard.daemon import hook_native_package_review
+
+    monkeypatch.setattr(hook_native_package_review, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(hook_native_package_review, "npm_install_proof", lambda *_args, **_kwargs: (version, True))
