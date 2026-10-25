@@ -98,13 +98,6 @@ def test_codex_unmatched_tool_block_returns_real_review_request(
 
 
 @pytest.mark.usefixtures("native_hook_force")
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The resident review queue stores the command's raw text, launch target and identity key "
-        "unmasked; those fields feed the review claim binding, so masking them is its own change."
-    ),
-)
 def test_codex_review_request_masks_bearer_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
