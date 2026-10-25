@@ -248,7 +248,7 @@ pub use mapping::evidence as mapping_evidence;
 /// same argv, so it reads it here rather than keeping a second copy.
 pub use validation::python_args_target_pytest;
 pub use workspace::workspace_script_reads;
-pub(crate) use workspace::{exact_shape as workspace_exact_shape, workspace_admissible};
+pub(crate) use workspace::workspace_admissible;
 pub(crate) use workspace_linux::available as linux_workspace_sandbox_available;
 #[cfg(test)]
 mod parity_tests;

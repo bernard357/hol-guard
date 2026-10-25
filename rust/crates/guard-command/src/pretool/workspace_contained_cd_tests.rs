@@ -48,7 +48,7 @@ fn the_launcher_runs_the_raw_text_that_enters_a_private_directory() {
     let raw = format!(
         "node --test 2>&1 | tail -12; cd \"$(mktemp -d)\" && TODO_FILE=t.json node {w}/src/cli.js add Hello world && TODO_FILE=t.json node {w}/src/cli.js list"
     );
-    let shape = crate::restricted_pytest::workspace_exact_shape(&raw, &ws).unwrap();
+    let shape = crate::pretool::workspace_exact_shape(&raw, &ws).unwrap();
     assert!(shape.bootstrap.is_none() && shape.prefix.is_none() && shape.remainder.is_none());
     for command in [
         "cd \"$(mktemp -d)\" && cat ../x",
@@ -59,14 +59,14 @@ fn the_launcher_runs_the_raw_text_that_enters_a_private_directory() {
         "ls \"$(mktemp -d)\"",
     ] {
         assert!(
-            crate::restricted_pytest::workspace_exact_shape(command, &ws).is_none(),
+            crate::pretool::workspace_exact_shape(command, &ws).is_none(),
             "{command}"
         );
     }
     // A bootstrapped `git init` would run a rewritten remainder, not the raw
     // text the projection judged.
     let fresh = workspace("temp-cd-fresh", false);
-    assert!(crate::restricted_pytest::workspace_exact_shape(
+    assert!(crate::pretool::workspace_exact_shape(
         "git init && cd \"$(mktemp -d)\" && ls",
         &fresh
     )
@@ -118,7 +118,7 @@ fn the_launcher_runs_the_raw_text_that_assigns_a_private_directory() {
         // A builtin-only program fed to `python3 -` from a quoted heredoc.
         "python3 - <<'EOF'\nprint(1)\nEOF\nexport X=$(mktemp -d)/t.json\nls",
     ] {
-        let shape = crate::restricted_pytest::workspace_exact_shape(raw, &ws).unwrap();
+        let shape = crate::pretool::workspace_exact_shape(raw, &ws).unwrap();
         assert!(shape.bootstrap.is_none() && shape.prefix.is_none() && shape.remainder.is_none());
     }
     for command in [
@@ -140,7 +140,7 @@ fn the_launcher_runs_the_raw_text_that_assigns_a_private_directory() {
         "node - <<'EOF'\nconsole.log(1)\nEOF\nexport X=$(mktemp -d)/t.json\nls",
     ] {
         assert!(
-            crate::restricted_pytest::workspace_exact_shape(command, &ws).is_none(),
+            crate::pretool::workspace_exact_shape(command, &ws).is_none(),
             "{command}"
         );
     }

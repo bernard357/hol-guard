@@ -51,8 +51,10 @@ mod loopback_ports;
 pub(crate) mod port_probes;
 pub(crate) mod rsync_local;
 mod workspace_contained;
-/// The package firewall's extensions, whose permission marks which
-/// ecosystem's manager ran rather than a risk the run carries.
+#[cfg(unix)]
+mod contained_exact_shape;
+#[cfg(unix)]
+pub(crate) use contained_exact_shape::exact_shape as workspace_exact_shape;
 #[cfg(unix)]
 pub(crate) use workspace_contained::Shape;
 #[cfg(unix)]
