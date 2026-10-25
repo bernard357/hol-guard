@@ -20,6 +20,7 @@ from .runtime_identity_probe import RuntimeProbe, probe_runtime_paths
 
 RUNTIME_POSTURE_SCHEMA = "guard.runtime-posture.v1"
 ADVISORIES_UNAVAILABLE = "runtime_advisories_unavailable"
+HARNESS_CONFIG_UNREADABLE = "harness_config_unreadable"
 COVERAGE_STATEMENT = (
     "Observed only: executables configured tools would launch, described without running them. "
     "Running processes are not enumerated and no runtime is reported safe."
@@ -32,6 +33,7 @@ def build_runtime_posture(
     generated_at: str,
     environment: Mapping[str, str] | None = None,
     workspace_dir: Path | None = None,
+    skipped_harnesses: Sequence[str] = (),
 ) -> dict[str, object]:
     try:
         candidates = collect_runtime_candidates(detections, environment=environment, workspace_dir=workspace_dir)
@@ -39,16 +41,18 @@ def build_runtime_posture(
         # Reading server entries projects their identity through the native runtime.
         code = str(error) if str(error).startswith("native_") else "runtime_candidates_unavailable"
         return {**_base_payload(generated_at, None), "status": "unavailable", "error": code, "runtimes": []}
-    base = _base_payload(generated_at, candidates)
+    base = {**_base_payload(generated_at, candidates), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
+    # A harness whose config could not be read leaves the inventory incomplete,
+    # which is not the same as having no servers.
+    status, error_code = ("partial", HARNESS_CONFIG_UNREADABLE) if skipped_harnesses else ("ok", None)
     if not candidates.candidates:
-        return {**base, "status": "ok", "error": None, "runtimes": []}
+        return {**base, "status": status, "error": error_code, "runtimes": []}
     try:
         probe = probe_runtime_paths([candidate.path for candidate in candidates.candidates])
     except RuntimeIdentityError as error:
         return {**base, "status": "unavailable", "error": error.code, "runtimes": []}
     advisory_rows: list[dict[str, object]] = []
     matches: dict[str, list[object]] = {}
-    status, error_code = "ok", None
     coverage = dict(_coverage(reason=ADVISORIES_UNAVAILABLE))
     try:
         assessment = assess_runtime_identity(
@@ -105,7 +109,7 @@ def _base_payload(generated_at: str, candidates: RuntimeCandidates | None) -> di
         "advisories": [],
         "candidate_limit_reached": bool(candidates and candidates.truncated),
         "unresolved_launches": [
-            {"harness": item.harness, "server": item.server, "command": item.command}
+            {"harness": item.harness, "server": item.server, "command": item.command, "lookup": item.lookup}
             for item in (candidates.unresolved if candidates else ())
         ],
     }
@@ -159,6 +163,7 @@ def _runtime_rows(
 
 __all__ = [
     "ADVISORIES_UNAVAILABLE",
+    "HARNESS_CONFIG_UNREADABLE",
     "RUNTIME_POSTURE_SCHEMA",
     "build_runtime_posture",
 ]

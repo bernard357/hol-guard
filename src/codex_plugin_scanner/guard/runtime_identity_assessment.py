@@ -66,7 +66,9 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
     return run_native_identity_command(RUNTIME_IDENTITY_FEATURE, RUNTIME_IDENTITY_COMMAND, request)
 
 
-def run_native_identity_command(feature: str, command: str, request: dict[str, object]) -> dict[str, object]:
+def run_native_identity_command(
+    feature: str, command: str, request: dict[str, object], *, timeout_seconds: float = _TIMEOUT_SECONDS
+) -> dict[str, object]:
     """Send ``request`` to one native runtime-identity command and return its decoded reply object."""
 
     import os
@@ -96,7 +98,7 @@ def run_native_identity_command(feature: str, command: str, request: dict[str, o
         input_text=json.dumps(request, sort_keys=True, separators=(",", ":")),
         cwd=runtime.parent,
         environment=environment,
-        timeout_seconds=_TIMEOUT_SECONDS,
+        timeout_seconds=timeout_seconds,
         output_limit=_OUTPUT_LIMIT_BYTES,
     )
     if (

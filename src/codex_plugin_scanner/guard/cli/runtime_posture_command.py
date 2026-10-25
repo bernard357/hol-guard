@@ -48,18 +48,23 @@ def run_runtime_posture_command(
     stream = output_stream if output_stream is not None else sys.stdout
     if getattr(args, "runtime_command", None) not in (None, "posture"):
         raise ValueError(f"unsupported runtime command: {args.runtime_command}")
-    detections = configured_harness_detections(context.home_dir, context.guard_home, context.workspace_dir)
+    skipped: list[str] = []
+    detections = configured_harness_detections(
+        context.home_dir, context.guard_home, context.workspace_dir, skipped=skipped
+    )
     payload = build_runtime_posture(
         detections,
         generated_at=datetime.now(timezone.utc).isoformat(),
         workspace_dir=context.workspace_dir,
+        skipped_harnesses=skipped,
     )
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))
         stream.write("\n")
     else:
         stream.write(render_runtime_posture(payload))
-    return 1 if payload["status"] == "unavailable" else 0
+    # Anything short of a complete observation is a failure for automation.
+    return 0 if payload["status"] == "ok" else 1
 
 
 def render_runtime_posture(payload: dict[str, object]) -> str:
@@ -68,15 +73,21 @@ def render_runtime_posture(payload: dict[str, object]) -> str:
     lines = ["Runtime posture (read only)"]
     if payload["status"] == "unavailable":
         lines.append(f"Unavailable: {payload.get('error')}. The native runtime could not inspect executables.")
+    elif payload["status"] == "partial":
+        lines.append(f"Partial: {payload.get('error')}. Some of what follows could not be determined.")
+    skipped = payload.get("skipped_harnesses")
+    if isinstance(skipped, list) and skipped:
+        lines.append(f"  Configuration could not be read for: {', '.join(str(name) for name in skipped)}")
     runtimes = payload.get("runtimes")
     rows = runtimes if isinstance(runtimes, list) else []
-    if not rows and payload["status"] != "unavailable":
+    if not rows and payload["status"] == "ok":
         lines.append("No configured MCP server launch executables were found.")
     for row in rows:
         lines.extend(_render_row(row))
     unresolved = payload.get("unresolved_launches")
     for item in unresolved if isinstance(unresolved, list) else []:
-        lines.append(f"  not found on PATH: {item['command']} ({item['harness']} / {item['server']})")
+        label = "configured path not found" if item.get("lookup") == "configured_path" else "not found on PATH"
+        lines.append(f"  {label}: {item['command']} ({item['harness']} / {item['server']})")
     if payload.get("candidate_limit_reached"):
         lines.append("  Candidate limit reached; some launch executables were not inspected.")
     lines.append(f"Coverage: observed_only; scope complete: no; advisories: unavailable ({reason}).")

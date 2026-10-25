@@ -122,7 +122,7 @@ def test_missing_launch_executable_is_reported_not_guessed(native_runtime: Path,
 
     assert payload["runtimes"] == []
     assert payload["unresolved_launches"] == [
-        {"harness": "claude-code", "server": "files", "command": "no-such-runtime"}
+        {"harness": "claude-code", "server": "files", "command": "no-such-runtime", "lookup": "search_path"}
     ]
     assert payload["status"] == "ok"
 
@@ -138,6 +138,27 @@ def test_no_servers_never_touches_the_native_runtime(monkeypatch: pytest.MonkeyP
     assert payload["status"] == "ok"
     assert payload["runtimes"] == []
     assert payload["coverage"]["reason"] == ADVISORIES_UNAVAILABLE
+
+
+def test_unreadable_harness_config_is_partial_not_an_empty_inventory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_runtime: Path
+) -> None:
+    node = _nvm_node(tmp_path)
+
+    empty = build_runtime_posture([], generated_at=NOW, skipped_harnesses=["codex", "codex"])
+    found = build_runtime_posture(
+        [_detection("node")],
+        generated_at=NOW,
+        environment={"PATH": str(node.parent)},
+        skipped_harnesses=["cursor"],
+    )
+
+    assert (empty["status"], empty["error"]) == ("partial", "harness_config_unreadable")
+    assert empty["skipped_harnesses"] == ["codex"]
+    assert empty["runtimes"] == []
+    assert (found["status"], found["error"]) == ("partial", "harness_config_unreadable")
+    assert found["skipped_harnesses"] == ["cursor"]
+    assert len(found["runtimes"]) == 1
 
 
 def test_native_unavailable_is_reported_honestly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -209,6 +230,13 @@ def test_probe_output_is_usable_as_assess_input(native_runtime: Path, tmp_path: 
     assert RUNTIME_PROBE_FEATURE == "runtime-identity-probe-v1"
 
 
+def test_probe_refuses_relative_paths(native_runtime: Path) -> None:
+    with pytest.raises(RuntimeIdentityError) as refused:
+        probe_runtime_paths(["node_modules/.bin/node"])
+
+    assert refused.value.code == "runtime_identity_probe_path_invalid"
+
+
 def test_cli_json_shape(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, native_runtime: Path
 ) -> None:
@@ -266,6 +294,76 @@ def test_cli_native_unavailable_exits_nonzero_without_a_crash(
     assert json_out["status"] == "unavailable"
     assert json_out["error"] == "runtime_identity_native_unavailable"
     assert "Unavailable: runtime_identity_native_unavailable" in human_out
+
+
+def test_cli_partial_results_exit_nonzero_and_name_the_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, native_runtime: Path
+) -> None:
+    node = _nvm_node(tmp_path)
+
+    def failed(request: dict[str, object]) -> None:
+        raise RuntimeIdentityError("runtime_identity_failed")
+
+    monkeypatch.setattr(runtime_posture, "assess_runtime_identity", failed)
+    _patch_detections(monkeypatch, [_detection("node")], path=str(node.parent))
+
+    code = main(["guard", "runtime", "posture", *_guard_args(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Partial: runtime_identity_failed" in out
+    assert "node 20.11.1" in out
+
+
+def test_cli_reports_harnesses_whose_config_could_not_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from codex_plugin_scanner.guard.adapters import harness_mcp_discovery
+
+    def discovery(*_a: object, skipped: list[str], **_k: object) -> list[HarnessDetection]:
+        skipped.append("codex")
+        return []
+
+    monkeypatch.setattr(harness_mcp_discovery, "configured_harness_detections", discovery)
+
+    code = main(["guard", "runtime", "posture", *_guard_args(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Partial: harness_config_unreadable" in out
+    assert "Configuration could not be read for: codex" in out
+    assert "No configured MCP server launch executables were found." not in out
+
+
+def test_cli_missing_explicit_path_is_not_called_a_path_lookup(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    gone = str(tmp_path / "gone" / "serve")
+    _patch_detections(monkeypatch, [_detection(gone, "ghost")], path=str(tmp_path))
+
+    code = main(["guard", "runtime", "posture", *_guard_args(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert f"configured path not found: {gone}" in out
+    assert "not found on PATH" not in out
+
+
+def test_probe_gets_a_longer_deadline_than_a_plain_assessment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner.guard import runtime_identity_probe
+
+    seen: dict[str, object] = {}
+
+    def fake(feature: str, command: str, request: dict[str, object], *, timeout_seconds: float) -> dict[str, object]:
+        seen["timeout"] = timeout_seconds
+        return {"ok": False, "error": "runtime_identity_probe_failed"}
+
+    monkeypatch.setattr(runtime_identity_probe, "run_native_identity_command", fake)
+
+    with pytest.raises(RuntimeIdentityError):
+        probe_runtime_paths(["/opt/node/bin/node"])
+
+    assert isinstance(seen["timeout"], float) and seen["timeout"] > 10.0
 
 
 def _guard_args(tmp_path: Path) -> list[str]:

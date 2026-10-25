@@ -18,6 +18,8 @@ RUNTIME_PROBE_FEATURE = "runtime-identity-probe-v1"
 RUNTIME_PROBE_COMMAND = "runtime-identity-probe"
 RUNTIME_PROBE_SCHEMA = "guard.runtime-identity-probe.v1"
 RUNTIME_PROBE_MAX_PATHS = 128
+# The probe hashes whole files, so it gets more time than a plain assessment.
+_PROBE_TIMEOUT_SECONDS = 60.0
 
 _LOCATION_STATES = frozenset({"present", "missing", "unknown"})
 _ARTIFACT_TEXT_KEYS = ("artifact_id", "family", "os", "arch", "identity_assurance")
@@ -38,7 +40,12 @@ def probe_runtime_paths(paths: Sequence[str]) -> RuntimeProbe:
         raise RuntimeIdentityError("runtime_identity_probe_too_many_paths")
     if not unique:
         return RuntimeProbe(artifacts=(), locations=(), observations=())
-    reply = run_native_identity_command(RUNTIME_PROBE_FEATURE, RUNTIME_PROBE_COMMAND, {"paths": list(unique)})
+    reply = run_native_identity_command(
+        RUNTIME_PROBE_FEATURE,
+        RUNTIME_PROBE_COMMAND,
+        {"paths": list(unique)},
+        timeout_seconds=_PROBE_TIMEOUT_SECONDS,
+    )
     if reply.get("ok") is not True:
         error = reply.get("error")
         raise RuntimeIdentityError(error if isinstance(error, str) and error else "runtime_identity_probe_failed")

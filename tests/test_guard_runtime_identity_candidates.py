@@ -93,15 +93,63 @@ def test_server_configured_path_wins_over_the_process_path(tmp_path: Path) -> No
     assert str(process_node) not in {candidate.path for candidate in found.candidates}
 
 
-def test_unexpanded_path_placeholder_falls_back_to_the_process_path(tmp_path: Path) -> None:
-    node = _executable(tmp_path / "process" / "node")
+def test_path_placeholder_expands_and_keeps_the_servers_own_directories_first(tmp_path: Path) -> None:
+    process_node = _executable(tmp_path / "process" / "node")
+    server_node = _executable(tmp_path / "opt" / "node22" / "node")
+    process = {"PATH": str(tmp_path / "process")}
+
+    shadowed = collect_runtime_candidates(
+        [_detection(_server("files", "node", env={"PATH": f"{tmp_path / 'opt' / 'node22'}:${{PATH}}"}))],
+        environment=process,
+    )
+    appended = collect_runtime_candidates(
+        [_detection(_server("files", "node", env={"PATH": "$PATH:/opt/extra"}))], environment=process
+    )
+
+    assert [candidate.path for candidate in shadowed.candidates] == [str(server_node)]
+    assert [candidate.path for candidate in appended.candidates] == [str(process_node)]
+
+
+def test_path_with_a_variable_this_process_lacks_is_unresolved_not_guessed(tmp_path: Path) -> None:
+    _executable(tmp_path / "process" / "node")
 
     found = collect_runtime_candidates(
-        [_detection(_server("files", "node", env={"PATH": "${PATH}:/opt/extra"}))],
+        [_detection(_server("files", "node", env={"PATH": "${NO_SUCH_VARIABLE_FOR_GUARD}/bin:${PATH}"}))],
         environment={"PATH": str(tmp_path / "process")},
     )
 
-    assert [candidate.path for candidate in found.candidates] == [str(node)]
+    assert found.candidates == ()
+    assert [(item.server, item.lookup) for item in found.unresolved] == [("files", "search_path")]
+
+
+def test_relative_path_entries_resolve_against_the_launch_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    local = _executable(workspace / "node_modules" / ".bin" / "node")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    found = collect_runtime_candidates(
+        [_detection(_server("files", "node"))],
+        environment={"PATH": "node_modules/.bin"},
+        workspace_dir=workspace,
+    )
+
+    assert [candidate.path for candidate in found.candidates] == [str(local)]
+    assert all(os.path.isabs(candidate.path) for candidate in found.candidates)
+
+
+def test_without_a_workspace_relative_launches_use_the_process_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _executable(tmp_path / "tools" / "serve")
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_launch_executable("./tools/serve", search_path=None) == str(local)
+    found = collect_runtime_candidates([_detection(_server("files", "./tools/serve"))], environment={"PATH": ""})
+    assert [candidate.path for candidate in found.candidates] == [str(local)]
 
 
 def test_launcher_script_adds_its_shebang_interpreter(tmp_path: Path) -> None:
@@ -126,7 +174,7 @@ def test_absolute_and_workspace_relative_commands(tmp_path: Path) -> None:
     assert resolve_launch_executable("./tools/serve", search_path=None, workspace_dir=tmp_path / "workspace") == str(
         local
     )
-    assert resolve_launch_executable("./tools/serve", search_path=None) is None
+    assert resolve_launch_executable("./tools/missing", search_path=None, workspace_dir=tmp_path / "workspace") is None
     assert resolve_launch_executable("   ", search_path=os.defpath) is None
 
 
@@ -138,6 +186,15 @@ def test_missing_commands_are_reported_without_a_path(tmp_path: Path) -> None:
 
     assert found.candidates == ()
     assert [(item.server, item.command) for item in found.unresolved] == [("ghost", "no-such-tool")]
+    assert found.unresolved[0].lookup == "search_path"
+
+
+def test_missing_explicit_path_keeps_the_configured_path_and_its_kind(tmp_path: Path) -> None:
+    configured = str(tmp_path / "gone" / "serve")
+
+    found = collect_runtime_candidates([_detection(_server("ghost", configured))], environment={"PATH": str(tmp_path)})
+
+    assert [(item.command, item.lookup) for item in found.unresolved] == [(configured, "configured_path")]
 
 
 def test_disabled_servers_are_skipped(tmp_path: Path) -> None:
@@ -195,3 +252,60 @@ def test_collecting_candidates_never_runs_the_executable(tmp_path: Path) -> None
     )
 
     assert not marker.exists()
+
+
+def _fifo(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path, 0o755)
+    return path
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX only")
+def test_executable_fifo_on_the_path_is_neither_opened_nor_a_candidate(tmp_path: Path) -> None:
+    _fifo(tmp_path / "bin" / "node")
+
+    found = collect_runtime_candidates(
+        [_detection(_server("files", "node", env={"PATH": str(tmp_path / "bin")}))],
+        environment={"PATH": ""},
+    )
+
+    assert found.candidates == ()
+    assert [item.server for item in found.unresolved] == ["files"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX only")
+def test_fifo_launcher_is_never_read_for_a_shebang(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.runtime_identity_candidates import _read_head
+
+    fifo = _fifo(tmp_path / "serve")
+
+    assert _read_head(str(fifo)) is None
+
+
+@pytest.mark.parametrize(
+    ("shebang", "expected"),
+    [
+        ("#!/usr/bin/env python3", "python3"),
+        ("#!/usr/bin/env -u DEBUG python3", "python3"),
+        ("#!/usr/bin/env --unset=DEBUG python3", "python3"),
+        ("#!/usr/bin/env -uDEBUG python3", "python3"),
+        ("#!/usr/bin/env -i FOO=1 python3", "python3"),
+        ("#!/usr/bin/env -S python3 -u", "python3"),
+        ("#!/usr/bin/env -- python3", "python3"),
+        ("#!/usr/bin/env --no-such-option python3", None),
+        ("#!/usr/bin/env -S 'python3 -u'", None),
+        ("#!/usr/bin/env -u", None),
+    ],
+)
+def test_env_shebang_options_do_not_hide_the_interpreter(tmp_path: Path, shebang: str, expected: str | None) -> None:
+    bin_dir = tmp_path / "bin"
+    interpreters = {name: _executable(bin_dir / name) for name in ("python3", "DEBUG")}
+    launcher = _executable(bin_dir / "serve", f"{shebang}\nprint('x')\n")
+
+    found = collect_runtime_candidates(
+        [_detection(_server("api", "serve"))],
+        environment={"PATH": str(bin_dir)},
+    )
+
+    paths = {candidate.path for candidate in found.candidates}
+    assert paths == {str(launcher)} | ({str(interpreters[expected])} if expected else set())

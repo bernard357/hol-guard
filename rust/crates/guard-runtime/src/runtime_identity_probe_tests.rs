@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::run_command;
+use super::{observe, run_command, Hashing, Outcome};
 use crate::runtime_identity_probe_layout::{hint_for, strict_version};
 
 fn probe(paths: &[&str]) -> Value {
@@ -333,6 +333,98 @@ fn headers_set_os_and_arch() {
     assert_eq!(artifact_of(&result, 2)["arch"], "unknown");
 }
 
+/// A fat header: magic, entry count, then `count` entries of `entry` bytes
+/// whose first holds a cpu type, an offset past the table and an alignment.
+fn universal(magic: u32, count: u32, wide: bool) -> Vec<u8> {
+    let entry = if wide { 32 } else { 20 };
+    let table_end = 8 + count as usize * entry;
+    let mut bytes = vec![0_u8; table_end.max(64)];
+    bytes[..4].copy_from_slice(&magic.to_be_bytes());
+    bytes[4..8].copy_from_slice(&count.to_be_bytes());
+    bytes[8..12].copy_from_slice(&0x0100_000c_u32.to_be_bytes());
+    let offset = (table_end as u64).next_multiple_of(0x4000);
+    if wide {
+        bytes[16..24].copy_from_slice(&offset.to_be_bytes());
+        bytes[32..36].copy_from_slice(&14_u32.to_be_bytes());
+    } else {
+        bytes[16..20].copy_from_slice(&(offset as u32).to_be_bytes());
+        bytes[24..28].copy_from_slice(&14_u32.to_be_bytes());
+    }
+    bytes
+}
+
+#[test]
+fn universal_binaries_are_recognised_in_both_widths_and_any_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let cases = [
+        ("fat", universal(0xcafe_babe, 2, false)),
+        ("fat-many", universal(0xcafe_babe, 12, false)),
+        ("fat64", universal(0xcafe_babf, 2, true)),
+        ("fat64-many", universal(0xcafe_babf, 30, true)),
+    ];
+    for (name, bytes) in cases {
+        let path = write(dir.path(), &format!("{name}/node"), &bytes);
+        let result = probe(&[path.to_str().unwrap()]);
+        let artifact = artifact_of(&result, 0);
+        assert_eq!(
+            (artifact["os"].as_str(), artifact["arch"].as_str()),
+            (Some("macos"), Some("universal")),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn java_class_with_a_plausible_version_is_not_universal() {
+    let dir = tempfile::tempdir().unwrap();
+    // Major version 65 reads as an entry count in range; the entry table is not.
+    let mut java = vec![0xa5_u8; 512];
+    java[..4].copy_from_slice(&0xcafe_babe_u32.to_be_bytes());
+    java[4..8].copy_from_slice(&65_u32.to_be_bytes());
+    let path = write(dir.path(), "class/node", &java);
+    let result = probe(&[path.to_str().unwrap()]);
+    assert_eq!(artifact_of(&result, 0)["arch"], "unknown");
+}
+
+#[cfg(unix)]
+#[test]
+fn aliases_of_one_file_are_hashed_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = write(dir.path(), "real/node", b"payload");
+    let mut hashing = Hashing::default();
+    let mut ids = Vec::new();
+    for alias in ["a", "b", "c"] {
+        let link = dir.path().join(alias);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        match observe(link.to_str().unwrap(), &mut hashing) {
+            Outcome::Present { artifact, .. } => ids.push(artifact["artifact_id"].clone()),
+            _ => panic!("alias not present"),
+        }
+    }
+    assert_eq!(hashing.done.len(), 1);
+    assert_eq!(hashing.remaining, super::MAX_TOTAL_HASH_BYTES - 7);
+    assert!(ids.windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+#[test]
+fn hashing_stops_when_the_request_budget_is_spent() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = write(dir.path(), "one/node", b"12345678");
+    let second = write(dir.path(), "two/node", b"87654321");
+    let mut hashing = Hashing {
+        remaining: 10,
+        ..Hashing::default()
+    };
+    assert!(matches!(
+        observe(first.to_str().unwrap(), &mut hashing),
+        Outcome::Present { .. }
+    ));
+    match observe(second.to_str().unwrap(), &mut hashing) {
+        Outcome::Unknown { reason, .. } => assert_eq!(reason, "hash_budget_exhausted"),
+        _ => panic!("budget not enforced"),
+    }
+}
+
 #[test]
 fn requests_are_validated_and_bounded() {
     let malformed = json!({"paths": ["a"], "extra": 1}).to_string();
@@ -346,6 +438,10 @@ fn requests_are_validated_and_bounded() {
     );
     assert_eq!(
         probe_error(json!({"paths": ["a\u{0}b"]})),
+        "runtime_identity_probe_path_invalid"
+    );
+    assert_eq!(
+        probe_error(json!({"paths": ["node_modules/.bin/node"]})),
         "runtime_identity_probe_path_invalid"
     );
     let many: Vec<String> = (0..=super::MAX_PATHS).map(|i| format!("/x/{i}")).collect();

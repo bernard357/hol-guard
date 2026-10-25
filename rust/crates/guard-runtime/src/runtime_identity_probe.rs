@@ -8,6 +8,10 @@
 //! never launched. Layout and name claims are `self_reported` at most; the
 //! probe cannot produce a locally trusted or vendor verified identity.
 //!
+//! Paths must be absolute: the probe runs in its own working directory, so a
+//! relative path would name a different file than the caller meant. Aliases of
+//! one file are hashed once, and the bytes hashed per request are capped.
+//!
 //! The reply's `artifacts` and `locations` are valid input for
 //! `runtime-identity-assess`; `observations` carries the paths for display.
 
@@ -31,6 +35,8 @@ const MAX_PATHS: usize = 128;
 const MAX_PATH_BYTES: usize = 4_096;
 /// Runtimes are tens of megabytes; this bounds the read, not the policy.
 const MAX_HASH_BYTES: u64 = 512 * 1024 * 1024;
+/// Bounds the work one request can do so a large inventory cannot outlast the caller's deadline.
+const MAX_TOTAL_HASH_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,23 +69,22 @@ fn probe(request: &Request) -> Result<Value, String> {
     if request.paths.len() > MAX_PATHS {
         return Err("runtime_identity_probe_too_many_paths".to_owned());
     }
-    if request
-        .paths
-        .iter()
-        .any(|p| p.is_empty() || p.len() > MAX_PATH_BYTES || p.contains('\0'))
-    {
+    if request.paths.iter().any(|p| {
+        p.is_empty() || p.len() > MAX_PATH_BYTES || p.contains('\0') || !Path::new(p).is_absolute()
+    }) {
         return Err("runtime_identity_probe_path_invalid".to_owned());
     }
     let mut artifacts: BTreeMap<String, Value> = BTreeMap::new();
     let mut locations: Vec<Value> = Vec::new();
     let mut observations: Vec<Value> = Vec::new();
     let mut seen: BTreeMap<String, ()> = BTreeMap::new();
+    let mut hashing = Hashing::default();
     for requested in &request.paths {
         let location_id = location_id(requested);
         if seen.insert(location_id.clone(), ()).is_some() {
             continue;
         }
-        let (state, artifact_id, resolved, reason) = match observe(requested) {
+        let (state, artifact_id, resolved, reason) = match observe(requested, &mut hashing) {
             Outcome::Present { resolved, artifact } => {
                 let id = artifact["artifact_id"]
                     .as_str()
@@ -113,7 +118,22 @@ fn location_id(requested: &str) -> String {
     format!("path:{}", hex::encode(digest))
 }
 
-fn observe(requested: &str) -> Outcome {
+/// Hash results by resolved file, and what is left of the byte budget.
+struct Hashing {
+    done: BTreeMap<String, Option<(String, Format)>>,
+    remaining: u64,
+}
+
+impl Default for Hashing {
+    fn default() -> Self {
+        Self {
+            done: BTreeMap::new(),
+            remaining: MAX_TOTAL_HASH_BYTES,
+        }
+    }
+}
+
+fn observe(requested: &str, hashing: &mut Hashing) -> Outcome {
     let resolved = match fs::canonicalize(requested) {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Outcome::Missing,
@@ -131,17 +151,25 @@ fn observe(requested: &str) -> Outcome {
     };
     // `canonicalize` follows links, so this is the file itself. Checked before
     // opening so a FIFO or device is never read.
-    match fs::metadata(&resolved) {
-        Ok(meta) if meta.is_file() => {
-            if meta.len() > MAX_HASH_BYTES {
-                return unknown("too_large");
-            }
-        }
+    let length = match fs::metadata(&resolved) {
+        Ok(meta) if meta.is_file() => meta.len(),
         Ok(_) => return unknown("not_regular_file"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Outcome::Missing,
         Err(_) => return unknown("unreadable"),
+    };
+    if length > MAX_HASH_BYTES {
+        return unknown("too_large");
     }
-    let Some((sha256, format)) = hash_and_format(&resolved) else {
+    if !hashing.done.contains_key(&resolved_text) {
+        if length > hashing.remaining {
+            return unknown("hash_budget_exhausted");
+        }
+        hashing.remaining -= length;
+        hashing
+            .done
+            .insert(resolved_text.clone(), hash_and_format(&resolved));
+    }
+    let Some((sha256, format)) = hashing.done[&resolved_text].clone() else {
         return unknown("unreadable");
     };
     Outcome::Present {
