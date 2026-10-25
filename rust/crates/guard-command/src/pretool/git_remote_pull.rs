@@ -161,12 +161,14 @@ fn configuration_routed(effective: &GitConfig, repository: &GitConfig, pull: Pul
     })
 }
 
-/// Whether the user's own configuration already sets this key to the value
-/// the repository's copy holds, so the repository changes nothing Git would
-/// do. `git config --show-scope --list` reports every scope's entry in Git's
-/// own order, so an effective key holding more entries than the repository
-/// scope does is one an outer scope sets too; when every entry is the same
-/// value, which scope wins does not matter.
+/// Whether the user's own configuration already decides this key, so the
+/// repository's copy changes nothing Git would do. `git config --show-scope
+/// --list` reports every scope's entry in Git's own order and the last one
+/// wins, so the repository changes nothing when the entry an outer scope
+/// already set carries the value Git ends up using. The repository's scopes
+/// are read after the user's, so its entries stand at the end of the
+/// effective list; a trailing run that is not the repository's own is a
+/// shape this reader does not decide.
 fn repository_restates_user(effective: &GitConfig, repository: &GitConfig, key: &str) -> bool {
     let Some(local) = repository.get(key) else {
         return false;
@@ -174,7 +176,14 @@ fn repository_restates_user(effective: &GitConfig, repository: &GitConfig, key: 
     let Some(all) = effective.get(key) else {
         return false;
     };
-    all.len() > local.len() && all.windows(2).all(|pair| pair[0] == pair[1])
+    let Some((outer, tail)) = all
+        .len()
+        .checked_sub(local.len())
+        .map(|at| all.split_at(at))
+    else {
+        return false;
+    };
+    tail == local.as_slice() && outer.last().is_some() && outer.last() == all.last()
 }
 
 /// Whether nothing the fast-forward or merge runs after the fetch can start
@@ -374,6 +383,43 @@ mod tests {
             .expect("signed")
             .push(planted.clone());
         repository.insert("gpg.program".to_owned(), vec![planted]);
+        let pull = Pull {
+            upstream: false,
+            merge: false,
+            fetches: true,
+        };
+        assert!(configuration_routed(&effective, &repository, pull));
+    }
+
+    /// The user's global configuration sets `gpg.program` once for every
+    /// checkout and again, to the signing wrapper, behind the conditional
+    /// include that covers this one. Git uses the last entry, which the
+    /// repository's copy restates, so the fast-forward stays where it was.
+    #[test]
+    fn an_outer_scope_the_include_overrides_leaves_a_fast_forward_alone() {
+        let (mut effective, repository) = signed();
+        effective
+            .get_mut("gpg.program")
+            .expect("signed")
+            .insert(0, "gpg".to_owned());
+        let pull = Pull {
+            upstream: false,
+            merge: false,
+            fetches: true,
+        };
+        assert!(!configuration_routed(&effective, &repository, pull));
+    }
+
+    /// `git -c gpg.program=...` is read after the repository's own scopes, so
+    /// the entries at the end of the effective list are not the repository's
+    /// and the reader does not decide the key.
+    #[test]
+    fn a_scope_after_the_repository_routes_a_fast_forward() {
+        let (mut effective, repository) = signed();
+        effective
+            .get_mut("gpg.program")
+            .expect("signed")
+            .push("/src/.git/hooks/sign.sh".to_owned());
         let pull = Pull {
             upstream: false,
             merge: false,
