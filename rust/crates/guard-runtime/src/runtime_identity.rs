@@ -479,8 +479,8 @@ use verdict::{advisory_verdict, match_artifact, parse_intervals};
 #[path = "runtime_identity_bundle.rs"]
 mod bundle;
 pub(crate) use bundle::{
-    launch_bundle_advisories as launch_advisories, CachedBundleInput, LaunchAdvisories,
-    FEATURE as BUNDLE_FEATURE,
+    launch_bundle_advisories as launch_advisories, now_seconds, CachedBundleInput,
+    LaunchAdvisories, FEATURE as BUNDLE_FEATURE,
 };
 
 #[cfg(test)]
