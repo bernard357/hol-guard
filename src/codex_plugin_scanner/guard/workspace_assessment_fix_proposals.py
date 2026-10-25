@@ -123,7 +123,8 @@ def prepare(store: Any, keys: assessments.WorktreeKeys, finding_id: str, *, now_
         )
     except native.WorkspaceFixError as error:
         raise _native_failure(error) from error
-    proposals = [item for item in planned["proposals"] if isinstance(item, dict)]  # type: ignore[attr-defined]
+    raw_proposals = planned["proposals"]
+    proposals = [item for item in raw_proposals if isinstance(item, dict)] if isinstance(raw_proposals, list) else []
     skipped = _skipped_payload(planned["skipped"])
     truncated = planned["truncated"] is True
     if not proposals:
@@ -131,7 +132,7 @@ def prepare(store: Any, keys: assessments.WorktreeKeys, finding_id: str, *, now_
             skipped[0]["reason"] if skipped else ("manifest_scan_incomplete" if truncated else "transitive_dependency")
         )
         raise FixProposalError("fix_unsupported", 422, reason=reason, skipped=skipped, truncated=truncated)
-    identity = {
+    identity: dict[str, object] = {
         "ecosystem": "npm",
         "package_name": package,
         "fix_version": fix_version,
@@ -339,7 +340,10 @@ def _store_prepared(
                 ids.append(str(same))
                 continue
             proposal_id = uuid.uuid4().hex
-            edits = item["edits"]
+            raw_edits = item["edits"]
+            if not isinstance(raw_edits, list):
+                raise FixProposalError("workspace_fix_failed", 500)
+            edits: list[object] = raw_edits
             connection.execute(
                 f"insert into workspace_fix_proposals ({_SELECT}) values ({', '.join('?' for _ in _COLUMNS)})",
                 (

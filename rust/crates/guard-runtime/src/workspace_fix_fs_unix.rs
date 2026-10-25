@@ -30,7 +30,7 @@ fn io_error(errno: Errno) -> io::Error {
 }
 
 // `dev_t`, `ino_t` and `off_t` differ in width and sign across Unix targets.
-#[allow(clippy::unnecessary_cast)]
+#[allow(clippy::unnecessary_cast, clippy::useless_conversion)]
 fn entry(stat: &FileStat) -> Entry {
     let format = stat.st_mode & libc::S_IFMT;
     Entry {
