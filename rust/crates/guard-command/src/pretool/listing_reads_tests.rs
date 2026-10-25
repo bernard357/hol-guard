@@ -164,6 +164,23 @@ fn a_tilde_root_is_read_only_when_the_shell_home_matches() {
             allowed,
             "{command} with shell_home_matches={shell_home_matches}"
         );
+        let words: Vec<String> = "tree ~/work/absent-logs"
+            .split(' ')
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            crate::pretool::tree_reads::safe_tree_segment(&words[1..], context, true),
+            allowed,
+            "tree with shell_home_matches={shell_home_matches}"
+        );
+        // A listing that walks nothing reads one directory's names at most, so
+        // it stays admitted whatever the shell's own `HOME` is.
+        let command = "ls ~/work/absent-logs";
+        let words: Vec<String> = command.split(' ').map(str::to_owned).collect();
+        assert!(
+            super::safe_listing_segment(command, &words[1..], context, true),
+            "{command} with shell_home_matches={shell_home_matches}"
+        );
     }
     std::fs::remove_dir_all(root).unwrap();
 }

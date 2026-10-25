@@ -81,6 +81,8 @@ _PROBES_FOR_ABSENCE = frozenset(
         "ls-recursive-absent-nested-module",
         "tree-recursive-absent-sibling-dir",
         "tree-recursive-absent-nested-module",
+        "grep-recursive-absent-probe-fallback",
+        "ls-recursive-absent-probe-fallback",
     }
 )
 

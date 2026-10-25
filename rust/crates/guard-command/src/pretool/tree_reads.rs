@@ -140,9 +140,14 @@ pub(super) fn safe_tree_segment(
     }
     operands.iter().all(|operand| {
         // A name that is not there holds no tree to walk, so `tree` prints the
-        // same error it prints for any unreadable operand and reads nothing.
+        // same error it prints for any unreadable operand and reads nothing. A
+        // `~` is expanded by the shell from its own `HOME`, which this screen
+        // reads as the declared home, so a walk is admitted under it only once
+        // `shell_home_matches` says the two name one directory.
         search::safe_recursive_listing_target(operand, context, lists_hidden)
-            || (absent_recursive && super::listing_reads::absent_listing_operand(operand, context))
+            || (absent_recursive
+                && (!operand.starts_with('~') || context.shell_home_matches)
+                && super::listing_reads::absent_listing_operand(operand, context))
     })
 }
 
