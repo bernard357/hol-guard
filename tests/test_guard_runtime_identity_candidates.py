@@ -1,7 +1,10 @@
 """Launch-executable candidates for configured MCP servers.
 
-Resolution must follow the search path a server would launch with, never the
-ambient default, and must never start a process.
+Resolution happens in the native ``runtime-identity-probe`` command (its Rust
+unit tests cover the lookup, placeholder and shebang rules). These tests drive
+the real native binary through the Python glue: the launch request Python
+builds and the mapping of the reply back to servers, unresolved kinds and the
+candidate cap.
 """
 
 from __future__ import annotations
@@ -11,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.guard import runtime_identity_candidates
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
-from codex_plugin_scanner.guard.runtime_identity_candidates import (
-    collect_runtime_candidates,
-    resolve_launch_executable,
-)
+from codex_plugin_scanner.guard.runtime_identity_assessment import RuntimeIdentityError
+from codex_plugin_scanner.guard.runtime_identity_candidates import RuntimeCandidates, collect_runtime_candidates
+from codex_plugin_scanner.guard.runtime_identity_probe import RuntimeProbe
 
 # Server discovery projects each entry's identity through the compiled runtime.
 pytestmark = pytest.mark.usefixtures("native_hook_force")
@@ -26,6 +29,16 @@ def _executable(path: Path, body: str = "binary-not-a-script\n") -> Path:
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
     return path
+
+
+def _collect(
+    detections: list[HarnessDetection],
+    *,
+    environment: dict[str, str],
+    workspace_dir: Path | None = None,
+    limit: int = 64,
+) -> RuntimeCandidates:
+    return collect_runtime_candidates(detections, environment=environment, workspace_dir=workspace_dir, limit=limit)[0]
 
 
 def _server(
@@ -68,7 +81,7 @@ def test_bare_command_resolves_through_the_given_path_to_the_real_file(tmp_path:
     node = _executable(bin_dir / "node")
     decoy = _executable(tmp_path / "other" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("files", "node"))],
         environment={"PATH": str(bin_dir)},
     )
@@ -84,7 +97,7 @@ def test_server_configured_path_wins_over_the_process_path(tmp_path: Path) -> No
     process_node = _executable(tmp_path / "process" / "node")
     server_node = _executable(tmp_path / "server" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("files", "node", env={"PATH": str(tmp_path / "server")}))],
         environment={"PATH": str(tmp_path / "process")},
     )
@@ -98,13 +111,11 @@ def test_path_placeholder_expands_and_keeps_the_servers_own_directories_first(tm
     server_node = _executable(tmp_path / "opt" / "node22" / "node")
     process = {"PATH": str(tmp_path / "process")}
 
-    shadowed = collect_runtime_candidates(
+    shadowed = _collect(
         [_detection(_server("files", "node", env={"PATH": f"{tmp_path / 'opt' / 'node22'}:${{PATH}}"}))],
         environment=process,
     )
-    appended = collect_runtime_candidates(
-        [_detection(_server("files", "node", env={"PATH": "$PATH:/opt/extra"}))], environment=process
-    )
+    appended = _collect([_detection(_server("files", "node", env={"PATH": "$PATH:/opt/extra"}))], environment=process)
 
     assert [candidate.path for candidate in shadowed.candidates] == [str(server_node)]
     assert [candidate.path for candidate in appended.candidates] == [str(process_node)]
@@ -113,7 +124,7 @@ def test_path_placeholder_expands_and_keeps_the_servers_own_directories_first(tm
 def test_path_with_a_variable_this_process_lacks_is_unresolved_not_guessed(tmp_path: Path) -> None:
     _executable(tmp_path / "process" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("files", "node", env={"PATH": "${NO_SUCH_VARIABLE_FOR_GUARD}/bin:${PATH}"}))],
         environment={"PATH": str(tmp_path / "process")},
     )
@@ -131,7 +142,7 @@ def test_relative_path_entries_resolve_against_the_launch_directory(
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("files", "node"))],
         environment={"PATH": "node_modules/.bin"},
         workspace_dir=workspace,
@@ -147,8 +158,7 @@ def test_without_a_workspace_relative_launches_use_the_process_directory(
     local = _executable(tmp_path / "tools" / "serve")
     monkeypatch.chdir(tmp_path)
 
-    assert resolve_launch_executable("./tools/serve", search_path=None) == str(local)
-    found = collect_runtime_candidates([_detection(_server("files", "./tools/serve"))], environment={"PATH": ""})
+    found = _collect([_detection(_server("files", "./tools/serve"))], environment={"PATH": ""})
     assert [candidate.path for candidate in found.candidates] == [str(local)]
 
 
@@ -157,7 +167,7 @@ def test_launcher_script_adds_its_shebang_interpreter(tmp_path: Path) -> None:
     interpreter = _executable(bin_dir / "python3")
     launcher = _executable(bin_dir / "serve", "#!/usr/bin/env python3\nprint('x')\n")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("api", "serve"))],
         environment={"PATH": str(bin_dir)},
     )
@@ -170,16 +180,28 @@ def test_absolute_and_workspace_relative_commands(tmp_path: Path) -> None:
     absolute = _executable(tmp_path / "abs" / "runner")
     local = _executable(tmp_path / "workspace" / "tools" / "serve")
 
-    assert resolve_launch_executable(str(absolute), search_path=None) == str(absolute)
-    assert resolve_launch_executable("./tools/serve", search_path=None, workspace_dir=tmp_path / "workspace") == str(
-        local
+    found = _collect(
+        [
+            _detection(
+                _server("abs", str(absolute)),
+                _server("rel", "./tools/serve"),
+                _server("missing", "./tools/missing"),
+                _server("blank", "   "),
+            )
+        ],
+        environment={"PATH": os.defpath},
+        workspace_dir=tmp_path / "workspace",
     )
-    assert resolve_launch_executable("./tools/missing", search_path=None, workspace_dir=tmp_path / "workspace") is None
-    assert resolve_launch_executable("   ", search_path=os.defpath) is None
+
+    assert sorted(candidate.path for candidate in found.candidates) == sorted([str(absolute), str(local)])
+    assert [(item.server, item.lookup) for item in found.unresolved] == [
+        ("missing", "configured_path"),
+        ("blank", "search_path"),
+    ]
 
 
 def test_missing_commands_are_reported_without_a_path(tmp_path: Path) -> None:
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("ghost", "no-such-tool"), _server("shared", None))],
         environment={"PATH": str(tmp_path)},
     )
@@ -192,7 +214,7 @@ def test_missing_commands_are_reported_without_a_path(tmp_path: Path) -> None:
 def test_missing_explicit_path_keeps_the_configured_path_and_its_kind(tmp_path: Path) -> None:
     configured = str(tmp_path / "gone" / "serve")
 
-    found = collect_runtime_candidates([_detection(_server("ghost", configured))], environment={"PATH": str(tmp_path)})
+    found = _collect([_detection(_server("ghost", configured))], environment={"PATH": str(tmp_path)})
 
     assert [(item.command, item.lookup) for item in found.unresolved] == [(configured, "configured_path")]
 
@@ -200,7 +222,7 @@ def test_missing_explicit_path_keeps_the_configured_path_and_its_kind(tmp_path: 
 def test_disabled_servers_are_skipped(tmp_path: Path) -> None:
     _executable(tmp_path / "bin" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("off", "node", enabled=False))],
         environment={"PATH": str(tmp_path / "bin")},
     )
@@ -212,7 +234,7 @@ def test_disabled_servers_are_skipped(tmp_path: Path) -> None:
 def test_servers_sharing_an_executable_share_one_candidate(tmp_path: Path) -> None:
     node = _executable(tmp_path / "bin" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [
             _detection(_server("one", "node"), _server("two", "node")),
             _detection(_server("three", "node", harness="cursor"), harness="cursor"),
@@ -236,7 +258,7 @@ def test_candidate_count_is_capped_and_reported(tmp_path: Path) -> None:
         _executable(bin_dir / f"tool{index}")
         artifacts.append(_server(f"s{index}", f"tool{index}"))
 
-    found = collect_runtime_candidates([_detection(*artifacts)], environment={"PATH": str(bin_dir)}, limit=3)
+    found = _collect([_detection(*artifacts)], environment={"PATH": str(bin_dir)}, limit=3)
 
     assert len(found.candidates) == 3
     assert found.truncated
@@ -246,7 +268,7 @@ def test_collecting_candidates_never_runs_the_executable(tmp_path: Path) -> None
     marker = tmp_path / "ran"
     _executable(tmp_path / "bin" / "node", f"#!/bin/sh\ntouch {marker}\n")
 
-    collect_runtime_candidates(
+    _collect(
         [_detection(_server("files", "node"))],
         environment={"PATH": str(tmp_path / "bin")},
     )
@@ -264,7 +286,7 @@ def _fifo(path: Path) -> Path:
 def test_executable_fifo_on_the_path_is_neither_opened_nor_a_candidate(tmp_path: Path) -> None:
     _fifo(tmp_path / "bin" / "node")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("files", "node", env={"PATH": str(tmp_path / "bin")}))],
         environment={"PATH": ""},
     )
@@ -274,12 +296,24 @@ def test_executable_fifo_on_the_path_is_neither_opened_nor_a_candidate(tmp_path:
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX only")
-def test_fifo_launcher_is_never_read_for_a_shebang(tmp_path: Path) -> None:
-    from codex_plugin_scanner.guard.runtime_identity_candidates import _read_head
-
+def test_fifo_launch_command_is_unresolved_and_never_opened(tmp_path: Path) -> None:
     fifo = _fifo(tmp_path / "serve")
 
-    assert _read_head(str(fifo)) is None
+    found = _collect([_detection(_server("api", str(fifo)))], environment={"PATH": ""})
+
+    assert found.candidates == ()
+    assert [(item.server, item.lookup) for item in found.unresolved] == [("api", "configured_path")]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX only")
+def test_fifo_named_by_a_shebang_is_not_read_or_admitted(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    fifo = _fifo(tmp_path / "interp")
+    launcher = _executable(bin_dir / "serve", f"#!{fifo}\n")
+
+    found = _collect([_detection(_server("api", "serve"))], environment={"PATH": str(bin_dir)})
+
+    assert [candidate.path for candidate in found.candidates] == [str(launcher)]
 
 
 @pytest.mark.parametrize(
@@ -302,10 +336,56 @@ def test_env_shebang_options_do_not_hide_the_interpreter(tmp_path: Path, shebang
     interpreters = {name: _executable(bin_dir / name) for name in ("python3", "DEBUG")}
     launcher = _executable(bin_dir / "serve", f"{shebang}\nprint('x')\n")
 
-    found = collect_runtime_candidates(
+    found = _collect(
         [_detection(_server("api", "serve"))],
         environment={"PATH": str(bin_dir)},
     )
 
     paths = {candidate.path for candidate in found.candidates}
     assert paths == {str(launcher)} | ({str(interpreters[expected])} if expected else set())
+
+
+def test_no_servers_never_touch_the_native_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> RuntimeProbe:
+        raise AssertionError("native probe must not run without servers")
+
+    monkeypatch.setattr(runtime_identity_candidates, "probe_runtime_launches", refuse)
+
+    found, probe = collect_runtime_candidates([_detection()], environment={"PATH": "/usr/bin"})
+
+    assert found == RuntimeCandidates((), (), False)
+    assert probe.launches == ()
+
+
+def test_request_shares_only_variables_a_launch_could_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def capture(specs: list[dict[str, object]], *, environment: dict[str, str], candidate_limit: int) -> RuntimeProbe:
+        seen.update(specs=specs, environment=environment, limit=candidate_limit)
+        return RuntimeProbe(
+            (), (), (), ({"index": 0, "state": "unresolved", "lookup": "search_path", "targets": []},), False
+        )
+
+    monkeypatch.setattr(runtime_identity_candidates, "probe_runtime_launches", capture)
+
+    collect_runtime_candidates(
+        [_detection(_server("api", " node ", env={"path": "${TOOLS}/bin:$PATH"}))],
+        environment={"PATH": "/p", "TOOLS": "/t", "API_KEY": "secret", "HOME": "/h"},
+        workspace_dir=tmp_path,
+        limit=5,
+    )
+
+    assert seen["specs"] == [{"command": "node", "launch_dir": str(tmp_path), "configured_path": "${TOOLS}/bin:$PATH"}]
+    assert seen["environment"] == {"PATH": "/p", "TOOLS": "/t", "HOME": "/h"}
+    assert seen["limit"] == 5
+
+
+def test_reply_for_a_different_number_of_launches_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        runtime_identity_candidates,
+        "probe_runtime_launches",
+        lambda *_args, **_kwargs: RuntimeProbe((), (), (), (), False),
+    )
+
+    with pytest.raises(RuntimeIdentityError):
+        collect_runtime_candidates([_detection(_server("api", "node"))], environment={"PATH": str(tmp_path)})

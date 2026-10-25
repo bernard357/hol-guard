@@ -2,19 +2,23 @@
 
 The native command inspects each candidate executable without starting it:
 it resolves symlinks, hashes the file and infers family and version from the
-install layout. This module only sends paths and checks the shape of the
-reply. Its ``artifacts`` and ``locations`` are valid input for
+install layout. It also resolves configured MCP server launches (search path
+lookup, relative anchoring and a script's ``#!`` interpreter) to the files to
+describe. This module only sends paths or launch specs and checks the shape of
+the reply. Its ``artifacts`` and ``locations`` are valid input for
 ``runtime-identity-assess``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .runtime_identity_assessment import RuntimeIdentityError, run_native_identity_command
 
 RUNTIME_PROBE_FEATURE = "runtime-identity-probe-v1"
+# Launch resolution is an additive capability of the same command.
+RUNTIME_PROBE_LAUNCH_FEATURE = "runtime-identity-launch-v1"
 RUNTIME_PROBE_COMMAND = "runtime-identity-probe"
 RUNTIME_PROBE_SCHEMA = "guard.runtime-identity-probe.v1"
 RUNTIME_PROBE_MAX_PATHS = 128
@@ -22,6 +26,7 @@ RUNTIME_PROBE_MAX_PATHS = 128
 _PROBE_TIMEOUT_SECONDS = 60.0
 
 _LOCATION_STATES = frozenset({"present", "missing", "unknown"})
+_LAUNCH_STATES = frozenset({"resolved", "unresolved"})
 _ARTIFACT_TEXT_KEYS = ("artifact_id", "family", "os", "arch", "identity_assurance")
 
 
@@ -30,6 +35,9 @@ class RuntimeProbe:
     artifacts: tuple[dict[str, object], ...]
     locations: tuple[dict[str, object], ...]
     observations: tuple[dict[str, object], ...]
+    # One row per launch spec sent, in order; empty for a path-only probe.
+    launches: tuple[dict[str, object], ...] = ()
+    candidate_limit_reached: bool = False
 
 
 def probe_runtime_paths(paths: Sequence[str]) -> RuntimeProbe:
@@ -40,10 +48,37 @@ def probe_runtime_paths(paths: Sequence[str]) -> RuntimeProbe:
         raise RuntimeIdentityError("runtime_identity_probe_too_many_paths")
     if not unique:
         return RuntimeProbe(artifacts=(), locations=(), observations=())
+    return _probe(RUNTIME_PROBE_FEATURE, {"paths": list(unique)})
+
+
+def probe_runtime_launches(
+    launches: Sequence[Mapping[str, object]],
+    *,
+    environment: Mapping[str, str],
+    candidate_limit: int,
+) -> RuntimeProbe:
+    """Resolve configured launches and describe their executables natively, never running them.
+
+    Each launch carries ``command``, ``launch_dir`` and optionally the server's
+    own ``configured_path``. ``environment`` holds only the process values a
+    search path may reference; the native command never echoes them.
+    """
+
+    if not launches:
+        return RuntimeProbe(artifacts=(), locations=(), observations=())
+    request: dict[str, object] = {
+        "launches": [dict(launch) for launch in launches],
+        "environment": dict(environment),
+        "candidate_limit": candidate_limit,
+    }
+    return _probe(RUNTIME_PROBE_LAUNCH_FEATURE, request)
+
+
+def _probe(feature: str, request: dict[str, object]) -> RuntimeProbe:
     reply = run_native_identity_command(
-        RUNTIME_PROBE_FEATURE,
+        feature,
         RUNTIME_PROBE_COMMAND,
-        {"paths": list(unique)},
+        request,
         timeout_seconds=_PROBE_TIMEOUT_SECONDS,
     )
     if reply.get("ok") is not True:
@@ -58,19 +93,30 @@ def _parse_result(result: object) -> RuntimeProbe:
     artifacts = result.get("artifacts")
     locations = result.get("locations")
     observations = result.get("observations")
-    if not (isinstance(artifacts, list) and isinstance(locations, list) and isinstance(observations, list)):
+    launches = result.get("launches", [])
+    limit_reached = result.get("candidate_limit_reached", False)
+    if not (
+        isinstance(artifacts, list)
+        and isinstance(locations, list)
+        and isinstance(observations, list)
+        and isinstance(launches, list)
+        and isinstance(limit_reached, bool)
+    ):
         raise RuntimeIdentityError("runtime_identity_probe_failed")
     artifact_ids: set[object] = {row.get("artifact_id") for row in artifacts if isinstance(row, dict)}
     if not (
         all(_artifact_ok(row) for row in artifacts)
         and all(_location_ok(row, artifact_ids) for row in locations)
         and all(_observation_ok(row) for row in observations)
+        and all(_launch_ok(row, index) for index, row in enumerate(launches))
     ):
         raise RuntimeIdentityError("runtime_identity_probe_failed")
     return RuntimeProbe(
         artifacts=tuple(artifacts),
         locations=tuple(locations),
         observations=tuple(observations),
+        launches=tuple(launches),
+        candidate_limit_reached=limit_reached,
     )
 
 
@@ -105,9 +151,21 @@ def _observation_ok(row: object) -> bool:
     )
 
 
+def _launch_ok(row: object, index: int) -> bool:
+    return (
+        isinstance(row, dict)
+        and row.get("index") == index
+        and row.get("state") in _LAUNCH_STATES
+        and (row.get("lookup") is None or isinstance(row.get("lookup"), str))
+        and isinstance(row.get("targets"), list)
+    )
+
+
 __all__ = [
     "RUNTIME_PROBE_FEATURE",
+    "RUNTIME_PROBE_LAUNCH_FEATURE",
     "RUNTIME_PROBE_MAX_PATHS",
     "RuntimeProbe",
+    "probe_runtime_launches",
     "probe_runtime_paths",
 ]

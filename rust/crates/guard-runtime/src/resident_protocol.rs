@@ -112,6 +112,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "secrets-cli-v1".into(),
         crate::runtime_identity::FEATURE.into(),
         crate::runtime_identity_probe::FEATURE.into(),
+        crate::runtime_identity_launch::FEATURE.into(),
         guard_plugin_kit::FEATURE.into(),
         guard_plugin_telemetry::FEATURE.into(),
         crate::workspace_snapshot::FEATURE.into(),

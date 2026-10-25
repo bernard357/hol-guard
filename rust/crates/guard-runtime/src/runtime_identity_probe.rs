@@ -12,6 +12,12 @@
 //! relative path would name a different file than the caller meant. Aliases of
 //! one file are hashed once, and the bytes hashed per request are capped.
 //!
+//! A request may also carry launch specs (see `runtime_identity_launch`): the
+//! probe resolves the executable each configured server would launch, adds a
+//! launcher script's interpreter, and describes the admitted candidates with
+//! the same rules as explicit paths. The reply's `launches` says what each spec
+//! resolved to, and `candidate_limit_reached` whether the candidate cap dropped any.
+//!
 //! The reply's `artifacts` and `locations` are valid input for
 //! `runtime-identity-assess`; `observations` carries the paths for display.
 
@@ -24,6 +30,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::runtime_identity_launch::{
+    self as launch, Environment, LaunchSpec, DEFAULT_CANDIDATE_LIMIT, MAX_LAUNCHES,
+};
 use crate::runtime_identity_probe_format::{sniff, Format, HEADER_BYTES};
 use crate::runtime_identity_probe_layout::hint_for;
 
@@ -41,7 +50,15 @@ const MAX_TOTAL_HASH_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
+    #[serde(default)]
     paths: Vec<String>,
+    #[serde(default)]
+    launches: Vec<LaunchSpec>,
+    /// Process environment values launches may read; never echoed back.
+    #[serde(default)]
+    environment: BTreeMap<String, String>,
+    #[serde(default)]
+    candidate_limit: Option<usize>,
 }
 
 pub(crate) fn run_command(bytes: &[u8]) -> Result<Value, String> {
@@ -74,12 +91,32 @@ fn probe(request: &Request) -> Result<Value, String> {
     }) {
         return Err("runtime_identity_probe_path_invalid".to_owned());
     }
+    if request.launches.len() > MAX_LAUNCHES {
+        return Err("runtime_identity_probe_too_many_launches".to_owned());
+    }
+    let limit = request.candidate_limit.unwrap_or(DEFAULT_CANDIDATE_LIMIT);
+    if limit == 0
+        || limit > MAX_PATHS
+        || request.launches.iter().any(|spec| !spec.is_valid())
+        || request
+            .environment
+            .iter()
+            .any(|(key, value)| key.contains('\0') || value.contains('\0'))
+    {
+        return Err("runtime_identity_probe_launch_invalid".to_owned());
+    }
+    let collected = launch::collect(&request.launches, &Environment(&request.environment), limit);
+    let mut requested_paths: Vec<&String> = request.paths.iter().collect();
+    requested_paths.extend(&collected.paths);
+    if requested_paths.len() > MAX_PATHS {
+        return Err("runtime_identity_probe_too_many_paths".to_owned());
+    }
     let mut artifacts: BTreeMap<String, Value> = BTreeMap::new();
     let mut locations: Vec<Value> = Vec::new();
     let mut observations: Vec<Value> = Vec::new();
     let mut seen: BTreeMap<String, ()> = BTreeMap::new();
     let mut hashing = Hashing::default();
-    for requested in &request.paths {
+    for requested in requested_paths {
         let location_id = location_id(requested);
         if seen.insert(location_id.clone(), ()).is_some() {
             continue;
@@ -110,6 +147,8 @@ fn probe(request: &Request) -> Result<Value, String> {
         "artifacts": artifacts.into_values().collect::<Vec<_>>(),
         "locations": locations,
         "observations": observations,
+        "launches": collected.launches,
+        "candidate_limit_reached": collected.truncated,
     }))
 }
 
@@ -178,7 +217,7 @@ fn observe(requested: &str, hashing: &mut Hashing) -> Outcome {
     }
 }
 
-fn open_read_only(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_read_only(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

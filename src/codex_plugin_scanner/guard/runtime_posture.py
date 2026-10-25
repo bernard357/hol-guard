@@ -1,8 +1,8 @@
 """Read-only posture of the runtimes configured tools launch with.
 
 Collects the executables configured MCP servers would launch, has the native
-probe describe them without starting them, and has the native assessment match
-them against runtime advisories. Nothing here feeds hooks, approvals or any
+probe resolve and describe them without starting them, and has the native
+assessment match them against runtime advisories. Nothing here feeds hooks, approvals or any
 allow or deny decision. Coverage is observation only: running processes are
 not enumerated, so the scope is never complete and no fix is ever proven.
 Unknown stays unknown; the report makes no safety claim.
@@ -16,7 +16,7 @@ from pathlib import Path
 from .models import HarnessDetection
 from .runtime_identity_assessment import RuntimeIdentityError, assess_runtime_identity
 from .runtime_identity_candidates import RuntimeCandidates, collect_runtime_candidates
-from .runtime_identity_probe import RuntimeProbe, probe_runtime_paths
+from .runtime_identity_probe import RuntimeProbe
 
 RUNTIME_POSTURE_SCHEMA = "guard.runtime-posture.v1"
 ADVISORIES_UNAVAILABLE = "runtime_advisories_unavailable"
@@ -36,21 +36,21 @@ def build_runtime_posture(
     skipped_harnesses: Sequence[str] = (),
 ) -> dict[str, object]:
     try:
-        candidates = collect_runtime_candidates(detections, environment=environment, workspace_dir=workspace_dir)
+        candidates, probe = collect_runtime_candidates(detections, environment=environment, workspace_dir=workspace_dir)
     except ValueError as error:
         # Reading server entries projects their identity through the native runtime.
         code = str(error) if str(error).startswith("native_") else "runtime_candidates_unavailable"
         return {**_base_payload(generated_at, None), "status": "unavailable", "error": code, "runtimes": []}
+    except RuntimeIdentityError as error:
+        # The native probe resolves the launches, so without it nothing is known about them.
+        base = {**_base_payload(generated_at, None), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
+        return {**base, "status": "unavailable", "error": error.code, "runtimes": []}
     base = {**_base_payload(generated_at, candidates), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
     # A harness whose config could not be read leaves the inventory incomplete,
     # which is not the same as having no servers.
     status, error_code = ("partial", HARNESS_CONFIG_UNREADABLE) if skipped_harnesses else ("ok", None)
     if not candidates.candidates:
         return {**base, "status": status, "error": error_code, "runtimes": []}
-    try:
-        probe = probe_runtime_paths([candidate.path for candidate in candidates.candidates])
-    except RuntimeIdentityError as error:
-        return {**base, "status": "unavailable", "error": error.code, "runtimes": []}
     advisory_rows: list[dict[str, object]] = []
     matches: dict[str, list[object]] = {}
     coverage = dict(_coverage(reason=ADVISORIES_UNAVAILABLE))

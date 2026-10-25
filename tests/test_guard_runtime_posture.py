@@ -14,10 +14,15 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.cli import main
-from codex_plugin_scanner.guard import runtime_posture
+from codex_plugin_scanner.guard import runtime_identity_candidates, runtime_posture
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
 from codex_plugin_scanner.guard.runtime_identity_assessment import RuntimeIdentityError
-from codex_plugin_scanner.guard.runtime_identity_probe import RUNTIME_PROBE_FEATURE, probe_runtime_paths
+from codex_plugin_scanner.guard.runtime_identity_probe import (
+    RUNTIME_PROBE_FEATURE,
+    RUNTIME_PROBE_LAUNCH_FEATURE,
+    probe_runtime_launches,
+    probe_runtime_paths,
+)
 from codex_plugin_scanner.guard.runtime_posture import ADVISORIES_UNAVAILABLE, build_runtime_posture
 
 NOW = "2026-01-01T00:00:00+00:00"
@@ -128,10 +133,10 @@ def test_missing_launch_executable_is_reported_not_guessed(native_runtime: Path,
 
 
 def test_no_servers_never_touches_the_native_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(paths: list[str]) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("native must not be called without candidates")
 
-    monkeypatch.setattr(runtime_posture, "probe_runtime_paths", refuse)
+    monkeypatch.setattr(runtime_identity_candidates, "probe_runtime_launches", refuse)
 
     payload = build_runtime_posture([], generated_at=NOW, environment={"PATH": ""})
 
@@ -161,20 +166,15 @@ def test_unreadable_harness_config_is_partial_not_an_empty_inventory(
     assert len(found["runtimes"]) == 1
 
 
-def test_native_unavailable_is_reported_honestly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    node = _nvm_node(tmp_path)
+def test_native_unavailable_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime_posture, "collect_runtime_candidates", _native_unavailable)
 
-    def unavailable(paths: list[str]) -> None:
-        raise RuntimeIdentityError("runtime_identity_native_unavailable")
-
-    monkeypatch.setattr(runtime_posture, "collect_runtime_candidates", _fixed_candidates(node))
-    monkeypatch.setattr(runtime_posture, "probe_runtime_paths", unavailable)
-
-    payload = build_runtime_posture([], generated_at=NOW)
+    payload = build_runtime_posture([], generated_at=NOW, skipped_harnesses=["codex"])
 
     assert payload["status"] == "unavailable"
     assert payload["error"] == "runtime_identity_native_unavailable"
     assert payload["runtimes"] == []
+    assert payload["skipped_harnesses"] == ["codex"]
     assert payload["scope_complete"] is False
 
 
@@ -276,13 +276,7 @@ def test_cli_human_output_is_honest_about_coverage(
 def test_cli_native_unavailable_exits_nonzero_without_a_crash(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    node = _nvm_node(tmp_path)
-
-    def unavailable(paths: list[str]) -> None:
-        raise RuntimeIdentityError("runtime_identity_native_unavailable")
-
-    monkeypatch.setattr(runtime_posture, "collect_runtime_candidates", _fixed_candidates(node))
-    monkeypatch.setattr(runtime_posture, "probe_runtime_paths", unavailable)
+    monkeypatch.setattr(runtime_posture, "collect_runtime_candidates", _native_unavailable)
     _patch_detections(monkeypatch, [])
 
     code = main(["guard", "runtime", "posture", "--json", *_guard_args(tmp_path)])
@@ -366,6 +360,45 @@ def test_probe_gets_a_longer_deadline_than_a_plain_assessment(monkeypatch: pytes
     assert isinstance(seen["timeout"], float) and seen["timeout"] > 10.0
 
 
+def test_launch_probe_resolves_and_describes_natively(native_runtime: Path, tmp_path: Path) -> None:
+    node = _nvm_node(tmp_path)
+    launches = [
+        {"command": "node", "launch_dir": str(tmp_path)},
+        {"command": "ghost-tool", "launch_dir": str(tmp_path)},
+    ]
+
+    probe = probe_runtime_launches(launches, environment={"PATH": str(node.parent)}, candidate_limit=8)
+
+    assert [row["state"] for row in probe.launches] == ["resolved", "unresolved"]
+    assert probe.launches[0]["targets"] == [{"path": str(node), "role": "launch"}]
+    assert probe.launches[1]["lookup"] == "search_path"
+    assert [row["resolved_path"] for row in probe.observations] == [str(node)]
+    assert probe.candidate_limit_reached is False
+
+
+def test_launch_probe_sends_the_launch_feature_and_a_longer_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner.guard import runtime_identity_probe
+
+    seen: dict[str, object] = {}
+
+    def fake(feature: str, command: str, request: dict[str, object], *, timeout_seconds: float) -> dict[str, object]:
+        seen.update(feature=feature, request=request, timeout=timeout_seconds)
+        return {"ok": False, "error": "runtime_identity_probe_launch_invalid"}
+
+    monkeypatch.setattr(runtime_identity_probe, "run_native_identity_command", fake)
+
+    with pytest.raises(RuntimeIdentityError, match="runtime_identity_probe_launch_invalid"):
+        probe_runtime_launches([{"command": "node", "launch_dir": "/w"}], environment={"PATH": "/b"}, candidate_limit=3)
+
+    assert seen["feature"] == RUNTIME_PROBE_LAUNCH_FEATURE
+    assert seen["request"] == {
+        "launches": [{"command": "node", "launch_dir": "/w"}],
+        "environment": {"PATH": "/b"},
+        "candidate_limit": 3,
+    }
+    assert isinstance(seen["timeout"], float) and seen["timeout"] > 10.0
+
+
 def _guard_args(tmp_path: Path) -> list[str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -385,12 +418,5 @@ def _patch_detections(
         monkeypatch.setenv("PATH", path)
 
 
-def _fixed_candidates(path: Path):
-    from codex_plugin_scanner.guard.runtime_identity_candidates import RuntimeCandidate, RuntimeCandidates
-
-    found = RuntimeCandidates(
-        candidates=(RuntimeCandidate(str(path), (("claude-code", "files", "launch"),)),),
-        unresolved=(),
-        truncated=False,
-    )
-    return lambda *_a, **_k: found
+def _native_unavailable(*_args: object, **_kwargs: object) -> None:
+    raise RuntimeIdentityError("runtime_identity_native_unavailable")
