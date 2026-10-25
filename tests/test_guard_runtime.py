@@ -166,6 +166,17 @@ def _isolate_codex_runtime_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CODEX_HOME", raising=False)
 
 
+def _claude_pending_permission_state_key(session_id: str, artifact_id: str) -> str:
+    """The key the resident derives for a Claude pending permission.
+
+    Spelled out here so the legacy-row tests below can seed the exact row the
+    resident will look up for an artifact.
+    """
+
+    fingerprint = hashlib.sha256(artifact_id.encode("utf-8")).hexdigest()[:24]
+    return f"claude_pending_permission:{session_id}:{fingerprint}"
+
+
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -9323,6 +9334,279 @@ def test_guard_hook_claude_ask_user_question_multiple_questions_does_not_persist
     assert question_payload["decision"] == "block"
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert policies == []
+
+
+def test_guard_hook_claude_tampered_pending_state_cannot_bootstrap_signed_allow(tmp_path):
+    home_dir = tmp_path / "home"
+    store = GuardStore(home_dir)
+    session_id = "session-claude-tampered-pending"
+    artifact = GuardArtifact(
+        artifact_id="claude-code:runtime:file-read:.env",
+        name="Read",
+        harness="claude-code",
+        artifact_type="file_read_request",
+        source_scope="project",
+        config_path="/workspace/.env",
+    )
+    guard_commands_module._record_claude_permission_notice(
+        store=store,
+        payload={"session_id": session_id, "tool_name": "Read"},
+        reason="HOL Guard intercepted Claude's attempt to read .env.",
+        artifact=artifact,
+        artifact_hash="hash-authentic",
+    )
+    index_payload = store.get_sync_payload(guard_commands_module._claude_pending_permission_index_key(session_id))
+    assert isinstance(index_payload, dict)
+    pending_keys = index_payload.get("pending_keys")
+    assert isinstance(pending_keys, list)
+    assert len(pending_keys) == 1
+    pending_key = str(pending_keys[0])
+    pending = store.get_sync_payload(pending_key)
+    assert isinstance(pending, dict)
+    approval_question = str(pending["approval_question"])
+    approval_options = pending["approval_options"]
+    assert isinstance(approval_options, list)
+    with sqlite3.connect(store.path) as connection:
+        tampered = dict(pending)
+        tampered["artifact_hash"] = "hash-forged"
+        connection.execute(
+            "update sync_state set payload_json = ? where state_key = ?",
+            (json.dumps(tampered), pending_key),
+        )
+
+    persisted = guard_commands_module._persist_claude_guard_question_decision(
+        store,
+        {
+            "session_id": session_id,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": approval_question,
+                        "options": [{"label": str(option)} for option in approval_options],
+                    }
+                ]
+            },
+            "tool_response": {
+                "answers": {approval_question: "Allow once"},
+            },
+        },
+    )
+
+    assert persisted is False
+    assert store.list_policy_decisions("claude-code") == []
+    assert store.get_sync_payload(pending_key) is None
+    events = store.list_events(event_name="rule.ignored.local_integrity")
+    event_payloads = [event_payload for event in events if isinstance(event_payload := event.get("payload"), dict)]
+    assert any(
+        event_payload.get("source") == "claude-pending-permission"
+        and event_payload.get("integrity_status") == "tampered"
+        for event_payload in event_payloads
+    )
+
+
+def test_guard_hook_claude_signed_unseen_pending_cannot_bootstrap_allow(tmp_path):
+    store = GuardStore(tmp_path / "home")
+    session_id = "session-claude-signed-unseen-pending"
+    artifact = GuardArtifact(
+        artifact_id="claude-code:runtime:file-read:.env",
+        name="Read",
+        harness="claude-code",
+        artifact_type="file_read_request",
+        source_scope="project",
+        config_path="/workspace/.env",
+    )
+    artifact_hash_value = "hash-signed-unseen"
+    guard_commands_module._record_claude_permission_notice(
+        store=store,
+        payload={"session_id": session_id, "tool_name": "Read"},
+        reason="HOL Guard intercepted Claude's attempt to read .env.",
+        artifact=artifact,
+        artifact_hash=artifact_hash_value,
+    )
+
+    pending_pair = guard_commands_module._load_single_claude_pending_permission(
+        store,
+        {"session_id": session_id},
+    )
+    assert pending_pair is not None
+    pending = pending_pair[1]
+    assert pending.get("permission_prompt_seen") is not True
+    approval_question = str(pending["approval_question"])
+    approval_options = pending["approval_options"]
+    assert isinstance(approval_options, list)
+    question_saved = guard_commands_module._persist_claude_guard_question_decision(
+        store,
+        {
+            "session_id": session_id,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": approval_question,
+                        "options": [{"label": str(option)} for option in approval_options],
+                    }
+                ]
+            },
+            "tool_response": {"answers": {approval_question: "Allow once"}},
+        },
+    )
+    assert question_saved is False
+    assert store.list_policy_decisions("claude-code") == []
+    events = store.list_events(event_name="approval.pending_prompt_unseen")
+    event_payloads = [event_payload for event in events if isinstance(event_payload := event.get("payload"), dict)]
+    assert any(
+        event_payload.get("source") == "claude-pending-permission"
+        and event_payload.get("artifact_id") == artifact.artifact_id
+        for event_payload in event_payloads
+    )
+
+
+def test_guard_hook_claude_ask_user_question_unsigned_legacy_pending_state_cannot_persist_decision(tmp_path):
+    home_dir = tmp_path / "home"
+    store = GuardStore(home_dir)
+    session_id = "session-claude-legacy-pending"
+    artifact_id = "claude-code:runtime:file-read:.env"
+    now = "2026-04-24T00:00:00+00:00"
+    pending_key = _claude_pending_permission_state_key(session_id, artifact_id)
+    store.set_sync_payload(
+        pending_key,
+        {
+            "saved_at": now,
+            "reason": "HOL Guard intercepted Claude's attempt to use Read for local .env file.",
+            "artifact_id": artifact_id,
+            "artifact_hash": "hash-legacy",
+            "artifact_name": "Read",
+            "tool_name": "Read",
+            "permission_prompt_seen": True,
+        },
+        now,
+    )
+    store.set_sync_payload(
+        guard_commands_module._claude_pending_permission_index_key(session_id),
+        [pending_key],
+        now,
+    )
+
+    persisted = guard_commands_module._persist_claude_guard_question_decision(
+        store,
+        {
+            "session_id": session_id,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": "HOL Guard intercepted this sensitive action. What should Claude do?",
+                        "options": [
+                            {"label": "Allow once"},
+                            {"label": "Allow during this session"},
+                            {"label": "Keep blocked"},
+                        ],
+                    }
+                ]
+            },
+            "tool_response": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": "HOL Guard intercepted this sensitive action. What should Claude do?",
+                        "options": [
+                            {"label": "Allow once"},
+                            {"label": "Allow during this session"},
+                            {"label": "Keep blocked"},
+                        ],
+                    }
+                ],
+                "answers": {"HOL Guard intercepted this sensitive action. What should Claude do?": "Allow once"},
+            },
+        },
+    )
+    policies = store.list_policy_decisions("claude-code")
+
+    assert persisted is False
+    assert policies == []
+    assert store.get_sync_payload(guard_commands_module._claude_pending_permission_index_key(session_id)) is None
+    events = store.list_events(event_name="rule.ignored.local_integrity")
+    event_payloads = [event_payload for event in events if isinstance(event_payload := event.get("payload"), dict)]
+    assert any(event_payload.get("integrity_status") == "missing_integrity" for event_payload in event_payloads)
+
+
+def test_guard_hook_claude_ask_user_question_unsigned_bound_pending_cannot_persist_decision(tmp_path):
+    home_dir = tmp_path / "home"
+    store = GuardStore(home_dir)
+    session_id = "session-claude-bound-no-seen"
+    artifact_id = "claude-code:runtime:file-read:.env"
+    now = "2026-04-24T00:00:00+00:00"
+    approval_code = "abc123abc123"
+    approval_question = guard_commands_module._claude_guard_approval_question_text(approval_code)
+    pending_key = _claude_pending_permission_state_key(session_id, artifact_id)
+    store.set_sync_payload(
+        pending_key,
+        {
+            "saved_at": now,
+            "reason": "HOL Guard intercepted Claude's attempt to use Read for local .env file.",
+            "artifact_id": artifact_id,
+            "artifact_hash": "hash-bound",
+            "artifact_name": "Read",
+            "tool_name": "Read",
+            "approval_header": "HOL Guard",
+            "approval_question": approval_question,
+            "approval_options": ["Allow once", "Allow during this session", "Keep blocked"],
+            "approval_code": approval_code,
+        },
+        now,
+    )
+    store.set_sync_payload(
+        guard_commands_module._claude_pending_permission_index_key(session_id),
+        [pending_key],
+        now,
+    )
+
+    persisted = guard_commands_module._persist_claude_guard_question_decision(
+        store,
+        {
+            "session_id": session_id,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": approval_question,
+                        "options": [
+                            {"label": "Allow once"},
+                            {"label": "Allow during this session"},
+                            {"label": "Keep blocked"},
+                        ],
+                    }
+                ]
+            },
+            "tool_response": {
+                "questions": [
+                    {
+                        "header": "HOL Guard",
+                        "question": approval_question,
+                        "options": [
+                            {"label": "Allow once"},
+                            {"label": "Allow during this session"},
+                            {"label": "Keep blocked"},
+                        ],
+                    }
+                ],
+                "answers": {approval_question: "Allow once"},
+            },
+        },
+    )
+    policies = store.list_policy_decisions("claude-code")
+
+    assert persisted is False
     assert policies == []
 
 

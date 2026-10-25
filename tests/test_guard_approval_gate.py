@@ -37,6 +37,8 @@ from codex_plugin_scanner.guard.approvals import apply_approval_resolution
 from codex_plugin_scanner.guard.cli import prompt as guard_prompt_module
 from codex_plugin_scanner.guard.cli.approval_commands import run_approval_command
 from codex_plugin_scanner.guard.cli.commands import (
+    _persist_claude_native_permission_policy,
+    _queue_claude_native_approval_gate_fallback,
     run_guard_command,
 )
 from codex_plugin_scanner.guard.config import editable_guard_settings, load_guard_config, reset_guard_settings
@@ -52,6 +54,7 @@ from codex_plugin_scanner.guard.runtime.self_approval import _AGENT_ENV_MARKERS
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.totp import TotpSecretStore, _temporary_atomic_path, totp_code_at_counter
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
+from tests.native_permission_plan_stub import answer_persist_plans
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
 from tests.support.network import stub_authenticated_urlopen
 
@@ -2117,6 +2120,68 @@ def test_approval_gate_runtime_mcp_remembered_inline_allow_queues_fallback(
     assert opened_urls == []
     assert len(store.list_approval_requests(limit=10)) == 1
     assert store.list_policy_decisions("codex") == []
+
+
+def test_approval_gate_native_permission_persistence_cannot_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer_persist_plans(monkeypatch)
+    store = _store(tmp_path)
+    _enable_gate(store)
+
+    saved = _persist_claude_native_permission_policy(
+        store=store,
+        artifact_id="claude:project:tool",
+        artifact_hash="hash-native",
+        action="allow",
+        reason="native approval",
+        now="2026-04-11T00:00:00+00:00",
+    )
+
+    assert saved is False
+    assert store.list_policy_decisions("claude-code") == []
+
+
+def test_approval_gate_native_permission_failure_queues_guard_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer_persist_plans(monkeypatch)
+    store = _store(tmp_path)
+    _enable_gate(store)
+    artifact = GuardArtifact(
+        artifact_id="claude-code:runtime:bash:dangerous",
+        name="Bash",
+        harness="claude-code",
+        artifact_type="tool_action_request",
+        source_scope="project",
+        config_path="/repo/.claude/settings.json",
+        command="echo MALICIOUS > marker",
+    )
+
+    saved = _persist_claude_native_permission_policy(
+        store=store,
+        artifact_id=artifact.artifact_id,
+        artifact_hash="hash-native",
+        action="allow",
+        reason="native approval",
+        now="2026-04-11T00:00:00+00:00",
+    )
+    queued = _queue_claude_native_approval_gate_fallback(
+        store=store,
+        harness="claude-code",
+        artifact=artifact,
+        artifact_digest="hash-native",
+        approval_center_url="http://127.0.0.1:5474",
+    )
+
+    pending = store.list_approval_requests(limit=10)
+    assert saved is False
+    assert len(queued) == 1
+    assert len(pending) == 1
+    assert pending[0]["policy_action"] == "require-reapproval"
+    assert pending[0]["approval_url"].startswith("http://127.0.0.1:5474/requests/")
+    assert "approval_gate_required" in pending[0]["risk_signals"]
+    assert store.list_policy_decisions("claude-code") == []
 
 
 def test_approval_gate_password_material_stays_out_of_public_payloads(tmp_path: Path) -> None:

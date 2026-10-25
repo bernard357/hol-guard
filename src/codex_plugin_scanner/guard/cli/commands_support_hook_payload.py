@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import sys
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -132,6 +133,35 @@ def _restore_ephemeral_approval_tokens(value: object, tokens: list[str]) -> obje
     if isinstance(value, list):
         return [_restore_ephemeral_approval_tokens(item, tokens) for item in value]
     return value
+
+
+def _emit_native_hook_json_document(
+    payload: dict[str, object],
+    *,
+    compact: bool = False,
+    output_stream: TextIO | None = None,
+) -> None:
+    """Write a native protocol document, redacting everything except the
+    ephemeral signed approval link that the operator is meant to click."""
+    from .render import _redact_payload, _render_redacted_json_payload
+
+    tokens: list[str] = []
+    protected = _protect_ephemeral_approval_tokens(payload, tokens)
+    masked = _redact_payload(protected, command="hook")
+    restored = _restore_ephemeral_approval_tokens(masked, tokens)
+    rendered = (
+        json.dumps(restored, separators=(",", ":"))
+        if compact
+        else _render_redacted_json_payload(restored)
+    )
+    if output_stream is None:
+        # stdout is the harness delivery channel; the ephemeral approval
+        # link must reach the operator intact.
+        sys.stdout.write(rendered)  # codeql[py/clear-text-logging-sensitive-data]
+        sys.stdout.write("\n")
+    else:
+        output_stream.write(rendered)  # codeql[py/clear-text-logging-sensitive-data]
+        output_stream.write("\n")
 
 
 def _object_list(value: object | None) -> list[object]:
