@@ -293,6 +293,10 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             write_json(&workspace_snapshot::run_command(&bytes)?)
         }
+        [command, flag] if command == workspace_fix::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_fix::run_command(&bytes)?)
+        }
         [command, flag] if command == "context-digest" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             let response = context_digest::evaluate_context_digest_bytes(&bytes)?;

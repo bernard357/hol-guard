@@ -765,6 +765,10 @@ mod windows_node_build;
 mod windows_pytest;
 #[cfg(windows)]
 mod windows_readonly;
+mod workspace_fix;
+mod workspace_fix_diff;
+mod workspace_fix_fs;
+mod workspace_fix_manifest;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
 mod workspace_scan_targets;

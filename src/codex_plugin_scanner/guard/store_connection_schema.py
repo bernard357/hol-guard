@@ -75,7 +75,9 @@ from .store_workflow_capabilities_schema import (
 )
 from .store_workspace_assessment_schema import (
     WORKSPACE_ASSESSMENT_MIGRATION_VERSION,
+    WORKSPACE_FIX_PROPOSAL_MIGRATION_VERSION,
     ensure_workspace_assessment_schema,
+    ensure_workspace_fix_proposal_schema,
 )
 
 if TYPE_CHECKING:
@@ -200,6 +202,7 @@ _REQUIRED_SCHEMA_MIGRATION_VERSIONS = (  # Keep retired-index databases on the p
     BASH_REVIEW_MIGRATION_VERSION,
     BASH_INVOCATION_MIGRATION_VERSION,
     WORKSPACE_ASSESSMENT_MIGRATION_VERSION,
+    WORKSPACE_FIX_PROPOSAL_MIGRATION_VERSION,
 )
 
 
@@ -1099,6 +1102,7 @@ class StoreConnectionSchemaMixin:
             ensure_local_cli_schema(connection)
             ensure_bash_operation_schema(connection, applied_at=_now())
             ensure_workspace_assessment_schema(connection, applied_at=_now())
+            ensure_workspace_fix_proposal_schema(connection, applied_at=_now())
             ensure_workflow_capability_schema(connection, applied_at=_now())
             ensure_command_shadow_schema(connection, applied_at=_now())
             ensure_mcp_policy_request_schema(connection)
