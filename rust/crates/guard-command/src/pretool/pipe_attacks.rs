@@ -15,11 +15,11 @@ use crate::{assignment_name, executable_basename, CanonicalCommandV1};
 mod stdin_programs;
 use stdin_programs::runs_stdin_program;
 
-pub(super) const REMOTE_CODE: (&str, &str) = (
+pub(crate) const REMOTE_CODE: (&str, &str) = (
     "native_remote_code_execution",
     "HOL Guard blocked a command that pipes downloaded content into a shell or interpreter, which runs remote code without review. Download it to a file, inspect it, and ask the user before running it.",
 );
-pub(super) const ENVIRONMENT_EXFILTRATION: (&str, &str) = (
+pub(crate) const ENVIRONMENT_EXFILTRATION: (&str, &str) = (
     "native_secret_exfiltration",
     "HOL Guard blocked a command that sends environment variables, which often hold secrets, over the network. Send only the specific non-secret values the request needs.",
 );
@@ -27,7 +27,7 @@ pub(super) const ENVIRONMENT_EXFILTRATION: (&str, &str) = (
 const MAX_STEPS: usize = 64;
 
 /// The attack `model` pipes, as `(reason_code, reason)`.
-pub(super) fn pipe_attack(model: &CanonicalCommandV1) -> Option<(&'static str, &'static str)> {
+pub(crate) fn pipe_attack(model: &CanonicalCommandV1) -> Option<(&'static str, &'static str)> {
     if model.dialect != "posix" || model.transport != "shell_string" {
         return None;
     }

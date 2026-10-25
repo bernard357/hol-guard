@@ -1,5 +1,5 @@
 import { Tag, type TagTone } from "./approval-center-primitives";
-import type { WorkspaceFinding } from "./workspace-findings-api";
+import type { WorkspaceFinding, WorkspaceSkillCheck } from "./workspace-findings-api";
 
 export function Cell(props: { label: string; wide?: boolean; children: React.ReactNode }) {
   return (
@@ -56,47 +56,86 @@ const CONFIDENCE_LABELS: Record<string, string> = { strong: "Strong signal", lik
  * Agent skills whose instructions match a skill content rule. Each row shows the
  * rule's own wording, never text from the skill, and is a warning only.
  */
-export function SkillFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+type RuleFindingsTableProps = {
+  findings: WorkspaceFinding[];
+  caption: string;
+  subjectLabel: string;
+  subject: (finding: WorkspaceFinding) => React.ReactNode;
+  check: (finding: WorkspaceFinding) => WorkspaceSkillCheck | null;
+};
+
+/** Findings raised by a fixed rule: the rule's own wording, never text from the checked file. */
+function RuleFindingsTable({ findings, caption, subjectLabel, subject, check }: RuleFindingsTableProps) {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200">
       <table className="w-full text-left text-sm">
-        <caption className="sr-only">Agent skills with risky instructions</caption>
+        <caption className="sr-only">{caption}</caption>
         <thead className="hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group">
           <tr>
-            <th scope="col" className="px-3 py-2">Skill</th>
+            <th scope="col" className="px-3 py-2">{subjectLabel}</th>
             <th scope="col" className="px-3 py-2">Check</th>
             <th scope="col" className="px-3 py-2">Severity</th>
             <th scope="col" className="px-3 py-2">Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {findings.map((finding) => (
-            <tr key={finding.findingId} className="grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0">
-              <Cell label="Skill" wide>
-                <span className="break-all font-mono text-xs text-slate-700">{finding.path}</span>
-              </Cell>
-              <Cell label="Check" wide>
-                <span className="block font-semibold text-brand-dark">{finding.skill?.title}</span>
-                <span className="mt-0.5 block text-xs text-slate-600">{finding.skill?.reason}</span>
-                {finding.skill?.falsePositiveHint && (
-                  <span className="mt-0.5 block text-xs text-slate-500">{finding.skill.falsePositiveHint}</span>
-                )}
-                <span className="mt-1 block break-all font-mono text-xs text-slate-500">{finding.ruleIds.join(", ")}</span>
-              </Cell>
-              <Cell label="Severity">
-                <span className="capitalize text-slate-700">{finding.severity}</span>
-                {finding.skill && (
-                  <span className="block text-xs text-slate-500">
-                    {CONFIDENCE_LABELS[finding.skill.confidence] ?? finding.skill.confidence}
-                  </span>
-                )}
-              </Cell>
-              <Cell label="Status"><Tag tone="amber">Warning</Tag></Cell>
-            </tr>
-          ))}
+          {findings.map((finding) => {
+            const matched = check(finding);
+            return (
+              <tr key={finding.findingId} className="grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0">
+                <Cell label={subjectLabel} wide>{subject(finding)}</Cell>
+                <Cell label="Check" wide>
+                  <span className="block font-semibold text-brand-dark">{matched?.title}</span>
+                  <span className="mt-0.5 block text-xs text-slate-600">{matched?.reason}</span>
+                  {matched?.falsePositiveHint && (
+                    <span className="mt-0.5 block text-xs text-slate-500">{matched.falsePositiveHint}</span>
+                  )}
+                  <span className="mt-1 block break-all font-mono text-xs text-slate-500">{finding.ruleIds.join(", ")}</span>
+                </Cell>
+                <Cell label="Severity">
+                  <span className="capitalize text-slate-700">{finding.severity}</span>
+                  {matched && (
+                    <span className="block text-xs text-slate-500">
+                      {CONFIDENCE_LABELS[matched.confidence] ?? matched.confidence}
+                    </span>
+                  )}
+                </Cell>
+                <Cell label="Status"><Tag tone="amber">Warning</Tag></Cell>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+export function SkillFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+  return (
+    <RuleFindingsTable
+      findings={findings}
+      caption="Agent skills with risky instructions"
+      subjectLabel="Skill"
+      subject={(finding) => <span className="break-all font-mono text-xs text-slate-700">{finding.path}</span>}
+      check={(finding) => finding.skill}
+    />
+  );
+}
+
+export function McpFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+  return (
+    <RuleFindingsTable
+      findings={findings}
+      caption="MCP servers with risky launch settings"
+      subjectLabel="Server"
+      subject={(finding) => (
+        <>
+          <span className="block break-all font-semibold text-slate-800">{finding.mcp?.server}</span>
+          <span className="block break-all font-mono text-xs text-slate-500">{finding.path}</span>
+        </>
+      )}
+      check={(finding) => finding.mcp}
+    />
   );
 }
 

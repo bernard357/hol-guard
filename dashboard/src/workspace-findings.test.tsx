@@ -296,6 +296,52 @@ assert.ok(skillMarkup.includes("Agent skills with risky instructions"), "skill f
 assert.ok(skillMarkup.includes("Skill downloads and runs remote code"));
 assert.ok(skillMarkup.includes(".claude/skills/setup/SKILL.md"));
 assert.ok(!skillMarkup.includes("No dependency or secret findings"), "a run with only skill findings is not shown as clean");
+const mcpState = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-mcp",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "complete", mcp_config_v1: "complete" } },
+        findings: [
+          {
+            finding_id: "mcp-1",
+            source_kind: "workspace_source",
+            detector: "mcp_config_v1",
+            severity: "high",
+            decision: "warn",
+            rule_ids: ["mcp.config.privileged-launch"],
+            path: ".mcp.json",
+            server: "admin-tools",
+            confidence: "strong",
+            title: "MCP server launches with elevated privileges",
+            reason: "The server's launch command runs through a privilege wrapper.",
+            false_positive_hint: "Expected only for a server that manages the machine itself.",
+          },
+          { finding_id: "mcp-no-server", source_kind: "workspace_source", detector: "mcp_config_v1", rule_ids: ["mcp.config.remote-code"], path: ".mcp.json", title: "t", reason: "r" },
+          { finding_id: "mcp-no-path", source_kind: "workspace_source", detector: "mcp_config_v1", rule_ids: ["mcp.config.remote-code"], server: "s", title: "t", reason: "r" },
+        ],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(mcpState.findings.length, 1, "an MCP finding without its server or path is dropped");
+const [mcpFinding] = mcpState.findings;
+assert.deepEqual(
+  [mcpFinding.kind, mcpFinding.path, mcpFinding.mcp?.server, mcpFinding.skill, mcpFinding.packageName],
+  ["mcp", ".mcp.json", "admin-tools", null, null],
+);
+const mcpMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: mcpState, busyKey: null, onAction: () => {} }),
+);
+assert.ok(mcpMarkup.includes("MCP servers with risky launch settings"), "MCP findings get their own table");
+assert.ok(mcpMarkup.includes("admin-tools") && mcpMarkup.includes(".mcp.json"));
+assert.ok(mcpMarkup.includes("MCP server launches with elevated privileges"));
+assert.ok(mcpMarkup.includes("Expected only for a server that manages the machine itself."));
+assert.ok(!mcpMarkup.includes("No dependency or secret findings"), "a run with only MCP findings is not shown as clean");
 const skillGapMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
     worktree,

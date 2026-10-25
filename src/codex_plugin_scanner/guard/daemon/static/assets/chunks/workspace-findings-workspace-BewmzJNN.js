@@ -81,7 +81,8 @@ function normalizeFinding(value) {
         return value2 !== null && value2 >= 1 ? [value2] : [];
       }),
       runtime: null,
-      skill: null
+      skill: null,
+      mcp: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
@@ -101,6 +102,34 @@ function normalizeFinding(value) {
       lines: [],
       runtime: null,
       skill: {
+        title,
+        reason,
+        confidence: text$1(item.confidence) ?? "likely",
+        falsePositiveHint: text$1(item.false_positive_hint)
+      },
+      mcp: null
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
+    const path = text$1(item.path);
+    const server = text$1(item.server);
+    const title = text$1(item.title);
+    const reason = text$1(item.reason);
+    if (path === null || server === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "mcp",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: {
+        server,
         title,
         reason,
         confidence: text$1(item.confidence) ?? "likely",
@@ -128,7 +157,8 @@ function normalizeFinding(value) {
         title: text$1(item.title),
         knownExploited: item.known_exploited === true
       },
-      skill: null
+      skill: null,
+      mcp: null
     };
   }
   const packageName = text$1(item.package_name);
@@ -144,7 +174,8 @@ function normalizeFinding(value) {
     line: null,
     lines: [],
     runtime: null,
-    skill: null
+    skill: null,
+    mcp: null
   };
 }
 function normalizeAssessment(value) {
@@ -270,30 +301,60 @@ function SecretFindingsTable({ findings }) {
   ] }) });
 }
 const CONFIDENCE_LABELS = { strong: "Strong signal", likely: "Likely", weak: "Weak signal" };
-function SkillFindingsTable({ findings }) {
+function RuleFindingsTable({ findings, caption, subjectLabel, subject, check }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Agent skills with risky instructions" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: caption }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Skill" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: subjectLabel }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Check" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Status" })
     ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-slate-100", children: findings.map((finding) => /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Skill", wide: true, children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.path }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Check", wide: true, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block font-semibold text-brand-dark", children: finding.skill?.title }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block text-xs text-slate-600", children: finding.skill?.reason }),
-        finding.skill?.falsePositiveHint && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block text-xs text-slate-500", children: finding.skill.falsePositiveHint }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-1 block break-all font-mono text-xs text-slate-500", children: finding.ruleIds.join(", ") })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Severity", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }),
-        finding.skill && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs text-slate-500", children: CONFIDENCE_LABELS[finding.skill.confidence] ?? finding.skill.confidence })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "amber", children: "Warning" }) })
-    ] }, finding.findingId)) })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-slate-100", children: findings.map((finding) => {
+      const matched = check(finding);
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: subjectLabel, wide: true, children: subject(finding) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Check", wide: true, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block font-semibold text-brand-dark", children: matched?.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block text-xs text-slate-600", children: matched?.reason }),
+          matched?.falsePositiveHint && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block text-xs text-slate-500", children: matched.falsePositiveHint }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-1 block break-all font-mono text-xs text-slate-500", children: finding.ruleIds.join(", ") })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Severity", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }),
+          matched && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs text-slate-500", children: CONFIDENCE_LABELS[matched.confidence] ?? matched.confidence })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "amber", children: "Warning" }) })
+      ] }, finding.findingId);
+    }) })
   ] }) });
+}
+function SkillFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    RuleFindingsTable,
+    {
+      findings,
+      caption: "Agent skills with risky instructions",
+      subjectLabel: "Skill",
+      subject: (finding) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.path }),
+      check: (finding) => finding.skill
+    }
+  );
+}
+function McpFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    RuleFindingsTable,
+    {
+      findings,
+      caption: "MCP servers with risky launch settings",
+      subjectLabel: "Server",
+      subject: (finding) => /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-semibold text-slate-800", children: finding.mcp?.server }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-mono text-xs text-slate-500", children: finding.path })
+      ] }),
+      check: (finding) => finding.mcp
+    }
+  );
 }
 const RUNTIME_VERDICTS = {
   affected: { label: "Affected version", tone: "attention" },
@@ -824,7 +885,8 @@ const COVERAGE_REASONS = {
   secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed.",
   runtime_advisories_unavailable: "Runtimes this workspace's tools launch were not checked: Guard has no runtime advisories cached.",
   runtimes_incomplete: "Some runtimes this workspace's tools launch could not be identified or checked.",
-  skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked."
+  skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked.",
+  mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -839,7 +901,8 @@ const FAILURE_REASONS = {
 const DETECTOR_LABELS = {
   secrets: "Secret scanning",
   runtime_identity_v1: "Runtime checking",
-  skill_content_v1: "Skill checking"
+  skill_content_v1: "Skill checking",
+  mcp_config_v1: "MCP server checking"
 };
 function sameWorktree(left, right) {
   return left.codebaseKey === right.codebaseKey && left.worktreeKey === right.worktreeKey;
@@ -1023,14 +1086,16 @@ function FindingsSections(props) {
   const secrets = props.findings.filter((finding) => finding.kind === "secret");
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   const skills = props.findings.filter((finding) => finding.kind === "skill");
-  if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0 && skills.length === 0) {
+  const servers = props.findings.filter((finding) => finding.kind === "mcp");
+  if (props.findings.length === 0) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies, fixes: props.fixes }),
     secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets }),
     runtimes.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(RuntimeFindingsTable, { findings: runtimes }),
-    skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillFindingsTable, { findings: skills })
+    skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillFindingsTable, { findings: skills }),
+    servers.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(McpFindingsTable, { findings: servers })
   ] });
 }
 function FindingsTable({ findings, fixes }) {

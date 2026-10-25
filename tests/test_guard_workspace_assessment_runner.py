@@ -130,6 +130,7 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
         "secrets": "complete",
         "runtime_identity_v1": "no_inputs",
         "skill_content_v1": "no_inputs",
+        "mcp_config_v1": "no_inputs",
     }
     [finding] = outcome.findings
     assert finding["severity"] == "critical"

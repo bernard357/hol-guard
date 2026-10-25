@@ -145,7 +145,7 @@ mod apply_patch_writes;
 mod data_heredocs;
 mod lockfile_install;
 mod omp_hashline_writes;
-mod pipe_attacks;
+pub(crate) mod pipe_attacks;
 mod pure_expression;
 mod read_paths;
 mod source_reads;

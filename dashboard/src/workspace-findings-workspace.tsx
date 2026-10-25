@@ -14,7 +14,7 @@ import {
   type WorkspaceWorktree,
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
-import { Cell, RuntimeFindingsTable, SecretFindingsTable, SkillFindingsTable } from "./workspace-findings-tables";
+import { Cell, McpFindingsTable, RuntimeFindingsTable, SecretFindingsTable, SkillFindingsTable } from "./workspace-findings-tables";
 import { FixCell, FixHistory, FixLoadError, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
 const REFRESH_MS = 15_000;
@@ -37,6 +37,7 @@ const COVERAGE_REASONS: Record<string, string> = {
   runtime_advisories_unavailable: "Runtimes this workspace's tools launch were not checked: Guard has no runtime advisories cached.",
   runtimes_incomplete: "Some runtimes this workspace's tools launch could not be identified or checked.",
   skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked.",
+  mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked.",
 };
 
 const FAILURE_REASONS: Record<string, string> = {
@@ -54,6 +55,7 @@ const DETECTOR_LABELS: Record<string, string> = {
   secrets: "Secret scanning",
   runtime_identity_v1: "Runtime checking",
   skill_content_v1: "Skill checking",
+  mcp_config_v1: "MCP server checking",
 };
 
 export type WorktreeStatus = { label: string; tone: TagTone; detail: string | null };
@@ -314,7 +316,8 @@ function FindingsSections(props: { findings: WorkspaceFinding[]; secretsChecked:
   const secrets = props.findings.filter((finding) => finding.kind === "secret");
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   const skills = props.findings.filter((finding) => finding.kind === "skill");
-  if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0 && skills.length === 0) {
+  const servers = props.findings.filter((finding) => finding.kind === "mcp");
+  if (props.findings.length === 0) {
     return (
       <p className="text-sm text-slate-600">
         {props.secretsChecked
@@ -329,6 +332,7 @@ function FindingsSections(props: { findings: WorkspaceFinding[]; secretsChecked:
       {secrets.length > 0 && <SecretFindingsTable findings={secrets} />}
       {runtimes.length > 0 && <RuntimeFindingsTable findings={runtimes} />}
       {skills.length > 0 && <SkillFindingsTable findings={skills} />}
+      {servers.length > 0 && <McpFindingsTable findings={servers} />}
     </div>
   );
 }

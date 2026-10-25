@@ -28,6 +28,12 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .workspace_mcp_config_findings import (
+    MCP_CONFIG_DETECTOR,
+    assess_workspace_mcp_configs,
+    project_mcp_config_findings,
+    with_mcp_config_coverage,
+)
 from .workspace_runtime_findings import (
     RUNTIME_DETECTOR,
     assessment_context_digest,
@@ -40,7 +46,13 @@ from .workspace_runtime_findings import (
 from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 from .workspace_skill_findings import SKILL_DETECTOR, project_skill_findings, with_skill_coverage
 
-DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR, RUNTIME_DETECTOR, SKILL_DETECTOR)
+DETECTOR_SET: Final = (
+    "supply_chain_local_v1",
+    SECRET_DETECTOR,
+    RUNTIME_DETECTOR,
+    SKILL_DETECTOR,
+    MCP_CONFIG_DETECTOR,
+)
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
@@ -129,6 +141,7 @@ def execute(
     if not assessments.renew_lease(store, run, now_ms=clock()):
         return _LEASE_LOST
     posture = _runtime_posture(store, root)
+    mcp_configs = assess_workspace_mcp_configs(store, root)
     if not assessments.renew_lease(store, run, now_ms=clock()):
         return _LEASE_LOST
     context_digest = assessment_context_digest(
@@ -154,14 +167,18 @@ def execute(
         project_secret_findings(before.secrets),
         runtime_findings,
         project_skill_findings(before.skills),
+        project_mcp_config_findings(mcp_configs),
     )
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
-    coverage = with_skill_coverage(
-        with_runtime_coverage(
-            coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+    coverage = with_mcp_config_coverage(
+        with_skill_coverage(
+            with_runtime_coverage(
+                coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+            ),
+            before.skills,
         ),
-        before.skills,
+        mcp_configs,
     )
     return assessments.RunOutcome(
         state="completed" if coverage["status"] == "complete" else "partial",
