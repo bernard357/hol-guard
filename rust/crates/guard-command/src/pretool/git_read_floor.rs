@@ -34,7 +34,7 @@ fn patch_check(arguments: &[String], context: super::PathContext<'_>) -> bool {
 /// floor: every Git read was proven helper-free, but a step before it could
 /// not be proven to leave Git's configuration unchanged. Run alone, each read
 /// keeps its own proof, so the review reason can say so.
-pub(super) fn unsettled_steps_before_reads(
+pub(crate) fn unsettled_steps_before_reads(
     model: &CanonicalCommandV1,
     context: super::PathContext<'_>,
     deadline: Option<Instant>,

@@ -3,13 +3,16 @@
 //! `switch`, `checkout`, `stash`, `reset` and `restore` stay out of the sandbox
 //! because most of their forms overwrite files the sandbox cannot restore. A
 //! few spellings leave every change reachable: creating a branch at `HEAD`
-//! keeps the working tree as it is, a plain stash push records the changes in
-//! `refs/stash`, where `git stash pop` brings them back, and `reset --soft`,
-//! `reset --mixed` and `restore --staged` move `HEAD` and the index while the
-//! working tree keeps every byte it had. Start points, pathspecs, force and
-//! merge options, the stash subcommands that drop or apply entries, and every
-//! form that writes the working tree — `reset --hard`, `--merge` and `--keep`,
-//! and `restore` without `--staged` or with `--worktree` — keep their review.
+//! keeps the working tree as it is, a stash push records the changes in
+//! `refs/stash`, where `git stash pop` brings them back — named paths included,
+//! since a pathspec keeps strictly less work than the bare form and the entry
+//! still holds every change it moves — and `reset --soft`, `reset --mixed` and
+//! `restore --staged` move `HEAD` and the index while the working tree keeps
+//! every byte it had. Start points, force and merge options, a pathspec given
+//! to anything but `stash push`, the stash subcommands that drop or apply
+//! entries, and every form that writes the working tree — `reset --hard`,
+//! `--merge` and `--keep`, and `restore` without `--staged` or with
+//! `--worktree` — keep their review.
 use crate::CanonicalCommandV1;
 use guard_contracts::NativeCommandObservationV1;
 

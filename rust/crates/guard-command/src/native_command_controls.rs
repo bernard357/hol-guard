@@ -374,7 +374,15 @@ impl CompiledNativeCommandControls {
                 + usize::from(batch.evaluation_error.is_some()),
         };
         let explicit_allow = floor == "allow"
-            && self.explicit_allow(&result, &batch, command, context, enabled_uncertainty);
+            && self.explicit_allow(
+                &result,
+                &batch,
+                command,
+                context,
+                enabled_uncertainty,
+                deadline,
+                environment,
+            );
         if enabled_uncertainty && !explicit_allow && rank(floor) < rank("review") {
             floor = "review";
             reason = "native_command_extension_uncertain";
