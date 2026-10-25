@@ -1152,6 +1152,40 @@
       "expect": "allow"
     },
     {
+      "id": "git-worktree-submodule-quiet-leading",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule --quiet status"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "git-worktree-submodule-cached-leading",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git submodule --cached status"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "neg-git-submodule-status-recursive",
       "fix_area": "git",
       "harnesses": [

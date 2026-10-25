@@ -21,14 +21,25 @@
 //! never reads it, so the recursive walk keeps its review.
 //!
 //! Bare `git submodule` is `git submodule status`, and is admitted as one.
+//! So are the shared options Git's synopsis places before the verb, `--quiet`
+//! and `--cached`: they choose how much the listing prints and name no path.
 
 /// Whether `arguments`, the tokens after the `submodule` subcommand, name the
 /// printing form.
 pub(crate) fn read_form(arguments: &[String]) -> bool {
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
-    match words.split_first() {
-        // Bare `git submodule` runs `status`.
-        None => true,
+    // Git's synopsis puts the shared options before the verb: `git submodule
+    // [--quiet] [--cached] <command>`. They choose how much the listing
+    // prints and name no path, so a leading one leaves the form unchanged.
+    let rest = match words
+        .iter()
+        .position(|word| !matches!(*word, "-q" | "--quiet" | "--cached"))
+    {
+        // Bare `git submodule`, and the shared options alone, run `status`.
+        None => return true,
+        Some(index) => &words[index..],
+    };
+    match rest.split_first() {
         Some((&"status", rest)) => status(rest),
         _ => false,
     }
@@ -78,6 +89,24 @@ mod tests {
         assert!(form(&["status", "--cached"]));
         assert!(form(&["status", "vendor/lib"]));
         assert!(form(&["status", "--cached", "--", "vendor/lib"]));
+    }
+
+    /// Git's synopsis is `git submodule [--quiet] [--cached] <command>`, so
+    /// both spellings may stand before the verb, and alone they still run
+    /// `status`.
+    #[test]
+    fn shared_options_may_precede_the_verb() {
+        assert!(form(&["-q", "status"]));
+        assert!(form(&["--quiet", "status"]));
+        assert!(form(&["--cached", "status"]));
+        assert!(form(&["--quiet", "--cached", "status", "vendor/lib"]));
+        assert!(form(&["-q"]));
+        assert!(form(&["--quiet"]));
+        assert!(form(&["--cached"]));
+        // The verb still decides: a leading option admits nothing else.
+        assert!(!form(&["--quiet", "foreach", "git", "status"]));
+        assert!(!form(&["-q", "update"]));
+        assert!(!form(&["--quiet", "status", "--recursive"]));
     }
 
     #[test]
