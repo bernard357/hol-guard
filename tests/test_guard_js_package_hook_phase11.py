@@ -336,7 +336,7 @@ def test_guard_hook_requires_contained_run_for_repository_local_vitest(
     assert rc == 0
     assert captured.err == ""
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert payload["policy_action"] == "sandbox-required", payload
+    assert payload["policy_action"] == "sandbox-required", (payload.get("reason_code"), payload.get("reason"))
     assert payload["reason_code"] == "native_vitest_readonly_containment_required"
     assert payload["required_execution_profile"] == "vitest-readonly-v1"
     assert "protected read-only execution" in payload["hookSpecificOutput"]["permissionDecisionReason"]
