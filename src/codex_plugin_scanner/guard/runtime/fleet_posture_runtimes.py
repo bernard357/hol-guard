@@ -69,9 +69,7 @@ def runtimes_section(
         return None
     if ttl_seconds > 0:
         try:
-            store.set_sync_payload(
-                RUNTIMES_STATE_KEY, {"at": iso(now), "scope": scope, "section": section}, iso(now)
-            )
+            store.set_sync_payload(RUNTIMES_STATE_KEY, {"at": iso(now), "scope": scope, "section": section}, iso(now))
         except Exception:
             _LOGGER.debug("fleet posture: runtime posture cache could not be saved", exc_info=True)
     return section
