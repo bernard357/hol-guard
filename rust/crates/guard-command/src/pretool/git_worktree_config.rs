@@ -19,6 +19,9 @@ pub(super) struct ConfigFacts {
     pub(super) repository_hooks_path: Option<String>,
     /// Every `remote.<name>.fetch` refspec, by remote name as Git spells it.
     pub(super) remote_fetch: Vec<(String, String)>,
+    /// `worktree.guessRemote` starts the branch `git worktree add <path>`
+    /// creates from a remote-tracking branch of that name, not from `HEAD`.
+    pub(super) guess_remote: bool,
 }
 
 /// `Some(None)` when a setting could run a program or redirect the checkout,
@@ -58,6 +61,13 @@ pub(super) fn safe_worktree_config(output: &[u8], home: &Path) -> Option<Option<
         }
         if key == "core.bare" && super::super::git_config::enabled_boolean(value) {
             return Some(None);
+        }
+        if key == "worktree.guessremote" {
+            // The last value Git reads wins, exactly as it resolves the key.
+            // Git reads the key as a boolean, where any non-zero integer and
+            // an empty value are true, so only an explicit false clears it.
+            facts.guess_remote = !super::super::git_config::disabled_boolean(value);
+            continue;
         }
         let global_scope = matches!(scope, "global" | "system" | "unknown");
         // The bundled `unknown` scope keeps the stricter reading for settings
@@ -269,6 +279,31 @@ mod tests {
 
     fn judged(entries: &[(&str, &str, &str)]) -> Option<Option<ConfigFacts>> {
         safe_worktree_config(&listing(entries), Path::new("/nonexistent-home"))
+    }
+
+    #[test]
+    fn worktree_guess_remote_is_read_as_a_fact_not_a_review() {
+        let Some(Some(facts)) = judged(&[("global", "worktree.guessRemote", "true")]) else {
+            panic!("the setting is ordinary developer config");
+        };
+        assert!(facts.guess_remote);
+        let Some(Some(facts)) = judged(&[
+            ("global", "worktree.guessRemote", "true"),
+            ("local", "worktree.guessRemote", "false"),
+        ]) else {
+            panic!("the setting is ordinary developer config");
+        };
+        assert!(!facts.guess_remote, "the last value Git reads wins");
+        for value in ["2", "-1", ""] {
+            let Some(Some(facts)) = judged(&[("global", "worktree.guessRemote", value)]) else {
+                panic!("the setting is ordinary developer config");
+            };
+            assert!(facts.guess_remote, "Git reads {value:?} as true");
+        }
+        let Some(Some(facts)) = judged(&[("global", "user.name", "Example")]) else {
+            panic!("the setting is ordinary developer config");
+        };
+        assert!(!facts.guess_remote);
     }
 
     #[test]

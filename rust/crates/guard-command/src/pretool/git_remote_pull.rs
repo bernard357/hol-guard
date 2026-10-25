@@ -39,6 +39,26 @@ pub(super) struct Pull {
     pub(super) fetches: bool,
 }
 
+/// What the proof must cover for one remote segment: the pull or merge shape
+/// when the segment is one, and whether the refresh reaches every remote the
+/// repository configures rather than the `origin` it names.
+#[derive(Clone, Copy)]
+pub(super) struct Operation {
+    pub(super) upstream: Option<Pull>,
+    pub(super) every_remote: bool,
+}
+
+impl Operation {
+    /// A pull or merge. Both name what they reach, so neither walks the
+    /// repository's other remotes.
+    pub(super) fn upstream(shape: Pull) -> Self {
+        Self {
+            upstream: Some(shape),
+            every_remote: false,
+        }
+    }
+}
+
 /// The shape of the arguments after `pull`: `--ff-only` or a merge, either
 /// with no remote, where Git picks the upstream, or with `origin [branch]`.
 /// `--rebase` and every other option keep the review.

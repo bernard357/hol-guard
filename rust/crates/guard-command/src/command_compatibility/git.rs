@@ -224,6 +224,12 @@ pub(super) fn fetch_origin_shaped(arguments: &[String]) -> bool {
     git_fetch::origin_shaped_arguments(arguments)
 }
 
+/// Whether a refresh's operands name a reach the proof can follow, and whether
+/// that reach is every configured remote rather than `origin` alone.
+pub(super) fn fetch_reach(arguments: &[String]) -> Option<bool> {
+    git_fetch::reach(arguments).map(|reach| reach == git_fetch::Reach::EveryRemote)
+}
+
 pub(super) fn routed_arguments<'a>(
     arguments: &'a [String],
     context: crate::pretool::PathContext<'_>,
@@ -475,8 +481,8 @@ pub(super) fn observe_with_contexts(
         // A trailing `2>&1` only merges the fetch's progress into stdout.
         let stripped = crate::pretool::without_stderr_merge(segment);
         let refresh = stripped.as_ref().unwrap_or(segment);
-        let plain = git_fetch::plain_origin_refresh(refresh, command_index)
-            || (routed_remote && git_fetch::routed_origin_refresh(refresh, command_index));
+        let plain = git_fetch::plain_refresh(refresh, command_index).is_some()
+            || (routed_remote && git_fetch::routed_refresh(refresh, command_index).is_some());
         if !(plain && crate::pretool::verified_origin_operation(refresh, proof_context)) {
             result.rule("command.git.unverified-fetch", index, !plain);
         }
