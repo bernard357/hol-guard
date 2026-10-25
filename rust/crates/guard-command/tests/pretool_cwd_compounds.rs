@@ -76,6 +76,16 @@ fn cwd_compounds_validate_reads_and_one_bounded_write() {
             // above, and a process stop has no bounded form at all.
             ("&& pkill -f server", false),
             ("&& rustfmt one.txt", false),
+            // The same holds for an effect a program's own proof authorizes
+            // while its other shapes read: `docker start` runs an existing
+            // container again, `curl` writes what it fetched into the
+            // directory the `cd` named, and `hol-guard dashboard` starts
+            // Guard's daemon.
+            ("&& docker start web", false),
+            ("&& docker container start web", false),
+            ("&& curl -o out.json https://example.com/data", false),
+            ("&& curl --output out.json https://example.com/data", false),
+            ("&& hol-guard dashboard", false),
         ] {
             let command = format!("cd {} {suffix}", project.display());
             let result = evaluate_pre_tool_envelope_with_context(

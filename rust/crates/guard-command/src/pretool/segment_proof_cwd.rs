@@ -105,7 +105,7 @@ pub(in crate::pretool) fn exact_safe_cwd_compound(
         );
     }
     model.segments[1..].iter().all(|segment| {
-        !cwd_effectful_executable(segment.executable.as_deref())
+        !cwd_effectful_segment(segment)
             && exact_safe_segment_with_context(
                 model,
                 segment,
@@ -124,6 +124,25 @@ pub(in crate::pretool) fn exact_safe_cwd_compound(
                 },
             )
     })
+}
+
+/// Whether `segment` carries an effect the generic branch must not admit:
+/// its executable is one of the effectful names below, or its own proof is
+/// one of the few that authorize an effect for a program whose other shapes
+/// only read.
+fn cwd_effectful_segment(segment: &crate::CommandSegmentV1) -> bool {
+    if cwd_effectful_executable(segment.executable.as_deref()) {
+        return true;
+    }
+    let words: Vec<&str> = segment.arguments.iter().map(String::as_str).collect();
+    match segment.executable.as_deref() {
+        // `docker ps` and the other listings read; `docker start` and
+        // `docker container start` run an existing container again.
+        Some("docker") => super::super::docker_start::start_shaped(&words),
+        // `hol-guard dashboard` starts Guard's daemon and opens a browser.
+        Some("hol-guard") => words.iter().any(|word| *word == "dashboard"),
+        _ => false,
+    }
 }
 
 /// Executables a verified `cd` compound keeps out of its generic branch.
@@ -156,6 +175,9 @@ fn cwd_effectful_executable(executable: Option<&str>) -> bool {
                 | "export"
                 | "set"
                 | "unset"
+                // `--output`, `--remote-name` and `--dump-header` write what
+                // curl fetched into the directory the `cd` named.
+                | "curl"
         )
     )
 }
