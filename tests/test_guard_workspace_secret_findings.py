@@ -161,11 +161,18 @@ def test_a_concurrent_first_run_reuses_the_key_another_worker_stored(
     winner = "a" * 64
     store.set_sync_payload(secret_findings.FINGERPRINT_KEY_STATE_KEY, {"key": winner}, "2026-10-24T00:00:00Z")
     real_read = store.get_sync_payload
-    reads = iter([None])
-    # The first read happens before the other worker's write lands.
-    monkeypatch.setattr(store, "get_sync_payload", lambda key: next(reads, None) or real_read(key))
+    calls = {"n": 0}
+
+    def stale_first_read(key: str) -> object:
+        # The first read happens before the other worker's write lands.
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real_read(key)
+
+    monkeypatch.setattr(store, "get_sync_payload", stale_first_read)
 
     assert secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:01Z") == winner
+    # The miss sends it through the insert-if-absent path and its read-back.
+    assert calls["n"] == 2
     assert real_read(secret_findings.FINGERPRINT_KEY_STATE_KEY) == {"key": winner}
 
 
