@@ -352,25 +352,9 @@ _SERVICE_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/stable_guard_cli.py",
     }
 )
-_PENDING_AUTHORITY_PATHS: Final = frozenset(
-    {
-        # Decision-adjacent Python that remains authoritative until the
-        # package/archive, guarded-launch, command-authority, and local-MCP
-        # migration legs land. Each leg must shrink this set; it may only
-        # grow through an explicit contract change.
-        #
-        # Every entry has to name a module the gate still reaches from a hook
-        # root. A waiver for a module the hook graph no longer reaches excuses
-        # nothing, and leaving it here would let the set read as a backlog
-        # long after the leg that owned it landed, so the gate rejects a stale
-        # entry rather than trusting this list to be pruned by hand.
-        "src/codex_plugin_scanner/guard/cli/commands_hook_native_floor.py",
-        "src/codex_plugin_scanner/guard/cli/commands_support_codex_paths.py",
-        "src/codex_plugin_scanner/guard/cli/commands_support_runtime_artifacts.py",
-        "src/codex_plugin_scanner/guard/runtime/approval_context.py",
-        "src/codex_plugin_scanner/guard/runtime/github_workflow_authorization.py",
-        "src/codex_plugin_scanner/guard/runtime/mcp_skill_firewall.py",
-        "src/codex_plugin_scanner/guard/shims.py",
-    }
-)
+# Decision-adjacent Python that stays authoritative while a migration leg is
+# open. Every leg that once needed a waiver has landed; an entry may only come
+# back through an explicit contract change, and the gate rejects any entry the
+# hook graph no longer reaches.
+_PENDING_AUTHORITY_PATHS: Final[frozenset[str]] = frozenset()
 _PERSISTENCE_ONLY_PATHS: Final[frozenset[str]] = frozenset()
