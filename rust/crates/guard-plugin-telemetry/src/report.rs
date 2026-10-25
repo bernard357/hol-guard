@@ -63,7 +63,10 @@ pub fn normalize_repository_url(value: &str) -> Option<String> {
 /// share that repository (a monorepo), the manifest name must pick exactly
 /// one. A plugin with no repository never matches, so a private plugin that
 /// happens to share a listed name is never reported.
-fn match_listing<'a>(index: &'a [IndexEntry], plugin: &InstalledPlugin) -> Option<&'a IndexEntry> {
+pub(crate) fn match_listing<'a>(
+    index: &'a [IndexEntry],
+    plugin: &InstalledPlugin,
+) -> Option<&'a IndexEntry> {
     let repository = plugin.repository.as_deref()?;
     let candidates: Vec<&IndexEntry> = index
         .iter()
