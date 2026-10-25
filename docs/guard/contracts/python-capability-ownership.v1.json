@@ -1781,6 +1781,31 @@
    "native_replacements": [
     "rust/crates/guard-command/src/sfrs_quote_tokens.rs"
    ]
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/runtime/executable_resolution.py",
+   "module": "codex_plugin_scanner.guard.runtime.executable_resolution",
+   "source_sha256": "69f139b71e515ae54746e688b3cd4bcc982023920d238ca9b556b37bf492c5ff",
+   "forbidden_symbols": [
+    "which_for_execution_cwd"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/sfrs_static_safety.rs"
+   ]
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/constants_patterns.py",
+   "module": "codex_plugin_scanner.guard.runtime.secret_file_request_services.constants_patterns",
+   "source_sha256": "cd25f485945276d7feb730c8d4a6cfed496b7bbe17c1026ae47e2db4cd02b08a",
+   "forbidden_symbols": [
+    "_ENCODED_EXECUTION_TARGET_PATTERN",
+    "_CURL_SHORT_FLAGS_WITH_VALUES",
+    "_SINGLE_INTERPRETER_HEREDOC_PATTERN",
+    "_GIT_GLOBAL_OPTIONS_WITH_VALUE"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/sfrs_patterns.rs"
+   ]
   }
  ],
  "retired_test_paths": [

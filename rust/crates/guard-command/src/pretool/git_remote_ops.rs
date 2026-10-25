@@ -64,6 +64,10 @@ pub(super) fn exact_safe_command(
     // Whether the current pipeline starts with the proven fetch, as in
     // `git fetch origin main 2>&1 | tail -2`.
     let mut fetch_pipeline = false;
+    // The pull or fast-forward merge that rewrote the work tree, if one did.
+    // A commit it checks out may become configuration a later Git read obeys,
+    // which the proof of that read never saw.
+    let mut rewrote: Option<usize> = None;
     for (index, segment) in model.segments.iter().enumerate() {
         if segment.pipeline_index == 0 {
             fetch_pipeline = false;
@@ -104,6 +108,9 @@ pub(super) fn exact_safe_command(
                 fetch_seen = true;
                 pulled |= operation.upstream.is_some();
             }
+            if operation.upstream.is_some() {
+                rewrote = Some(index);
+            }
             fetch_pipeline = true;
             continue;
         }
@@ -132,6 +139,23 @@ pub(super) fn exact_safe_command(
             && !proven_read(model, index, context, deadline, execution_environment)
         {
             return None;
+        }
+        // A fast-forward earlier in the chain may check out a file an include
+        // names, which this read would then obey; the refresh answers for the
+        // read only when no include reaches into the work tree.
+        if let Some(prior) = rewrote {
+            if super::executable_basename(segment.executable.as_deref().unwrap_or_default())
+                == "git"
+                && !verified_refresh(
+                    &model.segments[prior],
+                    segment,
+                    context,
+                    deadline,
+                    execution_environment,
+                )
+            {
+                return None;
+            }
         }
     }
     (fetch_seen || merged).then_some((
@@ -298,14 +322,114 @@ pub(super) fn verified(segment: &CommandSegmentV1, context: super::PathContext<'
     parse(segment, context).is_some() && super::git_probe::proven(&memo_key(segment, context))
 }
 
-/// Whether this evaluation already proved `segment` as a safe `origin` fetch.
-/// A fetch writes only refs and objects, never the configuration a later Git
-/// read in the same command depends on; a pull also updates the work tree.
-pub(super) fn verified_fetch(segment: &CommandSegmentV1, context: super::PathContext<'_>) -> bool {
+/// Whether this evaluation proved `segment` as an `origin` refresh that
+/// settles a later Git read in the same command. A fetch writes only refs and
+/// objects, so it settles one outright. A pull's fast-forward also rewrites
+/// tracked files, and the one route by which a tracked file becomes
+/// configuration the later read obeys is an include that names it, so a pull
+/// settles the read when no include reaches into the work tree.
+pub(super) fn verified_refresh(
+    segment: &CommandSegmentV1,
+    later: &CommandSegmentV1,
+    context: super::PathContext<'_>,
+    deadline: Option<Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
     let stripped = super::segment_proof::without_stderr_merge(segment);
     let segment = stripped.as_ref().unwrap_or(segment);
-    parse(segment, context).is_some_and(|(_, operation)| operation.upstream.is_none())
-        && super::git_probe::proven(&memo_key(segment, context))
+    let Some((leading, operation)) = parse(segment, context) else {
+        return false;
+    };
+    if !super::git_probe::proven(&memo_key(segment, context)) {
+        return false;
+    }
+    if operation.upstream.is_none() {
+        return true;
+    }
+    let Some(route) = read_route(later, context) else {
+        return false;
+    };
+    let mut key = memo_key(segment, context);
+    key.0.push_str(":settles:");
+    key.0.push_str(&route.to_string_lossy());
+    super::git_probe::memoized(key, || {
+        let executable = segment.executable.as_deref()?;
+        let probe = Probe::new(
+            executable,
+            leading,
+            context,
+            deadline,
+            execution_environment,
+        )?;
+        Some(work_tree_settles(&probe, &route))
+    })
+    .unwrap_or(false)
+}
+
+/// The directory the later read runs Git in: the segment's working directory
+/// folded through its leading `-C` routes, as Git folds them. `None` when a
+/// leading option could send the read somewhere this cannot name, which
+/// `--git-dir` and `--work-tree` do.
+fn read_route(
+    later: &CommandSegmentV1,
+    context: super::PathContext<'_>,
+) -> Option<std::path::PathBuf> {
+    let mut route = std::path::PathBuf::from(context.cwd?);
+    let mut arguments = later.arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "-P" | "--no-pager" | "--no-optional-locks" | "--literal-pathspecs" => {}
+            // A relative path joins what came before it; an absolute one
+            // replaces it, which `PathBuf::push` already does.
+            "-C" => route.push(arguments.next()?),
+            "-c" => {
+                arguments.next()?;
+            }
+            _ if argument.starts_with('-') => return None,
+            // The subcommand: every later word is its own.
+            _ => break,
+        }
+    }
+    std::fs::canonicalize(route).ok()
+}
+
+/// Whether the later read, routed to `route`, reads only what this checkout
+/// already proved: it runs at this very top level, and no configuration
+/// include names a file the work tree holds, so no commit the fast-forward
+/// checks out can become configuration. A relative include, or one whose
+/// location this cannot resolve, counts as reaching the work tree.
+fn work_tree_settles(probe: &Probe, route: &std::path::Path) -> bool {
+    let Some((effective, _)) = probe.config() else {
+        return false;
+    };
+    let Some(toplevel) = probe
+        .text(&["rev-parse", "--show-toplevel"])
+        .and_then(|toplevel| std::fs::canonicalize(toplevel).ok())
+    else {
+        return false;
+    };
+    // The fetched commit may add a directory Git reads as a repository of its
+    // own: `safe.bareRepository=all`, Git's default, finds one anywhere below
+    // the checkout, and a read routed into it would take its configuration.
+    // Only a read that runs at this very top level is answered for.
+    if toplevel != route {
+        return false;
+    }
+    !effective.iter().any(|(key, values)| {
+        (key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path")))
+            && values
+                .iter()
+                .any(|value| include_reaches_tree(value, &probe.home, &toplevel))
+    })
+}
+
+fn include_reaches_tree(value: &str, home: &std::path::Path, toplevel: &std::path::Path) -> bool {
+    let path = match value.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if std::path::Path::new(value).is_absolute() => std::path::PathBuf::from(value),
+        None => return true,
+    };
+    !super::git_hook_files::outside_checkout(&path, toplevel)
 }
 
 fn memo_key(
@@ -420,3 +544,7 @@ fn prove(
             .upstream
             .is_none_or(|shape| pull::pull_inert(&effective, &repository, shape, &probe))
 }
+
+#[cfg(test)]
+#[path = "git_remote_ops_tests.rs"]
+mod tests;

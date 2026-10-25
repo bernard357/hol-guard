@@ -578,7 +578,7 @@ fn expand_home_targets(leading: &[String], home: &Path) -> Vec<String> {
     expanded
 }
 
-fn disabled_boolean(value: &str) -> bool {
+pub(super) fn disabled_boolean(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
         "0" | "false" | "no" | "off"

@@ -230,14 +230,26 @@ fn verdict(
             .is_none_or(|executable| super::executable_basename(executable) != "git")
             || super::symlink_writes::current_branch_read(segment, read_context)
     });
-    let settled = |prior: usize| {
+    let settled = |prior: usize, later: &crate::CommandSegmentV1| {
         let segment = segments[prior];
         benign.contains(&prior)
             || write_free(segment)
             || (link_settles
                 && super::symlink_writes::safe_symlink_arguments(segment, read_context))
-            || super::git_remote_ops::verified_fetch(segment, read_context)
-            || super::git_remote_ops::verified_fetch(segment, context)
+            || super::git_remote_ops::verified_refresh(
+                segment,
+                later,
+                read_context,
+                deadline,
+                execution_environment,
+            )
+            || super::git_remote_ops::verified_refresh(
+                segment,
+                later,
+                context,
+                deadline,
+                execution_environment,
+            )
             || super::worktree_add::proven_alone(
                 model,
                 prior,
@@ -278,7 +290,7 @@ fn verdict(
         // invalidate. Other Git operations retain their own native
         // review/permission floors, not this read floor.
         if inspection.is_some() {
-            unsettled.extend((0..index).filter(|prior| !settled(*prior)));
+            unsettled.extend((0..index).filter(|prior| !settled(*prior, segment)));
         }
     }
     unsettled.sort_unstable();

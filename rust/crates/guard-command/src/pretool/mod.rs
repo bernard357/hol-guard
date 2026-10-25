@@ -80,6 +80,7 @@ pub(crate) mod git_apply_check;
 pub(crate) mod git_branch_listing;
 pub(crate) mod git_clean_preview;
 pub(crate) mod git_clone_local;
+pub(crate) mod git_conditional_include;
 mod git_config;
 pub(crate) mod git_config_reads;
 mod git_config_trust;

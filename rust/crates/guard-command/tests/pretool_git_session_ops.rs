@@ -346,6 +346,49 @@ fn fast_forward_pull_is_quiet_only_without_merge_or_checkout_programs() {
     }
 }
 
+/// The chain an agent sends to catch a checkout up and look at where it
+/// landed. The pull's fast-forward rewrites tracked files, so the reads after
+/// it settle only while no configuration include names a file the work tree
+/// holds.
+#[test]
+fn a_proven_fast_forward_pull_settles_the_reads_after_it() {
+    const REFRESH: &str = "native_exact_safe_git_origin_refresh";
+    let session = session("pull-reads");
+    let primary = session.primary.display();
+    session.config(&["branch.main.remote", "origin"]);
+    session.config(&["branch.main.merge", "refs/heads/main"]);
+    let compound = format!(
+        "git -C {primary} pull --ff-only origin main \
+         && git -C {primary} log -1 --oneline \
+         && git -C {primary} status -sb"
+    );
+    session.assert_allow(&compound, REFRESH);
+    session.assert_allow(
+        &format!("git -C {primary} pull --ff-only && git -C {primary} status --short"),
+        REFRESH,
+    );
+    // An include names a file a commit the fast-forward checks out may
+    // rewrite, so what the reads after it obey is not what this proved.
+    let tracked = session.primary.join("ci.gitconfig");
+    std::fs::write(&tracked, "[core]\n\tabbrev = 12\n").unwrap();
+    for value in [
+        "ci.gitconfig".to_string(),
+        tracked.display().to_string(),
+        "../app-portal/ci.gitconfig".to_string(),
+    ] {
+        session.config(&["include.path", value.as_str()]);
+        session.assert_not_allow(&compound);
+        session.config(&["--unset-all", "include.path"]);
+    }
+    session.assert_allow(&compound, REFRESH);
+    // An include outside the work tree names no file the fast-forward writes.
+    let outside = session.home.join("ci.gitconfig");
+    std::fs::write(&outside, "[core]\n\tabbrev = 12\n").unwrap();
+    session.config(&["include.path", outside.display().to_string().as_str()]);
+    session.assert_allow(&compound, REFRESH);
+    session.config(&["--unset-all", "include.path"]);
+}
+
 #[test]
 fn forged_checkout_is_not_a_push_or_removal_target() {
     let session = session("forged");
