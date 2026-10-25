@@ -14,6 +14,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::COMPOSIO_ROLE_FEATURE,
     guard_contracts::EXTENSION_CONTROL_FEATURE,
     guard_contracts::EXTENSION_ALLOW_HINT_FEATURE,
+    crate::hook_direct::saved_decision::review_hint::op::EXTENSION_REVIEW_HINT_FEATURE,
     crate::pre_tool_extension_evidence_op::PRE_TOOL_EXTENSION_EVIDENCE_FEATURE,
     guard_contracts::APPROVAL_EXTENSION_RECOMMENDATION_FEATURE,
     guard_contracts::GITHUB_CLI_CLASSIFY_FEATURE,

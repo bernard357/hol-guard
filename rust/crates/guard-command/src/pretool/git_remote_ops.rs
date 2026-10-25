@@ -147,6 +147,7 @@ pub(super) fn exact_safe_command(
 pub(super) fn settle_fast_forward(
     result: &mut guard_contracts::PreToolResultV1,
     model: Option<&CanonicalCommandV1>,
+    controls: Option<&crate::native_command_controls::CompiledNativeCommandControls>,
     context: super::PathContext<'_>,
     deadline: Option<Instant>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
@@ -171,8 +172,11 @@ pub(super) fn settle_fast_forward(
             Some((_, Operation { upstream: Some(shape), .. })) if !shape.fetches
         )
     });
-    // Only the merge rule's own review is lifted: another rule, a permission
-    // the user keeps under review or an uncertain match keeps its verdict.
+    // Only the merge rule's own review is lifted: another rule that asks for
+    // more than allow, a permission the user keeps under review or an
+    // uncertain match keeps its verdict. A `git status` or `git log` beside
+    // the merge asks for nothing of its own, so it does not hold the proof
+    // back.
     let Some(extensions) = result.command_extensions.as_ref() else {
         return;
     };
@@ -182,10 +186,11 @@ pub(super) fn settle_fast_forward(
         || !extensions.permission_observations.is_empty()
         || !extensions.observations.iter().all(|observation| {
             observation.uncertainty_reasons.is_empty()
-                && matches!(
+                && (matches!(
                     observation.rule_id.as_str(),
                     "command.git.merge" | "command.git.fetch" | "command.git.pull"
-                )
+                ) || controls
+                    .is_some_and(|controls| controls.rule_settles_at_allow(&observation.rule_id)))
         })
     {
         return;

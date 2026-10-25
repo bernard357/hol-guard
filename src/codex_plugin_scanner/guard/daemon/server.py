@@ -3338,7 +3338,10 @@ class GuardDaemonServer:
         # Catalog preparation and publication run on their own threads and hold
         # no daemon object. Without this sink a permanent preparation fault
         # leaves no line in daemon.log while every catalog read answers 503.
-        install_background_sink(self._diagnostics.record_background)
+        install_background_sink(
+            self._diagnostics.record_background,
+            notice=self._diagnostics.record_background_notice,
+        )
         try:
             with timed_phase("init_provider_registry"):
                 self._isolation_provider_registry = load_managed_provider_registry()

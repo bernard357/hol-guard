@@ -5,6 +5,7 @@ use std::ffi::OsStr;
 use guard_command::local_supply_chain::is_audit_sensitive_basename;
 use sha2::{Digest, Sha256};
 
+use super::secrets::SecretScan;
 use super::{Limits, SnapshotMode, SKIP_DIRS};
 use crate::workspace_snapshot_file::{hash_stable, DirHandle, HashError, Kind, Node};
 
@@ -61,6 +62,9 @@ pub(super) struct Walk {
     pub(super) oversize_detector_input: bool,
     pub(super) depth_cap_hit: bool,
     pub(super) visit_cap_hit: bool,
+    /// Present when the caller asked for secret detection over the bytes the
+    /// walk hashes.
+    pub(super) secrets: Option<SecretScan>,
 }
 
 #[derive(Default)]
@@ -217,10 +221,21 @@ fn admit_file(
         walk.exclude(format!("{child}\0unreadable"));
         return;
     };
-    match hash_stable(file, node, limits.file_bytes) {
+    let mut captured = Vec::new();
+    let scan_content = walk
+        .secrets
+        .as_mut()
+        .is_some_and(|secrets| secrets.admits(child));
+    let capture = scan_content.then_some(&mut captured);
+    match hash_stable(file, node, limits.file_bytes, capture) {
         Ok((digest, read)) => {
             walk.hashed_bytes += read;
             walk.entries.push(format!("{child}\0{read}\0{digest}"));
+            if scan_content {
+                if let Some(secrets) = walk.secrets.as_mut() {
+                    secrets.observe(child, &captured);
+                }
+            }
         }
         Err(HashError::Unstable) => {
             walk.unstable += 1;

@@ -486,9 +486,10 @@ impl CompiledNativeCommandControls {
 /// answers for the shape the scan already gave up on, and the question is
 /// only which program the text puts in command position.
 fn backgrounded_nested_executor(normalized: &str) -> bool {
-    let Some(foreground) = crate::pretool::foreground_job(normalized) else {
+    let Some(foreground) = crate::pretool::sequential_jobs(normalized) else {
         return false;
     };
+    let foreground = foreground.as_str();
     // Both of these name the program they run, so the floor below can still
     // bound them and backgrounding takes nothing away.
     if named_xargs_pipeline(foreground) || named_find_exec(foreground) {

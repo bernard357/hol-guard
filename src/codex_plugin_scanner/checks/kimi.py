@@ -20,6 +20,7 @@ from .security import (
     check_no_approval_bypass_defaults,
     check_security_md,
 )
+from .security_binaries import UninspectedBinary, uninspected_binary_check
 
 KIMI_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 KIMI_SEMVER_RE = re.compile(
@@ -476,6 +477,8 @@ def run_kimi_checks(package: NormalizedPackage) -> tuple[CheckResult, ...]:
     """Run Kimi schema, path, MCP, and declared-content checks."""
 
     files = _bundle_files(package)
+    uninspected: list[UninspectedBinary] = []
+    credential_checks = check_credential_access(package.root_path, files, uninspected=uninspected)
     return (
         check_kimi_manifest(package),
         check_kimi_declared_paths(package),
@@ -483,8 +486,9 @@ def run_kimi_checks(package: NormalizedPackage) -> tuple[CheckResult, ...]:
         check_kimi_mcp_servers(package),
         check_security_md(package.root_path),
         check_license(package.root_path),
-        *check_credential_access(package.root_path, files),
+        *credential_checks,
         check_no_approval_bypass_defaults(package.root_path, files),
         check_no_eval(package.root_path, files),
         check_no_shell_injection(package.root_path, files),
+        *((uninspected_binary_check(package.root_path.resolve(), uninspected),) if uninspected else ()),
     )

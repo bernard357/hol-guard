@@ -1049,6 +1049,7 @@ fn evaluate_envelope(
     super::git_remote_ops::settle_fast_forward(
         &mut result,
         command_model,
+        controls,
         super::PathContext {
             home_dir,
             cwd,

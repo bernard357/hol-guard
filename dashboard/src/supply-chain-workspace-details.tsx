@@ -18,6 +18,8 @@ import type {
 } from "./guard-types";
 import { fetchReceipts } from "./guard-api";
 import { SupplyChainBundlePanel } from "./supply-chain-bundle-panel";
+import { bundleRefreshKey, resolveIntelFreshness } from "./supply-chain-intel-freshness";
+import { useSupplyChainBundle } from "./use-supply-chain-bundle";
 import {
   deriveSupplyChainEvidenceRail,
   type SupplyChainEvidenceRailSnapshot,
@@ -209,7 +211,7 @@ export function SupplyChainWorkspaceDetails({
           onOpenAudit={onAuditNavigate}
         />
 
-        <SupplyChainBundlePanel />
+        <SupplyChainBundlePanel refreshKey={bundleRefreshKey(snapshot)} />
 
         <SupplyChainDetailSection
           id="supply-chain-apps-heading"
@@ -263,9 +265,18 @@ export function SupplyChainWorkspaceDetails({
 function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }: { snapshot: GuardRuntimeSnapshot; hideLocalOnlyWarning?: boolean }) {
   const cloudState = snapshot.cloud_state;
   const isSample = cloudState === "local_only";
-  const isStale =
-    snapshot.latest_receipts.length > 0 &&
-    Date.now() - new Date(snapshot.latest_receipts[0].timestamp).getTime() > 7 * 24 * 60 * 60 * 1000;
+  const bundleLoad = useSupplyChainBundle(bundleRefreshKey(snapshot));
+  const freshness = resolveIntelFreshness({ cloudState, load: bundleLoad, nowMs: Date.now() });
+  const needsRefresh = freshness.kind === "none" || freshness.kind === "expired";
+  const generatedAt =
+    freshness.kind === "current" && bundleLoad.phase === "ready" ? bundleLoad.bundle?.generatedAt : undefined;
+  const updateLabel = generatedAt ? `Updated ${formatRelativeTime(generatedAt)}` : freshness.label;
+  const sourceLabel = isSample
+    ? "On this device only"
+    : cloudState === "paired_waiting"
+      ? "Guard Cloud connected, syncing"
+      : "Live from Guard Cloud";
+  const sourceTone = isSample ? "attention" : cloudState === "paired_waiting" ? "blue" : "green";
 
   return (
     <div className="space-y-3">
@@ -273,17 +284,13 @@ function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }: { snapshot:
         <div className="flex items-center gap-2">
           <dt className="text-sm text-slate-600">Data source</dt>
           <dd>
-            <Tag tone={isSample ? "attention" : "green"}>
-              {isSample ? "On this device only" : "Live from Guard Cloud"}
-            </Tag>
+            <Tag tone={sourceTone}>{sourceLabel}</Tag>
           </dd>
         </div>
         <div className="flex items-center gap-2">
           <dt className="text-sm text-slate-600">Last update</dt>
           <dd>
-            <Tag tone={isStale ? "attention" : "green"}>
-              {isStale ? "Older than 7 days" : "Recent"}
-            </Tag>
+            <Tag tone={freshness.tone}>{updateLabel}</Tag>
           </dd>
         </div>
       </dl>
@@ -297,14 +304,13 @@ function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }: { snapshot:
           protection across your machines.
         </p>
       )}
-      {isStale && !isSample && (
+      {needsRefresh && !isSample && (
         <p className="flex items-start gap-2 text-sm leading-6 text-slate-600">
           <HiMiniArrowPath
             className="mt-1 h-4 w-4 shrink-0 text-brand-attention"
             aria-hidden="true"
           />
-          Safety checks have not refreshed recently. Make sure Guard is running, then sync policy or
-          run an audit.
+          {freshness.description}
         </p>
       )}
     </div>

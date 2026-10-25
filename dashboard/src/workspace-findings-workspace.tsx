@@ -14,6 +14,7 @@ import {
   type WorkspaceWorktree,
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
+import { FixCell, FixHistory, FixLoadError, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
 const REFRESH_MS = 15_000;
 
@@ -28,6 +29,7 @@ const COVERAGE_REASONS: Record<string, string> = {
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
   finding_cap: "There were more findings than one assessment keeps.",
+  secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed.",
 };
 
 const FAILURE_REASONS: Record<string, string> = {
@@ -272,15 +274,85 @@ export function WorktreeRow(props: {
           ))}
         </ul>
       )}
-      {assessment && <FindingsTable findings={assessment.findings} />}
+      {assessment && <AssessmentFindings worktree={worktree} assessment={assessment} />}
     </li>
   );
 }
 
-function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
-  if (findings.length === 0) {
-    return <p className="text-sm text-slate-600">No dependency findings in the checked files.</p>;
+function AssessmentFindings(props: { worktree: WorkspaceWorktree; assessment: WorkspaceAssessment }) {
+  const { findings, runId, notRun } = props.assessment;
+  const fixes = useWorktreeFixes(props.worktree, runId);
+  return (
+    <div className="space-y-4">
+      <FixLoadError fixes={fixes} />
+      <FindingsSections findings={findings} secretsChecked={!notRun.includes("secrets")} fixes={fixes} />
+      <FixReview fixes={fixes} findings={findings} />
+      <FixHistory fixes={fixes} findings={findings} />
+    </div>
+  );
+}
+
+function FindingsSections(props: { findings: WorkspaceFinding[]; secretsChecked: boolean; fixes: WorktreeFixes }) {
+  const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
+  const secrets = props.findings.filter((finding) => finding.kind === "secret");
+  if (dependencies.length === 0 && secrets.length === 0) {
+    return (
+      <p className="text-sm text-slate-600">
+        {props.secretsChecked
+          ? "No dependency or secret findings in the checked files."
+          : "No dependency findings in the checked files."}
+      </p>
+    );
   }
+  return (
+    <div className="space-y-4">
+      {dependencies.length > 0 && <FindingsTable findings={dependencies} fixes={props.fixes} />}
+      {secrets.length > 0 && <SecretFindingsTable findings={secrets} />}
+    </div>
+  );
+}
+
+function secretLines(finding: WorkspaceFinding): string {
+  const lines = finding.lines.length > 0 ? finding.lines : finding.line !== null ? [finding.line] : [];
+  return lines.length > 0 ? `:${lines.join(", ")}` : "";
+}
+
+function SecretFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <table className="w-full text-left text-sm">
+        <caption className="sr-only">Possible secrets in files</caption>
+        <thead className="hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group">
+          <tr>
+            <th scope="col" className="px-3 py-2">Rule</th>
+            <th scope="col" className="px-3 py-2">Location</th>
+            <th scope="col" className="px-3 py-2">Severity</th>
+            <th scope="col" className="px-3 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {findings.map((finding) => (
+            <tr key={finding.findingId} className="grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0">
+              <Cell label="Rule">
+                <span className="break-all font-mono text-xs text-slate-700">{finding.ruleIds.join(", ")}</span>
+              </Cell>
+              <Cell label="Location" wide>
+                <span className="break-all font-mono text-xs text-slate-700">
+                  {finding.path}
+                  {secretLines(finding)}
+                </span>
+              </Cell>
+              <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
+              <Cell label="Status"><Tag tone="slate">Not verified</Tag></Cell>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixes: WorktreeFixes }) {
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200">
       <table className="w-full text-left text-sm">
@@ -293,6 +365,7 @@ function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
             <th scope="col" className="px-3 py-2">Decision</th>
             <th scope="col" className="px-3 py-2">Severity</th>
             <th scope="col" className="px-3 py-2">Advisories</th>
+            <th scope="col" className="px-3 py-2">Fix</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -315,6 +388,7 @@ function FindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
                   <span className="text-slate-500">None listed</span>
                 )}
               </Cell>
+              <Cell label="Fix" wide><FixCell finding={finding} fixes={fixes} /></Cell>
             </tr>
           ))}
         </tbody>

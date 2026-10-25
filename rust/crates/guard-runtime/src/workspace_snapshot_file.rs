@@ -60,10 +60,15 @@ pub(crate) enum HashError {
 /// Hash one file the walk opened without following a leaf symlink and reject
 /// it when the open descriptor is not the file the walk saw, or when its size
 /// or mtime moved during the read.
+///
+/// When `capture` is given, the bytes that were hashed are appended to it, so
+/// a detector reads exactly the content the snapshot digest covers. The buffer
+/// is only meaningful when the call returns `Ok`.
 pub(crate) fn hash_stable(
     mut file: File,
     seen: &Node,
     max_bytes: u64,
+    mut capture: Option<&mut Vec<u8>>,
 ) -> Result<(String, u64), HashError> {
     let before = platform::file_node(&file).map_err(|_| HashError::Unreadable)?;
     if !before.unchanged(seen) {
@@ -82,6 +87,9 @@ pub(crate) fn hash_stable(
             return Err(HashError::Unstable);
         }
         hasher.update(&buffer[..count]);
+        if let Some(sink) = capture.as_deref_mut() {
+            sink.extend_from_slice(&buffer[..count]);
+        }
     }
     let after = platform::file_node(&file).map_err(|_| HashError::Unreadable)?;
     if read_total != before.len || !before.unchanged(&after) {

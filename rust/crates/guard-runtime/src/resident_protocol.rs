@@ -116,6 +116,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         guard_plugin_kit::FEATURE.into(),
         guard_plugin_telemetry::FEATURE.into(),
         crate::workspace_snapshot::FEATURE.into(),
+        crate::workspace_snapshot::SECRETS_FEATURE.into(),
         crate::workspace_fix::FEATURE.into(),
         guard_plugin_telemetry::UPDATES_FEATURE.into(),
     ];
@@ -207,6 +208,9 @@ pub(crate) enum ResidentOperationV1 {
     ComposioRole(guard_contracts::ComposioRoleRequestV1),
     ExtensionControl(guard_contracts::ExtensionControlRequestV1),
     ExtensionAllowHint(guard_contracts::ExtensionAllowHintRequestV1),
+    ExtensionReviewHint(
+        crate::hook_direct::saved_decision::review_hint::op::ExtensionReviewHintRequestV1,
+    ),
     ApprovalExtensionRecommendation(guard_contracts::ApprovalExtensionRecommendationRequestV1),
     GithubCliClassify(GithubCliClassifyRequestV1),
     GithubWorkflowPrepare(guard_contracts::GithubWorkflowPrepareRequestV1),

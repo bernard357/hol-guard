@@ -1,6 +1,7 @@
-import { j as jsxRuntimeExports, r as reactExports, ea as fetchSupplyChainBundle, f as formatRelativeTime, co as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dn as HiMiniBugAnt, a6 as Badge, T as Tag, A as ActionButton, dE as fetchReceipts, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, c as HiMiniChevronDown, d as HiMiniArrowPath } from "../guard-dashboard.js";
-import { s as supplyChainEvidenceHref, r as resolveSupplyChainIssues, d as deriveSupplyChainEvidenceRail } from "./supply-chain-issues-BLapd7LV.js";
-import "./feed-health-workspace-B4WCTrqZ.js";
+import { j as jsxRuntimeExports, r as reactExports, co as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dn as HiMiniBugAnt, a6 as Badge, T as Tag, f as formatRelativeTime, A as ActionButton, dG as fetchReceipts, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, c as HiMiniChevronDown, d as HiMiniArrowPath } from "../guard-dashboard.js";
+import { f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-353JT_AI.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CMXvC-ZB.js";
+import { s as supplyChainEvidenceHref, r as resolveSupplyChainIssues, d as deriveSupplyChainEvidenceRail } from "./supply-chain-issues-CBE-TPrC.js";
 import "./home-protection-module-DYHkHSPd.js";
 import "./supply-chain-protection-stats-CJkxdP0r.js";
 function SupplyChainDetailSection({
@@ -70,27 +71,11 @@ function IntelSection({ action, children }) {
     }
   );
 }
-function SupplyChainBundlePanel() {
-  const [bundle, setBundle] = reactExports.useState(null);
-  const [loading, setLoading] = reactExports.useState(true);
-  const [error, setError] = reactExports.useState(null);
-  reactExports.useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetchSupplyChainBundle().then((data) => {
-      if (cancelled) return;
-      setBundle(data);
-      setError(null);
-    }).catch((err) => {
-      if (cancelled) return;
-      setError(err instanceof Error ? err.message : "Failed to load");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+function SupplyChainBundlePanel({ refreshKey = "" }) {
+  const load = useSupplyChainBundle(refreshKey);
+  const bundle = load.phase === "ready" ? load.bundle : null;
+  const loading = load.phase === "loading";
+  const error = load.phase === "error" ? load.message : null;
   const severityCounts = reactExports.useMemo(() => {
     if (!bundle) return null;
     const counts = {};
@@ -137,6 +122,9 @@ function SupplyChainBundlePanel() {
       " Guard has not synced a supply chain bundle yet. Connect to Guard Cloud for live advisory data."
     ] }) });
   }
+  const nowMs = Date.now();
+  const expiry = bundle.expiresAt ? formatBundleExpiry(bundle.expiresAt, nowMs) : null;
+  const expired = isBundleExpired(bundle, nowMs);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     IntelSection,
     {
@@ -166,9 +154,9 @@ function SupplyChainBundlePanel() {
             /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-slate-600", children: "Packages" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { className: "font-medium tabular-nums text-brand-dark", children: bundle.packages.length })
           ] }),
-          bundle.expiresAt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-baseline gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-slate-600", children: "Expires" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { className: "font-medium text-brand-dark", children: formatRelativeTime(bundle.expiresAt) })
+          expiry !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-baseline gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-slate-600", children: expired ? "Expired" : "Expires" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { className: `font-medium ${expired ? "text-brand-attention-text" : "text-brand-dark"}`, children: expiry })
           ] })
         ] }),
         severityCounts && Object.keys(severityCounts).length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm", "aria-label": "Advisories by severity", children: SEVERITY_LEVELS.map((sev) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "flex items-baseline gap-1.5", children: [
@@ -457,7 +445,7 @@ function SupplyChainWorkspaceDetails({
           onOpenAudit: onAuditNavigate
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainBundlePanel, {}),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainBundlePanel, { refreshKey: bundleRefreshKey(snapshot) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         SupplyChainDetailSection,
         {
@@ -500,16 +488,22 @@ function SupplyChainWorkspaceDetails({
 function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }) {
   const cloudState = snapshot.cloud_state;
   const isSample = cloudState === "local_only";
-  const isStale = snapshot.latest_receipts.length > 0 && Date.now() - new Date(snapshot.latest_receipts[0].timestamp).getTime() > 7 * 24 * 60 * 60 * 1e3;
+  const bundleLoad = useSupplyChainBundle(bundleRefreshKey(snapshot));
+  const freshness = resolveIntelFreshness({ cloudState, load: bundleLoad, nowMs: Date.now() });
+  const needsRefresh = freshness.kind === "none" || freshness.kind === "expired";
+  const generatedAt = freshness.kind === "current" && bundleLoad.phase === "ready" ? bundleLoad.bundle?.generatedAt : void 0;
+  const updateLabel = generatedAt ? `Updated ${formatRelativeTime(generatedAt)}` : freshness.label;
+  const sourceLabel = isSample ? "On this device only" : cloudState === "paired_waiting" ? "Guard Cloud connected, syncing" : "Live from Guard Cloud";
+  const sourceTone = isSample ? "attention" : cloudState === "paired_waiting" ? "blue" : "green";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("dl", { className: "flex flex-wrap gap-x-8 gap-y-2", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-sm text-slate-600", children: "Data source" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: isSample ? "attention" : "green", children: isSample ? "On this device only" : "Live from Guard Cloud" }) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: sourceTone, children: sourceLabel }) })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-sm text-slate-600", children: "Last update" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: isStale ? "attention" : "green", children: isStale ? "Older than 7 days" : "Recent" }) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: freshness.tone, children: updateLabel }) })
       ] })
     ] }),
     isSample && !hideLocalOnlyWarning && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "flex items-start gap-2 text-sm leading-6 text-slate-600", children: [
@@ -522,7 +516,7 @@ function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }) {
       ),
       "This device is using sample safety data. Connect Guard Cloud for live package warnings and protection across your machines."
     ] }),
-    isStale && !isSample && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "flex items-start gap-2 text-sm leading-6 text-slate-600", children: [
+    needsRefresh && !isSample && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "flex items-start gap-2 text-sm leading-6 text-slate-600", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         HiMiniArrowPath,
         {
@@ -530,7 +524,7 @@ function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }) {
           "aria-hidden": "true"
         }
       ),
-      "Safety checks have not refreshed recently. Make sure Guard is running, then sync policy or run an audit."
+      freshness.description
     ] })
   ] });
 }

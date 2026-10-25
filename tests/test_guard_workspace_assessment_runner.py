@@ -35,6 +35,16 @@ SNAPSHOT = native.WorkspaceSnapshot(
     entry_count=3,
     summary={"entry_count": 3, "hashed_bytes": 120},
 )
+SECRETS_COMPLETE = {
+    "schema": "guard.workspace-secrets.v1",
+    "status": "complete",
+    "files_scanned": 3,
+    "bytes_scanned": 120,
+    "skipped": {"credential_store": 0, "not_text": 0, "oversize": 0},
+    "truncation_reasons": [],
+    "findings": [],
+}
+SCANNED = replace(SNAPSHOT, secrets=SECRETS_COMPLETE)
 KEYS = assessments.WorktreeKeys(SNAPSHOT.codebase_key, SNAPSHOT.worktree_key)
 
 BLOCKED_PACKAGE = {
@@ -74,7 +84,9 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
     modes: list[str] = []
     remaining = list(values)
 
-    def fake(root: Path, *, mode: str = "content") -> native.WorkspaceSnapshot:
+    def fake(
+        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None
+    ) -> native.WorkspaceSnapshot:
         modes.append(mode)
         return remaining.pop(0) if len(remaining) > 1 else remaining[0]
 
@@ -84,15 +96,16 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
 
 def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
-    modes = snapshots(monkeypatch, runner, SNAPSHOT)
+    modes = snapshots(monkeypatch, runner, SCANNED)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     outcome = runner.execute(store, None, claimed)
     assert modes == ["content", "content"]
-    # Secret scanning never runs in the background, so no run is complete yet.
-    assert outcome.state == "partial"
+    # Both detectors covered the whole snapshot, so the run is complete.
+    assert outcome.state == "completed"
     assert outcome.snapshot_digest == SNAPSHOT.snapshot_digest
-    assert outcome.coverage is not None and outcome.coverage["status"] == "partial"
-    assert outcome.coverage["reasons"] == ["detector_not_run:secrets"]
+    assert outcome.coverage is not None and outcome.coverage["status"] == "complete"
+    assert outcome.coverage["reasons"] == []
+    assert outcome.coverage["detectors"] == {"supply_chain": "complete", "secrets": "complete"}
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
     assert finding["package_version"] == "1.2.8"
@@ -158,7 +171,7 @@ def test_detector_failure_is_reported_without_details(tmp_path: Path, monkeypatc
 def test_snapshot_failure_fails_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
 
-    def unavailable(root: Path, *, mode: str = "content"):
+    def unavailable(root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None):
         raise native.WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
 
     monkeypatch.setattr(runner, "workspace_snapshot", unavailable)
@@ -175,8 +188,8 @@ def test_partial_snapshot_and_missing_lockfile_report_partial_coverage() -> None
         "snapshot_entry_limit",
         "supply_chain_incomplete",
         "lockfile_warnings",
-        "finding_cap",
         "detector_not_run:secrets",
+        "finding_cap",
     ]
     assert coverage["detectors"] == {"supply_chain": "incomplete", "secrets": "not_run"}
 
@@ -249,7 +262,7 @@ def test_oversized_result_is_recorded_as_failure(tmp_path: Path, monkeypatch) ->
         snapshot_digest=SNAPSHOT.snapshot_digest,
         findings=[{"package_name": "x" * 1024}] * 400,
     )
-    monkeypatch.setattr(assessments, "claim_next", lambda store, owner, now_ms: claimed)
+    monkeypatch.setattr(assessments, "claim_next", lambda store, owner, now_ms, **_: claimed)
     monkeypatch.setattr(runner, "execute", lambda store, config, run: huge)
     assert runner.run_next(store, None, owner="test", clock=lambda: T0 + 1)
     run = assessments.get_run(store, claimed.run_id)
@@ -388,3 +401,45 @@ def test_native_reply_parsing_rejects_malformed_results() -> None:
     for broken in ({**reply, "schema": "other"}, {**reply, "snapshot_digest": "short"}, {**reply, "mode": "x"}):
         with pytest.raises(native.WorkspaceSnapshotError):
             native._parse_result(broken)
+
+
+def test_a_run_queued_before_an_upgrade_is_relabelled_when_it_is_claimed(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    old = digest("old-detector-set")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=old, now_ms=T0)
+    claimed = assessments.claim_next(store, owner="test", now_ms=T0, detector_set_digest=runner.DETECTOR_SET_DIGEST)
+    assert claimed is not None
+    assert claimed.detector_set_digest == runner.DETECTOR_SET_DIGEST
+    with store._connect() as connection:
+        stored = connection.execute("select detector_set_digest from workspace_assessment_runs").fetchone()[0]
+    assert stored == runner.DETECTOR_SET_DIGEST
+
+
+def test_coalescing_into_a_queued_run_records_the_current_detector_set(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    first = assessments.enqueue(
+        store, KEYS, trigger_kind="workspace_open", detector_set_digest=digest("old"), now_ms=T0
+    )
+    second = assessments.enqueue(
+        store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0 + 1
+    )
+    assert first == second
+    with store._connect() as connection:
+        stored = connection.execute("select detector_set_digest from workspace_assessment_runs").fetchone()[0]
+    assert stored == runner.DETECTOR_SET_DIGEST
+
+
+def test_run_next_claims_with_the_running_detector_set(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=digest("old"), now_ms=T0)
+    seen: list[str] = []
+    monkeypatch.setattr(
+        runner,
+        "execute",
+        lambda store, config, run: seen.append(run.detector_set_digest) or assessments.RunOutcome(state="failed"),
+    )
+    assert runner.run_next(store, None, owner="test", clock=lambda: T0)
+    assert seen == [runner.DETECTOR_SET_DIGEST]

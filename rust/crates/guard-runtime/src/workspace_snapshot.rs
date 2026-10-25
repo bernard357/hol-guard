@@ -27,12 +27,18 @@ use sha2::{Digest, Sha256};
 use crate::workspace_snapshot_file::DirHandle;
 use crate::workspace_snapshot_git::{git_identity, GitIdentity};
 
+#[path = "workspace_snapshot_secrets.rs"]
+mod secrets;
 #[path = "workspace_snapshot_walk.rs"]
 mod walk;
+#[cfg(test)]
+use secrets::MAX_SECRET_FINDINGS;
+use secrets::{SecretKey, SecretScan, WalkSkips};
 use walk::{walk_directory, Walk, MAX_WALK_DEPTH};
 
 pub(crate) const COMMAND: &str = "workspace-snapshot";
 pub(crate) const FEATURE: &str = "workspace-snapshot-v1";
+pub(crate) const SECRETS_FEATURE: &str = "workspace-snapshot-secrets-v1";
 const RESULT_SCHEMA: &str = "guard.workspace-snapshot.v1";
 const CONTRACT_VERSION: u32 = 1;
 
@@ -46,6 +52,17 @@ const HARD_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 /// tree of empty or excluded entries cannot keep the walk running.
 const DEFAULT_MAX_VISITED_ENTRIES: usize = 250_000;
 const HARD_MAX_VISITED_ENTRIES: usize = 1_000_000;
+/// Snapshot limits that leave files unread, which leaves the secret scan
+/// incomplete too. An oversize file is excluded by policy and counted as a
+/// skip instead.
+const SECRET_SCAN_LIMITS: [&str; 6] = [
+    "entry_cap",
+    "byte_cap",
+    "visit_cap",
+    "depth_cap",
+    "unreadable",
+    "unstable",
+];
 /// Vendored, generated and dependency directories. Their content is owned by
 /// a lockfile or a build, not by the developer's edits.
 pub(crate) const SKIP_DIRS: [&str; 22] = [
@@ -93,6 +110,14 @@ pub(crate) struct SnapshotRequest {
     pub(crate) max_file_bytes: u64,
     #[serde(default)]
     pub(crate) max_visited_entries: usize,
+    /// Also run the secret detector over the content the snapshot hashes.
+    /// Needs `content` mode; the findings never carry the matched text.
+    #[serde(default)]
+    pub(crate) secrets: bool,
+    /// Per-install secret that keys the finding fingerprints. Required with
+    /// `secrets`; never echoed in the result.
+    #[serde(default)]
+    pub(crate) secret_key: Option<SecretKey>,
 }
 
 struct Limits {
@@ -165,18 +190,29 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         .to_str()
         .ok_or("workspace_snapshot_root_not_utf8")?
         .to_owned();
+    if request.secrets && request.mode != SnapshotMode::Content {
+        return Err("workspace_snapshot_secrets_need_content".to_owned());
+    }
+    let secret_key = match (request.secrets, request.secret_key.as_ref()) {
+        (true, Some(key)) if key.is_usable() => Some(key),
+        (true, _) => return Err("workspace_snapshot_secrets_need_key".to_owned()),
+        (false, _) => None,
+    };
     let mut handle = DirHandle::open_root(&root).ok_or("workspace_snapshot_root_unreadable")?;
     let limits = Limits::from_request(request);
     let git = git_identity(&root);
-    let mut walk = Walk::default();
-    walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
-    walk.entries.sort();
-
     let worktree_key = keyed_digest("worktree", &root_text);
     let codebase_key = keyed_digest(
         "codebase",
         git.common_dir.as_deref().unwrap_or(root_text.as_str()),
     );
+    let mut walk = Walk {
+        secrets: secret_key.map(|key| SecretScan::new(key, &codebase_key, &worktree_key)),
+        ..Walk::default()
+    };
+    walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
+    walk.entries.sort();
+
     let input_manifest_digest = input_manifest_digest(&limits, &walk);
     let snapshot_digest = snapshot_digest(
         request.mode,
@@ -208,7 +244,19 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if walk.visit_cap_hit {
         partial_reasons.push("visit_cap");
     }
-    Ok(json!({
+    let secrets = walk.secrets.take().map(|scan| {
+        let incomplete: Vec<&str> = partial_reasons
+            .iter()
+            .copied()
+            .filter(|reason| SECRET_SCAN_LIMITS.contains(reason))
+            .collect();
+        let skips = WalkSkips {
+            sensitive: walk.counts.sensitive,
+            oversize: walk.counts.oversize,
+        };
+        scan.report(&skips, &incomplete)
+    });
+    let mut result = json!({
         "schema": RESULT_SCHEMA,
         "contract_version": CONTRACT_VERSION,
         "mode": match request.mode {
@@ -245,7 +293,11 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
             "max_depth": MAX_WALK_DEPTH,
             "max_visited_entries": limits.visits,
         },
-    }))
+    });
+    if let (Some(secrets), Some(fields)) = (secrets, result.as_object_mut()) {
+        fields.insert("secrets".to_owned(), secrets);
+    }
+    Ok(result)
 }
 
 fn keyed_digest(domain: &str, value: &str) -> String {
@@ -306,6 +358,9 @@ fn snapshot_digest(
     hex::encode(hasher.finalize())
 }
 
+#[cfg(test)]
+#[path = "workspace_snapshot_secrets_tests.rs"]
+mod secrets_tests;
 #[cfg(test)]
 #[path = "workspace_snapshot_tests.rs"]
 mod tests;

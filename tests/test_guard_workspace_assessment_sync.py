@@ -173,6 +173,27 @@ def test_findings_are_capped_and_flagged(tmp_path: Path) -> None:
     assert len(json.dumps(built.payload).encode()) <= sync.MAX_SUMMARY_BYTES + 1024
 
 
+def test_a_secret_scan_that_hit_its_cap_is_synced_as_truncated(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from codex_plugin_scanner.guard import workspace_assessment_runner as runner
+    from tests.test_guard_workspace_assessment_runner import AUDIT, SECRETS_COMPLETE, SNAPSHOT
+
+    capped = replace(
+        SNAPSHOT, secrets={**SECRETS_COMPLETE, "status": "incomplete", "truncation_reasons": ["max_findings"]}
+    )
+    coverage = runner.coverage_summary(capped, AUDIT, findings_truncated=False)
+    guard_store = GuardStore(tmp_path / "home")
+    assessed(guard_store, state="partial", findings=[finding(1)], reasons=list(coverage["reasons"]))
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None
+    [entry] = built.payload["worktrees"]
+    # The receiver must not close secrets this partial list left off.
+    assert entry["findingsTruncated"] is True
+
+
 def test_summary_rides_on_the_first_batch_and_commits_after_delivery(
     store: GuardStore,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
