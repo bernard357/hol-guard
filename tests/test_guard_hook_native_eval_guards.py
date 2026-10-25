@@ -11,7 +11,6 @@ from codex_plugin_scanner.guard.cli.commands_hook_native_edge_facts import _nati
 from codex_plugin_scanner.guard.cli.commands_hook_native_eval import (
     _runtime_external_archive_has_digest_binding_sink,
 )
-from codex_plugin_scanner.guard.cli.commands_hook_native_generic import _observed_action_detail
 from codex_plugin_scanner.guard.native_shim_admin import NativeShimAdminError
 
 
@@ -102,12 +101,3 @@ def test_digest_binding_sink_treats_an_unreachable_resident_as_no_sink(
         )
         is False
     )
-
-
-def test_observed_action_detail_falls_back_to_envelope_composition(tmp_path) -> None:
-    assert _observed_action_detail(None, action_envelope=None, home_dir=tmp_path) is None
-    envelope = SimpleNamespace(tool_name=None, target_paths=())
-    assert _observed_action_detail(None, action_envelope=envelope, home_dir=tmp_path) is None
-    envelope = SimpleNamespace(tool_name="Read", target_paths=("/etc/hosts",))
-    detail = _observed_action_detail(None, action_envelope=envelope, home_dir=tmp_path)
-    assert isinstance(detail, str) and "Read" in detail

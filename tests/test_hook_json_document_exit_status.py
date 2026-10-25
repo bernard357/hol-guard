@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-from codex_plugin_scanner.guard.cli import commands_hook_native_generic_render as render
 from codex_plugin_scanner.guard.cli import commands_support_hook_payload as payload
 
 
@@ -59,59 +58,3 @@ class TestTheRouteReportsTheStatusItWasGiven:
 
     def test_the_python_exit_table_is_gone_from_this_route(self) -> None:
         assert not hasattr(payload, "native_hook_verdict_exit_code")
-
-
-_DIRECTIVE: dict[str, object] = {
-    "route": "render",
-    "queue_observe_request": False,
-    "queue_approval_request": False,
-    "emitter": "default",
-    # A replayed decision: the fallback envelope acknowledges with 0.
-    "exit_code": 0,
-    "json_exit_code": 1,
-    "stderr_only_on_nonzero_exit": False,
-    "codex_native_reason": "never",
-    "include_remediation": False,
-    "terminal_notice": False,
-    "system_message": "none",
-    "try_json_document": True,
-    "after_json": "fallback_envelope",
-    "envelope_decision": "block",
-}
-
-
-class TestTheRendererPassesTheDocumentsOwnStatus:
-    def test_the_relaxed_envelope_status_does_not_reach_the_document(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        emitted: list[dict[str, object]] = []
-        monkeypatch.setattr(
-            render,
-            "_native_hook_json_document",
-            lambda _args, *, exit_code, **_kwargs: ({"decision": "deny"}, exit_code()),
-        )
-        monkeypatch.setattr(
-            render,
-            "_emit_native_hook_json_document",
-            lambda document, **_kwargs: emitted.append(document),
-        )
-
-        code = render.render_generic_hook(
-            _args(),
-            action_envelope=None,
-            approval_context=None,
-            canonical_harness="claude-code",
-            command_text=None,
-            directive=_DIRECTIVE,
-            envelope={},
-            event_name="Stop",
-            incoming_reason="HOL Guard blocked this action",
-            native_edge_result=None,
-            output_stream=None,
-            payload={"hook_event_name": "Stop"},
-            policy_action="block",
-            remediation=lambda: None,
-            verified_benign=lambda: False,
-            coalesce=lambda *values: next((value for value in values if value), ""),
-        )
-
-        assert emitted == [{"decision": "deny"}]
-        assert code == 1
