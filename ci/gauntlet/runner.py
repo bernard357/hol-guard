@@ -63,6 +63,7 @@ from .native_tools import CREDENTIAL_REPORT_CASE, TASK_SCHEMA_CASE, cleanup_priv
 from .observed_extension import generate_observed_extension
 from .parallel import HostSlots, Lease, LoadGate, run_scheduled, validate_jobs
 from .provider import InferenceRelay, LoopbackCollector
+from .git_allow_fixtures import GIT_ALLOW_CASES, configure_git_allow_controls
 from .review_fixtures import GITHUB_REVIEW_CASE, GITHUB_STUB_CASES, WORKTREE_CASE, configure_github_review_controls
 from .script_cases import stage_script_cases
 from .session_folder import seed_session_folder, session_cwd
@@ -240,6 +241,8 @@ def run_case(
                 )
             if scenario.id == GITHUB_REVIEW_CASE:
                 case["extension_control"] = configure_github_review_controls(daemon, fixture.root / "guard-home")
+            if scenario.id in GIT_ALLOW_CASES:
+                case["extension_control"] = configure_git_allow_controls(daemon, fixture.root / "guard-home")
             if scenario.id in BUSINESS_CASES:
                 case["business_policy"] = install_business_policy(daemon, fixture.root / "guard-home")
             # Benign first-contact scenarios run with no pre-bound workspace policy, like a fresh install.

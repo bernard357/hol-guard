@@ -47,6 +47,7 @@ from .review_fixtures import (
     configure_github_review_controls,
     seed_protected_codex_hooks,
 )
+from .git_allow_fixtures import GIT_ALLOW_CASES, configure_git_allow_controls
 from .runner import _fixture_replacements, _scenario_prompt, _watch_binding
 from .script_cases import stage_script_cases
 from .session_folder import seed_session_folder
@@ -228,6 +229,8 @@ def run_harness_case(
                 )
             if scenario.id == GITHUB_REVIEW_CASE:
                 case["extension_control"] = configure_github_review_controls(daemon, guard_home)
+            if scenario.id in GIT_ALLOW_CASES:
+                case["extension_control"] = configure_git_allow_controls(daemon, guard_home)
             if scenario.id in BUSINESS_CASES:
                 case["business_policy"] = install_business_policy(daemon, guard_home)
             # Native-tools cases run first-contact, with no pre-bound workspace policy, like a fresh install.
