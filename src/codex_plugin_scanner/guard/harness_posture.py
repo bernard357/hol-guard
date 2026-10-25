@@ -148,14 +148,6 @@ def effective_harness_posture(config: GuardConfig, harness: object) -> str:
     return max(baseline, override, key=lambda posture: _POSTURE_STRENGTH.get(posture, 1))
 
 
-def harness_is_recording_only(config: GuardConfig | None, harness: object) -> bool:
-    """True when hooks for this harness record but never stop (Watch)."""
-
-    if config is None:
-        return False
-    return effective_harness_posture(config, harness) == "watch"
-
-
 def config_for_harness(config: GuardConfig, harness: object) -> GuardConfig:
     """Config as one harness sees it, for runtime paths that read ``mode``.
 
@@ -270,7 +262,6 @@ __all__ = [
     "effective_harness_posture",
     "effective_harness_postures",
     "global_effective_posture",
-    "harness_is_recording_only",
     "harness_posture_line",
     "harness_posture_override",
     "harness_posture_status",

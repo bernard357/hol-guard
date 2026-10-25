@@ -229,11 +229,7 @@ def _ambient_context_digest_home(
 
     ``context_digest`` calls resolve their guard home either from the bound
     flow context or the default user home; both are pointed at the keyed
-    session home.  ``native_hook_approval_context`` imports the lookup by
-    name at module load, so it holds its own reference and has to be bound
-    separately; without that its tokens are asked of whatever guard home the
-    runner happens to have, and whether a resident can answer there depends
-    on what else already ran in the same worker process.  Unit tests default
+    session home.  Unit tests default
     to ``HOL_GUARD_NATIVE=off`` so the
     adapter's status probe is additionally re-evaluated under ``force`` —
     scoped to the ``native_context`` module only, leaving every other
@@ -242,7 +238,7 @@ def _ambient_context_digest_home(
     preserving the no-binary behavior.
     """
 
-    from codex_plugin_scanner.guard import native_context, native_hook_approval_context, native_runtime
+    from codex_plugin_scanner.guard import native_context, native_runtime
     from codex_plugin_scanner.guard.runtime import approval_context
 
     real_status = native_runtime.native_runtime_status
@@ -272,11 +268,6 @@ def _ambient_context_digest_home(
 
     monkeypatch.setattr(native_context, "native_runtime_status", _digest_status)
     monkeypatch.setattr(native_context, "context_digest_guard_home", lambda: _native_context_home)
-    monkeypatch.setattr(
-        native_hook_approval_context,
-        "context_digest_guard_home",
-        lambda: _native_context_home,
-    )
     monkeypatch.setattr(
         approval_context,
         "_context_digest_guard_home",
@@ -450,22 +441,6 @@ def native_command_artifact_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.fail(f"Native command artifact fixture failed: {type(exc).__name__}: {exc}")
 
     monkeypatch.setattr(commands_support_runtime_artifacts, "review_command_native", review)
-
-
-@pytest.fixture
-def native_data_flow_runtime(
-    native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
-    """Serve data-flow analysis from the real resident; there is no Python fallback."""
-
-    from codex_plugin_scanner.guard import native_data_flow
-
-    monkeypatch.setattr(
-        native_data_flow,
-        "_resolve_digest_home",
-        lambda guard_home: guard_home if guard_home is not None else _native_context_home,
-    )
-    return _native_context_home
 
 
 @pytest.fixture

@@ -578,8 +578,6 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/adapters/_modules/cline/__init__.py",
-          "src/codex_plugin_scanner/guard/adapters/_modules/devin/__init__.py",
           "src/codex_plugin_scanner/guard/adapters/_modules/pi/__init__.py",
           "src/codex_plugin_scanner/guard/adapters/_modules/zcode/__init__.py"
         ],
@@ -636,7 +634,6 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/cli/codex_live_hook_completion.py",
           "src/codex_plugin_scanner/guard/cli/commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_lifecycle_gate.py",
           "src/codex_plugin_scanner/guard/cli/commands_router.py",
