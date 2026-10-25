@@ -395,6 +395,7 @@
       "src/pretool/git_session_probe.rs",
       "src/pretool/git_side_record_reads.rs",
       "src/pretool/git_stash_reads.rs",
+      "src/pretool/git_submodule_reads.rs",
       "src/pretool/git_tag_listing.rs",
       "src/pretool/git_worktree.rs",
       "src/pretool/git_worktree_config.rs",

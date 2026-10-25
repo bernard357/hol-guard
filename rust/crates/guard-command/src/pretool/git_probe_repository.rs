@@ -25,7 +25,9 @@ pub(in crate::pretool) fn repository_inert(
 ) -> Option<bool> {
     // `git describe --dirty` and `--broken` refresh the index before they
     // answer, so they reach the `post-index-change` hook the same way.
-    let refreshes = matches!(operation, "status" | "diff")
+    // `git submodule status` reads the superproject index and then opens each
+    // recorded submodule, so it is held to the same inspection.
+    let refreshes = matches!(operation, "status" | "diff" | "submodule")
         || super::super::git_history_reads::refreshes_the_index(
             operation,
             arguments.get(1..).unwrap_or_default(),

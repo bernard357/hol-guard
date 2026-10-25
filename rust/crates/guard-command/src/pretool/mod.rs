@@ -96,6 +96,7 @@ mod git_rev_list;
 mod git_search_text;
 pub(crate) mod git_side_record_reads;
 pub(crate) mod git_stash_reads;
+pub(crate) mod git_submodule_reads;
 pub(crate) mod git_tag_listing;
 pub(crate) mod recoverable_removal;
 mod repo_create_reason;
