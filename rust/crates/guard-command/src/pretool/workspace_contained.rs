@@ -13,6 +13,7 @@ use std::path::Path;
 
 #[cfg(unix)]
 use crate::restricted_pytest::linux_workspace_sandbox_available;
+#[cfg(unix)]
 use crate::workspace_roots::workspace_admissible;
 
 /// The workspace sandbox runs on macOS and Linux; Windows never admits a workspace.
