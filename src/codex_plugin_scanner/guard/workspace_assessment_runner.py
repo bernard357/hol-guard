@@ -45,6 +45,9 @@ _FINDING_DECISIONS: Final = frozenset({"block", "ask", "warn"})
 _LOOKUP_UNAVAILABLE: Final = frozenset(
     {"cloud_auth_error", "cloud_http_error", "cloud_timeout", "cloud_validation_error"}
 )
+# With no advisory bundle cached, a package Guard only recorded was never
+# compared with any intelligence: it is unknown, not clean.
+_NO_CACHED_MATCH: Final = "no_cached_match"
 
 
 def now_ms() -> int:
@@ -177,11 +180,16 @@ def coverage_summary(
     supply_chain = "complete"
     if payload.get("audit_status") == "incomplete":
         supply_chain = "no_inputs" if not payload.get("manifest_paths") else "incomplete"
-    if supply_chain == "complete" and (egress_refused or _unresolved_packages(payload)):
-        # A package needed registry or Cloud data the offline run could not get.
+    # The audit stopped, or a package needed registry or Cloud data the offline
+    # run could not get.
+    missing_lookup = supply_chain == "incomplete" or bool(egress_refused or _unresolved_packages(payload))
+    unchecked = _unchecked_packages(payload) > 0
+    if supply_chain == "complete" and (missing_lookup or unchecked):
         supply_chain = "incomplete"
-    if supply_chain == "incomplete":
+    if missing_lookup:
         reasons.append("supply_chain_incomplete")
+    if unchecked:
+        reasons.append("advisory_data_unavailable")
     if payload.get("lockfile_warnings"):
         reasons.append("lockfile_warnings")
     # A detector that did not run, or did not cover every file, leaves its
@@ -319,15 +327,31 @@ def _packages(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
 def _lookup_unavailable(package: Mapping[str, object]) -> bool:
     if package.get("decision") == "block":
         return False
+    codes = _reason_codes(package)
+    return bool(codes) and codes <= _LOOKUP_UNAVAILABLE
+
+
+def _reason_codes(package: Mapping[str, object]) -> set[object]:
     reasons = package.get("reasons")
     codes = {item.get("code") for item in reasons if isinstance(item, Mapping)} if isinstance(reasons, list) else set()
     codes.add(package.get("ruleId"))
     codes.discard(None)
-    return bool(codes) and codes <= _LOOKUP_UNAVAILABLE
+    return codes
 
 
 def _unresolved_packages(payload: Mapping[str, object]) -> int:
     return sum(1 for package in _packages(payload) if _lookup_unavailable(package))
+
+
+def _unchecked_packages(payload: Mapping[str, object]) -> int:
+    """Packages that went unchecked because no advisory bundle is cached."""
+
+    evaluation = payload.get("evaluation")
+    if not isinstance(evaluation, Mapping) or evaluation.get("bundle_version") is not None:
+        return 0
+    # The evaluator can add review reasons (an unidentified package, a lockfile
+    # drift) beside the miss; none of them means advisories were consulted.
+    return sum(1 for package in _packages(payload) if _NO_CACHED_MATCH in _reason_codes(package))
 
 
 def _max_severity(reasons: list[Mapping[str, object]]) -> str:
