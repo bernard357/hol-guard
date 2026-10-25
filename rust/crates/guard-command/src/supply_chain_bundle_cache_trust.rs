@@ -12,8 +12,8 @@ use serde_json::Value;
 
 use crate::supply_chain_bundle::{
     load_supply_chain_verification_keys, verify_supply_chain_bundle_response, RingRsaPssVerify,
-    SupplyChainBundle, SupplyChainBundleError, SupplyChainBundleResponse,
-    BUNDLE_CLOCK_SKEW_SECONDS, BUNDLE_MAX_AGE_SECONDS,
+    SupplyChainBundleError, SupplyChainBundleResponse, BUNDLE_CLOCK_SKEW_SECONDS,
+    BUNDLE_MAX_AGE_SECONDS,
 };
 
 /// Why a cached bundle cannot be used.
@@ -115,11 +115,36 @@ pub fn validate_cached_supply_chain_bundle(
     Ok(!keys.is_empty())
 }
 
-/// The last moment the freshness check still accepts `bundle`: its signed
-/// expiry or its maximum age, whichever comes first, with the clock skew the
-/// check allows. A cached result built from the bundle is stale after it.
-pub fn cached_supply_chain_bundle_valid_until(bundle: &SupplyChainBundle) -> Option<f64> {
+/// The last moment the freshness check still accepts the cached response:
+/// the bundle's signed expiry or its maximum age, whichever comes first, with
+/// the clock skew the check allows, and no later than the expiry of a grace
+/// signing key, advertised or in the synced keyring. A cached result built
+/// from the bundle is stale after it.
+pub fn cached_supply_chain_bundle_valid_until(
+    typed: &SupplyChainBundleResponse,
+    sync_keyring: Option<&Value>,
+) -> Option<f64> {
+    let bundle = &typed.bundle;
     let expires = bundle.expires_at_timestamp().ok()? + BUNDLE_CLOCK_SKEW_SECONDS;
     let aged = bundle.generated_at_timestamp().ok()? + BUNDLE_MAX_AGE_SECONDS;
-    Some(expires.min(aged))
+    let mut until = expires.min(aged);
+    let Some(signer) = typed
+        .verification_keys
+        .iter()
+        .find(|key| key.key_id == bundle.key_id)
+    else {
+        return Some(until);
+    };
+    let synced = load_supply_chain_verification_keys(sync_keyring).unwrap_or_default();
+    let grace = std::iter::once(signer).chain(
+        synced
+            .iter()
+            .filter(|key| key.fingerprint_sha256 == signer.fingerprint_sha256),
+    );
+    for key in grace.filter(|key| key.state == "grace") {
+        if let Ok(Some(key_until)) = key.valid_until_timestamp() {
+            until = until.min(key_until);
+        }
+    }
+    Some(until)
 }

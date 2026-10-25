@@ -400,3 +400,21 @@ fn a_universal_binary_confirms_no_single_architecture() {
         (json!("unknown"), json!("platform_unknown"))
     );
 }
+
+#[test]
+fn a_grace_signing_key_bounds_how_long_the_bundle_counts_as_fresh() {
+    let response = signed_response(Some(section(vec![node_rule()])));
+    let grace = |keys: &mut Value| {
+        keys[0]["state"] = json!("grace");
+        keys[0]["validUntil"] = json!("2026-10-25T05:00:00.000Z");
+    };
+    let mut synced = anchored(response.clone());
+    grace(&mut synced["sync_keyring"]["keys"]);
+    let mut advertised = response;
+    grace(&mut advertised["verificationKeys"]);
+    for input in [synced, cached(advertised)] {
+        let source = &assess(trusted_node("22.12.0", "arm64"), input)["advisory_source"];
+        assert_eq!(source["state"], json!("verified"));
+        assert_eq!(source["valid_until"], json!(1_792_904_400.0));
+    }
+}
