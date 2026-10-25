@@ -321,11 +321,15 @@ def test_phase14_guard_hook_queues_package_review_for_managed_harnesses(
 
     pending = store.list_approval_requests(limit=5)
     assert rc == _PACKAGE_REVIEW_EXIT_CODES.get(harness, 0)
-    assert output["policy_action"] == "review"
-    assert output["reason_code"] == "native_package_review"
-    assert output.get("prompted") is True
     assert len(pending) == 1
-    assert [item["request_id"] for item in output["approval_requests"]] == [pending[0]["request_id"]]
+    if harness == "hermes":
+        # Hermes reads one flat decision document, as from its bridge.
+        assert output["decision"] == "block"
+    else:
+        assert output["policy_action"] == "review"
+        assert output["reason_code"] == "native_package_review"
+        assert output.get("prompted") is True
+        assert [item["request_id"] for item in output["approval_requests"]] == [pending[0]["request_id"]]
     envelope = pending[0]["action_envelope_json"]
     assert envelope["command"] == "npm install minimist@1.2.8"
     assert envelope["package_manager"] == "npm"
@@ -445,10 +449,17 @@ def test_phase14_package_hook_block_copy_stays_consistent_across_harnesses(
         monkeypatch=monkeypatch,
     )
 
+    assert rc == _PACKAGE_REVIEW_EXIT_CODES.get(harness, 0)
+    if harness == "hermes":
+        # Hermes reads one flat decision document, as from its bridge.
+        assert set(output) == {"decision", "reason"}
+        assert output["decision"] == "block"
+        assert "minimist@1.2.8" in str(output["reason"])
+        assert store.count_approval_requests(status="pending") == 0
+        return
     hook_output = output["hookSpecificOutput"]
     assert isinstance(hook_output, dict)
     message = str(hook_output["permissionDecisionReason"])
-    assert rc == _PACKAGE_REVIEW_EXIT_CODES.get(harness, 0)
     if harness == "copilot":
         # Copilot sends its command in `toolArgs`, which the daemon's package
         # evaluator does not read, so the bundle's block reaches Copilot as an

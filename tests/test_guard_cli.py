@@ -5439,7 +5439,7 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
         reason = output["hookSpecificOutput"]["permissionDecisionReason"]
         assert reason.startswith("HOL Guard")
         assert "http://127.0.0.1:" not in reason
-        if output["policy_action"] == "review":
+        if output["policy_action"] in {"review", "require-reapproval"}:
             # Where the daemon can bind the script's bytes to its run, it queues
             # the reviewed version for approval instead of a terminal block.
             assert output["approval_requests"]
