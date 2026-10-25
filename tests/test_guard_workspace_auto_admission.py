@@ -197,6 +197,7 @@ def test_poll_admits_registered_workspaces_before_observing(tmp_path: Path, monk
     snapshots(monkeypatch, worker, replace(STAT, snapshot_digest=digest("stat-1")))
     monkeypatch.setattr(guard_config, "load_guard_config", lambda home: object())
     monkeypatch.setattr(worker, "run_next", lambda store, config, owner, user_only=False: False)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: None)
     register(store, "claude-code", str(tmp_path))
 
     assert worker.poll_once(store, owner="test", stop=threading.Event(), attempted={}) == 0

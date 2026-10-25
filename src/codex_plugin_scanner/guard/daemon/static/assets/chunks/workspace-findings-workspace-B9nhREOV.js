@@ -788,7 +788,7 @@ function WorkspaceFindingsWorkspace(props) {
     ] }),
     loadError && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorNotice, { message: loadError, onRetry: () => void refresh() }),
     actionError && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorNotice, { message: actionError }),
-    state.deferredReason === "resource_pressure" && state.worktrees.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "status", className: "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600", children: "This device is busy, so background checks are waiting. Checks you start with Run now still run." }),
+    state.deferredReason === "resource_pressure" && state.worktrees.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "status", className: "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600", children: "This device is busy, so background checks are waiting. Checks you start with Assess now still run." }),
     state.worktrees.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
       EmptyState,
       {

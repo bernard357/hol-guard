@@ -183,7 +183,7 @@ export function WorkspaceFindingsWorkspace(props: {
       {actionError && <ErrorNotice message={actionError} />}
       {state.deferredReason === "resource_pressure" && state.worktrees.length > 0 && (
         <p role="status" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          This device is busy, so background checks are waiting. Checks you start with Run now still run.
+          This device is busy, so background checks are waiting. Checks you start with Assess now still run.
         </p>
       )}
       {state.worktrees.length === 0 ? (
