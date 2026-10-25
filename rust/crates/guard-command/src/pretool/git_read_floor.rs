@@ -82,6 +82,16 @@ fn verdict(
     {
         return Verdict::Clear;
     }
+    // A proven `origin` refresh or fast-forward of one answers for its whole
+    // chain: it starts no hook, filter or transport program, and the Git
+    // reads standing beside it were each proven helper-free in the directory
+    // it runs in. Those reads keep that proof, so the fetch or merge before
+    // them is not an unsettled step.
+    if super::git_remote_ops::exact_safe_command(model, context, deadline, execution_environment)
+        .is_some()
+    {
+        return Verdict::Clear;
+    }
     // A proven read prefix holds no Git segment and changes nothing a later
     // read depends on, so the floor judges the command from its `cd` onward.
     if let Some(rest) = super::segment_proof::after_read_prefix(model, context) {

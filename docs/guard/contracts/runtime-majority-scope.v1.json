@@ -252,9 +252,10 @@
       {
         "id": "workspace-assessment-async",
         "category": "async_control_plane",
-        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
+        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit and the native secret scan against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
         "path": [
           "src/codex_plugin_scanner/guard/workspace_assessment_*.py",
+          "src/codex_plugin_scanner/guard/workspace_secret_findings.py",
           "src/codex_plugin_scanner/guard/native_workspace_snapshot.py",
           "src/codex_plugin_scanner/guard/native_workspace_fix.py",
           "src/codex_plugin_scanner/guard/store_workspace_assessment_schema.py",
@@ -914,6 +915,14 @@
           "src/codex_plugin_scanner/guard/cli/native_hook_exit_code.py"
         ],
         "reason": "Reviewed and retained in runtime scope: the per-harness verdict exit-status table. The JSON document now carries the status the resident's directive decided, so commands_support_hook_payload no longer imports this table at load; commands_hook_native_availability still reaches it lazily to map a native-unavailable fail-closed deny onto the harness's own exit contract. That fallback runs exactly when the resident cannot answer, so the table stays counted as runtime until the native runtime owns the unavailable lane too."
+      },
+      {
+        "path": [
+          "src/codex_plugin_scanner/guard/runtime/direct_vitest.py",
+          "src/codex_plugin_scanner/guard/runtime/package_evidence_common.py",
+          "src/codex_plugin_scanner/guard/runtime/jsonc.py"
+        ],
+        "reason": "Reviewed and retained in runtime scope: the retired Python literal-cd parser imported these at load, so they counted as eager. They are now reached lazily: direct_vitest presents the resident's direct local tool context to the support-artifact command, and package_evidence_common with its bounded JSONC decoder reads lockfile integrity for the contained Node tool lane. They run while Guard prepares a contained run, so they stay counted as runtime."
       }
     ],
     "tests": {

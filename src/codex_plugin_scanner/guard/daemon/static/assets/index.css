@@ -119,6 +119,7 @@
     --color-emerald-600: oklch(59.6% .145 163.225);
     --color-emerald-700: oklch(50.8% .118 165.612);
     --color-emerald-800: oklch(43.2% .095 166.913);
+    --color-emerald-900: oklch(37.8% .077 168.94);
     --color-emerald-950: oklch(26.2% .051 172.552);
     --color-cyan-50: oklch(98.4% .019 200.873);
     --color-cyan-200: oklch(91.7% .08 205.041);
@@ -1760,6 +1761,10 @@
 
   .basis-56 {
     flex-basis: calc(var(--spacing) * 56);
+  }
+
+  .basis-64 {
+    flex-basis: calc(var(--spacing) * 64);
   }
 
   .basis-full {
@@ -4110,8 +4115,14 @@
     }
   }
 
-  .bg-surface-1 {
+  .bg-surface-1, .bg-surface-1\/60 {
     background-color: var(--surface-1);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-surface-1\/60 {
+      background-color: color-mix(in oklab, var(--surface-1) 60%, transparent);
+    }
   }
 
   .bg-surface-2 {
@@ -5059,6 +5070,10 @@
     white-space: nowrap;
   }
 
+  .whitespace-pre {
+    white-space: pre;
+  }
+
   .whitespace-pre-wrap {
     white-space: pre-wrap;
   }
@@ -5343,6 +5358,10 @@
 
   .text-emerald-800 {
     color: var(--color-emerald-800);
+  }
+
+  .text-emerald-900 {
+    color: var(--color-emerald-900);
   }
 
   .text-emerald-950 {

@@ -25,6 +25,15 @@ def verify_fixture_scope(root: Path, executable: str) -> None:
         ("additional value on fixture line", relative, fixture + " " + unexpected, True),
         ("additional value in fixture file", relative, fixture + "\n" + unexpected, True),
     )
+    binary_relative = Path("tests/test_security_binaries.py")
+    historical = "SECRET_LINE = 'const token = \"sk-proj-" + "abcdefghijklmnopqrstuvwxyz0123456789\";\\n'"
+    cases += (
+        ("historical packaged-binary fixture", binary_relative, historical, False),
+        ("packaged-binary fixture outside test", Path("src/production.py"), historical, True),
+        ("changed packaged-binary fixture", binary_relative, historical.replace("0123456789", "9876543210"), True),
+        ("credential beside packaged-binary fixture", binary_relative, historical + " " + unexpected, True),
+        ("credential after packaged-binary fixture", binary_relative, historical + "\n" + unexpected, True),
+    )
     pem_relative = Path("rust/crates/guard-contained-process/src/runtime_resources/resource_tests.rs")
     pem_lines = (root / pem_relative).read_text(encoding="utf-8").splitlines()
     framing = [index for index, line in enumerate(pem_lines) if "PRIVATE KEY" in line]

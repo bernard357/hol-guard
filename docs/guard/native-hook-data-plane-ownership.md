@@ -150,26 +150,26 @@ command evaluation `command_effect_decide` uses, under the resident's own
 admitted control snapshot, with hypothetical enabled permissions, then keeps
 only the permissions the allow needs. It offers a hint only when the pause is
 the extension review itself (`native_command_review_required`), so a fixed
-PreTool floor never gets one. Python
-(`native_extension_allow_hint.py`) builds the query from the evidence the review
-already holds and shape-checks the answer; with no resident there is no hint
-and no Python recomputation. The one remaining mirror is the cheap gate that
-decides whether a paused review is worth asking about at all (not under an
-authority failure, held for review, and the extension review itself rather than
-a fixed floor): `compute_extension_allow_hint`, the resident's
-`allow_hint_candidate` check and `native_review_allow_hint._definite_review_binding`
-state the same rule, the resident stays authoritative, and the recorded vectors in
-`rust/crates/guard-runtime/testdata/hook_direct_review/` pin the resident and
-daemon copies together. The settle proofs and the counterfactual that verifies a
-hint before it is stored are Rust-owned. A review the direct hook lane queues
-itself stores its hints without a daemon round trip:
-`rust/crates/guard-runtime/src/hook_direct_review_hint.rs` repeats the review
-with extension evidence under the admitted snapshot, inside one command
-authority lease, and asks `extension_allow_hint_op` only when that review
-matches the one that paused. The coverage hint
-(`rust/crates/guard-runtime/src/extension_coverage_hint.rs`, mirroring
-`extension_coverage_hint.py`) rides on every queued review an extension
-observed.
+PreTool floor never gets one. Python only shape-checks the answer; with no
+resident there is no hint and no Python recomputation. The gate that decides
+whether a paused review is worth asking about at all (not under an authority
+failure, held for review, and the extension review itself rather than a fixed
+floor) is the resident's `allow_hint_candidate`, and the recorded vectors in
+`rust/crates/guard-runtime/testdata/hook_direct_review/` pin it. The settle
+proofs and the counterfactual that verifies a hint before it is stored are
+Rust-owned. A review the direct hook lane queues itself stores its hints without
+a daemon round trip: `rust/crates/guard-runtime/src/hook_direct_review_hint.rs`
+repeats the review with extension evidence under the admitted snapshot, inside
+one command authority lease, and asks `extension_allow_hint_op` only when that
+review matches the one that paused. A review the daemon queues asks the
+`extension_review_hint` resident op
+(`rust/crates/guard-runtime/src/hook_direct_review_hint_op.rs`) for the same
+hints, handing it the paused result; a pending row read back with nothing
+stored asks the same op without one, and the resident reviews the command once
+for both hints. `native_review_allow_hint.py` only picks the command and launch
+directory and shape-checks the answer. The coverage hint
+(`rust/crates/guard-runtime/src/extension_coverage_hint.rs`) rides on every
+queued review an extension observed; Python only validates and delivers it.
 
 A review due only to non-recognition of a command that launches a local CLI
 this device has not set up is a connector-setup review, and the direct hook lane

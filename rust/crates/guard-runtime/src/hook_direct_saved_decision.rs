@@ -538,7 +538,7 @@ mod review_request;
 mod review_queue;
 
 #[path = "hook_direct_review_hint.rs"]
-mod review_hint;
+pub(crate) mod review_hint;
 
 #[cfg(test)]
 #[path = "hook_direct_saved_decision_tests.rs"]

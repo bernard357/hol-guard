@@ -1,7 +1,8 @@
 """Run one claimed workspace assessment.
 
 The run is bound to a content snapshot taken before the detectors start and
-checked again after they finish. If the two differ the worktree changed under
+checked again after they finish. The secret detector reads the very bytes that
+snapshot hashed, so its findings are bound to the same content. If the two differ the worktree changed under
 the detectors, so the run is superseded rather than reporting findings for
 content that no longer exists. Detectors run locally and the Cloud audit is
 never used from here. An automatic run is also offline: every network
@@ -26,13 +27,12 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 
-DETECTOR_SET: Final = ("supply_chain_local_v1",)
+DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR)
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
-# Secret scanning runs the user's Git, which a background run must not do.
-_NOT_RUN_DETECTORS: Final = ("secrets",)
 MAX_FINDINGS: Final = 500
 # Leave room under the column bound for the list brackets and separators.
 _FINDINGS_BYTE_BUDGET: Final = MAX_FINDINGS_JSON_BYTES - 1024
@@ -54,7 +54,7 @@ def now_ms() -> int:
 def run_next(store: Any, config: Any, *, owner: str, clock: Callable[[], int] = now_ms) -> bool:
     """Claim and run one due assessment; return whether one ran."""
 
-    claimed = assessments.claim_next(store, owner=owner, now_ms=clock())
+    claimed = assessments.claim_next(store, owner=owner, now_ms=clock(), detector_set_digest=DETECTOR_SET_DIGEST)
     if claimed is None:
         return False
     outcome = execute(store, config, claimed)
@@ -72,10 +72,11 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
     root = Path(run.private_root)
     try:
         feed_digest = feed_context_digest(store)
+        secret_key = load_fingerprint_key(store, datetime.now(timezone.utc).isoformat())
     except sqlite3.Error:
         return assessments.RunOutcome(state="failed", error_code="feed_context_unavailable")
     try:
-        before = workspace_snapshot(root, mode="content")
+        before = _snapshot_with_secrets(root, secret_key)
     except WorkspaceSnapshotError as error:
         return assessments.RunOutcome(state="failed", error_code=error.code)
     if before.worktree_key != run.keys.worktree_key or before.codebase_key != run.keys.codebase_key:
@@ -103,7 +104,9 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             input_manifest_digest=before.input_manifest_digest,
             feed_context_digest=feed_digest,
         )
-    findings, truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
+    supply_findings, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
+    findings, merge_truncated = merge_findings(supply_findings, project_secret_findings(before.secrets))
+    truncated = supply_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
     coverage = coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused)
     return assessments.RunOutcome(
@@ -114,6 +117,18 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
         coverage=coverage,
         findings=findings,
     )
+
+
+def _snapshot_with_secrets(root: Path, secret_key: str) -> WorkspaceSnapshot:
+    """Snapshot with the secret scan, or without it on a runtime that lacks it."""
+
+    try:
+        return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key)
+    except WorkspaceSnapshotError as error:
+        if error.code != "workspace_snapshot_secrets_unavailable":
+            raise
+    # The run is then partial: coverage reports the secret detector as not run.
+    return workspace_snapshot(root, mode="content")
 
 
 def _local_audit(store: Any, config: Any, root: Path) -> dict[str, object]:
@@ -165,19 +180,28 @@ def coverage_summary(
         reasons.append("supply_chain_incomplete")
     if payload.get("lockfile_warnings"):
         reasons.append("lockfile_warnings")
+    # A detector that did not run, or did not cover every file, leaves its
+    # findings unknown, so the run is partial until every detector has covered
+    # the whole snapshot.
+    secrets: dict[str, object] = {}
+    if snapshot.secrets is None:
+        secrets_status = "not_run"
+        reasons.append(f"detector_not_run:{SECRET_DETECTOR}")
+    else:
+        secrets_status, secrets, secret_reasons = secret_coverage(snapshot.secrets)
+        if secrets_status != "complete":
+            reasons.append("secrets_incomplete")
+        # A scan that stopped at its own cap lists only some secrets, so the
+        # findings list is as truncated as one cut by the merge bounds.
+        findings_truncated = findings_truncated or "max_findings" in secret_reasons
     if findings_truncated:
         reasons.append("finding_cap")
-    # A detector that did not run leaves its findings unknown, so the run is
-    # partial until every detector in the set has covered the snapshot.
-    reasons.extend(f"detector_not_run:{name}" for name in _NOT_RUN_DETECTORS)
     return {
         "status": "partial" if reasons else "complete",
         "reasons": reasons,
         "snapshot": {"coverage": snapshot.coverage, **snapshot.summary},
-        "detectors": {
-            "supply_chain": supply_chain,
-            **{name: "not_run" for name in _NOT_RUN_DETECTORS},
-        },
+        "detectors": {"supply_chain": supply_chain, SECRET_DETECTOR: secrets_status},
+        **({"secrets": secrets} if secrets else {}),
         "manifest_count": len(_strings(payload.get("manifest_paths"))),
         "lockfile_count": len(_strings(payload.get("lockfile_paths"))),
         "head_commit": snapshot.head_commit,
@@ -248,6 +272,40 @@ def project_supply_chain_findings(
     return kept, len(kept) < len(ordered)
 
 
+def merge_findings(
+    *groups: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], bool]:
+    """Order findings from every detector and keep them within the bounds.
+
+    Each group is already bounded on its own; the merge keeps the most severe
+    findings first and reports whether any were dropped.
+    """
+
+    ordered = sorted(
+        (item for group in groups for item in group),
+        key=lambda item: (
+            _SEVERITY_ORDER.index(str(item["severity"])),
+            str(item.get("package_name") or item.get("path") or ""),
+            _line(item),
+            str(item["finding_id"]),
+        ),
+    )
+    kept: list[dict[str, object]] = []
+    used = 0
+    for finding in ordered[:MAX_FINDINGS]:
+        size = len(json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
+        if used + size > _FINDINGS_BYTE_BUDGET:
+            break
+        kept.append(finding)
+        used += size
+    return kept, len(kept) < len(ordered)
+
+
+def _line(item: Mapping[str, object]) -> int:
+    line = item.get("line")
+    return line if isinstance(line, int) else 0
+
+
 def _packages(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
     evaluation = payload.get("evaluation")
     packages = evaluation.get("packages") if isinstance(evaluation, Mapping) else None
@@ -292,6 +350,7 @@ __all__ = [
     "coverage_summary",
     "execute",
     "feed_context_digest",
+    "merge_findings",
     "now_ms",
     "project_supply_chain_findings",
     "run_next",

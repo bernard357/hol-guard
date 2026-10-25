@@ -40,6 +40,27 @@ impl CompiledNativeCommandControls {
         }
     }
 
+    /// Whether `rule_id` by itself asks for nothing beyond allow: a rule the
+    /// user explicitly allowed, or one whose packaged mode and permission
+    /// leave the command where it already stands. A proof that lifts one
+    /// rule's review uses this to tell the rules it is not lifting, so an
+    /// ordinary read beside the reviewed step does not hold the proof back.
+    pub(crate) fn rule_settles_at_allow(&self, rule_id: &str) -> bool {
+        let Some(index) = self.rule_indices.get(rule_id) else {
+            return false;
+        };
+        let rule = &self.program.rules[*index];
+        let extension = &self.program.extensions[rule.extension_index];
+        if self.blocked_extensions.contains(&extension.extension_id)
+            || self.blocked_permissions.contains(&rule.permission_id)
+        {
+            return false;
+        }
+        self.explicitly_enabled_permissions
+            .contains(&rule.permission_id)
+            || rule_floor(rule, extension.required) == "allow"
+    }
+
     /// Whether the user's authenticated Allow for every segment's extension
     /// permissions settles a command whose delegated floor is already allow.
     /// Guard self-protection, secret access and exfiltration, configured Git
