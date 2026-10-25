@@ -372,7 +372,8 @@ fn a_notice_under_the_bound_key_is_answered_and_marked_seen() {
 #[test]
 fn a_tool_call_notice_stores_its_command_with_credentials_masked() {
     let (lane, connection) = keyed_lane("permission-notice-masked");
-    let command = "curl -H 'Authorization: Bearer synthetic0secret0token' https://example.invalid";
+    let token = "synthetic0secret0token";
+    let command = format!("curl -H 'Authorization: Bearer {token}' https://example.invalid");
     for (session, artifact_type) in [("masked", "tool_call"), ("kept", "package_request")] {
         let mut sent = notice(session, artifact_type);
         sent["command"] = json!(command);
