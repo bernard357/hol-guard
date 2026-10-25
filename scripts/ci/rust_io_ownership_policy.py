@@ -105,7 +105,7 @@ _TRANSPORT_INTEGRITY_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/native_approval_proof.py",
         # Same correlation-only digest for the store-policy claim and diagnostic ops.
         "src/codex_plugin_scanner/guard/native_store_policy.py",
-        # Same correlation-only digest for the generic-hook decision resident op.
+        # Same correlation-only digest for the hook decision resident op.
         "src/codex_plugin_scanner/guard/native_hook_decision.py",
         # Same correlation-only digest for the daemon route/auth policy op.
         "src/codex_plugin_scanner/guard/native_daemon_route.py",
@@ -190,7 +190,7 @@ _TRANSPORT_DECODE_PATHS: Final = frozenset(
         # Decodes the bounded resident claim and diagnostic replies; the answer
         # is strictly bound to the request and never reinterpreted.
         "src/codex_plugin_scanner/guard/native_store_policy.py",
-        # Decodes the bounded resident generic-hook decision response; the
+        # Decodes the bounded resident hook decision response; the
         # answer is strictly validated and never reinterpreted into a decision.
         "src/codex_plugin_scanner/guard/native_hook_decision.py",
         # Decodes the bounded resident daemon route policy response; strictly
