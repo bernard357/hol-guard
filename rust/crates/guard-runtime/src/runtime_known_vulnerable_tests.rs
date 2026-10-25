@@ -176,6 +176,12 @@ fn strict_blocks_and_a_stronger_result_keeps_its_own_reason() {
         false,
     );
     assert_eq!(held.reason_code, FINDING);
+    assert!(held.reason.contains("CVE-1"));
+    assert!(
+        held.reason.ends_with("Also: native test"),
+        "{}",
+        held.reason
+    );
 }
 
 #[cfg(unix)]
@@ -196,24 +202,41 @@ fn launches_resolve_the_way_the_shell_would() {
     executable(&bin.join("node"));
     executable(&local.join("node"));
     let search = bin.to_string_lossy().into_owned();
-    let launches = |command: &str| {
-        let mut found = runtime_launches(command, Some(root.path()), root.path(), Some(&search))
+    let launches_on = |command: &str, search: &str| {
+        let mut found = runtime_launches(command, Some(root.path()), root.path(), Some(search))
             .into_iter()
             .map(|path| path.strip_prefix(root.path()).unwrap().to_owned())
             .collect::<Vec<_>>();
         found.sort();
         found
     };
+    let launches = |command: &str| launches_on(command, &search);
+    let tools = [Path::new("tools/node")];
     assert_eq!(launches("node server.js"), [Path::new("bin/node")]);
-    assert_eq!(
-        launches("cd x && ./tools/node a.js"),
-        [Path::new("tools/node")]
-    );
+    assert_eq!(launches("./tools/node a.js"), tools);
     assert_eq!(
         launches("bash -c 'node a.js' && tools/node b.js"),
         [Path::new("bin/node"), Path::new("tools/node")]
     );
+    assert_eq!(launches("exec node a.js"), [Path::new("bin/node")]);
+    assert_eq!(launches("exec -a app node a.js"), [Path::new("bin/node")]);
+    // A PATH prefix hides only what a bare name finds.
     assert!(launches("PATH=/elsewhere node a.js").is_empty());
+    assert_eq!(launches("PATH=/elsewhere ./tools/node a.js"), tools);
+    // After a directory or PATH change, only an absolute path is still known.
+    let absolute = format!("cd x && {}/tools/node a.js", root.path().display());
+    assert_eq!(launches(&absolute), tools);
+    for command in [
+        "cd x && ./tools/node a.js",
+        "cd x && bash -c './tools/node a.js'",
+        "export PATH=/x:$PATH; node a.js",
+        "PATH=/x; node a.js",
+        "source env.sh && node a.js",
+    ] {
+        assert!(launches(command).is_empty(), "{command}");
+    }
+    // A relative PATH entry is looked up from the working directory.
+    assert_eq!(launches_on("node a.js", "tools"), tools);
     assert!(launches("npm test && python3 -V && echo node").is_empty());
 }
 
@@ -232,9 +255,26 @@ fn only_command_text_is_read() {
     assert_eq!(command_text(&string).as_deref(), Some("node a.js"));
     let argv = json!({"tool_input": {"command": ["bash", "-lc", "node a.js"]}});
     assert_eq!(command_text(&argv).as_deref(), Some("node a.js"));
+    let positional = json!({"tool_input": {"command": ["bash", "-c", "node \"$0\"", "a.js"]}});
+    assert_eq!(command_text(&positional).as_deref(), Some("node \"$0\""));
     assert_eq!(
         command_text(&json!({"tool_input": {"command": "  "}})),
         None
     );
     assert_eq!(command_text(&json!({"tool_input": {"url": "x"}})), None);
+}
+
+#[test]
+fn a_verification_is_not_reused_past_its_expiry() {
+    let at = std::time::Instant::now();
+    let now = crate::binding_capture_op::now_seconds();
+    let until = |valid_until: Value| {
+        LaunchAdvisories::for_tests(
+            json!([]),
+            json!({"state": "verified", "valid_until": valid_until}),
+        )
+    };
+    assert!(source::reusable(&until(json!(now + 600.0)), at));
+    assert!(source::reusable(&until(Value::Null), at));
+    assert!(!source::reusable(&until(json!(now - 1.0)), at));
 }

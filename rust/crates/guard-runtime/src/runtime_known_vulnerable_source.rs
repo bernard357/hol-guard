@@ -2,9 +2,10 @@
 //! supply-chain bundle, and the identity of each launched executable.
 //!
 //! Both are read locally on the hook path, never from Cloud. The bundle is
-//! verified again whenever its rows change and at least once a minute, so an
-//! expiry or key change is seen without a resync. An executable is hashed
-//! again whenever its file changes; an unchanged file reuses its identity.
+//! verified again whenever its rows change, when it reaches its expiry, and
+//! at least once a minute, so an expiry or key change is seen without a
+//! resync. An executable is hashed again whenever its file changes; an
+//! unchanged file reuses its identity.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,7 +56,7 @@ pub(super) fn advisories(guard_home: &Path) -> Option<Arc<LaunchAdvisories>> {
     let key: StoreKey = (guard_home.to_path_buf(), workspace.clone(), stamps);
     if let Ok(cached) = ADVISORIES.lock() {
         if let Some((cached_key, at, advisories)) = cached.as_ref() {
-            if *cached_key == key && at.elapsed() < REVERIFY_AFTER {
+            if *cached_key == key && reusable(advisories, *at) {
                 return Some(Arc::clone(advisories));
             }
         }
@@ -66,6 +67,15 @@ pub(super) fn advisories(guard_home: &Path) -> Option<Arc<LaunchAdvisories>> {
         *cached = Some((key, Instant::now(), Arc::clone(&advisories)));
     }
     Some(advisories)
+}
+
+/// Whether a verification can be reused: for at most a minute, and never
+/// past the moment its bundle goes stale or its grace key expires.
+pub(super) fn reusable(advisories: &LaunchAdvisories, at: Instant) -> bool {
+    at.elapsed() < REVERIFY_AFTER
+        && advisories.source["valid_until"]
+            .as_f64()
+            .is_none_or(|until| crate::binding_capture_op::now_seconds() <= until)
 }
 
 /// The native cached-bundle input, as the posture loader builds it. The

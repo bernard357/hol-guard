@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
+use guard_command::command_model::CommandSegment;
 use guard_contracts::{GuardHookEnvelopeV2, PreToolActionTypeV1, PreToolResultV1};
 use serde_json::Value;
 
@@ -111,15 +112,17 @@ pub(crate) fn apply_to_envelope(
     }
 }
 
-/// The shell text of a command tool call, a `[shell, -c, script]` argv
-/// included.
+/// The shell text of a command tool call, a `[shell, -c, script, args...]`
+/// argv included.
 fn command_text(payload: &Value) -> Option<String> {
     match payload.pointer("/tool_input/command")? {
         Value::String(text) => Some(text.clone()),
         Value::Array(argv) => {
             let argv: Vec<&str> = argv.iter().map(Value::as_str).collect::<Option<_>>()?;
             match argv.as_slice() {
-                [_, flag, script] if matches!(*flag, "-c" | "-lc") => Some((*script).to_owned()),
+                [_, flag, script, ..] if matches!(*flag, "-c" | "-lc") => {
+                    Some((*script).to_owned())
+                }
                 parts => Some(parts.join(" ")),
             }
         }
@@ -130,18 +133,19 @@ fn command_text(payload: &Value) -> Option<String> {
 
 /// The executables a command launches as Node.js, resolved the way the shell
 /// would: a bare name through the hook's `PATH`, a relative one from `cwd`.
-/// A segment that overrides `PATH` is skipped; Guard cannot say which file it
-/// would run.
+/// Once a segment changes the directory or `PATH` for the segments after it,
+/// Guard cannot say which file a relative path or bare name names there, so
+/// only absolute paths are checked.
 fn runtime_launches(
     command: &str,
     cwd: Option<&Path>,
     home: &Path,
     search_path: Option<&str>,
 ) -> Vec<PathBuf> {
-    let mut texts = vec![command.to_owned()];
+    let mut texts = vec![(command.to_owned(), Known::default())];
     let mut launches = Vec::new();
     let mut parsed = 0;
-    while let Some(text) = texts.pop() {
+    while let Some((text, mut known)) = texts.pop() {
         parsed += 1;
         if parsed > MAX_LAUNCHES * 2 || text.trim().is_empty() {
             break;
@@ -155,33 +159,94 @@ fn runtime_launches(
             "guard-shell",
             true,
         );
+        for segment in &model.segments {
+            if let Some(executable) = launched(segment).filter(|name| is_runtime_name(name)) {
+                let cwd = cwd.filter(|_| known.cwd);
+                let search_path = search_path.filter(|_| known.path && !segment.path_overridden);
+                if let Some(path) = resolve(executable, cwd, search_path) {
+                    if !launches.contains(&path) {
+                        launches.push(path);
+                    }
+                }
+                if launches.len() >= MAX_LAUNCHES {
+                    return launches;
+                }
+            }
+            known = known.after(segment);
+        }
+        // An embedded script's shell starts from the state the outer one
+        // leaves, which is never better known than after its last segment.
         texts.extend(
             model
                 .embedded_commands
                 .iter()
-                .map(|embedded| embedded.text.clone()),
+                .map(|embedded| (embedded.text.clone(), known)),
         );
-        for segment in &model.segments {
-            if segment.path_overridden {
-                continue;
-            }
-            let Some(executable) = segment.executable.as_deref() else {
-                continue;
-            };
-            if !is_runtime_name(executable) {
-                continue;
-            }
-            if let Some(path) = resolve(executable, cwd, search_path) {
-                if !launches.contains(&path) {
-                    launches.push(path);
-                }
-            }
-            if launches.len() >= MAX_LAUNCHES {
-                return launches;
-            }
-        }
     }
     launches
+}
+
+/// Which parts of the hook's launch context still hold for a segment.
+#[derive(Clone, Copy)]
+struct Known {
+    cwd: bool,
+    path: bool,
+}
+
+impl Default for Known {
+    fn default() -> Self {
+        Self {
+            cwd: true,
+            path: true,
+        }
+    }
+}
+
+impl Known {
+    /// The context after `segment` runs. A directory change leaves relative
+    /// paths unresolvable, a `PATH` change bare names; a sourced script may
+    /// do either.
+    fn after(mut self, segment: &CommandSegment) -> Self {
+        let assigns_path = || {
+            segment
+                .arguments
+                .iter()
+                .any(|argument| argument.starts_with("PATH=") || argument.starts_with("PATH+="))
+        };
+        match segment.executable.as_deref() {
+            Some("cd" | "pushd" | "popd") => self.cwd = false,
+            Some("source" | ".") => {
+                self.cwd = false;
+                self.path = false;
+            }
+            Some("export" | "declare" | "typeset" | "readonly" | "local") if assigns_path() => {
+                self.path = false;
+            }
+            None if segment.path_overridden => self.path = false,
+            _ => {}
+        }
+        self
+    }
+}
+
+/// The program a segment starts, looking through the shell's `exec`.
+fn launched(segment: &CommandSegment) -> Option<&str> {
+    let executable = segment.executable.as_deref()?;
+    if executable != "exec" {
+        return Some(executable);
+    }
+    let mut arguments = segment.arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "-a" => {
+                arguments.next();
+            }
+            "--" => return arguments.next().map(String::as_str),
+            flag if flag.starts_with('-') => {}
+            program => return Some(program),
+        }
+    }
+    None
 }
 
 fn is_runtime_name(executable: &str) -> bool {
@@ -202,13 +267,40 @@ fn resolve(executable: &str, cwd: Option<&Path>, search_path: Option<&str>) -> O
     if path.components().count() > 1 {
         return cwd.map(|cwd| cwd.join(path));
     }
+    let search_path = anchored(search_path?, cwd);
     let environment = std::collections::BTreeMap::new();
     crate::runtime_identity_launch::which(
         executable,
-        search_path,
+        Some(&search_path),
         &crate::runtime_identity_launch::Environment(&environment),
     )
     .map(PathBuf::from)
+}
+
+/// `PATH` with its relative entries, and on Unix its empty ones (the current
+/// directory), taken from `cwd` as the shell would look them up. Without a
+/// usable `cwd` they stay relative, and the lookup refuses a match there.
+fn anchored(search_path: &str, cwd: Option<&Path>) -> String {
+    let separator = crate::runtime_identity_launch::path_separator();
+    let Some(cwd) = cwd
+        .map(|cwd| cwd.to_string_lossy())
+        .filter(|cwd| !cwd.contains(separator))
+    else {
+        return search_path.to_owned();
+    };
+    search_path
+        .split(separator)
+        .map(|entry| match entry {
+            "" if cfg!(unix) => cwd.clone().into_owned(),
+            "" => String::new(),
+            entry if Path::new(entry).is_relative() => Path::new(cwd.as_ref())
+                .join(entry)
+                .to_string_lossy()
+                .into_owned(),
+            entry => entry.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(&separator.to_string())
 }
 
 /// The strongest high or critical advisory this executable's build is known
@@ -291,11 +383,16 @@ pub(crate) fn raise(
     };
     if minimum == floor {
         // The same floor raised for another reason keeps its decision; a
-        // review held by this finding carries its reason.
+        // review held by this finding carries its code, with the earlier
+        // reason kept in the text so the prompt still shows it.
         if floor >= ActionFloor::Review {
             result.explicitly_benign = false;
             result.reason_code = reason_code.into();
-            result.reason = reason;
+            result.reason = if result.reason.trim().is_empty() {
+                reason
+            } else {
+                format!("{reason} Also: {}", result.reason)
+            };
         }
         return result;
     }

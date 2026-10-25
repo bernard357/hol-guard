@@ -20,8 +20,8 @@ use guard_command::supply_chain_bundle::{
     load_supply_chain_bundle_response, SupplyChainBundleError,
 };
 use guard_command::supply_chain_bundle_cache_trust::{
-    cached_supply_chain_bundle_valid_until, validate_cached_supply_chain_bundle,
-    CachedBundleRejection,
+    cached_supply_chain_bundle_key_valid_until, cached_supply_chain_bundle_valid_until,
+    validate_cached_supply_chain_bundle, CachedBundleRejection,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -134,7 +134,9 @@ pub(crate) fn bundle_advisories(
 /// PRD retains stale affected verdicts while stale absence stays unknown. The
 /// bundle is re-checked as of its own expiry, so scope, payload hash,
 /// signature, key state and rollback are still enforced; only freshness is
-/// relaxed, and the report stays `stale` so callers never clear on it.
+/// relaxed, and the report stays `stale` so callers never clear on it. A
+/// grace key that vouched for it must still be valid now; the report's
+/// `valid_until` is that key's expiry, or null when no grace key bounds it.
 pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> LaunchAdvisories {
     let budget = Budget {
         artifacts: 1,
@@ -145,12 +147,19 @@ pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> Lau
     let (Some(input), Some("bundle_expired")) = (input, current.source["reason"].as_str()) else {
         return current;
     };
-    let Some(expired_at) = load_supply_chain_bundle_response(&input.response)
-        .ok()
-        .and_then(|typed| typed.bundle.expires_at_timestamp().ok())
-    else {
+    let Ok(typed) = load_supply_chain_bundle_response(&input.response) else {
         return current;
     };
+    let Ok(expired_at) = typed.bundle.expires_at_timestamp() else {
+        return current;
+    };
+    let key_until = cached_supply_chain_bundle_key_valid_until(&typed, input.sync_keyring.as_ref());
+    let now = input
+        .now
+        .unwrap_or_else(crate::binding_capture_op::now_seconds);
+    if key_until.is_some_and(|until| now > until) {
+        return current;
+    }
     let (advisories, mut source) = evaluate(input, Some(expired_at), &budget);
     if source["state"] != "verified" {
         return current;
@@ -158,6 +167,7 @@ pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> Lau
     source["state"] = json!("stale");
     source["reason"] = json!("bundle_expired");
     source["expired_at"] = json!(expired_at);
+    source["valid_until"] = json!(key_until);
     LaunchAdvisories { advisories, source }
 }
 
