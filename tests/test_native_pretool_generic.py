@@ -217,8 +217,8 @@ def test_supported_cli_pretool_unavailability_does_not_use_source_ref_fallback(
     )
     monkeypatch.setattr(
         commands_hook_native_authority,
-        "emit_guard_payload",
-        lambda _kind, payload, _json, _stream=None: emitted.append(payload),
+        "_emit_native_hook_json_document",
+        lambda payload, **_kwargs: emitted.append(payload),
     )
     guard_home = tmp_path / "guard-home"
     result = commands_hook_native_authority.route_native_hook(

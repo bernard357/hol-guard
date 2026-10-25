@@ -18051,11 +18051,12 @@ def test_hermes_pretool_reviews_docker_sensitive_command_requests(tmp_path, caps
     )
     output = json.loads(capsys.readouterr().out)
 
-    # The daemon holds the registry login for review instead of blocking it outright.
+    # The daemon holds the registry login for review instead of blocking it
+    # outright; Hermes reads one flat decision document, as from its bridge.
     assert rc == 2
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert output["policy_action"] == "review"
-    assert output["approval_requests"]
+    assert output["decision"] == "block"
+    assert "hookSpecificOutput" not in output
+    assert GuardStore(home_dir).list_approval_requests(limit=5)
 
 
 def test_hermes_pretool_allows_shell_redirect_into_the_workspace(tmp_path, capsys, monkeypatch):

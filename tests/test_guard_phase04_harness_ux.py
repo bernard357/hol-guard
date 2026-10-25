@@ -507,15 +507,6 @@ def test_gr083_claude_permission_request_routes_to_ask_user_question(tmp_path: P
     assert "Keep blocked" in str(hook_output)
 
 
-def _assert_question_answer_reviewed(exit_code: int, output: str) -> None:
-    # The daemon takes no Guard decision from AskUserQuestion output; it reviews
-    # that output like any other unrecognized tool, so the answer changes nothing.
-    payload = _json_line(output)
-    assert exit_code == 1
-    assert payload["decision"] == "block"
-    assert payload["reason_code"] == "native_policy_review_required"
-
-
 @pytest.mark.usefixtures("native_hook_force")
 def test_gr084_claude_keep_blocked_answer_leaves_repeat_under_review(tmp_path: Path) -> None:
     event = _claude_sensitive_read_event("session-gr084")
@@ -545,8 +536,11 @@ def test_gr084_claude_keep_blocked_answer_leaves_repeat_under_review(tmp_path: P
     assert first_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert permission_exit_code == 0
     assert "AskUserQuestion" in str(permission_payload["hookSpecificOutput"])
-    _assert_question_answer_reviewed(answer_exit_code, answer_output)
+    assert answer_exit_code == 0
+    assert answer_output == ""
     assert repeat_exit_code == 0
+    # Keep blocked settles the pending prompt without saving a rule, so the
+    # repeat is reviewed again rather than allowed.
     assert repeat_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert repeat_payload["policy_action"] == "review"
 
@@ -582,7 +576,8 @@ def test_gr085_claude_allow_once_cannot_lower_current_reapproval(tmp_path: Path)
 
     assert first_exit_code == 0
     assert permission_exit_code == 0
-    _assert_question_answer_reviewed(answer_exit_code, answer_output)
+    assert answer_exit_code == 0
+    assert answer_output == ""
     assert retry_exit_code == 0
     assert retry_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert changed_exit_code == 0
@@ -614,7 +609,8 @@ def test_gr086_claude_session_allow_cannot_lower_current_reapproval(tmp_path: Pa
 
     assert first_exit_code == 0
     assert permission_exit_code == 0
-    _assert_question_answer_reviewed(answer_exit_code, answer_output)
+    assert answer_exit_code == 0
+    assert answer_output == ""
     assert retry_exit_code == 0
     assert retry_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
 

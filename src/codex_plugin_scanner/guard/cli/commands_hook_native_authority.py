@@ -15,6 +15,7 @@ from ..adapters.bounded_cli_hook_daemon import (
     _daemon_response_to_native,
     _policy_action_from_daemon,
 )
+from ..adapters.hermes_runtime_hooks import hermes_bridge_response
 from ..config import GuardConfig
 from ..daemon.diagnostics import DaemonDiagnostics
 from ..daemon.hook_availability_policy import availability_harness_response, hook_event_pauses_when_unavailable
@@ -153,13 +154,18 @@ def emit_hook_review(
     response: dict[str, Any],
     *,
     event_name: str,
+    guard_home: Path | None = None,
     output_stream: TextIO | None = None,
 ) -> int:
     """Write a reviewed hook's answer and return the harness's exit code."""
 
     canonical = _canonical_harness_name(harness)
     if canonical in _BRIDGE_RENDERED_HARNESSES:
-        stdout, stderr, exit_code = _daemon_response_to_native(response, harness=canonical, event_name=event_name)
+        if canonical == "hermes":
+            # The Hermes bridge renders its daemon reply natively; so does the CLI.
+            stdout, stderr, exit_code = hermes_bridge_response(response, event_name=event_name, guard_home=guard_home)
+        else:
+            stdout, stderr, exit_code = _daemon_response_to_native(response, harness=canonical, event_name=event_name)
         stream = output_stream or sys.stdout
         if stdout:
             _ = stream.write(stdout + "\n")
@@ -234,7 +240,9 @@ def route_native_hook(
                 reason_code="native_hook_worker_unavailable",
                 reason="HOL Guard could not complete the native hook decision safely.",
             )
-        return emit_hook_review(args.harness, response, event_name=event_name, output_stream=output_stream)
+        return emit_hook_review(
+            args.harness, response, event_name=event_name, guard_home=context.guard_home, output_stream=output_stream
+        )
     except Exception as error:
         _record_native_hook_exception(context.guard_home, harness=args.harness, event_name=event_name)
         _log_worker_exception(error, harness=args.harness)
@@ -244,4 +252,6 @@ def route_native_hook(
             reason_code="native_hook_worker_exception",
             reason="HOL Guard could not complete the native hook decision safely.",
         )
-        return emit_hook_review(args.harness, response, event_name=event_name, output_stream=output_stream)
+        return emit_hook_review(
+            args.harness, response, event_name=event_name, guard_home=context.guard_home, output_stream=output_stream
+        )

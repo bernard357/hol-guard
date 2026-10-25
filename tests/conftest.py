@@ -418,6 +418,30 @@ def _isolate_lifecycle_authority_home(
 
 
 @pytest.fixture(autouse=True)
+def _isolate_hook_cli_loader_search_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the runner's loader search paths out of `hol-guard hook` reviews.
+
+    The hook CLI stamps the caller's environment like a bridge does. CI's Python
+    exports LD_LIBRARY_PATH, which the native review rightly treats as a loader
+    override, so hook tests would answer for the runner rather than the fixture.
+    Child processes still inherit the variable.
+    """
+    from codex_plugin_scanner.guard.cli import commands_hook_native_authority as hook_authority
+    from codex_plugin_scanner.guard.hook_execution_environment import LIBRARY_SEARCH_PATH_NAMES
+
+    collect = hook_authority.collect_hook_execution_environment
+
+    def collect_without_runner_loader_paths() -> dict[str, object]:
+        stamped = collect()
+        names = stamped.get("environment_names")
+        if isinstance(names, list):
+            stamped["environment_names"] = [name for name in names if name not in LIBRARY_SEARCH_PATH_NAMES]
+        return {**stamped, "library_search_paths": {}}
+
+    monkeypatch.setattr(hook_authority, "collect_hook_execution_environment", collect_without_runner_loader_paths)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_trust_attestation_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear trust attestation env vars so tests don't inherit the developer's shell config."""
     for key in (
