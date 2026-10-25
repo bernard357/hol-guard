@@ -317,6 +317,7 @@ fn fast_forward_pull_is_quiet_only_without_merge_or_checkout_programs() {
         ("pull.rebase", "true"),
         ("branch.main.rebase", "merges"),
         ("merge.verifySignatures", "true"),
+        ("gpg.program", "/tmp/gpg"),
         ("filter.lfs.smudge", "git-lfs smudge %f"),
         // A repository cannot vouch for its own filter, even the LFS one.
         ("filter.lfs.process", "git-lfs filter-process"),
@@ -332,12 +333,6 @@ fn fast_forward_pull_is_quiet_only_without_merge_or_checkout_programs() {
         session.assert_not_allow(&pull);
         session.config(&["--unset-all", key]);
     }
-    // A signing program the repository picks runs when the merge pull writes
-    // its commit, not when a fast-forward moves the ref.
-    session.config(&["gpg.program", "/tmp/gpg"]);
-    session.assert_allow(&pull, REFRESH);
-    session.assert_not_allow(&format!("git -C {primary} pull"));
-    session.config(&["--unset-all", "gpg.program"]);
     // Git pulls from the upstream it reads, so that upstream must be origin.
     session.config(&["branch.main.remote", "evil"]);
     session.assert_not_allow(&pull);
