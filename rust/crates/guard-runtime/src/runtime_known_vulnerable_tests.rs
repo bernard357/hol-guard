@@ -271,7 +271,7 @@ fn only_command_text_is_read() {
 #[test]
 fn a_verification_is_not_reused_past_its_expiry() {
     let at = std::time::Instant::now();
-    let now = crate::binding_capture_op::now_seconds();
+    let now = crate::runtime_identity::now_seconds();
     let until = |valid_until: Value| {
         LaunchAdvisories::for_tests(
             json!([]),

@@ -1491,6 +1491,14 @@
    "body": "d1a21a8dce28"
   },
   {
+   "verdict": "posix-primitive",
+   "note": "An empty `PATH` entry means the current directory only in a POSIX shell; Windows skips empty entries. Off Unix the entry stays empty, so the lookup refuses a match there and the launch stays unresolved. The overlay only raises a result for a resolved affected build, so an unresolved launch keeps the decision Guard already made and nothing is loosened.",
+   "file": "rust/crates/guard-runtime/src/runtime_known_vulnerable.rs",
+   "item": "fn anchored -- cfg! expression",
+   "cfg": "unix",
+   "body": "5bf21e38ad03"
+  },
+  {
    "file": "rust/crates/guard-runtime/src/shell_request_inspection_host.rs",
    "item": "fn current_uid -- non-Unix block",
    "verdict": "posix-primitive",

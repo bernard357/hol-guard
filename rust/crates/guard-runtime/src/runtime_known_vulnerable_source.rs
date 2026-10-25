@@ -75,7 +75,7 @@ pub(super) fn reusable(advisories: &LaunchAdvisories, at: Instant) -> bool {
     at.elapsed() < REVERIFY_AFTER
         && advisories.source["valid_until"]
             .as_f64()
-            .is_none_or(|until| crate::binding_capture_op::now_seconds() <= until)
+            .is_none_or(|until| crate::runtime_identity::now_seconds() <= until)
 }
 
 /// The native cached-bundle input, as the posture loader builds it. The

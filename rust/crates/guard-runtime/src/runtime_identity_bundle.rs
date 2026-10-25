@@ -15,6 +15,7 @@
 //! one, the same limit package evaluation puts on such a bundle.
 
 use std::collections::BTreeSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use guard_command::supply_chain_bundle::{
     load_supply_chain_bundle_response, SupplyChainBundleError,
@@ -137,6 +138,13 @@ pub(crate) fn bundle_advisories(
 /// relaxed, and the report stays `stale` so callers never clear on it. A
 /// grace key that vouched for it must still be valid now; the report's
 /// `valid_until` is that key's expiry, or null when no grace key bounds it.
+/// Seconds since the Unix epoch, on every platform.
+pub(crate) fn now_seconds() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+}
+
 pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> LaunchAdvisories {
     let budget = Budget {
         artifacts: 1,
@@ -154,9 +162,7 @@ pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> Lau
         return current;
     };
     let key_until = cached_supply_chain_bundle_key_valid_until(&typed, input.sync_keyring.as_ref());
-    let now = input
-        .now
-        .unwrap_or_else(crate::binding_capture_op::now_seconds);
+    let now = input.now.unwrap_or_else(now_seconds);
     if key_until.is_some_and(|until| now > until) {
         return current;
     }
