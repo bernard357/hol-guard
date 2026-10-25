@@ -200,14 +200,28 @@ pub(super) fn settle_fast_forward(
     // more than allow, a permission the user keeps under review or an
     // uncertain match keeps its verdict. A `git status` or `git log` beside
     // the merge asks for nothing of its own, so it does not hold the proof
-    // back.
+    // back. Neither does the ruleless permission a Git plumbing read records
+    // (`git rev-parse`, `git merge-base`, `git show-ref`): it declares no
+    // floor, and exists so a disabled Git extension or permission can still
+    // block the read.
     let Some(extensions) = result.command_extensions.as_ref() else {
         return;
     };
     if !merges
         || extensions.binding.uncertainty_count != 0
         || extensions.evaluation_error.is_some()
-        || !extensions.permission_observations.is_empty()
+        || !extensions
+            .permission_observations
+            .iter()
+            .all(|observation| {
+                observation.uncertainty_reasons.is_empty()
+                    && controls.is_some_and(|controls| {
+                        controls.permission_settles_at_allow(
+                            &observation.extension_id,
+                            &observation.permission_id,
+                        )
+                    })
+            })
         || !extensions.observations.iter().all(|observation| {
             observation.uncertainty_reasons.is_empty()
                 && (matches!(
