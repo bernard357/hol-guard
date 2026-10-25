@@ -82,6 +82,20 @@ def admit_workspace(
     return {"codebase_key": keys.codebase_key, "worktree_key": keys.worktree_key, "run_id": run_id}
 
 
+def withdraw_unregistered_admissions(store: Any) -> list[str]:
+    """End admissions whose registering install is gone; return the roots still registered."""
+
+    registered = [
+        workspace
+        for install in store.list_managed_installs()
+        if install.get("active")
+        and isinstance(workspace := install.get("workspace"), str)
+        and Path(workspace).is_absolute()
+    ]
+    end_unregistered_install_admissions(store, {os.path.realpath(workspace) for workspace in registered})
+    return registered
+
+
 def admit_registered_workspaces(
     store: Any, *, attempted: dict[str, int] | None = None, clock: Callable[[], int] = now_ms
 ) -> int:
@@ -96,14 +110,7 @@ def admit_registered_workspaces(
     walked on every poll; a root that is missing is retried once it exists.
     """
 
-    registered = [
-        workspace
-        for install in store.list_managed_installs()
-        if install.get("active")
-        and isinstance(workspace := install.get("workspace"), str)
-        and Path(workspace).is_absolute()
-    ]
-    end_unregistered_install_admissions(store, {os.path.realpath(workspace) for workspace in registered})
+    registered = withdraw_unregistered_admissions(store)
     known = watched_roots(store, unavailable_digest=UNAVAILABLE_STAT_DIGEST)
     admitted = 0
     for workspace in registered:
@@ -172,17 +179,25 @@ def poll_once(
 
     # A busy host defers admission, observation and automatic runs; a run the
     # user asked for still starts. Observation resumes from the stored digests,
-    # so a change made while deferred still queues a run afterwards.
+    # so a change made while deferred still queues a run afterwards. Removing
+    # an install withdraws its admission even while the host is busy.
     pressure = host_resource_pressure()
     record_deferral(store, pressure)
     if pressure is None:
         admit_registered_workspaces(store, attempted=attempted)
         observe(store)
+    else:
+        withdraw_unregistered_admissions(store)
     ran = 0
     config = None
     while ran < _MAX_RUNS_PER_POLL and not (stop is not None and stop.is_set()):
         if config is None:
             config = load_guard_config(store.guard_home)
+        if ran > 0:
+            # A run can take long enough for the host to get busy, so each
+            # further claim uses a fresh sample.
+            pressure = host_resource_pressure()
+            record_deferral(store, pressure)
         if not run_next(store, config, owner=owner, user_only=pressure is not None):
             break
         ran += 1

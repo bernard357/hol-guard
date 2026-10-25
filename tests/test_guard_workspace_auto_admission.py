@@ -196,7 +196,7 @@ def test_poll_admits_registered_workspaces_before_observing(tmp_path: Path, monk
     store = GuardStore(tmp_path / "home")
     snapshots(monkeypatch, worker, replace(STAT, snapshot_digest=digest("stat-1")))
     monkeypatch.setattr(guard_config, "load_guard_config", lambda home: object())
-    monkeypatch.setattr(worker, "run_next", lambda store, config, owner: False)
+    monkeypatch.setattr(worker, "run_next", lambda store, config, owner, user_only=False: False)
     register(store, "claude-code", str(tmp_path))
 
     assert worker.poll_once(store, owner="test", stop=threading.Event(), attempted={}) == 0
@@ -212,3 +212,15 @@ def test_manual_admission_still_resumes_a_paused_worktree(tmp_path: Path, monkey
 
     worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
     assert assessments.list_worktrees(store)[0]["paused"] is False
+
+
+def test_removing_an_install_withdraws_its_admission_while_the_host_is_busy(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    snapshots(monkeypatch, worker, STAT)
+    register(store, "claude-code", str(tmp_path))
+    assert worker.admit_registered_workspaces(store, clock=lambda: T0) == 1
+    register(store, "claude-code", str(tmp_path), active=False)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: "resource_pressure")
+
+    worker.poll_once(store, owner="test")
+    assert assessments.list_worktrees(store) == []
