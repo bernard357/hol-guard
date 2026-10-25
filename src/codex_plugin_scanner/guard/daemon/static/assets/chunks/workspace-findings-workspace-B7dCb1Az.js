@@ -1,4 +1,4 @@
-import { cY as fetchGuardApi, r as reactExports, j as jsxRuntimeExports, a4 as HiMiniExclamationTriangle, A as ActionButton, f as formatRelativeTime, T as Tag, ap as HiMiniWrenchScrewdriver, s as HiMiniCheckCircle, N as EmptyState, eh as HiMiniFolderOpen, d as HiMiniArrowPath } from "../guard-dashboard.js";
+import { cY as fetchGuardApi, r as reactExports, j as jsxRuntimeExports, a4 as HiMiniExclamationTriangle, A as ActionButton, f as formatRelativeTime, T as Tag, s as HiMiniCheckCircle, ap as HiMiniWrenchScrewdriver, N as EmptyState, eh as HiMiniFolderOpen, d as HiMiniArrowPath } from "../guard-dashboard.js";
 const ASSESSMENTS_PATH = "/v1/supply-chain/workspace-assessments";
 const FINDINGS_PATH = "/v1/supply-chain/workspace-findings";
 const RUN_STATES = /* @__PURE__ */ new Set(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -49,20 +49,51 @@ function normalizeRun(value) {
 function normalizeRuns(value) {
   return list$1(value).map(normalizeRun).filter((entry) => entry !== null);
 }
+function strings(value) {
+  return list$1(value).filter((entry) => typeof entry === "string");
+}
 function normalizeFinding(value) {
   const item = record$1(value);
   const findingId = text$1(item.finding_id);
-  const packageName = text$1(item.package_name);
-  if (findingId === null || packageName === null) return null;
-  return {
+  if (findingId === null) return null;
+  const common = {
     findingId,
     severity: text$1(item.severity) ?? "unknown",
     decision: text$1(item.decision) ?? "warn",
+    ruleIds: strings(item.rule_ids),
+    advisoryIds: strings(item.advisory_ids)
+  };
+  if (item.source_kind === "secret") {
+    const path = text$1(item.path);
+    if (path === null || common.ruleIds.length === 0) return null;
+    const line = count(item.line);
+    return {
+      ...common,
+      kind: "secret",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: line !== null && line >= 1 ? line : null,
+      lines: list$1(item.lines).flatMap((entry) => {
+        const value2 = count(entry);
+        return value2 !== null && value2 >= 1 ? [value2] : [];
+      })
+    };
+  }
+  const packageName = text$1(item.package_name);
+  if (packageName === null) return null;
+  return {
+    ...common,
+    kind: "supply_chain",
     ecosystem: text$1(item.ecosystem) ?? "unknown",
     packageName,
     packageVersion: text$1(item.package_version),
     fixVersion: text$1(item.fix_version),
-    advisoryIds: list$1(item.advisory_ids).filter((entry) => typeof entry === "string")
+    path: null,
+    line: null,
+    lines: []
   };
 }
 function normalizeAssessment(value) {
@@ -641,7 +672,8 @@ const COVERAGE_REASONS = {
   snapshot_visit_cap: "The workspace has more entries than one assessment visits.",
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
-  finding_cap: "There were more findings than one assessment keeps."
+  finding_cap: "There were more findings than one assessment keeps.",
+  secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -820,19 +852,51 @@ function WorktreeRow(props) {
   ] });
 }
 function AssessmentFindings(props) {
-  const { findings, runId } = props.assessment;
+  const { findings, runId, notRun } = props.assessment;
   const fixes = useWorktreeFixes(props.worktree, runId);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixLoadError, { fixes }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings, fixes }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsSections, { findings, secretsChecked: !notRun.includes("secrets"), fixes }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixReview, { fixes, findings }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixHistory, { fixes, findings })
   ] });
 }
-function FindingsTable({ findings, fixes }) {
-  if (findings.length === 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "No dependency findings in the checked files." });
+function FindingsSections(props) {
+  const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
+  const secrets = props.findings.filter((finding) => finding.kind === "secret");
+  if (dependencies.length === 0 && secrets.length === 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
   }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+    dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies, fixes: props.fixes }),
+    secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets })
+  ] });
+}
+function secretLines(finding) {
+  const lines = finding.lines.length > 0 ? finding.lines : finding.line !== null ? [finding.line] : [];
+  return lines.length > 0 ? `:${lines.join(", ")}` : "";
+}
+function SecretFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Possible secrets in files" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Rule" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Location" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Status" })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-slate-100", children: findings.map((finding) => /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Rule", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.ruleIds.join(", ") }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Location", wide: true, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "break-all font-mono text-xs text-slate-700", children: [
+        finding.path,
+        secretLines(finding)
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "slate", children: "Not verified" }) })
+    ] }, finding.findingId)) })
+  ] }) });
+}
+function FindingsTable({ findings, fixes }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Dependency findings" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [

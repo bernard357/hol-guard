@@ -64,6 +64,11 @@ const finding: WorkspaceFinding = {
   packageVersion: "4.17.15",
   fixVersion: "4.17.21",
   advisoryIds: ["GHSA-35jh-r3h4-6jhm"],
+  kind: "supply_chain",
+  ruleIds: [],
+  path: null,
+  line: null,
+  lines: [],
 };
 
 function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {

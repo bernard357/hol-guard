@@ -71,7 +71,8 @@ def test_background_run_reports_a_blocked_dependency_locally(
     [latest] = assessments.latest_assessed_runs(store)
     assert latest["run_id"] == admitted["run_id"]
     assert latest["state"] in {"completed", "partial"}
-    assert latest["coverage"]["detectors"]["secrets"] == "not_run"
+    assert latest["coverage"]["detectors"]["secrets"] == "complete"
+    assert "detector_not_run:secrets" not in latest["coverage"]["reasons"]
     [finding] = [item for item in latest["findings"] if item["package_name"] == "minimist"]
     assert (finding["decision"], finding["package_version"], finding["fix_version"]) == ("block", "1.2.8", "1.2.9")
     assert str(workspace) not in json.dumps(latest)
@@ -104,7 +105,9 @@ def test_automatic_run_never_reaches_the_network(
     assert runner.run_next(store, load_guard_config(store.guard_home), owner="test", clock=lambda: due)
     [latest] = assessments.latest_assessed_runs(store)
     assert (latest["run_id"], latest["trigger_kind"]) == (admitted["run_id"], "workspace_open")
-    assert latest["state"] == "partial"
+    # Both detectors ran over the whole worktree, so nothing keeps the run partial.
+    assert latest["state"] == "completed"
+    assert latest["coverage"]["detectors"]["secrets"] == "complete"
     [finding] = [item for item in latest["findings"] if item["package_name"] == "minimist"]
     assert finding["decision"] == "block"
 

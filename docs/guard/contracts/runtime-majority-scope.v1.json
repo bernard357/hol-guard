@@ -252,9 +252,10 @@
       {
         "id": "workspace-assessment-async",
         "category": "async_control_plane",
-        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
+        "reason": "Background workspace assessments: a daemon worker thread polls worktrees the user admitted, queues runs in SQLite and runs the local supply-chain audit and the native secret scan against a native content snapshot. The dashboard routes under /v1/supply-chain/workspace-* read results, admit, pause, queue and cancel runs, and prepare, apply and verify a reviewed one-line dependency version edit that the user applies explicitly. None of it is reached from hook admission, decision, consume or dispatch; snapshot hashing runs in the native workspace-snapshot command, and the manifest scan, edit planning, diff and conditional file replacement of a fix run in the native workspace-fix command.",
         "path": [
           "src/codex_plugin_scanner/guard/workspace_assessment_*.py",
+          "src/codex_plugin_scanner/guard/workspace_secret_findings.py",
           "src/codex_plugin_scanner/guard/native_workspace_snapshot.py",
           "src/codex_plugin_scanner/guard/native_workspace_fix.py",
           "src/codex_plugin_scanner/guard/store_workspace_assessment_schema.py",
@@ -555,6 +556,18 @@
           "src/codex_plugin_scanner/guard/protection_capabilities.py"
         ],
         "reason": "Static protection-capability payloads for the dashboard and settings views. Its only callers are daemon/server_common.py's _settings_response_payload (called only from server_dashboard_runtime_read.py, server_control_repair.py and server_control_sync.py), server_dashboard_runtime_read.py and the excluded approvals runtime snapshot; no hook or tool request reads it."
+      },
+      {
+        "category": "offline_reporting",
+        "id": "runtime-identity-posture",
+        "path": [
+          "src/codex_plugin_scanner/guard/runtime_identity_assessment.py",
+          "src/codex_plugin_scanner/guard/runtime_identity_candidates.py",
+          "src/codex_plugin_scanner/guard/runtime_identity_probe.py",
+          "src/codex_plugin_scanner/guard/runtime_posture.py",
+          "src/codex_plugin_scanner/guard/cli/runtime_posture_command.py"
+        ],
+        "reason": "Read-only `guard runtime posture` report: discovers configured MCP servers, sends their launches to the native runtime-identity probe and assessment (launch resolution, shebang following and the decision logic live in Rust), and formats the result. Reached only from the CLI dispatcher for that subcommand; no hook, approval, allow or deny path reads it."
       }
     ],
     "reviewed_runtime": [
