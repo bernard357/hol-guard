@@ -78,7 +78,11 @@ def _status(result: object) -> tuple[str, dict[str, object], list[str]]:
         return "error", {}, ["unreadable_result"]
     status = result.get("status")
     # A reply without its findings list cannot show that nothing was found.
-    if status not in {"complete", "incomplete"} or not isinstance(result.get("findings"), list):
+    if (
+        not isinstance(status, str)
+        or status not in {"complete", "incomplete"}
+        or not isinstance(result.get("findings"), list)
+    ):
         return "error", {}, ["unreadable_result"]
     reasons = _reasons(result.get("truncation_reasons"))
     if _projection(result)[1]:

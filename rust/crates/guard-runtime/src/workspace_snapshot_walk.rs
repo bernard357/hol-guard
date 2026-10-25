@@ -1,6 +1,7 @@
 //! The bounded, no-follow directory walk behind `workspace-snapshot`.
 
 use std::ffi::OsStr;
+use std::path::Path;
 
 use guard_command::local_supply_chain::is_audit_sensitive_basename;
 use sha2::{Digest, Sha256};
@@ -113,11 +114,19 @@ impl Walk {
         }
     }
 
-    /// Record a symlink or special file the walk did not follow, which the
-    /// skill scan counts when a skill could be behind it.
-    fn left_unfollowed(&mut self, relative: &str) {
+    /// Record a special file the walk did not follow, which the skill scan
+    /// counts when a skill could be there.
+    fn left_special(&mut self, relative: &str) {
         if let Some(skills) = self.skills.as_mut() {
-            skills.left_unfollowed(relative);
+            skills.left_special(relative);
+        }
+    }
+
+    /// Record a symlink the walk did not follow, which the skill scan counts
+    /// when a skill could be behind it.
+    fn left_link(&mut self, relative: &str, target: Option<&Path>) {
+        if let Some(skills) = self.skills.as_mut() {
+            skills.left_link(relative, target);
         }
     }
 
@@ -178,12 +187,13 @@ pub(super) fn walk_directory(
         match node.kind {
             Kind::Symlink => {
                 walk.counts.symlinks += 1;
-                let target = directory
-                    .read_link(&os_name)
+                let target = directory.read_link(&os_name);
+                let digest = target
+                    .as_ref()
                     .map(|target| hex::encode(Sha256::digest(target.as_encoded_bytes())))
                     .unwrap_or_else(|| "-".to_owned());
-                walk.exclude(format!("{child}\0symlink\0{target}"));
-                walk.left_unfollowed(&child);
+                walk.exclude(format!("{child}\0symlink\0{digest}"));
+                walk.left_link(&child, target.as_deref().map(Path::new));
             }
             Kind::Directory if SKIP_DIRS.contains(&name.as_str()) => {
                 walk.counts.directories += 1;
@@ -209,7 +219,7 @@ pub(super) fn walk_directory(
             Kind::Special => {
                 walk.counts.special += 1;
                 walk.exclude(format!("{child}\0special"));
-                walk.left_unfollowed(&child);
+                walk.left_special(&child);
             }
             Kind::File if is_audit_sensitive_basename(&name) => {
                 walk.counts.sensitive += 1;
