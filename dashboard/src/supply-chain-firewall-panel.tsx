@@ -51,6 +51,7 @@ import {
   type FirewallStatusFilter,
 } from "./supply-chain-firewall-controls";
 import { useResolvedApprovalGate } from "./use-resolved-approval-gate";
+import { refreshSupplyChainBundle } from "./use-supply-chain-bundle";
 import { parseInterceptProofSnapshot, type InterceptProofSnapshot } from "./supply-chain-firewall-action-result";
 import { InterceptProofModal } from "./supply-chain-intercept-proof-modal";
 import { SupplyChainManagerDrawer } from "./supply-chain-manager-drawer";
@@ -443,6 +444,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
       setAuditRecoveryError(null);
       try {
         const response = await runPackageSync(credentials);
+        refreshSupplyChainBundle();
         setLastCompleted({ op: "sync", manager: null, response });
         await refreshAfterOp();
         await onStateChanged?.();
@@ -824,6 +826,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
       setActivationAssistError(null);
       try {
         const response = await runPackageSync();
+        refreshSupplyChainBundle();
         setLastCompleted({ op, manager: null, response });
         await refreshAfterOp();
         await onStateChanged?.();

@@ -102,6 +102,8 @@ assert(markup.includes("Sample data"), "local-only feed freshness card reads Sam
 
 const loadingMarkup = renderToStaticMarkup(<FeedHealthWorkspace snapshot={snapshot("paired_active")} />);
 assert(!loadingMarkup.includes(">Fresh<"), "a paired feed does not claim Fresh before the bundle is read");
+assert(!loadingMarkup.includes("Live feed active"), "a pending bundle read does not claim the feed is active");
+assert(loadingMarkup.includes("Checking the intel feed"), "a pending bundle read says it is checking");
 
 assert(
   describeFirewallFailure({ op: "fix_all", manager: null, message: "x" }) === "Restoring protection failed",

@@ -1,4 +1,5 @@
-import { r as reactExports, ei as fetchSupplyChainBundle, s as HiMiniCheckCircle, bS as HiMiniInformationCircle, a4 as HiMiniExclamationTriangle, j as jsxRuntimeExports, A as ActionButton, S as SectionLabel, d as HiMiniArrowPath, ej as HiMiniSignal, aA as HiMiniXCircle, ct as HiMiniClock, f as formatRelativeTime, a6 as Badge, T as Tag } from "../guard-dashboard.js";
+import { s as HiMiniCheckCircle, bS as HiMiniInformationCircle, a4 as HiMiniExclamationTriangle, j as jsxRuntimeExports, A as ActionButton, S as SectionLabel, d as HiMiniArrowPath, ej as HiMiniSignal, aA as HiMiniXCircle, ct as HiMiniClock, f as formatRelativeTime, a6 as Badge, T as Tag } from "../guard-dashboard.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CUWa62Pi.js";
 function bundleRefreshKey(snapshot) {
   return [
     snapshot.cloud_policy_bundle_hash ?? "",
@@ -80,23 +81,6 @@ function resolveIntelFreshness(input) {
     tone: "green"
   };
 }
-function useSupplyChainBundle(refreshKey = "") {
-  const [load, setLoad] = reactExports.useState({ phase: "loading" });
-  reactExports.useEffect(() => {
-    let cancelled = false;
-    fetchSupplyChainBundle().then((bundle) => {
-      if (!cancelled) setLoad({ phase: "ready", bundle });
-    }).catch((error) => {
-      if (cancelled) return;
-      const message = error instanceof Error ? error.message : "Failed to load";
-      setLoad((previous) => previous.phase === "ready" ? previous : { phase: "error", message });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-  return load;
-}
 function resolveFeedSourceMode(cloudState) {
   if (cloudState === "local_only") return "sample";
   if (cloudState === "paired_waiting") return "full";
@@ -126,7 +110,16 @@ function FeedSourceBadge({ mode }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "attention", children: "Sample only (local-only mode)" });
 }
 function LiveFeedNotice({ freshness }) {
-  if (freshness.kind === "current" || freshness.kind === "loading") {
+  if (freshness.kind === "loading") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniClock, { className: "mt-0.5 h-4 w-4 shrink-0 text-slate-400", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: "Checking the intel feed" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-slate-600 mt-0.5", children: freshness.description })
+      ] })
+    ] });
+  }
+  if (freshness.kind === "current") {
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-xl border border-brand-green/20 bg-brand-green/[0.04] px-3 py-2.5", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniCheckCircle, { className: "mt-0.5 h-4 w-4 shrink-0 text-brand-green", "aria-hidden": "true" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
@@ -278,6 +271,5 @@ export {
   feedHealthWorkspace as c,
   formatBundleExpiry as f,
   isBundleExpired as i,
-  resolveIntelFreshness as r,
-  useSupplyChainBundle as u
+  resolveIntelFreshness as r
 };

@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CDZn3bSf.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-BU3dzTBu.js","assets/chunks/fleet-workspace-D64ubOfc.js","assets/chunks/harness-version-label-BEu-FrKY.js","assets/chunks/connect-guard-cloud-button-JglOCagn.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-DCrWqtaw.js","assets/chunks/confirm-dialog-DClNtuX1.js","assets/chunks/extensions-workspace-B-9_UzCR.js","assets/chunks/app-detail-workspace-D2VCIfIX.js","assets/chunks/policy-workspace-page-D4RJjjPg.js","assets/chunks/about-workspace-CTEFKkyd.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CDZn3bSf.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-BU3dzTBu.js","assets/chunks/fleet-workspace-C_GUSXk7.js","assets/chunks/harness-version-label-BEu-FrKY.js","assets/chunks/connect-guard-cloud-button-CQjSNn0A.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-Lbp2xdty.js","assets/chunks/confirm-dialog-DClNtuX1.js","assets/chunks/extensions-workspace-B-9_UzCR.js","assets/chunks/app-detail-workspace-D2VCIfIX.js","assets/chunks/policy-workspace-page-BOcG_xv1.js","assets/chunks/about-workspace-CyfRP7Sf.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
 (function polyfill() {
   const relList = document.createElement("link").relList;
   if (relList && relList.supports && relList.supports("modulepreload")) return;
@@ -36686,7 +36686,7 @@ function turnProtectionOnUpdate(snapshot) {
 }
 const McpPolicyRequestPanel = lazyWorkspace(
   "mcp-policy-request-panel",
-  () => __vitePreload(() => import("./chunks/mcp-policy-request-panel-BcN7ROCT.js"), true ? [] : void 0).then((m) => ({ default: m.McpPolicyRequestPanel }))
+  () => __vitePreload(() => import("./chunks/mcp-policy-request-panel-DmDRflVD.js"), true ? [] : void 0).then((m) => ({ default: m.McpPolicyRequestPanel }))
 );
 function InboxWatchBanner(props) {
   const { snapshot } = props;
@@ -37108,8 +37108,8 @@ function useRouteFocus(view, mainSelector = "main#main-content") {
 }
 const HOME_QUEUE_PREVIEW_LIMIT = 50;
 const HomeWorkspace = lazyWorkspace("home-dashboard", () => __vitePreload(() => import("./chunks/home-dashboard-CDZn3bSf.js"), true ? __vite__mapDeps([0,1,2,3,4]) : void 0).then((m) => ({ default: m.HomeWorkspace })));
-const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() => import("./chunks/fleet-workspace-D64ubOfc.js"), true ? __vite__mapDeps([5,6,7,4,8]) : void 0).then((m) => ({ default: m.FleetWorkspace })));
-const SettingsWorkspace = lazyWorkspace("settings-workspace", () => __vitePreload(() => import("./chunks/settings-workspace-DCrWqtaw.js"), true ? __vite__mapDeps([9,8,4,10,7]) : void 0).then((m) => ({ default: m.SettingsWorkspace })));
+const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() => import("./chunks/fleet-workspace-C_GUSXk7.js"), true ? __vite__mapDeps([5,6,7,4,8]) : void 0).then((m) => ({ default: m.FleetWorkspace })));
+const SettingsWorkspace = lazyWorkspace("settings-workspace", () => __vitePreload(() => import("./chunks/settings-workspace-Lbp2xdty.js"), true ? __vite__mapDeps([9,8,4,10,7]) : void 0).then((m) => ({ default: m.SettingsWorkspace })));
 const ExtensionsWorkspace = lazyWorkspace(
   "extensions-workspace",
   () => __vitePreload(() => import("./chunks/extensions-workspace-B-9_UzCR.js"), true ? __vite__mapDeps([11,10]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
@@ -37118,19 +37118,19 @@ const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePre
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));
 const SupplyChainHubWorkspace = lazyWorkspace(
   "supply-chain-hub-workspace",
-  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-Dop7EMne.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
+  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-CUWa62Pi.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
 );
 const PolicyWorkspacePage = lazyWorkspace(
   "policy-workspace-page",
-  () => __vitePreload(() => import("./chunks/policy-workspace-page-D4RJjjPg.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.PolicyWorkspacePage }))
+  () => __vitePreload(() => import("./chunks/policy-workspace-page-BOcG_xv1.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.PolicyWorkspacePage }))
 );
 const AboutWorkspace = lazyWorkspace(
   "about-workspace",
-  () => __vitePreload(() => import("./chunks/about-workspace-CTEFKkyd.js"), true ? __vite__mapDeps([14,2,3,15]) : void 0).then((m) => ({ default: m.AboutWorkspace }))
+  () => __vitePreload(() => import("./chunks/about-workspace-CyfRP7Sf.js"), true ? __vite__mapDeps([14,2,3,15]) : void 0).then((m) => ({ default: m.AboutWorkspace }))
 );
 const ReleasesWorkspace = lazyWorkspace(
   "releases-workspace",
-  () => __vitePreload(() => import("./chunks/releases-workspace-BxMjvm1u.js"), true ? [] : void 0).then((m) => ({ default: m.ReleasesWorkspace }))
+  () => __vitePreload(() => import("./chunks/releases-workspace-CdGXVNQZ.js"), true ? [] : void 0).then((m) => ({ default: m.ReleasesWorkspace }))
 );
 const ProtectionRepairPage = lazyWorkspace(
   "protection-repair-page",
@@ -38257,7 +38257,7 @@ export {
   filterCodexHostApps as cy,
   connectorWorkspaceItems as cz,
   HiMiniArrowPath as d,
-  subscribeDashboardLocation as d$,
+  HiMiniQueueList as d$,
   HiMiniHome as d0,
   appSetupTarget as d1,
   guardActionPresentation as d2,
@@ -38268,33 +38268,33 @@ export {
   CommandActivityWorkspace as d7,
   EvidenceFilterBar as d8,
   EvidenceInsightStrip as d9,
-  runPackageFirewallAction as dA,
-  parseInterceptProofSnapshot as dB,
-  activatePackageFirewallRuntime as dC,
-  EntitlementNotice as dD,
-  chooseSupplyChainAuditFolder as dE,
-  fetchReceipts as dF,
-  lazyWorkspace as dG,
-  __vitePreload as dH,
-  scopeLabel as dI,
-  HiMiniCloudArrowUp as dJ,
-  HiMiniCodeBracket as dK,
-  HiMiniClipboardDocument as dL,
-  HiMiniUsers as dM,
-  HiMiniFolder as dN,
-  HiMiniIdentification as dO,
-  StyledSelect as dP,
-  policyActionLabel as dQ,
-  createCloudExceptionRequest as dR,
-  HiMiniPuzzlePiece as dS,
-  fetchCloudExceptions as dT,
-  fetchCloudExceptionRequests as dU,
-  downloadBlob as dV,
-  PaginationControls as dW,
-  PolicyStatField as dX,
-  HiMiniArrowDownTray as dY,
-  HiMiniInbox as dZ,
-  HiMiniQueueList as d_,
+  repairSupplyChainProtection as dA,
+  runPackageFirewallAction as dB,
+  parseInterceptProofSnapshot as dC,
+  activatePackageFirewallRuntime as dD,
+  EntitlementNotice as dE,
+  chooseSupplyChainAuditFolder as dF,
+  fetchReceipts as dG,
+  lazyWorkspace as dH,
+  __vitePreload as dI,
+  scopeLabel as dJ,
+  HiMiniCloudArrowUp as dK,
+  HiMiniCodeBracket as dL,
+  HiMiniClipboardDocument as dM,
+  HiMiniUsers as dN,
+  HiMiniFolder as dO,
+  HiMiniIdentification as dP,
+  StyledSelect as dQ,
+  policyActionLabel as dR,
+  createCloudExceptionRequest as dS,
+  HiMiniPuzzlePiece as dT,
+  fetchCloudExceptions as dU,
+  fetchCloudExceptionRequests as dV,
+  downloadBlob as dW,
+  PaginationControls as dX,
+  PolicyStatField as dY,
+  HiMiniArrowDownTray as dZ,
+  HiMiniInbox as d_,
   EvidenceActionList as da,
   EvidenceActionDetail as db,
   policyIdentityKey as dc,
@@ -38309,37 +38309,37 @@ export {
   ActivationSummary as dl,
   ActionResultPanel as dm,
   HiMiniBugAnt as dn,
-  closeOnEscape as dp,
-  ConnectFlowCard as dq,
-  ApprovalProofInline as dr,
-  HiMiniCloudArrowDown as ds,
-  fetchPackageFirewallStatus as dt,
-  runPackageAudit as du,
-  resolveSupplyChainAuditFailure as dv,
-  runPackageSync as dw,
-  startPackageFirewallConnect as dx,
-  PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE as dy,
-  repairSupplyChainProtection as dz,
+  fetchSupplyChainBundle as dp,
+  closeOnEscape as dq,
+  ConnectFlowCard as dr,
+  ApprovalProofInline as ds,
+  HiMiniCloudArrowDown as dt,
+  fetchPackageFirewallStatus as du,
+  runPackageAudit as dv,
+  resolveSupplyChainAuditFailure as dw,
+  runPackageSync as dx,
+  startPackageFirewallConnect as dy,
+  PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE as dz,
   HiMiniCheck as e,
-  Surface as e0,
-  HiMiniEllipsisHorizontal as e1,
-  HiMiniMinus as e2,
-  HiMiniWrench as e3,
-  HiMiniArrowLongRight as e4,
-  HiMiniArrowUpCircle as e5,
-  fetchReleaseFeedApi as e6,
-  fetchMcpPolicyRequest as e7,
-  resolveMcpPolicyRequest as e8,
-  HiMiniDocumentPlus as e9,
-  HiMiniDocumentMagnifyingGlass as ea,
-  isSupplyChainScannerEvidence as eb,
-  isBlockedGuardAction as ec,
-  HiMiniChevronLeft as ed,
-  HiMiniArrowDown as ee,
-  HiMiniArrowUp as ef,
-  runAuditRemediation as eg,
-  HiMiniFolderOpen as eh,
-  fetchSupplyChainBundle as ei,
+  subscribeDashboardLocation as e0,
+  Surface as e1,
+  HiMiniEllipsisHorizontal as e2,
+  HiMiniMinus as e3,
+  HiMiniWrench as e4,
+  HiMiniArrowLongRight as e5,
+  HiMiniArrowUpCircle as e6,
+  fetchReleaseFeedApi as e7,
+  fetchMcpPolicyRequest as e8,
+  resolveMcpPolicyRequest as e9,
+  HiMiniDocumentPlus as ea,
+  HiMiniDocumentMagnifyingGlass as eb,
+  isSupplyChainScannerEvidence as ec,
+  isBlockedGuardAction as ed,
+  HiMiniChevronLeft as ee,
+  HiMiniArrowDown as ef,
+  HiMiniArrowUp as eg,
+  runAuditRemediation as eh,
+  HiMiniFolderOpen as ei,
   HiMiniSignal as ej,
   formatRelativeTime as f,
   HiMiniNoSymbol as g,

@@ -59,7 +59,18 @@ function FeedSourceBadge({ mode }: FeedSourceBadgeProps) {
 }
 
 function LiveFeedNotice({ freshness }: { freshness: IntelFreshness }) {
-  if (freshness.kind === "current" || freshness.kind === "loading") {
+  if (freshness.kind === "loading") {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+        <HiMiniClock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+        <div>
+          <p className="text-sm font-semibold text-brand-dark">Checking the intel feed</p>
+          <p className="text-xs text-slate-600 mt-0.5">{freshness.description}</p>
+        </div>
+      </div>
+    );
+  }
+  if (freshness.kind === "current") {
     return (
       <div className="flex items-start gap-2 rounded-xl border border-brand-green/20 bg-brand-green/[0.04] px-3 py-2.5">
         <HiMiniCheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-brand-green" aria-hidden="true" />
