@@ -284,14 +284,73 @@ pub(super) fn verified(segment: &CommandSegmentV1, context: super::PathContext<'
     parse(segment, context).is_some() && super::git_probe::proven(&memo_key(segment, context))
 }
 
-/// Whether this evaluation already proved `segment` as a safe `origin` fetch.
-/// A fetch writes only refs and objects, never the configuration a later Git
-/// read in the same command depends on; a pull also updates the work tree.
-pub(super) fn verified_fetch(segment: &CommandSegmentV1, context: super::PathContext<'_>) -> bool {
+/// Whether this evaluation proved `segment` as an `origin` refresh that
+/// settles a later Git read in the same command. A fetch writes only refs and
+/// objects, so it settles one outright. A pull's fast-forward also rewrites
+/// tracked files, and the one route by which a tracked file becomes
+/// configuration the later read obeys is an include that names it, so a pull
+/// settles the read when no include reaches into the work tree.
+pub(super) fn verified_refresh(
+    segment: &CommandSegmentV1,
+    context: super::PathContext<'_>,
+    deadline: Option<Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
     let stripped = super::segment_proof::without_stderr_merge(segment);
     let segment = stripped.as_ref().unwrap_or(segment);
-    parse(segment, context).is_some_and(|(_, upstream)| upstream.is_none())
-        && super::git_probe::proven(&memo_key(segment, context))
+    let Some((leading, upstream)) = parse(segment, context) else {
+        return false;
+    };
+    if !super::git_probe::proven(&memo_key(segment, context)) {
+        return false;
+    }
+    if upstream.is_none() {
+        return true;
+    }
+    let mut key = memo_key(segment, context);
+    key.0.push_str(":settles");
+    super::git_probe::memoized(key, || {
+        let executable = segment.executable.as_deref()?;
+        let probe = Probe::new(
+            executable,
+            leading,
+            context,
+            deadline,
+            execution_environment,
+        )?;
+        Some(work_tree_includes_absent(&probe))
+    })
+    .unwrap_or(false)
+}
+
+/// No configuration include names a file the work tree holds, so no commit the
+/// fast-forward checks out can become configuration. A relative include, or
+/// one whose location this cannot resolve, counts as reaching the work tree.
+fn work_tree_includes_absent(probe: &Probe) -> bool {
+    let Some((effective, _)) = probe.config() else {
+        return false;
+    };
+    let Some(toplevel) = probe
+        .text(&["rev-parse", "--show-toplevel"])
+        .and_then(|toplevel| std::fs::canonicalize(toplevel).ok())
+    else {
+        return false;
+    };
+    !effective.iter().any(|(key, values)| {
+        (key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path")))
+            && values
+                .iter()
+                .any(|value| include_reaches_tree(value, &probe.home, &toplevel))
+    })
+}
+
+fn include_reaches_tree(value: &str, home: &std::path::Path, toplevel: &std::path::Path) -> bool {
+    let path = match value.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if std::path::Path::new(value).is_absolute() => std::path::PathBuf::from(value),
+        None => return true,
+    };
+    !super::git_hook_files::outside_checkout(&path, toplevel)
 }
 
 fn memo_key(

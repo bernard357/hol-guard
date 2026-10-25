@@ -226,8 +226,18 @@ fn verdict(
             || write_free(segment)
             || (link_settles
                 && super::symlink_writes::safe_symlink_arguments(segment, read_context))
-            || super::git_remote_ops::verified_fetch(segment, read_context)
-            || super::git_remote_ops::verified_fetch(segment, context)
+            || super::git_remote_ops::verified_refresh(
+                segment,
+                read_context,
+                deadline,
+                execution_environment,
+            )
+            || super::git_remote_ops::verified_refresh(
+                segment,
+                context,
+                deadline,
+                execution_environment,
+            )
             || super::worktree_add::proven_alone(
                 model,
                 prior,
