@@ -269,6 +269,10 @@ pub(super) fn run() -> Result<(), String> {
             let response = archive_inspect::evaluate_archive_inspection_bytes(&bytes)?;
             write_bytes_response(&response)
         }
+        [command, flag] if command == runtime_identity::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&runtime_identity::run_command(&bytes)?)
+        }
         [command, flag] if command == secrets_cli::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             write_json(&secrets_cli::run_command(&bytes)?)
@@ -276,6 +280,10 @@ pub(super) fn run() -> Result<(), String> {
         [command, flag] if command == guard_plugin_kit::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             write_json(&guard_plugin_kit::run_request(&bytes))
+        }
+        [command, flag] if command == guard_plugin_telemetry::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&guard_plugin_telemetry::run_request(&bytes))
         }
         [command, flag] if command == workspace_snapshot::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;

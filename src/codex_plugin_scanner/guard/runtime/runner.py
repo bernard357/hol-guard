@@ -145,6 +145,14 @@ from .supply_chain_bundle import (
 )
 from .supply_chain_bundle_models import SupplyChainVerificationKey
 from .supply_chain_support import ecosystem_support_matrix
+from .workspace_assessment_sync import (
+    MAX_REQUEST_BYTES as _WORKSPACE_ASSESSMENT_REQUEST_BYTES,
+)
+from .workspace_assessment_sync import (
+    build_workspace_assessment_sync_safely,
+    fit_workspace_assessment_to_request,
+    record_workspace_assessment_delivery,
+)
 
 _POLICY_DOCUMENT_VERSIONS = ("guard.hashgraphonline.com/v1alpha1",)
 _POLICY_BUNDLE_VERSIONS = ("guard-policy-bundle.v1", "guard-policy-bundle.v2")
@@ -215,6 +223,8 @@ _SYNC_RETRYABLE_GATEWAY_MAX_ATTEMPTS = 2
 _RUNTIME_SYNC_TIMEOUT_SECONDS = 10
 _RUNTIME_SYNC_RETRY_TIMEOUT_SECONDS = 90
 _RECEIPT_SYNC_BATCH_SIZE = 50
+# Serialized size of the `, "workspaceAssessments": ` key the summary adds to the sync context.
+_WORKSPACE_ASSESSMENT_KEY_OVERHEAD = 32
 _RECEIPT_SYNC_CURSOR_PAGE_SIZE = 200
 _RECEIPT_SYNC_CURSOR_BACKFILL_ROWS = 200
 _RECEIPT_COMMAND_DETAIL_BACKFILL_DAYS = 30
@@ -467,6 +477,7 @@ def sync_receipts(
         home_dir=home_dir,
         workspace_dir=workspace_dir,
     )
+    pending_workspace_assessments = build_workspace_assessment_sync_safely(store)
     bundle_hash_sent = _sync_context_bundle_hash(sync_context)
     for receipt_batch in _iter_receipt_sync_batches(receipts):
         batch_sync_context = dict(sync_context)
@@ -474,17 +485,30 @@ def sync_receipts(
         pending_fleet_posture = None
         if batch_fleet_posture is not None:
             batch_sync_context["fleetPosture"] = batch_fleet_posture.payload
-        body = json.dumps(
-            {
-                "receipts": _cloud_sync_receipts_payload(
-                    receipt_batch,
-                    device_id=device_id,
-                    device_name=device_name,
-                    redaction_level=redaction_level,
-                ),
-                "syncContext": batch_sync_context,
-            }
-        ).encode("utf-8")
+        unfitted_workspace_assessments = pending_workspace_assessments
+        pending_workspace_assessments = None
+        batch_workspace_assessments = unfitted_workspace_assessments
+        batch_receipts_payload = _cloud_sync_receipts_payload(
+            receipt_batch,
+            device_id=device_id,
+            device_name=device_name,
+            redaction_level=redaction_level,
+        )
+        if batch_workspace_assessments is not None:
+            # The summary gets what the receipts and fleet posture leave of the request budget.
+            base_size = len(
+                json.dumps({"receipts": batch_receipts_payload, "syncContext": batch_sync_context}).encode("utf-8")
+            )
+            batch_workspace_assessments = fit_workspace_assessment_to_request(
+                batch_workspace_assessments,
+                _WORKSPACE_ASSESSMENT_REQUEST_BYTES - base_size - _WORKSPACE_ASSESSMENT_KEY_OVERHEAD,
+            )
+            if batch_workspace_assessments is None:
+                # A later, smaller receipt batch may leave room for it.
+                pending_workspace_assessments = unfitted_workspace_assessments
+        if batch_workspace_assessments is not None:
+            batch_sync_context["workspaceAssessments"] = batch_workspace_assessments.payload
+        body = json.dumps({"receipts": batch_receipts_payload, "syncContext": batch_sync_context}).encode("utf-8")
         request = _guard_sync_request(
             resolved_auth_context,
             request_url=sync_url,
@@ -550,6 +574,7 @@ def sync_receipts(
         except OSError as error:
             raise RuntimeError(_sync_url_error_message(error)) from error
         _record_fleet_posture_delivery(store, batch_fleet_posture, payload)
+        record_workspace_assessment_delivery(store, batch_workspace_assessments)
         cursor_batch_rowids = _receipt_sync_cursor_rowids_from_batch(
             receipt_batch,
             cursor_receipt_ids=cursor_receipt_ids,

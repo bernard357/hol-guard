@@ -228,6 +228,7 @@ markers = [
   "daemon_bundle_refresh: enables the daemon supply-chain bundle refresh worker for focused tests",
   "daemon_headless_queue: enables request-triggered daemon cloud sync for focused tests",
   "daemon_headless_refresh: enables the daemon headless cloud sync worker for focused tests",
+  "daemon_plugin_telemetry: enables the daemon opt-in plugin install report worker for focused tests",
   "daemon_service_workers: enables command queue and live request sync workers for focused tests",
   "fault_injection: destructive store fault tests; only run with GUARD_FAULT_INJECTION=1",
   "installed: requires verification through an installed package artifact",

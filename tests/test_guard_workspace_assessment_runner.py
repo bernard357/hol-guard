@@ -103,6 +103,29 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
     assert assessments.finish(store, claimed, outcome, now_ms=T0 + 1)
 
 
+@pytest.mark.parametrize("code", ["cloud_auth_error", "cloud_http_error", "cloud_timeout", "cloud_validation_error"])
+def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(
+    tmp_path: Path, monkeypatch, code: str
+) -> None:
+    store, claimed = queued_run(tmp_path)
+    snapshots(monkeypatch, runner, SNAPSHOT)
+    unanswered = {
+        "decision": "ask",
+        "ecosystem": "npm",
+        "name": "left-pad",
+        "resolvedVersion": "1.3.0",
+        "reasons": [{"code": code, "message": "m", "severity": "high"}],
+    }
+    audit = {**AUDIT, "evaluation": {"packages": [BLOCKED_PACKAGE, unanswered]}}
+    monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: audit)
+    outcome = runner.execute(store, None, claimed)
+    assert [finding["package_name"] for finding in outcome.findings] == ["minimist"]
+    assert outcome.coverage is not None
+    detectors, reasons = outcome.coverage["detectors"], outcome.coverage["reasons"]
+    assert isinstance(detectors, dict) and detectors["supply_chain"] == "incomplete"
+    assert isinstance(reasons, list) and "supply_chain_incomplete" in reasons
+
+
 def test_change_during_detectors_supersedes_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
     snapshots(monkeypatch, runner, SNAPSHOT, replace(SNAPSHOT, snapshot_digest=digest("content-2")))
