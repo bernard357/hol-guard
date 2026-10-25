@@ -24,7 +24,7 @@ from . import workspace_assessment_store as assessments
 from .native_workspace_snapshot import WorkspaceSnapshotError, workspace_snapshot
 from .workspace_assessment_admissions import admit_and_queue, end_unregistered_install_admissions, watched_roots
 from .workspace_assessment_runner import DETECTOR_SET_DIGEST, feed_context_digest, now_ms, run_next
-from .workspace_runtime_findings import assessment_context_digest, observed_runtime_digest
+from .workspace_runtime_findings import assessment_context_digest, cached_runtime_digest, observed_runtime_digest
 
 POLL_INTERVAL_SECONDS: Final = 30.0
 # Recorded when an admitted root is missing, unreadable or now names another
@@ -34,6 +34,9 @@ UNAVAILABLE_STAT_DIGEST: Final = hashlib.sha256(b"guard.workspace-stat.unavailab
 # How long a root that could not be admitted waits before it is tried again;
 # a native runtime that was unavailable may have come back.
 ADMISSION_RETRY_MS: Final = 10 * 60_000
+# Runtime probes per poll. A probe hashes every launched executable, so after a
+# restart the worktrees are probed a few per poll rather than all at once.
+_MAX_RUNTIME_PROBES_PER_POLL: Final = 2
 # Runs per poll; the rest wait for the next poll so shutdown stays prompt.
 _MAX_RUNS_PER_POLL: Final = 4
 
@@ -144,6 +147,7 @@ def observe(store: Any, *, clock: Callable[[], int] = now_ms) -> int:
     """Queue assessments for admitted worktrees whose files or feed changed."""
 
     queued = 0
+    probes = 0
     feed_digest = feed_context_digest(store)
     for worktree in assessments.list_worktrees(store, include_paused=False):
         keys = assessments.WorktreeKeys(str(worktree["codebase_key"]), str(worktree["worktree_key"]))
@@ -153,7 +157,17 @@ def observe(store: Any, *, clock: Callable[[], int] = now_ms) -> int:
         except WorkspaceSnapshotError:
             snapshot = None
         available = snapshot is not None and snapshot.worktree_key == keys.worktree_key
-        runtime_digest = observed_runtime_digest(store, keys.worktree_key, root, now_ms=clock())
+        cached = cached_runtime_digest(store, keys.worktree_key, now_ms=clock())
+        if cached is not None and (cached[1] or probes >= _MAX_RUNTIME_PROBES_PER_POLL):
+            # Fresh, or due but out of probes: the last answer stands until a later poll.
+            runtime_digest = cached[0]
+        elif probes < _MAX_RUNTIME_PROBES_PER_POLL:
+            probes += 1
+            runtime_digest = observed_runtime_digest(store, keys.worktree_key, root, now_ms=clock())
+        else:
+            # Never probed: observing it now would record an unknown runtime and
+            # queue a run, so it waits for a later poll's probe.
+            continue
         triggers = assessments.record_observation(
             store,
             keys,

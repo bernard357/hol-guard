@@ -31,6 +31,7 @@ from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
 from .workspace_runtime_findings import (
     RUNTIME_DETECTOR,
     assessment_context_digest,
+    log_probe_failure,
     observe_workspace_runtimes,
     project_runtime_findings,
     remember_runtime_posture,
@@ -159,8 +160,9 @@ def _runtime_posture(store: Any, root: Path) -> dict[str, object] | None:
 
     try:
         return observe_workspace_runtimes(store, root)
-    except Exception:
+    except Exception as error:
         # The run keeps its other detectors; coverage reports this one as not run.
+        log_probe_failure(error)
         return None
 
 

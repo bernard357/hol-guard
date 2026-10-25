@@ -233,3 +233,80 @@ def test_a_finished_run_leaves_the_next_observation_quiet(tmp_path: Path, monkey
     # The run stored the context it assessed; observing the same context must
     # not queue another run, or the worker would reassess forever.
     assert worker.observe(store, clock=lambda: T0 + 2) == 0
+
+
+def test_unresolved_or_unidentified_launches_leave_runtimes_incomplete() -> None:
+    base = {"status": "complete", "reasons": [], "detectors": {}}
+    launch = {"harness": "codex", "server": "tools", "command": "node", "lookup": "path"}
+    unresolved = runtimes.with_runtime_coverage(base, {**posture(), "runtimes": [], "unresolved_launches": [launch]})
+    assert (unresolved["reasons"], unresolved["detectors"]["runtime_identity_v1"]) == (
+        ["runtimes_incomplete"],
+        "incomplete",
+    ), "a launch Guard could not resolve is not the same as launching nothing"
+    unreadable = {**NODE, "artifact_id": None, "family": None, "location_state": "unreadable"}
+    unidentified = runtimes.with_runtime_coverage(base, {**posture(), "runtimes": [unreadable]})
+    assert unidentified["reasons"] == ["runtimes_incomplete"]
+
+
+def test_every_path_of_a_matched_runtime_is_a_finding() -> None:
+    copy = {**NODE, "path": "/opt/tools/bin/node"}
+    findings, _ = runtimes.project_runtime_findings(
+        KEYS.worktree_key, {**posture(advisories=[advisory("affected")]), "runtimes": [NODE, copy]}
+    )
+    assert sorted(str(finding["path"]) for finding in findings) == sorted([NODE["path"], copy["path"]])
+    assert len({finding["finding_id"] for finding in findings}) == 2
+
+
+def test_the_cap_keeps_known_exploited_and_severe_findings() -> None:
+    minor = [
+        advisory("affected", f"GHSA-node-{index:04d}", severity="LOW", known_exploited=False)
+        for index in range(runtimes.MAX_RUNTIME_FINDINGS)
+    ]
+    critical = advisory("affected", "GHSA-node-late", severity="CRITICAL", known_exploited=True)
+    findings, truncated = runtimes.project_runtime_findings(KEYS.worktree_key, posture(advisories=[*minor, critical]))
+    assert truncated is True
+    assert findings[0]["advisory_ids"] == ["GHSA-node-late"], "a late critical advisory survives the cap"
+
+
+def test_a_launch_past_the_candidate_limit_changes_the_runtime_digest() -> None:
+    limited = {**posture(), "status": "partial", "candidate_limit_reached": True}
+    assert runtimes.runtime_identity_digest(limited) != runtimes.runtime_identity_digest(posture())
+
+
+def test_a_failed_probe_is_logged_without_its_path(tmp_path: Path, monkeypatch, caplog) -> None:
+    store = GuardStore(tmp_path / "home")
+
+    def broken(store, root, *, home_dir=None):
+        raise OSError(f"cannot read {root}/secret-config.json")
+
+    monkeypatch.setattr(runtimes, "observe_workspace_runtimes", broken)
+    with caplog.at_level("WARNING", logger=runtimes.__name__):
+        assert runtimes.observed_runtime_digest(store, KEYS.worktree_key, tmp_path, now_ms=T0) is None
+    assert "workspace runtime probe failed: OSError" in caplog.text
+    assert str(tmp_path) not in caplog.text
+
+
+def test_an_observation_pass_probes_a_bounded_number_of_worktrees(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    rows = [
+        {"codebase_key": "c" * 64, "worktree_key": f"{index:064d}", "root": str(tmp_path / str(index))}
+        for index in range(5)
+    ]
+    monkeypatch.setattr(worker.assessments, "list_worktrees", lambda store, include_paused=False: rows)
+    monkeypatch.setattr(worker.assessments, "record_observation", lambda *args, **kwargs: [])
+
+    def unavailable(root, *, mode):
+        raise worker.WorkspaceSnapshotError("workspace_root_missing")
+
+    monkeypatch.setattr(worker, "workspace_snapshot", unavailable)
+    probed: list[str] = []
+
+    def observe(store, root, *, home_dir=None):
+        probed.append(root.name)
+        return posture()
+
+    monkeypatch.setattr(runtimes, "observe_workspace_runtimes", observe)
+    worker.observe(store, clock=lambda: T0)
+    assert probed == ["0", "1"], "a restart does not hash every worktree's runtimes in one poll"
+    worker.observe(store, clock=lambda: T0 + 1)
+    assert probed == ["0", "1", "2", "3"], "the rest are probed by later polls"

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -28,7 +29,8 @@ RUNTIME_SOURCE_KIND: Final = "agent_inventory"
 RUNTIME_OBSERVE_INTERVAL_MS: Final = 10 * 60 * 1000
 MAX_RUNTIME_FINDINGS: Final = 50
 _FINDING_VERDICTS: Final = frozenset({"affected", "restart_required", "fix_unverified"})
-_SEVERITIES: Final = frozenset({"critical", "high", "medium", "low", "info"})
+_SEVERITY_RANK: Final = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+_LOGGER = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _observed: dict[tuple[str, str], tuple[int, str | None]] = {}
@@ -70,6 +72,10 @@ def runtime_identity_digest(posture: Mapping[str, object]) -> str | None:
     if posture.get("status") == "unavailable":
         return None
     identity = {
+        # A launch past the probe's candidate limit, or a harness that became
+        # unreadable, changes coverage without changing the retained rows.
+        "status": str(posture.get("status")),
+        "candidate_limit_reached": posture.get("candidate_limit_reached") is True,
         "runtimes": sorted(
             [
                 str(row.get("path")),
@@ -90,6 +96,16 @@ def runtime_identity_digest(posture: Mapping[str, object]) -> str | None:
     return hashlib.sha256(("guard.workspace-runtimes.v1\0" + encoded).encode("utf-8")).hexdigest()
 
 
+def cached_runtime_digest(store: Any, worktree_key: str, *, now_ms: int) -> tuple[str | None, bool] | None:
+    """The last probed digest of one worktree and whether it is still fresh, or ``None`` before any probe."""
+
+    with _lock:
+        previous = _observed.get((str(store.guard_home), worktree_key))
+    if previous is None:
+        return None
+    return previous[1], now_ms - previous[0] < RUNTIME_OBSERVE_INTERVAL_MS
+
+
 def observed_runtime_digest(store: Any, worktree_key: str, root: Path, *, now_ms: int) -> str | None:
     """The runtime digest of one worktree, probed at most once per interval.
 
@@ -103,7 +119,8 @@ def observed_runtime_digest(store: Any, worktree_key: str, root: Path, *, now_ms
         return previous[1]
     try:
         posture: Mapping[str, object] | None = observe_workspace_runtimes(store, root)
-    except Exception:
+    except Exception as error:
+        log_probe_failure(error)
         posture = None
     return remember_runtime_posture(store, worktree_key, posture, now_ms=now_ms)
 
@@ -128,6 +145,15 @@ def remember_runtime_posture(
     return digest
 
 
+def log_probe_failure(error: BaseException) -> None:
+    """Record why a runtime probe failed, without paths or configuration contents."""
+
+    code = getattr(error, "code", None)
+    _LOGGER.warning(
+        "workspace runtime probe failed: %s", code if isinstance(code, str) and code else type(error).__name__
+    )
+
+
 def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> str:
     """Digest everything outside the files that an assessment's answer depends on.
 
@@ -142,50 +168,60 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
 
 
 def project_runtime_findings(worktree_key: str, posture: Mapping[str, object]) -> tuple[list[dict[str, object]], bool]:
-    """One finding per advisory and matched executable, and whether any were dropped."""
+    """One finding per advisory and matched executable path, and whether any were dropped.
 
-    paths: dict[str, list[str]] = {}
-    artifacts: dict[str, Mapping[str, object]] = {}
+    Byte-identical runtimes at different paths share one artifact, so every
+    path of a matched artifact gets its own finding. The cap keeps the
+    known-exploited and most severe findings.
+    """
+
+    rows: dict[str, list[Mapping[str, object]]] = {}
     for row in _rows(posture.get("runtimes")):
         artifact_id = row.get("artifact_id")
         if isinstance(artifact_id, str):
-            artifacts.setdefault(artifact_id, row)
-            paths.setdefault(artifact_id, []).append(str(row.get("path")))
+            rows.setdefault(artifact_id, []).append(row)
     findings: dict[str, dict[str, object]] = {}
     for advisory in _rows(posture.get("advisories")):
         advisory_id, verdict = _text(advisory.get("advisory_id")), advisory.get("verdict")
         if advisory_id is None or verdict not in _FINDING_VERDICTS:
             continue
+        severity = str(advisory.get("severity") or "").lower()
         for artifact_id in _list(advisory.get("affected_artifact_ids")):
-            artifact = artifacts.get(str(artifact_id))
-            if artifact is None:
-                continue
-            finding_id = hashlib.sha256(
-                "\0".join(
-                    ("guard.workspace-finding.v1", worktree_key, "runtime", advisory_id, str(artifact_id))
-                ).encode("utf-8")
-            ).hexdigest()[:32]
-            severity = str(advisory.get("severity") or "").lower()
-            findings[finding_id] = {
-                "finding_id": finding_id,
-                "source_kind": RUNTIME_SOURCE_KIND,
-                "detector": RUNTIME_DETECTOR,
-                "severity": severity if severity in _SEVERITIES else "unknown",
-                # Observation only: a runtime finding never blocks anything.
-                "decision": "warn",
-                "ecosystem": None,
-                "package_name": None,
-                "runtime_family": _text(artifact.get("family")),
-                "runtime_version": _text(artifact.get("version")),
-                "path": sorted(paths[str(artifact_id)])[0],
-                "rule_ids": [str(verdict)],
-                "advisory_ids": [advisory_id],
-                "title": _text(advisory.get("title")),
-                "known_exploited": advisory.get("known_exploited") is True,
-                "validation_state": "confirmed",
-                "lifecycle_state": "open",
-            }
-    ordered = list(findings.values())
+            for row in rows.get(str(artifact_id), []):
+                path = str(row.get("path"))
+                finding_id = hashlib.sha256(
+                    "\0".join(("guard.workspace-finding.v1", worktree_key, "runtime", advisory_id, path)).encode(
+                        "utf-8"
+                    )
+                ).hexdigest()[:32]
+                findings[finding_id] = {
+                    "finding_id": finding_id,
+                    "source_kind": RUNTIME_SOURCE_KIND,
+                    "detector": RUNTIME_DETECTOR,
+                    "severity": severity if severity in _SEVERITY_RANK else "unknown",
+                    # Observation only: a runtime finding never blocks anything.
+                    "decision": "warn",
+                    "ecosystem": None,
+                    "package_name": None,
+                    "runtime_family": _text(row.get("family")),
+                    "runtime_version": _text(row.get("version")),
+                    "path": path,
+                    "rule_ids": [str(verdict)],
+                    "advisory_ids": [advisory_id],
+                    "title": _text(advisory.get("title")),
+                    "known_exploited": advisory.get("known_exploited") is True,
+                    "validation_state": "confirmed",
+                    "lifecycle_state": "open",
+                }
+    ordered = sorted(
+        findings.values(),
+        key=lambda item: (
+            item["known_exploited"] is not True,
+            _SEVERITY_RANK.get(str(item["severity"]), len(_SEVERITY_RANK)),
+            str(item["advisory_ids"]),
+            str(item["path"]),
+        ),
+    )
     return ordered[:MAX_RUNTIME_FINDINGS], len(ordered) > MAX_RUNTIME_FINDINGS
 
 
@@ -194,7 +230,8 @@ def with_runtime_coverage(coverage: dict[str, object], posture: Mapping[str, obj
 
     Runtimes the advisories could not be checked against, or a harness whose
     configuration could not be read, leave the detector incomplete and the run
-    partial. A workspace whose tools launch nothing has no runtime inputs.
+    partial, as does a configured launch Guard could not resolve or identify.
+    A workspace whose tools launch nothing has no runtime inputs.
     """
 
     reasons = list(_list(coverage.get("reasons")))
@@ -203,16 +240,20 @@ def with_runtime_coverage(coverage: dict[str, object], posture: Mapping[str, obj
         reasons.append(f"detector_not_run:{RUNTIME_DETECTOR}")
     else:
         runtimes = _rows(posture.get("runtimes"))
+        unresolved = _rows(posture.get("unresolved_launches"))
         gaps: list[str] = []
-        if posture.get("status") != "ok" or any(
-            row.get("verdict") == "unknown" for row in _rows(posture.get("advisories"))
+        if (
+            posture.get("status") != "ok"
+            or unresolved
+            or any(not isinstance(row.get("artifact_id"), str) or row.get("family") is None for row in runtimes)
+            or any(row.get("verdict") == "unknown" for row in _rows(posture.get("advisories")))
         ):
             gaps.append("runtimes_incomplete")
         posture_coverage = posture.get("coverage")
         available = isinstance(posture_coverage, Mapping) and posture_coverage.get("advisories_available") is True
         if runtimes and not available:
             gaps.append("runtime_advisories_unavailable")
-        status = "incomplete" if gaps else "complete" if runtimes else "no_inputs"
+        status = "incomplete" if gaps else "complete" if runtimes or unresolved else "no_inputs"
         reasons.extend(gaps)
     detectors = coverage.get("detectors")
     summary = {
@@ -249,6 +290,8 @@ __all__ = [
     "RUNTIME_OBSERVE_INTERVAL_MS",
     "RUNTIME_SOURCE_KIND",
     "assessment_context_digest",
+    "cached_runtime_digest",
+    "log_probe_failure",
     "observe_workspace_runtimes",
     "observed_runtime_digest",
     "project_runtime_findings",
