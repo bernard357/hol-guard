@@ -241,7 +241,6 @@ pub fn evaluate_with_deadline(
     mapping::evaluate(operation, input, deadline).unwrap_or_else(|| evaluate(operation, input))
 }
 pub use authority::evaluate;
-pub(crate) use environment::forwarded_setting;
 pub(crate) use launch_roots::launches_outside_exec_roots;
 pub use mapping::evidence as mapping_evidence;
 /// The Windows planner in `guard-runtime` decides the same question about the

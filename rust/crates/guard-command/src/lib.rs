@@ -482,6 +482,8 @@ pub mod egress_caller_policy;
 pub mod egress_proxy_credentials;
 mod egress_spool;
 pub mod false_positive_rules;
+#[cfg(unix)]
+mod forwarded_settings;
 pub mod guard_sync_transport;
 #[path = "adapters/hook/hook_adapter_envelope.rs"]
 pub mod hook_adapter_envelope;
