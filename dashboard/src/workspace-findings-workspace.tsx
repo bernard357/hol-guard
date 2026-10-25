@@ -27,6 +27,8 @@ const COVERAGE_REASONS: Record<string, string> = {
   snapshot_depth_cap: "Some folders are nested deeper than one assessment reads.",
   snapshot_visit_cap: "The workspace has more entries than one assessment visits.",
   snapshot_unsupported_dependency_input: "Some lockfiles use a format Guard does not check yet, so those dependencies were not checked.",
+  snapshot_undiscovered_dependency_input:
+    "Some dependency files are more than three folders below the workspace root, so those dependencies were not checked.",
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   advisory_data_unavailable:
     "No threat intel is cached on this device yet, so dependencies were listed but not checked for known vulnerabilities.",

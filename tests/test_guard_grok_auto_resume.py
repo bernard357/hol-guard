@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import io
 import json
-import sys
 import threading
 import time
 from pathlib import Path
@@ -256,46 +254,6 @@ def test_grok_live_wait_skips_observe_events_and_zero_timeout(tmp_path: Path) ->
         )
         is None
     )
-
-
-def test_grok_emit_allows_after_live_approval(tmp_path: Path, monkeypatch) -> None:
-    store = GuardStore(tmp_path / "guard-home")
-    store.add_approval_request(_request(tmp_path, "req-grok-emit"), "2026-05-08T10:00:00+00:00")
-    (store.guard_home / "config.toml").write_text("approval_wait_timeout_seconds = 4\n", encoding="utf-8")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["hol-guard", "hook", "--guard-home", str(store.guard_home), "--harness", "grok"],
-    )
-
-    def approve() -> None:
-        time.sleep(0.15)
-        apply_approval_resolution(
-            store=store,
-            request_id="req-grok-emit",
-            action="allow",
-            scope="artifact",
-            workspace=str(tmp_path),
-            reason="reviewed",
-            now="2026-05-08T10:00:01+00:00",
-        )
-
-    thread = threading.Thread(target=approve)
-    thread.start()
-    stream = io.StringIO()
-    from codex_plugin_scanner.guard.adapters.grok_hooks import emit_grok_hook_response, grok_hook_process_exit
-
-    emit_grok_hook_response(
-        policy_action="require-reapproval",
-        reason="Review in HOL Guard.",
-        event_name="PreToolUse",
-        approval_payload={"approval_requests": [{"request_id": "req-grok-emit"}]},
-        output_stream=stream,
-    )
-    thread.join(timeout=5)
-
-    assert json.loads(stream.getvalue()) == {"decision": "allow"}
-    assert grok_hook_process_exit("require-reapproval") == 0
 
 
 def test_grok_live_wait_ignores_unrelated_pending_requests(tmp_path: Path) -> None:

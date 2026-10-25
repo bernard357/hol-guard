@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 from ._commands_shared import *
 from .commands_parser_helpers import *
-from ..runtime.composio_contract import composio_names_a_wrapper
 from ..runtime.mcp_protection import McpServerIdentity
 from ..synced_policy import synced_policy_payload as _synced_policy_payload
 from ..native_cli_runtime_support import cli_runtime_support as _native_cli_support
@@ -84,40 +83,12 @@ def _prompt_scan_path_exists(path: Path) -> bool:
         return path.is_file()
     return False
 
-def _legacy_claude_alias_runtime_artifact(
-    *,
-    artifact: GuardArtifact,
-    requested_harness: str,
-    home_dir: Path,
-    workspace: Path | None,
-) -> GuardArtifact | None:
-    if requested_harness == artifact.harness:
-        return None
-    if requested_harness != "claude" or artifact.harness != "claude-code":
-        return None
-    legacy_prefix = "claude-code:"
-    if not artifact.artifact_id.startswith(legacy_prefix):
-        return None
-    return replace(
-        artifact,
-        artifact_id=f"claude:{artifact.artifact_id[len(legacy_prefix) :]}",
-        harness="claude",
-        config_path=str(_runtime_policy_path("claude", home_dir, workspace)),
-    )
-
 def _is_copilot_permission_request(payload: dict[str, object]) -> bool:
     from ..daemon.hook_availability_policy import hook_event_is_permission_request as _perm
     return any(
         isinstance(payload.get(key), str) and _perm(str(payload.get(key)))
         for key in ("hook_name", "hook_event_name", "hookEventName")
     )
-
-def _copilot_hook_stage(payload: dict[str, object]) -> str | None:
-    for key in ("hook_name", "hook_event_name", "hookEventName"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip().lower()
-    return None
 
 @dataclass(frozen=True, slots=True)
 class _CopilotMcpRuntimeServer:
@@ -130,73 +101,6 @@ def _copilot_identity_dto(value: dict[str, Any]) -> McpServerIdentity:
     fields: dict[str, Any] = dict(value)
     fields["env_keys"] = tuple(fields["env_keys"])
     return McpServerIdentity(**fields)
-
-
-def _copilot_runtime_tool_call(
-    *, payload: dict[str, object], home_dir: Path, workspace: Path | None,
-    config: GuardConfig | None = None, preferred_workspace_config: str | None = None,
-    store: GuardStore | None = None,
-) -> tuple[GuardArtifact, str, object] | None:
-    tool_name = payload.get("tool_name")
-    if (
-        not isinstance(tool_name, str) or not tool_name.strip()
-        or ("/" not in tool_name and not tool_name.startswith("mcp_"))
-    ):
-        return None
-    fields = ("tool_schema", "toolSchema", "input_schema", "inputSchema", "schema",
-              "tool_description", "toolDescription", "description")
-    projection = {key: payload[key] for key in (*fields, "tool_name", "source_scope") if key in payload}
-    for key in ("tool", "tool_definition", "toolDefinition"):
-        value = payload.get(key)
-        if isinstance(value, Mapping):
-            projection[key] = {name: value[name] for name in fields if name in value}
-    calls = payload.get("toolCalls")
-    if isinstance(calls, list):
-        projection["toolCalls"] = [
-            {name: item[name] for name in (*fields, "name") if name in item}
-            for item in calls if isinstance(item, Mapping)
-        ]
-    result = _native_cli_support("resolve_tool", {
-        "payload": projection, "home_dir": str(home_dir),
-        "workspace": str(workspace) if workspace is not None else None,
-        "preferred": preferred_workspace_config, "launch_cwd": str(workspace or Path.cwd()),
-        "environment": dict(os.environ),
-        "caller_cwd": str(Path.cwd()),
-    }, guard_home=store.guard_home if store is not None else None)
-    if result is None:
-        return None
-    server, identity, metadata = result["server"], result["identity"], result["metadata"]
-    runtime_name = result["tool_name"]
-    server_identity = identity["server_identity"]
-    artifact = build_tool_call_artifact(
-        harness="copilot", server_name=server["server_name"], tool_name=runtime_name,
-        source_scope=server["source_scope"], config_path=server["config_path"], transport=identity["transport"],
-        server_identity=_copilot_identity_dto(server_identity),
-        server_fingerprint=identity["fingerprint"], tool_schema=metadata["schema"],
-        tool_description=metadata["description"],
-        provider_catalog_hash=(
-            store.read_mcp_provider_authority_hash()
-            if store is not None and composio_names_a_wrapper(runtime_name)
-            else None
-        ),
-    )
-    arguments = payload.get("tool_input", payload.get("arguments"))
-    artifact_hash = build_tool_call_hash(artifact, arguments, workspace=workspace or Path.cwd(), config=config)
-    return artifact, artifact_hash, arguments
-
-
-
-
-
-def _resolve_copilot_workspace_root(workspace: Path | None) -> Path | None:
-    if workspace is None:
-        return None
-    result = _native_cli_support("workspace_root", {
-        "workspace": str(workspace),
-        "caller_cwd": str(Path.cwd()),
-    })
-    return Path(result) if result is not None else None
-
 
 
 def _copilot_runtime_server_identity(
@@ -336,29 +240,10 @@ def _queue_claude_native_approval_gate_fallback(
     )
     return queued
 
-def _runtime_capabilities_summary(artifact: GuardArtifact) -> str:
-    if artifact.artifact_type == "package_request":
-        package_manager = artifact.metadata.get("package_manager")
-        if isinstance(package_manager, str) and package_manager:
-            return f"package request • {package_manager}"
-        return "package request"
-    tool_name = artifact.metadata.get("tool_name")
-    if isinstance(tool_name, str) and tool_name:
-        if artifact.artifact_type == "tool_action_request":
-            return f"tool action request • {tool_name}"
-        return f"file read request • {tool_name}"
-    return "file read request"
-
 def _runtime_request_summary(artifact: GuardArtifact) -> str | None:
     summary = artifact.metadata.get("request_summary")
     if isinstance(summary, str) and summary:
         return summary
-    return None
-
-def _runtime_requested_path(artifact: GuardArtifact) -> str | None:
-    normalized_path = artifact.metadata.get("normalized_path")
-    if isinstance(normalized_path, str) and normalized_path:
-        return normalized_path
     return None
 
 def _canonical_harness_name(harness: str) -> str:
@@ -488,14 +373,13 @@ def _server_command(server: dict[str, object]) -> list[str]:
     return command_parts
 
 __all__ = [
-    "_canonical_harness_name", "_copilot_hook_stage",
-    "_copilot_runtime_tool_call",
-    "_expand_prompt_scan_path", "_is_copilot_permission_request", "_legacy_claude_alias_runtime_artifact",
+    "_canonical_harness_name",
+    "_expand_prompt_scan_path", "_is_copilot_permission_request",
     "_managed_install_for", "_managed_manifest_server",
     "_prompt_scan_path_exists", "_queue_claude_native_approval_gate_fallback",
     "_redact_codex_prompt_secret_assignments",
-    "_resolve_copilot_workspace_root", "_resolve_prompt_scan_path", "_run_hermes_mcp_proxy",
-    "_runtime_capabilities_summary", "_runtime_detection", "_runtime_policy_path", "_runtime_request_summary",
-    "_runtime_requested_path", "_server_command", "_server_env", "_server_headers",
+    "_resolve_prompt_scan_path", "_run_hermes_mcp_proxy",
+    "_runtime_detection", "_runtime_policy_path", "_runtime_request_summary",
+    "_server_command", "_server_env", "_server_headers",
     "_truncate_codex_display_text",
 ]

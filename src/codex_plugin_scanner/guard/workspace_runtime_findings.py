@@ -164,11 +164,12 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
 
     The version moves when a release changes what a run reports for unchanged
     files, so every worktree is reassessed once after the upgrade. v2: coverage
-    names lockfiles Guard cannot check. v3: a lockfile without packages leaves
-    the supply-chain detector incomplete rather than reporting no inputs.
+    names lockfiles Guard cannot check. v3: coverage names dependency files
+    below audit discovery. v4: a lockfile without packages leaves the
+    supply-chain detector incomplete rather than reporting no inputs.
     """
 
-    encoded = f"guard.workspace-context.v3\0{feed_digest}\0{runtime_digest or 'unknown'}"
+    encoded = f"guard.workspace-context.v4\0{feed_digest}\0{runtime_digest or 'unknown'}"
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 

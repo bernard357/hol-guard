@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -253,15 +252,6 @@ class ExtensionControlRuntime:
             _ = floors.popitem(last=False)
 
 
-@contextmanager
-def use_extension_control_snapshot(snapshot: ExtensionControlRuntimeSnapshot) -> Iterator[None]:
-    token = _ACTIVE_SNAPSHOT.set(snapshot)
-    try:
-        yield
-    finally:
-        _ACTIVE_SNAPSHOT.reset(token)
-
-
 def current_extension_control_snapshot() -> ExtensionControlRuntimeSnapshot | None:
     return _ACTIVE_SNAPSHOT.get()
 
@@ -269,12 +259,6 @@ def current_extension_control_snapshot() -> ExtensionControlRuntimeSnapshot | No
 def current_extension_control_binding_digest() -> str:
     snapshot = current_extension_control_snapshot()
     return _NO_CONTROL_DIGEST if snapshot is None else snapshot.effective_digest
-
-
-def extension_control_policy_version(base_version: str) -> str:
-    if not isinstance(base_version, str) or not base_version.strip():
-        raise ValueError("base policy version is required")
-    return f"{base_version}@{current_extension_control_binding_digest()}"
 
 
 def _layer_payload(layer: ExtensionControlLayer) -> dict[str, object]:
