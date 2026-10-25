@@ -6,7 +6,6 @@ import hashlib
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
-from contextvars import ContextVar
 from dataclasses import dataclass
 
 from ..native_command_control_authority_io import NativeCommandControlAuthorityUnavailableError
@@ -18,10 +17,6 @@ _NO_CONTROL_DIGEST = hashlib.sha256(b"hol.guard.extension-control:none:v1").hexd
 # from every runtime snapshot digest, so no binding can ever match it.
 _UNANSWERED_DIGEST = hashlib.sha256(b"hol.guard.extension-control:unanswered:v1").hexdigest()
 _MAX_PROTECTED_FLOORS = 32
-_ACTIVE_SNAPSHOT: ContextVar[ExtensionControlRuntimeSnapshot | None] = ContextVar(
-    "guard_extension_control_runtime_snapshot",
-    default=None,
-)
 
 
 class ExtensionControlSnapshotUnavailableError(NativeCommandControlAuthorityUnavailableError):
@@ -252,13 +247,10 @@ class ExtensionControlRuntime:
             _ = floors.popitem(last=False)
 
 
-def current_extension_control_snapshot() -> ExtensionControlRuntimeSnapshot | None:
-    return _ACTIVE_SNAPSHOT.get()
-
-
 def current_extension_control_binding_digest() -> str:
-    snapshot = current_extension_control_snapshot()
-    return _NO_CONTROL_DIGEST if snapshot is None else snapshot.effective_digest
+    # No hook path carries an extension-control snapshot, so every approval
+    # binds the fixed no-control digest.
+    return _NO_CONTROL_DIGEST
 
 
 def _layer_payload(layer: ExtensionControlLayer) -> dict[str, object]:
