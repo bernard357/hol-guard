@@ -344,22 +344,21 @@ fn mask_argument(word: &str, mask_next: &mut bool) -> String {
     if std::mem::take(mask_next) && !word.starts_with('-') {
         return "*****".to_owned();
     }
-    for separator in ['=', ':'] {
-        let Some(at) = word.find(separator) else {
-            continue;
-        };
-        if sensitive_key(&word[..at]) {
-            let gap = if separator == ':' { " " } else { "" };
-            let closing = word
-                .chars()
-                .next()
-                .filter(|open| {
-                    matches!(*open, '\'' | '"') && word.len() > 1 && word.ends_with(*open)
-                })
-                .map(String::from)
-                .unwrap_or_default();
-            return format!("{}{gap}*****{closing}", &word[..=at]);
-        }
+    // The first separator whose name is sensitive starts the value, so a
+    // value holding `=` or `:` itself (base64 padding) is masked whole, and
+    // `--header=X-Api-Key:…` still reaches the header's name.
+    if let Some((at, separator)) = word
+        .match_indices(['=', ':'])
+        .find(|(at, _)| sensitive_key(&word[..*at]))
+    {
+        let gap = if separator == ":" { " " } else { "" };
+        let closing = word
+            .chars()
+            .next()
+            .filter(|open| matches!(*open, '\'' | '"') && word.len() > 1 && word.ends_with(*open))
+            .map(String::from)
+            .unwrap_or_default();
+        return format!("{}{gap}*****{closing}", &word[..=at]);
     }
     *mask_next = word.starts_with('-') && sensitive_key(word);
     word.to_owned()
@@ -666,6 +665,14 @@ mod tests {
             (
                 format!("make deploy CLIENT_SECRET={secret}"),
                 "make deploy CLIENT_SECRET=*****",
+            ),
+            (
+                format!("curl -H 'X-Api-Key: {secret}=' https://example.invalid"),
+                "curl -H 'X-Api-Key: *****' https://example.invalid",
+            ),
+            (
+                format!("curl --header=X-Auth-Token:{secret}== https://example.invalid"),
+                "curl --header=X-Auth-Token: ***** https://example.invalid",
             ),
         ] {
             assert_eq!(redact_command_text(&command), masked, "{command}");
