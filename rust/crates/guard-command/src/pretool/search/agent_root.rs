@@ -65,9 +65,10 @@ pub(in crate::pretool) fn agent_root_listing(
         && (!recursive || walk(agent, &[], &[], false, false))
 }
 
-/// A user skill directory, `~/.agents`, or the `skills` tree of any tool's
-/// own home directory, named for a listing that prints names only (`ls`
-/// without recursion, `find` without actions). Agents look
+/// A user skill directory, `~/.agents`, the `skills` tree of any tool's own
+/// home directory, or the matching tree a checkout carries itself, named for
+/// a listing that prints names only (`ls` without recursion, `find` without
+/// actions). Agents look
 /// up skill scripts this way; the operand must clear the same word screens as
 /// the `.agent` root and resolve to a directory the skill rules admit.
 /// The operand names a skill root, and that root is a link to the home
@@ -161,8 +162,41 @@ pub(in crate::pretool) fn skill_listing_root(value: &str, context: ReadContext<'
                 && (super::super::read_paths::agent_skill_listing_directory(
                     &canonical,
                     context.home_dir,
-                ) || home_tool_skill_tree(&canonical, context.home_dir))
+                ) || home_tool_skill_tree(&canonical, context.home_dir)
+                    || project_skill_tree(&canonical, context))
         })
+}
+
+/// The `skills` tree a checkout carries itself.
+///
+/// A project ships `.agents/skills`, `.claude/skills` or `.codex/skills`
+/// beside its code, and an agent looks its own skills up there exactly as it
+/// does in the home tree. A plain listing of the session folder already
+/// prints these names, so `ls .agents` was admitted while
+/// `find .agents -type f -print` was not, and the walk that reads the
+/// project's skills had to ask. Both print names and never contents, so the
+/// same shape answers for both: the directory rules the project listing
+/// allowance already carries, plus the credential-store screen the home tree
+/// keeps. Each document below the tree still keeps its own read proof.
+fn project_skill_tree(canonical: &Path, context: ReadContext<'_>) -> bool {
+    let Some(session) = context.cwd.and_then(|cwd| std::fs::canonicalize(cwd).ok()) else {
+        return false;
+    };
+    if !super::super::read_paths::project_skill_listing_directory(canonical, &session) {
+        return false;
+    }
+    let Ok(relative) = canonical.strip_prefix(&session) else {
+        return false;
+    };
+    let lowered: Vec<String> = relative
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .map(|part| part.to_ascii_lowercase())
+        .collect();
+    !crate::credential_store_names::names_hold_credential_store(&lowered)
 }
 
 /// A `skills` tree below a tool's own home directory.

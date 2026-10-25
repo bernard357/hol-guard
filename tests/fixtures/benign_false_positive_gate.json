@@ -1084,6 +1084,57 @@
       "expect": "allow"
     },
     {
+      "id": "find-project-agents-root",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents -maxdepth 3 -type f -print"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "find-project-skills-tree",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents/skills -type d"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "find-project-agents-root-then-listing",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents -maxdepth 3 -type f -print && ls .agents/skills"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "git-worktree-status",
       "fix_area": "git",
       "harnesses": [
