@@ -63,8 +63,10 @@ pub(super) fn locations(model: &CanonicalCommandV1, workspace: &Path) -> Option<
                     next.extend([(cwd.clone(), true), (cwd, false)]);
                 } else {
                     let supplied = cwd.join(target);
-                    // Missing relative names may resolve through CDPATH; don't
-                    // invent a successful cwd that the real shell won't use.
+                    // The sandbox hands the run no CDPATH to search, so a
+                    // name that exists here is where the run lands. A name
+                    // that does not exist has nowhere to land at all, so
+                    // don't invent a cwd the real shell never reaches.
                     if !supplied.is_dir() {
                         return None;
                     }

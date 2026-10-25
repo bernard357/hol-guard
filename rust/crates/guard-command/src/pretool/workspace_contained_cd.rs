@@ -10,6 +10,16 @@ use crate::{CanonicalCommandV1, CommandSegmentV1};
 use std::path::Path;
 
 /// A literal directory at or below the workspace, with no parent step.
+///
+/// A bare relative operand is read as the directory of that name below the
+/// run's cwd, which the decision elsewhere admits only against proof that the
+/// caller exported no `CDPATH`. Containment needs no such proof: the launcher
+/// builds the run's environment from an allow-list
+/// (`restricted_pytest::environment::filter`), `CDPATH` is on no list, and a
+/// `CDPATH` the command sets itself is already refused by `cwd::locations`.
+/// So the search a shell would make cannot happen inside the sandbox, and the
+/// name resolves to exactly the directory this reading names. `environment_tests`
+/// pins that, so a name added to the allow-list later cannot quietly undo it.
 pub(super) fn below(target: &str, workspace: &Path) -> bool {
     let path = Path::new(target);
     !target.is_empty()
