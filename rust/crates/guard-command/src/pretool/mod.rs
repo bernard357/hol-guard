@@ -40,6 +40,8 @@ mod brace_group;
 mod contained_wrapper;
 pub(crate) mod curl_reads;
 pub use curl_reads::bound_curl_read_destinations;
+#[cfg(unix)]
+mod contained_exact_shape;
 pub(crate) mod dd_reads;
 mod digest_reads;
 pub(crate) mod docker_reads;
@@ -51,9 +53,10 @@ mod loopback_ports;
 pub(crate) mod port_probes;
 pub(crate) mod rsync_local;
 mod workspace_contained;
-/// The package firewall's extensions, whose permission marks which
-/// ecosystem's manager ran rather than a risk the run carries.
-pub(crate) use workspace_contained::package::PACKAGE_EXTENSIONS;
+#[cfg(unix)]
+pub(crate) use contained_exact_shape::{
+    exact_shape as workspace_exact_shape, runs_whole as workspace_runs_whole,
+};
 #[cfg(unix)]
 pub(crate) use workspace_contained::Shape;
 #[cfg(unix)]
@@ -96,6 +99,7 @@ mod git_rev_list;
 mod git_search_text;
 pub(crate) mod git_side_record_reads;
 pub(crate) mod git_stash_reads;
+pub(crate) mod git_submodule_reads;
 pub(crate) mod git_tag_listing;
 pub(crate) mod recoverable_removal;
 mod repo_create_reason;

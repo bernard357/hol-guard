@@ -105,6 +105,7 @@ export function SupplyChainHubWorkspace(props: {
         {tab === "supply-chain" && (
           <SupplyChainWorkspace
             snapshot={props.snapshot}
+            receipts={props.receipts}
             fixAllState={fixAllState}
             onFixAll={handleFixAll}
           />
