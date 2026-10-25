@@ -51,7 +51,8 @@ def runtimes_section(
 ) -> dict[str, object] | None:
     """The cached section, refreshed when older than ``ttl_seconds``; ``None`` when it cannot be built."""
 
-    scope = _cache_scope(context, hash_key)
+    advisory = _advisory_bundle(store)
+    scope = _cache_scope(context, hash_key, advisory)
     if ttl_seconds > 0:
         cached = store.get_sync_payload(RUNTIMES_STATE_KEY)
         if (
@@ -63,7 +64,7 @@ def runtimes_section(
             if fetched is not None and 0 <= (now - fetched).total_seconds() < ttl_seconds:
                 return cast("dict[str, object]", section)
     try:
-        section = project_runtime_posture(_observe(context, now), hash_key=hash_key)
+        section = project_runtime_posture(_observe(context, now, advisory), hash_key=hash_key)
     except Exception:
         _LOGGER.debug("fleet posture: runtime posture could not be observed", exc_info=True)
         return None
@@ -75,13 +76,34 @@ def runtimes_section(
     return section
 
 
-def _cache_scope(context: HarnessContext, hash_key: bytes) -> str:
+def _advisory_bundle(store: GuardStore) -> tuple[Mapping[str, object] | None, str | None]:
+    from ..runtime_advisory_bundle import cached_advisory_bundle
+
+    try:
+        return cached_advisory_bundle(store)
+    except Exception:
+        _LOGGER.debug("fleet posture: cached advisory bundle could not be read", exc_info=True)
+        return None, None
+
+
+def _cache_scope(
+    context: HarnessContext, hash_key: bytes, advisory: tuple[Mapping[str, object] | None, str | None]
+) -> str:
     # Keyed, so the stored scope names no path and changes whenever the key does.
+    # A newly synced bundle changes the scope too, so advisories are rematched
+    # on the next report instead of waiting out the cache.
     workspace = str(context.workspace_dir.resolve()) if context.workspace_dir is not None else ""
-    return keyed_digest(hash_key, f"fleet-posture-runtimes\0{workspace}")
+    bundle, reason = advisory
+    response = bundle.get("response") if bundle is not None else None
+    signed = response.get("bundle") if isinstance(response, Mapping) else None
+    version = signed.get("bundleVersion") if isinstance(signed, Mapping) else None
+    tag = f"bundle:{version}" if isinstance(version, str) else f"none:{reason}"
+    return keyed_digest(hash_key, f"fleet-posture-runtimes\0{workspace}\0{tag}")
 
 
-def _observe(context: HarnessContext, now: datetime) -> Mapping[str, Any]:
+def _observe(
+    context: HarnessContext, now: datetime, advisory: tuple[Mapping[str, object] | None, str | None]
+) -> Mapping[str, Any]:
     from ..adapters.harness_mcp_discovery import configured_harness_detections
     from ..runtime_posture import build_runtime_posture
 
@@ -94,6 +116,8 @@ def _observe(context: HarnessContext, now: datetime) -> Mapping[str, Any]:
         generated_at=iso(now),
         workspace_dir=context.workspace_dir,
         skipped_harnesses=skipped,
+        advisory_bundle=advisory[0],
+        advisory_bundle_reason=advisory[1],
     )
 
 
