@@ -17,9 +17,14 @@
 //! `hol-guard telemetry plugins` sends one JSON request on stdin to
 //! `hol-guard-runtime plugin-telemetry --stdin` and gets one response back:
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
+//!
+//! The same command answers `hol-guard plugin updates` with the `updates`
+//! request: it compares installed versions with the public release index on
+//! the device and sends nothing.
 
 mod installed;
 mod report;
+mod updates;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -29,9 +34,14 @@ use serde_json::{json, Value};
 
 pub use installed::{discover, InstalledPlugin, RuntimeHomes};
 pub use report::{build_report, normalize_repository_url, IndexEntry, ReportEntry};
+pub use updates::{
+    check_updates, compare_versions, Dismissal, IndexedRelease, ReleaseIndexEntry, UpdateCheck,
+    UpdatePrompt,
+};
 
 pub const COMMAND: &str = "plugin-telemetry";
 pub const FEATURE: &str = "plugin-telemetry-v1";
+pub const UPDATES_FEATURE: &str = "plugin-updates-v1";
 pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_ENTRIES: usize = 200;
 
@@ -62,6 +72,22 @@ enum Request {
         #[serde(rename = "guardVersion")]
         guard_version: String,
     },
+    Updates {
+        homes: Homes,
+        index: Vec<IndexEntry>,
+        releases: Vec<ReleaseIndexEntry>,
+        #[serde(default)]
+        dismissed: Vec<Dismissal>,
+    },
+}
+
+fn runtime_homes(homes: Homes) -> RuntimeHomes {
+    RuntimeHomes {
+        claude: homes.claude.map(PathBuf::from),
+        codex: homes.codex.map(PathBuf::from),
+        gemini: homes.gemini.map(PathBuf::from),
+        cursor: homes.cursor.map(PathBuf::from),
+    }
 }
 
 /// Runs one request and wraps the outcome in the native response envelope.
@@ -72,15 +98,6 @@ pub fn run_request(bytes: &[u8]) -> Value {
     {
         Ok(result) => json!({"ok": true, "result": result}),
         Err(error) => json!({"ok": false, "error": error}),
-    }
-}
-
-fn runtime_homes(homes: Homes) -> RuntimeHomes {
-    RuntimeHomes {
-        claude: homes.claude.map(PathBuf::from),
-        codex: homes.codex.map(PathBuf::from),
-        gemini: homes.gemini.map(PathBuf::from),
-        cursor: homes.cursor.map(PathBuf::from),
     }
 }
 
@@ -118,6 +135,16 @@ fn handle(request: Request) -> Result<Value, String> {
                     "entries": entries,
                 },
             }))
+        }
+        Request::Updates {
+            homes,
+            index,
+            releases,
+            dismissed,
+        } => {
+            let installed = discover(&runtime_homes(homes));
+            let check = check_updates(&index, &releases, &installed, &dismissed);
+            serde_json::to_value(check).map_err(|_| "plugin_updates_failed".to_owned())
         }
     }
 }
