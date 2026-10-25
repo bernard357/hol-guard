@@ -8,6 +8,7 @@
 //! pull split in two. It reaches no remote, so it needs only the work tree
 //! half of the pull proof: what a fast-forward checkout could start.
 
+use super::git_remote_config as config;
 use super::git_session_probe::Probe;
 use crate::{CanonicalCommandV1, CommandSegmentV1};
 use std::time::Instant;
