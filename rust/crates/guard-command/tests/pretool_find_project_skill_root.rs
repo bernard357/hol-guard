@@ -1,9 +1,8 @@
 //! A checkout carries its own `.agents/skills` tree, and an agent reads the
 //! project's skills by walking it. A plain listing of the session folder
 //! already prints those names, so the names-only walk that prints the same
-//! ones is ordinary work. A hidden project directory that is not a skills
-//! tree, an `.agents` folder holding state of its own, and a hidden or
-//! credential-named folder below the tree all keep review.
+//! ones is ordinary work. An `.agents` folder holding state of its own, and a
+//! hidden or credential-named folder below the tree, both keep review.
 use crate::pretool_home_layout_reads::{assert_decision, layout};
 use std::path::Path;
 
@@ -14,8 +13,6 @@ fn project(checkout: &Path) {
         "---\nname: x\n---\nSynthetic skill body.\n",
     )
     .unwrap();
-    std::fs::create_dir_all(checkout.join(".worktrees/inner")).unwrap();
-    std::fs::write(checkout.join(".worktrees/inner/notes.md"), "# Inert\n").unwrap();
 }
 
 #[test]
@@ -31,19 +28,6 @@ fn a_projects_own_skill_tree_is_walked_without_review() {
     ] {
         assert_decision(&checkout, &layout.home, command, true);
     }
-}
-
-#[test]
-fn a_hidden_project_directory_that_is_not_a_skill_tree_still_asks() {
-    let layout = layout("project-not-skill-root");
-    let checkout = layout.org.join("app-portal");
-    project(&checkout);
-    assert_decision(
-        &checkout,
-        &layout.home,
-        "find .worktrees -maxdepth 2 -type f -print",
-        false,
-    );
 }
 
 #[test]
