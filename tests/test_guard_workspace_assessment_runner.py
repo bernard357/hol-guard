@@ -12,6 +12,7 @@ from codex_plugin_scanner.guard import native_workspace_snapshot as native
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard import workspace_assessment_worker as worker
+from codex_plugin_scanner.guard import workspace_runtime_findings as runtimes
 from codex_plugin_scanner.guard.daemon import workspace_assessment_api as api
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -71,6 +72,14 @@ AUDIT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def no_launched_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Runtime observation has its own tests; here the tools launch nothing.
+    posture = {"status": "ok", "coverage": {"advisories_available": False}, "runtimes": [], "advisories": []}
+    monkeypatch.setattr(runner, "observe_workspace_runtimes", lambda store, root: posture)
+    monkeypatch.setattr(runtimes, "observe_workspace_runtimes", lambda store, root, *, home_dir=None: posture)
+
+
 def queued_run(tmp_path: Path) -> tuple[GuardStore, assessments.ClaimedRun]:
     store = GuardStore(tmp_path / "home")
     assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
@@ -105,7 +114,11 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
     assert outcome.snapshot_digest == SNAPSHOT.snapshot_digest
     assert outcome.coverage is not None and outcome.coverage["status"] == "complete"
     assert outcome.coverage["reasons"] == []
-    assert outcome.coverage["detectors"] == {"supply_chain": "complete", "secrets": "complete"}
+    assert outcome.coverage["detectors"] == {
+        "supply_chain": "complete",
+        "secrets": "complete",
+        "runtime_identity_v1": "no_inputs",
+    }
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
     assert finding["package_version"] == "1.2.8"

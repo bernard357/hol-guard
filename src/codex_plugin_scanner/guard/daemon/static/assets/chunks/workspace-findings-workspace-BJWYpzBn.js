@@ -79,7 +79,30 @@ function normalizeFinding(value) {
       lines: list$1(item.lines).flatMap((entry) => {
         const value2 = count(entry);
         return value2 !== null && value2 >= 1 ? [value2] : [];
-      })
+      }),
+      runtime: null
+    };
+  }
+  if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
+    const family = text$1(item.runtime_family);
+    const path = text$1(item.path);
+    if (family === null || path === null || common.advisoryIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "runtime",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: {
+        family,
+        version: text$1(item.runtime_version),
+        title: text$1(item.title),
+        knownExploited: item.known_exploited === true
+      }
     };
   }
   const packageName = text$1(item.package_name);
@@ -93,7 +116,8 @@ function normalizeFinding(value) {
     fixVersion: text$1(item.fix_version),
     path: null,
     line: null,
-    lines: []
+    lines: [],
+    runtime: null
   };
 }
 function normalizeAssessment(value) {
@@ -675,7 +699,9 @@ const COVERAGE_REASONS = {
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
   finding_cap: "There were more findings than one assessment keeps.",
-  secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed."
+  secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed.",
+  runtime_advisories_unavailable: "Runtimes this workspace's tools launch were not checked: Guard has no runtime advisories cached.",
+  runtimes_incomplete: "Some runtimes this workspace's tools launch could not be identified or checked."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -686,7 +712,7 @@ const FAILURE_REASONS = {
   lease_expired: "The assessment took too long and was retried.",
   feed_context_unavailable: "Guard could not read its cached advisories."
 };
-const DETECTOR_LABELS = { secrets: "Secret scanning" };
+const DETECTOR_LABELS = { secrets: "Secret scanning", runtime_identity_v1: "Runtime checking" };
 function sameWorktree(left, right) {
   return left.codebaseKey === right.codebaseKey && left.worktreeKey === right.worktreeKey;
 }
@@ -866,12 +892,14 @@ function AssessmentFindings(props) {
 function FindingsSections(props) {
   const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
   const secrets = props.findings.filter((finding) => finding.kind === "secret");
-  if (dependencies.length === 0 && secrets.length === 0) {
+  const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
+  if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies, fixes: props.fixes }),
-    secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets })
+    secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets }),
+    runtimes.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(RuntimeFindingsTable, { findings: runtimes })
   ] });
 }
 function secretLines(finding) {
@@ -896,6 +924,42 @@ function SecretFindingsTable({ findings }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "slate", children: "Not verified" }) })
     ] }, finding.findingId)) })
+  ] }) });
+}
+const RUNTIME_VERDICTS = {
+  affected: { label: "Affected version", tone: "attention" },
+  restart_required: { label: "Restart needed", tone: "amber" },
+  fix_unverified: { label: "Fix not verified", tone: "amber" }
+};
+function RuntimeFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Runtimes launched by this workspace's tools that match an advisory" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Runtime" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Executable" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Status" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Advisories" })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-slate-100", children: findings.map((finding) => {
+      const verdict = RUNTIME_VERDICTS[finding.ruleIds[0] ?? ""] ?? { label: "Matches an advisory", tone: "amber" };
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Runtime", wide: true, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold capitalize text-brand-dark", children: finding.runtime?.family }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-2 font-mono text-xs text-slate-500", children: finding.runtime?.version ?? "version unknown" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Executable", wide: true, children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.path }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex flex-wrap gap-1", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: verdict.tone, children: verdict.label }),
+          finding.runtime?.knownExploited && /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "red", children: "Known exploited" })
+        ] }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Advisories", wide: true, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.advisoryIds.join(", ") }),
+          finding.runtime?.title && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-0.5 block text-xs text-slate-500", children: finding.runtime.title })
+        ] })
+      ] }, finding.findingId);
+    }) })
   ] }) });
 }
 function FindingsTable({ findings, fixes }) {

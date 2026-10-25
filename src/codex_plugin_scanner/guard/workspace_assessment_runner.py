@@ -4,7 +4,8 @@ The run is bound to a content snapshot taken before the detectors start and
 checked again after they finish. The secret detector reads the very bytes that
 snapshot hashed, so its findings are bound to the same content. If the two differ the worktree changed under
 the detectors, so the run is superseded rather than reporting findings for
-content that no longer exists. Detectors run locally and the Cloud audit is
+content that no longer exists. The runtime detector reads the executables the
+worktree's configured tools would launch, without running them. Detectors run locally and the Cloud audit is
 never used from here. An automatic run is also offline: every network
 exchange the local evaluation asks for is answered from cache or refused,
 which leaves the run partial. A run the user asked for may look up package
@@ -27,9 +28,17 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .workspace_runtime_findings import (
+    RUNTIME_DETECTOR,
+    assessment_context_digest,
+    observe_workspace_runtimes,
+    project_runtime_findings,
+    remember_runtime_posture,
+    with_runtime_coverage,
+)
 from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 
-DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR)
+DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR, RUNTIME_DETECTOR)
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
@@ -93,6 +102,10 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             input_manifest_digest=before.input_manifest_digest,
             error_code="supply_chain_detector_failed",
         )
+    posture = _runtime_posture(store, root)
+    context_digest = assessment_context_digest(
+        feed_digest, remember_runtime_posture(store, run.keys.worktree_key, posture, now_ms=now_ms())
+    )
     try:
         after = workspace_snapshot(root, mode="content")
     except WorkspaceSnapshotError as error:
@@ -102,18 +115,25 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             state="superseded",
             snapshot_digest=before.snapshot_digest,
             input_manifest_digest=before.input_manifest_digest,
-            feed_context_digest=feed_digest,
+            feed_context_digest=context_digest,
         )
     supply_findings, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
-    findings, merge_truncated = merge_findings(supply_findings, project_secret_findings(before.secrets))
-    truncated = supply_truncated or merge_truncated
+    runtime_findings, runtime_truncated = (
+        project_runtime_findings(run.keys.worktree_key, posture) if posture is not None else ([], False)
+    )
+    findings, merge_truncated = merge_findings(
+        supply_findings, project_secret_findings(before.secrets), runtime_findings
+    )
+    truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
-    coverage = coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused)
+    coverage = with_runtime_coverage(
+        coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+    )
     return assessments.RunOutcome(
         state="completed" if coverage["status"] == "complete" else "partial",
         snapshot_digest=before.snapshot_digest,
         input_manifest_digest=before.input_manifest_digest,
-        feed_context_digest=feed_digest,
+        feed_context_digest=context_digest,
         coverage=coverage,
         findings=findings,
     )
@@ -129,6 +149,16 @@ def _snapshot_with_secrets(root: Path, secret_key: str) -> WorkspaceSnapshot:
             raise
     # The run is then partial: coverage reports the secret detector as not run.
     return workspace_snapshot(root, mode="content")
+
+
+def _runtime_posture(store: Any, root: Path) -> dict[str, object] | None:
+    """The runtimes configured tools would launch, or ``None`` when they could not be read."""
+
+    try:
+        return observe_workspace_runtimes(store, root)
+    except Exception:
+        # The run keeps its other detectors; coverage reports this one as not run.
+        return None
 
 
 def _local_audit(store: Any, config: Any, root: Path) -> dict[str, object]:

@@ -22,7 +22,10 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret";
+export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime";
+
+/** An executable a configured tool would launch that matches a runtime advisory. */
+export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
 
 export type WorkspaceFinding = {
   findingId: string;
@@ -37,11 +40,16 @@ export type WorkspaceFinding = {
   packageVersion: string | null;
   fixVersion: string | null;
   advisoryIds: string[];
-  /** Root-relative file path of a secret finding. Guard never receives the secret itself. */
+  /**
+   * Root-relative file path of a secret finding, or the executable path of a
+   * runtime finding. Guard never receives the secret itself.
+   */
   path: string | null;
   line: number | null;
   /** Every line the same secret appears on in that file, first to last. */
   lines: number[];
+  /** Set only for a runtime finding; observation only, so it has no fix. */
+  runtime: WorkspaceRuntime | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -154,6 +162,29 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         const value = count(entry);
         return value !== null && value >= 1 ? [value] : [];
       }),
+      runtime: null,
+    };
+  }
+  if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
+    const family = text(item.runtime_family);
+    const path = text(item.path);
+    if (family === null || path === null || common.advisoryIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "runtime",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: {
+        family,
+        version: text(item.runtime_version),
+        title: text(item.title),
+        knownExploited: item.known_exploited === true,
+      },
     };
   }
   const packageName = text(item.package_name);
@@ -168,6 +199,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     path: null,
     line: null,
     lines: [],
+    runtime: null,
   };
 }
 

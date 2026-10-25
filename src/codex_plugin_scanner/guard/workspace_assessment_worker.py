@@ -4,7 +4,8 @@ Only worktrees a user admitted (from the dashboard or the CLI) or registered a
 harness install for (``install --workspace``) are watched. Guard never takes a
 root from repository text or from a hook's working directory.
 Each poll takes a cheap stat snapshot of every admitted worktree and a digest
-of the cached advisory bundles; a change queues an assessment, and the
+of the cached advisory bundles and of the runtimes its configured tools would
+launch (probed at most once per interval); a change queues an assessment, and the
 coordinator's debounce and interval decide when it runs. Nothing here runs in
 a hook path, and the Cloud audit is never used.
 """
@@ -23,6 +24,7 @@ from . import workspace_assessment_store as assessments
 from .native_workspace_snapshot import WorkspaceSnapshotError, workspace_snapshot
 from .workspace_assessment_admissions import admit_and_queue, end_unregistered_install_admissions, watched_roots
 from .workspace_assessment_runner import DETECTOR_SET_DIGEST, feed_context_digest, now_ms, run_next
+from .workspace_runtime_findings import assessment_context_digest, observed_runtime_digest
 
 POLL_INTERVAL_SECONDS: Final = 30.0
 # Recorded when an admitted root is missing, unreadable or now names another
@@ -72,7 +74,8 @@ def admit_workspace(
         now_ms=clock(),
         automatic=automatic,
         stat_digest=snapshot.snapshot_digest,
-        feed_digest=feed_context_digest(store),
+        # The runtimes are not probed yet; the first observation sets the context.
+        feed_digest=None,
         detector_set_digest=DETECTOR_SET_DIGEST,
     )
     if run_id is None and automatic:
@@ -144,16 +147,18 @@ def observe(store: Any, *, clock: Callable[[], int] = now_ms) -> int:
     feed_digest = feed_context_digest(store)
     for worktree in assessments.list_worktrees(store, include_paused=False):
         keys = assessments.WorktreeKeys(str(worktree["codebase_key"]), str(worktree["worktree_key"]))
+        root = Path(str(worktree["root"]))
         try:
-            snapshot = workspace_snapshot(Path(str(worktree["root"])), mode="stat")
+            snapshot = workspace_snapshot(root, mode="stat")
         except WorkspaceSnapshotError:
             snapshot = None
         available = snapshot is not None and snapshot.worktree_key == keys.worktree_key
+        runtime_digest = observed_runtime_digest(store, keys.worktree_key, root, now_ms=clock())
         triggers = assessments.record_observation(
             store,
             keys,
             stat_digest=snapshot.snapshot_digest if snapshot is not None and available else UNAVAILABLE_STAT_DIGEST,
-            feed_digest=feed_digest,
+            feed_digest=assessment_context_digest(feed_digest, runtime_digest),
         )
         for trigger in triggers:
             if assessments.enqueue(
