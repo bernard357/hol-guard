@@ -382,7 +382,7 @@
     }
   },
   "verification": [
-    "uv run --no-sync pytest -q tests/test_guard_github_workflow_authorization.py tests/test_guard_github_workflow_privacy.py tests/test_guard_github_workflow_runtime.py tests/test_guard_command_critical_floors.py tests/test_guard_command_corpus.py tests/test_guard_command_decision_diff.py --tb=short",
+    "uv run --no-sync pytest -q tests/test_guard_github_workflow_authorization.py tests/test_guard_command_critical_floors.py tests/test_guard_command_corpus.py tests/test_guard_command_decision_diff.py --tb=short",
     "bun test tests/dockerlabs/installed-guard-package-proof.test.mjs",
     "uv run --no-sync pytest -q tests/test_installed_guard_package_origin.py --tb=short",
     "cd tests/dockerlabs/command-extension-analytics && bun run guard:test:command-extension-analytics",

@@ -27,6 +27,7 @@ from ..daemon.hook_availability_policy import (
 )
 from ..daemon.hook_request_parsing import runtime_hook_event_name
 from ..daemon.hook_worker import HookWorker
+from ..daemon.hook_worker_native import withhold_structured_destination, withholds_structured_destination
 from ..daemon.runtime_hook_deadline import RuntimeHookDeadline
 from ..hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 from ..native_hook_evidence_writer import NativeHookEvidenceWriter
@@ -118,6 +119,10 @@ def try_native_hook_authority(
             reason="HOL Guard could not complete the native hook decision safely.",
         )
         if worker is None:
+            # Without a worker the managed destination cannot be resolved, so a
+            # Pi or OMP post-tool result is withheld rather than passed through.
+            if withholds_structured_destination(harness=harness, event_name=event_name):
+                return withhold_structured_destination(response)
             return response
         # The worker withholds a managed structured destination on its own
         # unavailable answers; an answer it never returned stays withheld too.

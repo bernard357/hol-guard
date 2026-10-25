@@ -141,6 +141,43 @@ def test_cli_native_unavailable_withholds_managed_posttool_destination(
 
 
 @pytest.mark.parametrize("harness", ["pi", "omp"])
+def test_cli_worker_construction_failure_withholds_posttool_destination(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    harness: str,
+) -> None:
+    def broken_worker(**_kwargs: object) -> None:
+        raise RuntimeError("injected worker construction failure")
+
+    monkeypatch.setattr(authority, "NativeHookEvidenceWriter", lambda **_kwargs: None)
+    monkeypatch.setattr(authority, "HookWorker", broken_worker)
+    context = HarnessContext(
+        home_dir=tmp_path / "home",
+        workspace_dir=tmp_path / "workspace",
+        guard_home=tmp_path / "guard-home",
+    )
+    output = io.StringIO()
+    rc = authority.route_native_hook(
+        _Args(harness=harness),  # type: ignore[arg-type]
+        config=None,
+        context=context,
+        payload={"hook_event_name": "PostToolUse"},
+        runtime_workspace=context.workspace_dir,
+        store=GuardStore(context.guard_home),
+        output_stream=output,
+    )
+    response = json.loads(output.getvalue())
+
+    assert rc == 0
+    assert response["reason_code"] == "native_hook_worker_exception"
+    assert response["structured_content_mediation"] == {
+        "schema": "guard-structured-content-mediation.v1",
+        "action": "withhold",
+        "reason_code": "structured_native_edge_unavailable",
+    }
+
+
+@pytest.mark.parametrize("harness", ["pi", "omp"])
 def test_cli_native_unavailable_keeps_optional_structured_destination_off(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
