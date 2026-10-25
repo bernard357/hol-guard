@@ -49,20 +49,46 @@ function normalizeRun(value) {
 function normalizeRuns(value) {
   return list(value).map(normalizeRun).filter((entry) => entry !== null);
 }
+function strings(value) {
+  return list(value).filter((entry) => typeof entry === "string");
+}
 function normalizeFinding(value) {
   const item = record(value);
   const findingId = text(item.finding_id);
-  const packageName = text(item.package_name);
-  if (findingId === null || packageName === null) return null;
-  return {
+  if (findingId === null) return null;
+  const common = {
     findingId,
     severity: text(item.severity) ?? "unknown",
     decision: text(item.decision) ?? "warn",
+    ruleIds: strings(item.rule_ids),
+    advisoryIds: strings(item.advisory_ids)
+  };
+  if (item.source_kind === "secret") {
+    const path = text(item.path);
+    if (path === null || common.ruleIds.length === 0) return null;
+    const line = count(item.line);
+    return {
+      ...common,
+      kind: "secret",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: line !== null && line >= 1 ? line : null
+    };
+  }
+  const packageName = text(item.package_name);
+  if (packageName === null) return null;
+  return {
+    ...common,
+    kind: "supply_chain",
     ecosystem: text(item.ecosystem) ?? "unknown",
     packageName,
     packageVersion: text(item.package_version),
     fixVersion: text(item.fix_version),
-    advisoryIds: list(item.advisory_ids).filter((entry) => typeof entry === "string")
+    path: null,
+    line: null
   };
 }
 function normalizeAssessment(value) {
@@ -165,7 +191,8 @@ const COVERAGE_REASONS = {
   snapshot_visit_cap: "The workspace has more entries than one assessment visits.",
   supply_chain_incomplete: "Some dependencies need registry data Guard does not have offline. Use Assess now to look them up.",
   lockfile_warnings: "A lockfile could not be fully parsed.",
-  finding_cap: "There were more findings than one assessment keeps."
+  finding_cap: "There were more findings than one assessment keeps.",
+  secrets_incomplete: "Secret scanning did not cover every file, so some secrets may not be listed."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -340,13 +367,47 @@ function WorktreeRow(props) {
       /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "mt-0.5 h-4 w-4 shrink-0 text-amber-600", "aria-hidden": "true" }),
       reason
     ] }, reason)) }),
-    assessment && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: assessment.findings })
+    assessment && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      FindingsSections,
+      {
+        findings: assessment.findings,
+        secretsChecked: !assessment.notRun.includes("secrets")
+      }
+    )
   ] });
 }
-function FindingsTable({ findings }) {
-  if (findings.length === 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "No dependency findings in the checked files." });
+function FindingsSections(props) {
+  const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
+  const secrets = props.findings.filter((finding) => finding.kind === "secret");
+  if (dependencies.length === 0 && secrets.length === 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
   }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+    dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies }),
+    secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets })
+  ] });
+}
+function SecretFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Possible secrets in files" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Rule" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Location" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Status" })
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-slate-100", children: findings.map((finding) => /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 md:table-row md:p-0", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Rule", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.ruleIds.join(", ") }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Location", wide: true, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "break-all font-mono text-xs text-slate-700", children: [
+        finding.path,
+        finding.line !== null ? `:${finding.line}` : ""
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Status", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "slate", children: "Not verified" }) })
+    ] }, finding.findingId)) })
+  ] }) });
+}
+function FindingsTable({ findings }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-hidden rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-left text-sm", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("caption", { className: "sr-only", children: "Dependency findings" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "hidden bg-slate-50 text-xs font-semibold text-slate-600 md:table-header-group", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [

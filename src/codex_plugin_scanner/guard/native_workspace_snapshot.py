@@ -2,7 +2,9 @@
 
 The snapshot runs out of process so hashing a large worktree can never hold a
 hook decision. It reads files without following symlinks, never runs Git and
-returns only digests, counts and the worktree's local keys.
+returns only digests, counts and the worktree's local keys. A request may also
+ask for the secret scan of the same bytes; the native side redacts every
+finding before it crosses this boundary.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 WORKSPACE_SNAPSHOT_FEATURE = "workspace-snapshot-v1"
+WORKSPACE_SECRETS_FEATURE = "workspace-snapshot-secrets-v1"
 WORKSPACE_SNAPSHOT_COMMAND = "workspace-snapshot"
 WORKSPACE_SNAPSHOT_SCHEMA = "guard.workspace-snapshot.v1"
 
@@ -44,17 +47,33 @@ class WorkspaceSnapshot:
     partial_reasons: tuple[str, ...]
     entry_count: int
     summary: dict[str, object]
+    secrets: dict[str, object] | None = None
 
 
-def workspace_snapshot(root: Path, *, mode: Literal["content", "stat"] = "content") -> WorkspaceSnapshot:
-    reply = _native_request({"root": str(root), "mode": mode})
+def workspace_snapshot(
+    root: Path,
+    *,
+    mode: Literal["content", "stat"] = "content",
+    secrets: bool = False,
+) -> WorkspaceSnapshot:
+    """Snapshot ``root``; ``secrets`` also scans the hashed bytes for secrets.
+
+    A native runtime without the secret scan raises
+    ``workspace_snapshot_secrets_unavailable`` so the caller can fall back to a
+    plain snapshot and report the detector as not run.
+    """
+
+    request: dict[str, object] = {"root": str(root), "mode": mode}
+    if secrets:
+        request["secrets"] = True
+    reply = _native_request(request, needs_secrets=secrets)
     if reply.get("ok") is not True:
         error = reply.get("error")
         raise WorkspaceSnapshotError(error if isinstance(error, str) and error else "workspace_snapshot_failed")
     return _parse_result(reply.get("result"))
 
 
-def _native_request(request: dict[str, object]) -> dict[str, object]:
+def _native_request(request: dict[str, object], *, needs_secrets: bool = False) -> dict[str, object]:
     import os
 
     from .codex_hook_launch_runtime import run_isolated_hook_process
@@ -69,6 +88,8 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
         or WORKSPACE_SNAPSHOT_FEATURE not in status.capabilities.features
     ):
         raise WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
+    if needs_secrets and WORKSPACE_SECRETS_FEATURE not in status.capabilities.features:
+        raise WorkspaceSnapshotError("workspace_snapshot_secrets_unavailable")
     runtime = status.identity.path
     environment = {key: value for key in _CHILD_ENVIRONMENT_KEYS if (value := os.environ.get(key))}
     completed = run_isolated_hook_process(
@@ -116,6 +137,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
         key: result.get(key)
         for key in ("entry_count", "hashed_bytes", "excluded", "unreadable_count", "unstable_count", "limits")
     }
+    secrets = result.get("secrets")
     return WorkspaceSnapshot(
         mode=mode,  # type: ignore[arg-type]
         root=str(result["root"]),
@@ -128,6 +150,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
         partial_reasons=tuple(str(item) for item in reasons) if isinstance(reasons, list) else (),
         entry_count=int(result["entry_count"]),
         summary=summary,
+        secrets=secrets if isinstance(secrets, dict) else None,
     )
 
 
@@ -136,6 +159,7 @@ def _is_digest(value: object) -> bool:
 
 
 __all__ = [
+    "WORKSPACE_SECRETS_FEATURE",
     "WORKSPACE_SNAPSHOT_FEATURE",
     "WorkspaceSnapshot",
     "WorkspaceSnapshotError",

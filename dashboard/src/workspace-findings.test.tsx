@@ -46,6 +46,21 @@ const state = normalizeWorkspaceFindingsState(
             advisory_ids: ["GHSA-xxxx-yyyy-zzzz", 7],
           },
           { finding_id: "no-package" },
+          {
+            finding_id: "s".repeat(32),
+            source_kind: "secret",
+            detector: "secrets",
+            severity: "high",
+            decision: "warn",
+            rule_ids: ["github-token"],
+            path: "src/deploy.py",
+            line: 2,
+            fingerprint: "0".repeat(32),
+            validation_state: "unvalidated",
+            package_name: null,
+          },
+          { finding_id: "secret-no-path", source_kind: "secret", rule_ids: ["github-token"], path: "", line: 1 },
+          { finding_id: "secret-no-rule", source_kind: "secret", rule_ids: [], path: "a.txt", line: 1 },
         ],
       },
     ],
@@ -73,8 +88,14 @@ const [assessment] = state.assessments;
 assert.deepEqual(assessment.reasons, ["snapshot_unstable"], "detector gaps are reported separately from coverage gaps");
 assert.deepEqual(assessment.notRun, ["secrets"]);
 assert.equal(assessment.partial, true);
-assert.equal(assessment.findings.length, 1, "findings without a package are dropped");
+assert.equal(assessment.findings.length, 2, "findings with neither a package nor a secret location are dropped");
 assert.deepEqual(assessment.findings[0].advisoryIds, ["GHSA-xxxx-yyyy-zzzz"]);
+const secretFinding = assessment.findings[1];
+assert.deepEqual(
+  [secretFinding.kind, secretFinding.ruleIds, secretFinding.path, secretFinding.line, secretFinding.packageName],
+  ["secret", ["github-token"], "src/deploy.py", 2, null],
+  "a secret finding is read as a rule and a file location, with no package",
+);
 
 const [onlyNotRun] = normalizeWorkspaceFindingsState(
   { worktrees: [], runs: [] },
@@ -125,11 +146,47 @@ for (const copy of [
   "1.2.9",
   "Blocked",
   "GHSA-xxxx-yyyy-zzzz",
+  "github-token",
+  "src/deploy.py:2",
+  "Not verified",
   "Assess now",
   "Pause",
 ]) {
   assert.ok(markup.includes(copy), `row shows ${copy}`);
 }
+
+const secretsRan = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-4",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "complete", secrets: "complete" } },
+        findings: [],
+      },
+    ],
+  },
+).assessments[0];
+assert.deepEqual(secretsRan.notRun, [], "a detector that ran is not listed as missing");
+assert.equal(secretsRan.partial, false);
+const cleanMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: secretsRan, busyKey: null, onAction: () => {} }),
+);
+assert.ok(cleanMarkup.includes("No dependency or secret findings in the checked files."), "a clean run says secrets were checked");
+assert.ok(!cleanMarkup.includes("not part of this check yet"));
+const incompleteMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, {
+    worktree,
+    newestRun: partialRun,
+    assessment: { ...secretsRan, partial: true, reasons: ["secrets_incomplete"] },
+    busyKey: null,
+    onAction: () => {},
+  }),
+);
+assert.ok(incompleteMarkup.includes("Secret scanning did not cover every file"), "truncation is named to the operator");
 
 const paused = renderToStaticMarkup(
   createElement(WorktreeRow, {

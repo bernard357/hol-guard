@@ -113,6 +113,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         crate::runtime_identity::FEATURE.into(),
         guard_plugin_kit::FEATURE.into(),
         crate::workspace_snapshot::FEATURE.into(),
+        crate::workspace_snapshot::SECRETS_FEATURE.into(),
     ];
     features.extend(
         crate::resident_op_features::RESIDENT_OP_FEATURES

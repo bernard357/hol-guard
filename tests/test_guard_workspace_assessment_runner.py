@@ -35,6 +35,16 @@ SNAPSHOT = native.WorkspaceSnapshot(
     entry_count=3,
     summary={"entry_count": 3, "hashed_bytes": 120},
 )
+SECRETS_COMPLETE = {
+    "schema": "guard.workspace-secrets.v1",
+    "status": "complete",
+    "files_scanned": 3,
+    "bytes_scanned": 120,
+    "skipped": {"credential_store": 0, "not_text": 0, "oversize": 0},
+    "truncation_reasons": [],
+    "findings": [],
+}
+SCANNED = replace(SNAPSHOT, secrets=SECRETS_COMPLETE)
 KEYS = assessments.WorktreeKeys(SNAPSHOT.codebase_key, SNAPSHOT.worktree_key)
 
 BLOCKED_PACKAGE = {
@@ -74,7 +84,7 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
     modes: list[str] = []
     remaining = list(values)
 
-    def fake(root: Path, *, mode: str = "content") -> native.WorkspaceSnapshot:
+    def fake(root: Path, *, mode: str = "content", secrets: bool = False) -> native.WorkspaceSnapshot:
         modes.append(mode)
         return remaining.pop(0) if len(remaining) > 1 else remaining[0]
 
@@ -84,15 +94,16 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
 
 def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
-    modes = snapshots(monkeypatch, runner, SNAPSHOT)
+    modes = snapshots(monkeypatch, runner, SCANNED)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     outcome = runner.execute(store, None, claimed)
     assert modes == ["content", "content"]
-    # Secret scanning never runs in the background, so no run is complete yet.
-    assert outcome.state == "partial"
+    # Both detectors covered the whole snapshot, so the run is complete.
+    assert outcome.state == "completed"
     assert outcome.snapshot_digest == SNAPSHOT.snapshot_digest
-    assert outcome.coverage is not None and outcome.coverage["status"] == "partial"
-    assert outcome.coverage["reasons"] == ["detector_not_run:secrets"]
+    assert outcome.coverage is not None and outcome.coverage["status"] == "complete"
+    assert outcome.coverage["reasons"] == []
+    assert outcome.coverage["detectors"] == {"supply_chain": "complete", "secrets": "complete"}
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
     assert finding["package_version"] == "1.2.8"
@@ -135,7 +146,7 @@ def test_detector_failure_is_reported_without_details(tmp_path: Path, monkeypatc
 def test_snapshot_failure_fails_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
 
-    def unavailable(root: Path, *, mode: str = "content"):
+    def unavailable(root: Path, *, mode: str = "content", secrets: bool = False):
         raise native.WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
 
     monkeypatch.setattr(runner, "workspace_snapshot", unavailable)

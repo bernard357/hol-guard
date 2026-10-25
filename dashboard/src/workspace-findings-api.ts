@@ -22,15 +22,24 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
+export type WorkspaceFindingKind = "supply_chain" | "secret";
+
 export type WorkspaceFinding = {
   findingId: string;
+  kind: WorkspaceFindingKind;
   severity: string;
   decision: string;
+  /** Rule or advisory codes that raised the finding. */
+  ruleIds: string[];
   ecosystem: string;
-  packageName: string;
+  /** Null for a secret finding, which names a file location instead of a package. */
+  packageName: string | null;
   packageVersion: string | null;
   fixVersion: string | null;
   advisoryIds: string[];
+  /** Root-relative file path of a secret finding. Guard never receives the secret itself. */
+  path: string | null;
+  line: number | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -111,20 +120,47 @@ function normalizeRuns(value: unknown): WorkspaceRun[] {
     .filter((entry): entry is WorkspaceRun => entry !== null);
 }
 
+function strings(value: unknown): string[] {
+  return list(value).filter((entry): entry is string => typeof entry === "string");
+}
+
 function normalizeFinding(value: unknown): WorkspaceFinding | null {
   const item = record(value);
   const findingId = text(item.finding_id);
-  const packageName = text(item.package_name);
-  if (findingId === null || packageName === null) return null;
-  return {
+  if (findingId === null) return null;
+  const common = {
     findingId,
     severity: text(item.severity) ?? "unknown",
     decision: text(item.decision) ?? "warn",
+    ruleIds: strings(item.rule_ids),
+    advisoryIds: strings(item.advisory_ids),
+  };
+  if (item.source_kind === "secret") {
+    const path = text(item.path);
+    if (path === null || common.ruleIds.length === 0) return null;
+    const line = count(item.line);
+    return {
+      ...common,
+      kind: "secret",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: line !== null && line >= 1 ? line : null,
+    };
+  }
+  const packageName = text(item.package_name);
+  if (packageName === null) return null;
+  return {
+    ...common,
+    kind: "supply_chain",
     ecosystem: text(item.ecosystem) ?? "unknown",
     packageName,
     packageVersion: text(item.package_version),
     fixVersion: text(item.fix_version),
-    advisoryIds: list(item.advisory_ids).filter((entry): entry is string => typeof entry === "string"),
+    path: null,
+    line: null,
   };
 }
 
