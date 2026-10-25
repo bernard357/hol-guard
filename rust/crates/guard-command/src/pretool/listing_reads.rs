@@ -246,8 +246,19 @@ pub(super) fn absent_listing_operand(value: &str, context: super::PathContext<'_
 }
 
 /// The path an operand names, with `~` and a relative cwd resolved.
+///
+/// A `~` is expanded by the shell that runs the command, from its own `HOME`.
+/// Guard expands it from the declared `home_dir` instead, so the two name the
+/// same directory only when `shell_home_matches` says the shell's `HOME` is
+/// that directory. Without that, an operand this screen reads as absent could
+/// name an existing tree under the shell's home, which no proof here inspected.
+/// The cwd below is not expanded by the shell at all: it is the directory the
+/// harness reports, so it carries no such mismatch.
 fn expanded_path(value: &str, context: super::PathContext<'_>) -> Option<std::path::PathBuf> {
     if value.starts_with('~') {
+        if !context.shell_home_matches {
+            return None;
+        }
         super::read_paths::expand_home_read_path(value, context.home_dir)
             .map(std::path::PathBuf::from)
     } else if std::path::Path::new(value).is_absolute() {
