@@ -515,7 +515,9 @@ def test_automatic_runs_wait_while_the_host_is_busy(tmp_path: Path, monkeypatch)
 def test_user_only_claim_leaves_automatic_runs_queued(tmp_path: Path) -> None:
     store = GuardStore(tmp_path / "home")
     assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
-    assessments.enqueue(store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0)
+    assessments.enqueue(
+        store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0
+    )
     due = T0 + assessments.MAX_DEBOUNCE_WAIT_MS
     assert assessments.claim_next(store, owner="test", now_ms=due, user_only=True) is None
     assert assessments.claim_next(store, owner="test", now_ms=due) is not None
