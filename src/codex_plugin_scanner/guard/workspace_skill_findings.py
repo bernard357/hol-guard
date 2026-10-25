@@ -32,7 +32,7 @@ _CATEGORY = re.compile(r"[a-z_]{1,32}")
 _SKILL_FILE: Final = "SKILL.md"
 _MAX_PATH_CHARS: Final = 4096
 _MAX_TEXT_CHARS: Final = 1024
-_SKIP_KINDS: Final = ("oversize", "not_text", "unread")
+_SKIP_KINDS: Final = ("oversize", "not_text", "unread", "linked")
 
 
 def project_skill_findings(result: object) -> list[dict[str, object]]:
@@ -77,7 +77,8 @@ def _status(result: object) -> tuple[str, dict[str, object], list[str]]:
     if not isinstance(result, Mapping) or result.get("schema") != SKILLS_RESULT_SCHEMA:
         return "error", {}, ["unreadable_result"]
     status = result.get("status")
-    if status not in {"complete", "incomplete"}:
+    # A reply without its findings list cannot show that nothing was found.
+    if status not in {"complete", "incomplete"} or not isinstance(result.get("findings"), list):
         return "error", {}, ["unreadable_result"]
     reasons = _reasons(result.get("truncation_reasons"))
     if _projection(result)[1]:
@@ -154,12 +155,16 @@ def _finding(item: object) -> dict[str, object] | None:
 
 
 def _is_skill_path(value: object) -> bool:
+    """A normalized root-relative ``.../SKILL.md`` path, never one that leaves the root."""
+
+    if not isinstance(value, str) or len(value) > _MAX_PATH_CHARS or "\0" in value or "\\" in value:
+        return False
+    parts = value.split("/")
     return (
-        isinstance(value, str)
-        and len(value) <= _MAX_PATH_CHARS
-        and "\0" not in value
-        and value.rsplit("/", 1)[-1] == _SKILL_FILE
-        and "/" in value
+        len(parts) >= 2
+        and parts[-1] == _SKILL_FILE
+        and all(part not in {"", ".", ".."} for part in parts)
+        and not parts[0].endswith(":")
     )
 
 

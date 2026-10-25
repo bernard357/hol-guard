@@ -8,11 +8,12 @@
 //! title and reason, and the root-relative path. The rule's technical detail
 //! can quote skill text, so it is dropped here and never serialized.
 //!
-//! A skill is a `SKILL.md` under `.claude/skills`, `.agents/skills` or
-//! `.codex/skills` at any depth, or under a top-level `skills/` directory. A
-//! skill the scan could not read in full leaves it incomplete: one larger than
-//! the hook-time skill bound, one that is not UTF-8 text, or one the snapshot
-//! itself left out.
+//! A skill is a `SKILL.md` under `.claude/skills`, `.agents/skills`,
+//! `.codex/skills`, `.devin/skills` or `.opencode/skills` at any depth, or
+//! under a top-level `skills/` directory. A skill the scan could not read in
+//! full leaves it incomplete: one larger than the hook-time skill bound, one
+//! that is not UTF-8 text, one the snapshot itself left out, or a symlink or
+//! special file where a skill could be (the snapshot never follows links).
 
 use guard_command::skill_content_risk::detect_skill_content_risk;
 use serde_json::{json, Value};
@@ -28,7 +29,13 @@ pub(super) const MAX_SKILL_FINDINGS: usize = 200;
 const FINDING_ID_HEX_CHARS: usize = 32;
 const SKILL_FILE: &str = "SKILL.md";
 /// Skill directories agents load from at any depth of a workspace.
-const NESTED_SKILL_ROOTS: [&str; 3] = [".claude/skills", ".agents/skills", ".codex/skills"];
+const NESTED_SKILL_ROOTS: [&str; 5] = [
+    ".claude/skills",
+    ".agents/skills",
+    ".codex/skills",
+    ".devin/skills",
+    ".opencode/skills",
+];
 /// Skill directory recognized only at the workspace root; a nested `skills/`
 /// is too often ordinary project content.
 const TOP_LEVEL_SKILL_ROOT: &str = "skills/";
@@ -54,6 +61,7 @@ pub(super) struct SkillScan {
     skipped_oversize: usize,
     skipped_not_text: usize,
     unread: usize,
+    linked: usize,
     finding_cap_hit: bool,
     path_too_long: bool,
 }
@@ -82,6 +90,15 @@ impl SkillScan {
     /// unreadable or unstable), so its rules never ran.
     pub(super) fn left_unread(&mut self) {
         self.unread += 1;
+    }
+
+    /// The snapshot did not follow a symlink or special file at `relative`.
+    /// When a skill could sit behind it, the scan cannot say it saw every
+    /// skill.
+    pub(super) fn left_unfollowed(&mut self, relative: &str) {
+        if may_hold_skills(relative) {
+            self.linked += 1;
+        }
     }
 
     /// Run the skill rules over the exact bytes that were hashed for `relative`.
@@ -154,6 +171,9 @@ impl SkillScan {
         if self.unread > 0 {
             truncation.push("skill_unread");
         }
+        if self.linked > 0 {
+            truncation.push("skill_linked");
+        }
         truncation.sort_unstable();
         truncation.dedup();
         let mut findings: Vec<&Finding> = self.findings.iter().collect();
@@ -184,6 +204,7 @@ impl SkillScan {
                 "oversize": self.skipped_oversize,
                 "not_text": self.skipped_not_text,
                 "unread": self.unread,
+                "linked": self.linked,
             },
             "truncation_reasons": truncation,
             "findings": findings,
@@ -203,4 +224,21 @@ fn is_skill_path(relative: &str) -> bool {
         || NESTED_SKILL_ROOTS
             .iter()
             .any(|root| directory.contains(&format!("/{root}/")))
+}
+
+/// Whether a skill could lie at or below `relative`: a skill file, an entry
+/// under a skill root, a skill root itself, or the agent directory holding one
+/// (a linked `.claude` hides `.claude/skills`).
+fn may_hold_skills(relative: &str) -> bool {
+    if is_skill_path(relative) || relative == "skills" || relative.starts_with(TOP_LEVEL_SKILL_ROOT)
+    {
+        return true;
+    }
+    let path = format!("/{relative}/");
+    NESTED_SKILL_ROOTS.iter().any(|root| {
+        let agent_directory = root
+            .split_once('/')
+            .map_or(*root, |(directory, _)| directory);
+        path.contains(&format!("/{root}/")) || path.ends_with(&format!("/{agent_directory}/"))
+    })
 }

@@ -113,6 +113,14 @@ impl Walk {
         }
     }
 
+    /// Record a symlink or special file the walk did not follow, which the
+    /// skill scan counts when a skill could be behind it.
+    fn left_unfollowed(&mut self, relative: &str) {
+        if let Some(skills) = self.skills.as_mut() {
+            skills.left_unfollowed(relative);
+        }
+    }
+
     fn stopped(&self) -> bool {
         self.entry_cap_hit || self.visit_cap_hit
     }
@@ -175,6 +183,7 @@ pub(super) fn walk_directory(
                     .map(|target| hex::encode(Sha256::digest(target.as_encoded_bytes())))
                     .unwrap_or_else(|| "-".to_owned());
                 walk.exclude(format!("{child}\0symlink\0{target}"));
+                walk.left_unfollowed(&child);
             }
             Kind::Directory if SKIP_DIRS.contains(&name.as_str()) => {
                 walk.counts.directories += 1;
@@ -200,6 +209,7 @@ pub(super) fn walk_directory(
             Kind::Special => {
                 walk.counts.special += 1;
                 walk.exclude(format!("{child}\0special"));
+                walk.left_unfollowed(&child);
             }
             Kind::File if is_audit_sensitive_basename(&name) => {
                 walk.counts.sensitive += 1;

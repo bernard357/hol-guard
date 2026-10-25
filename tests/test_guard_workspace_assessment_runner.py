@@ -52,7 +52,7 @@ SKILLS_COMPLETE = {
     "status": "complete",
     "files_scanned": 0,
     "bytes_scanned": 0,
-    "skipped": {"oversize": 0, "not_text": 0, "unread": 0},
+    "skipped": {"oversize": 0, "not_text": 0, "unread": 0, "linked": 0},
     "truncation_reasons": [],
     "findings": [],
 }

@@ -123,7 +123,9 @@ def test_older_runtime_keeps_the_secret_scan_and_reports_skills_not_run(tmp_path
     assert outcome.coverage["detectors"]["skill_content_v1"] == "not_run"
 
 
-@pytest.mark.parametrize("reason", ["skill_oversize", "skill_unread", "skill_not_text", "snapshot_entry_limit"])
+@pytest.mark.parametrize(
+    "reason", ["skill_oversize", "skill_unread", "skill_not_text", "skill_linked", "snapshot_entry_limit"]
+)
 def test_a_skill_the_scan_could_not_read_leaves_the_run_partial(tmp_path: Path, monkeypatch, reason: str) -> None:
     result = skills_result(status="incomplete", truncation_reasons=[reason])
     _, _, outcome = run_with(tmp_path, monkeypatch, result)
@@ -142,7 +144,17 @@ def test_a_skill_scan_at_its_cap_marks_findings_truncated() -> None:
     assert coverage["reasons"] == ["skills_incomplete", "finding_cap"]
 
 
-@pytest.mark.parametrize("payload", [{"schema": "other"}, {**SKILLS_COMPLETE, "status": "weird"}, {}])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"schema": "other"},
+        {**SKILLS_COMPLETE, "status": "weird"},
+        {},
+        {key: value for key, value in SKILLS_COMPLETE.items() if key != "findings"},
+        {**SKILLS_COMPLETE, "findings": None},
+        {**SKILLS_COMPLETE, "findings": {"0": {}}},
+    ],
+)
 def test_an_unreadable_skill_result_is_an_error(payload: dict[str, object]) -> None:
     coverage = skill_findings.with_skill_coverage({"status": "complete", "reasons": [], "detectors": {}}, payload)
     assert (coverage["status"], coverage["reasons"]) == ("partial", ["skills_incomplete"])
@@ -158,6 +170,13 @@ def test_an_unreadable_skill_result_is_an_error(payload: dict[str, object]) -> N
         {"path": "docs/README.md"},
         {"path": "SKILL.md"},
         {"path": "a\0b/SKILL.md"},
+        {"path": "../SKILL.md"},
+        {"path": ".claude/skills/../../SKILL.md"},
+        {"path": "/etc/skills/x/SKILL.md"},
+        {"path": ".claude//skills/x/SKILL.md"},
+        {"path": "./skills/x/SKILL.md"},
+        {"path": ".claude\\skills\\x/SKILL.md"},
+        {"path": "C:/skills/x/SKILL.md"},
         {"category": "Execution!"},
         {"severity": "unknown"},
         {"confidence": "high"},

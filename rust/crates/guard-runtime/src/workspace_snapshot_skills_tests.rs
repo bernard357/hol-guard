@@ -84,6 +84,8 @@ fn skills_under_every_agent_root_are_read_and_other_skill_files_are_not() {
     for relative in [
         ".agents/skills/a/SKILL.md",
         ".codex/skills/b/SKILL.md",
+        ".devin/skills/g/SKILL.md",
+        ".opencode/skills/h/SKILL.md",
         "skills/c/SKILL.md",
         "packages/app/.claude/skills/d/SKILL.md",
         // Not agent skill locations.
@@ -96,7 +98,7 @@ fn skills_under_every_agent_root_are_read_and_other_skill_files_are_not() {
 
     let result = scan(root.path());
 
-    assert_eq!(result["skills"]["files_scanned"], 4);
+    assert_eq!(result["skills"]["files_scanned"], 6);
     let mut paths: Vec<&str> = result["skills"]["findings"]
         .as_array()
         .unwrap()
@@ -109,6 +111,8 @@ fn skills_under_every_agent_root_are_read_and_other_skill_files_are_not() {
         [
             ".agents/skills/a/SKILL.md",
             ".codex/skills/b/SKILL.md",
+            ".devin/skills/g/SKILL.md",
+            ".opencode/skills/h/SKILL.md",
             "packages/app/.claude/skills/d/SKILL.md",
             "skills/c/SKILL.md",
         ]
@@ -267,4 +271,55 @@ fn the_skill_scan_does_not_change_the_snapshot_identity() {
         scan(root.path())["snapshot_digest"],
         snapshot(&plain).unwrap()["snapshot_digest"]
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_skill_leaves_the_scan_incomplete() {
+    // The snapshot never follows links, so a skill shared through one is
+    // never read; the scan must not read as complete.
+    for link in [
+        ".claude/skills/setup/SKILL.md",
+        ".claude/skills/setup",
+        ".claude/skills",
+        ".claude",
+        "skills",
+        "packages/app/.agents/skills/setup",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), "shared/setup/SKILL.md", FETCH_EXEC_SKILL);
+        let path = root.path().join(link);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(root.path().join("shared/setup"), &path).unwrap();
+
+        let skills = scan(root.path())["skills"].clone();
+
+        assert_eq!(skills["status"], "incomplete", "{link}");
+        assert_eq!(skills["skipped"]["linked"], 1, "{link}");
+        assert_eq!(
+            skills["truncation_reasons"],
+            serde_json::json!(["skill_linked"]),
+            "{link}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_where_no_skill_could_be_keeps_the_scan_complete() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), ".claude/skills/notes/SKILL.md", BENIGN_SKILL);
+    write(root.path(), "docs/guide.md", "# Guide\n");
+    std::os::unix::fs::symlink(root.path().join("docs"), root.path().join("handbook")).unwrap();
+    std::os::unix::fs::symlink(
+        root.path().join("docs/guide.md"),
+        root.path().join("packages-skills.md"),
+    )
+    .unwrap();
+
+    let skills = scan(root.path())["skills"].clone();
+
+    assert_eq!(skills["status"], "complete");
+    assert_eq!(skills["skipped"]["linked"], 0);
+    assert_eq!(skills["files_scanned"], 1);
 }
