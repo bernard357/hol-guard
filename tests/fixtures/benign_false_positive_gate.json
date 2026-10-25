@@ -10524,16 +10524,52 @@
       "expect": "not_allow"
     },
     {
-      "id": "neg-git-worktree-add-no-reference",
-      "fix_area": "git-sibling-worktree",
+      "id": "git-worktree-add-implied-branch",
+      "fix_area": "worktree-add",
       "harnesses": [
-        "zcode",
         "claude-code",
-        "omp"
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
       ],
       "tool": "shell",
       "tool_input": {
         "command": "git worktree add ../app-portal-review"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "git-worktree-add-implied-branch-nested",
+      "fix_area": "worktree-add",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ${ORG}/reviews/app-portal-review"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-worktree-add-implied-branch-existing",
+      "fix_area": "negative",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../main"
       },
       "cwd": "org_app",
       "expect": "not_allow"
