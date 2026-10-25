@@ -57,6 +57,8 @@ export type WorkspaceAssessment = WorktreeKeys & {
   partial: boolean;
   reasons: string[];
   notRun: string[];
+  /** False when the workspace has no dependency files, so there was nothing to audit. */
+  dependencyFilesFound: boolean;
   finishedAtMs: number | null;
   findings: WorkspaceFinding[];
 };
@@ -227,6 +229,7 @@ function normalizeAssessment(value: unknown): WorkspaceAssessment | null {
     partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
+    dependencyFilesFound: detectors.supply_chain !== "no_inputs",
     finishedAtMs: count(item.finished_at_ms),
     findings: list(item.findings)
       .map(normalizeFinding)

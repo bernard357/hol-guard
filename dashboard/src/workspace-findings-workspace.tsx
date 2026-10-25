@@ -291,30 +291,34 @@ export function WorktreeRow(props: {
 }
 
 function AssessmentFindings(props: { worktree: WorkspaceWorktree; assessment: WorkspaceAssessment }) {
-  const { findings, runId, notRun } = props.assessment;
+  const { findings, runId, notRun, dependencyFilesFound } = props.assessment;
   const fixes = useWorktreeFixes(props.worktree, runId);
   return (
     <div className="space-y-4">
       <FixLoadError fixes={fixes} />
-      <FindingsSections findings={findings} secretsChecked={!notRun.includes("secrets")} fixes={fixes} />
+      <FindingsSections findings={findings} dependencyFilesFound={dependencyFilesFound} secretsChecked={!notRun.includes("secrets")} fixes={fixes} />
       <FixReview fixes={fixes} findings={findings} />
       <FixHistory fixes={fixes} findings={findings} />
     </div>
   );
 }
 
-function FindingsSections(props: { findings: WorkspaceFinding[]; secretsChecked: boolean; fixes: WorktreeFixes }) {
+function emptyFindingsCopy(dependencyFilesFound: boolean, secretsChecked: boolean): string {
+  // A workspace without dependency files had nothing to audit; saying its
+  // dependencies came back clean would overstate what was checked.
+  const none = "No dependency files were found, so there were no dependencies to check.";
+  if (!dependencyFilesFound) return secretsChecked ? `${none} No secret findings in the checked files.` : none;
+  return secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files.";
+}
+
+type FindingsSectionsProps = { findings: WorkspaceFinding[]; dependencyFilesFound: boolean; secretsChecked: boolean; fixes: WorktreeFixes };
+
+function FindingsSections(props: FindingsSectionsProps) {
   const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
   const secrets = props.findings.filter((finding) => finding.kind === "secret");
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0) {
-    return (
-      <p className="text-sm text-slate-600">
-        {props.secretsChecked
-          ? "No dependency or secret findings in the checked files."
-          : "No dependency findings in the checked files."}
-      </p>
-    );
+    return <p className="text-sm text-slate-600">{emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked)}</p>;
   }
   return (
     <div className="space-y-4">

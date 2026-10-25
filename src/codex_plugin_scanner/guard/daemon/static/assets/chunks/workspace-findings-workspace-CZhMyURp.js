@@ -138,6 +138,7 @@ function normalizeAssessment(value) {
     partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
+    dependencyFilesFound: detectors.supply_chain !== "no_inputs",
     finishedAtMs: count(item.finished_at_ms),
     findings: list$1(item.findings).map(normalizeFinding).filter((entry) => entry !== null)
   };
@@ -885,21 +886,26 @@ function WorktreeRow(props) {
   ] });
 }
 function AssessmentFindings(props) {
-  const { findings, runId, notRun } = props.assessment;
+  const { findings, runId, notRun, dependencyFilesFound } = props.assessment;
   const fixes = useWorktreeFixes(props.worktree, runId);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixLoadError, { fixes }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsSections, { findings, secretsChecked: !notRun.includes("secrets"), fixes }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsSections, { findings, dependencyFilesFound, secretsChecked: !notRun.includes("secrets"), fixes }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixReview, { fixes, findings }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixHistory, { fixes, findings })
   ] });
+}
+function emptyFindingsCopy(dependencyFilesFound, secretsChecked) {
+  const none = "No dependency files were found, so there were no dependencies to check.";
+  if (!dependencyFilesFound) return secretsChecked ? `${none} No secret findings in the checked files.` : none;
+  return secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files.";
 }
 function FindingsSections(props) {
   const dependencies = props.findings.filter((finding) => finding.kind === "supply_chain");
   const secrets = props.findings.filter((finding) => finding.kind === "secret");
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   if (dependencies.length === 0 && secrets.length === 0 && runtimes.length === 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: props.secretsChecked ? "No dependency or secret findings in the checked files." : "No dependency findings in the checked files." });
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked) });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     dependencies.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings: dependencies, fixes: props.fixes }),
