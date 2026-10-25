@@ -1135,7 +1135,7 @@
       "expect": "allow"
     },
     {
-      "id": "git-worktree-submodule-status-cached",
+      "id": "neg-git-submodule-status-cached",
       "fix_area": "git",
       "harnesses": [
         "codex",
@@ -1149,7 +1149,7 @@
         "command": "git submodule status --cached"
       },
       "cwd": "worktree",
-      "expect": "allow"
+      "expect": "not_allow"
     },
     {
       "id": "git-worktree-submodule-quiet-leading",
@@ -1169,7 +1169,7 @@
       "expect": "allow"
     },
     {
-      "id": "git-worktree-submodule-cached-leading",
+      "id": "neg-git-submodule-cached-leading",
       "fix_area": "git",
       "harnesses": [
         "codex",
@@ -1183,7 +1183,7 @@
         "command": "git submodule --cached status"
       },
       "cwd": "worktree",
-      "expect": "allow"
+      "expect": "not_allow"
     },
     {
       "id": "neg-git-submodule-status-recursive",

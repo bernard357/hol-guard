@@ -21,21 +21,32 @@
 //! never reads it, so the recursive walk keeps its review.
 //!
 //! Bare `git submodule` is `git submodule status`, and is admitted as one.
-//! So are the shared options Git's synopsis places before the verb, `--quiet`
-//! and `--cached`: they choose how much the listing prints and name no path.
+//! So is `--quiet`, the shared option Git's synopsis places before the verb:
+//! it chooses how much the listing prints and names no path.
+//!
+//! `--cached` is the other line this grammar will not cross. The plain
+//! listing describes each submodule's own `HEAD`, an object that submodule
+//! holds by definition. `--cached` describes the id the superproject's index
+//! records instead, which a partial-clone submodule need not have: `git
+//! describe` then pages it in through that submodule's promisor remote,
+//! running its transport and whatever credential helper it names and writing
+//! the objects it brings back. Nothing in the superproject-rooted probe sees
+//! that remote, so the cached listing keeps its review.
 
 /// Whether `arguments`, the tokens after the `submodule` subcommand, name the
 /// printing form.
 pub(crate) fn read_form(arguments: &[String]) -> bool {
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
     // Git's synopsis puts the shared options before the verb: `git submodule
-    // [--quiet] [--cached] <command>`. They choose how much the listing
-    // prints and name no path, so a leading one leaves the form unchanged.
+    // [--quiet] [--cached] <command>`. `--quiet` only chooses how much the
+    // listing prints and names no path, so a leading one leaves the form
+    // unchanged; `--cached` changes which object is described and is refused
+    // wherever it stands.
     let rest = match words
         .iter()
-        .position(|word| !matches!(*word, "-q" | "--quiet" | "--cached"))
+        .position(|word| !matches!(*word, "-q" | "--quiet"))
     {
-        // Bare `git submodule`, and the shared options alone, run `status`.
+        // Bare `git submodule`, and `--quiet` alone, run `status`.
         None => return true,
         Some(index) => &words[index..],
     };
@@ -52,7 +63,7 @@ fn status(rest: &[&str]) -> bool {
     let mut operands = false;
     rest.iter().all(|argument| match *argument {
         _ if operands => operand(argument),
-        "-q" | "--quiet" | "--cached" => true,
+        "-q" | "--quiet" => true,
         "--" => {
             operands = true;
             true
@@ -86,23 +97,19 @@ mod tests {
         assert!(form(&["status"]));
         assert!(form(&["status", "-q"]));
         assert!(form(&["status", "--quiet"]));
-        assert!(form(&["status", "--cached"]));
         assert!(form(&["status", "vendor/lib"]));
-        assert!(form(&["status", "--cached", "--", "vendor/lib"]));
+        assert!(form(&["status", "--", "vendor/lib"]));
     }
 
-    /// Git's synopsis is `git submodule [--quiet] [--cached] <command>`, so
-    /// both spellings may stand before the verb, and alone they still run
-    /// `status`.
+    /// Git's synopsis is `git submodule [--quiet] <command>`, so `--quiet`
+    /// may stand before the verb, and alone it still runs `status`.
     #[test]
     fn shared_options_may_precede_the_verb() {
         assert!(form(&["-q", "status"]));
         assert!(form(&["--quiet", "status"]));
-        assert!(form(&["--cached", "status"]));
-        assert!(form(&["--quiet", "--cached", "status", "vendor/lib"]));
+        assert!(form(&["--quiet", "status", "vendor/lib"]));
         assert!(form(&["-q"]));
         assert!(form(&["--quiet"]));
-        assert!(form(&["--cached"]));
         // The verb still decides: a leading option admits nothing else.
         assert!(!form(&["--quiet", "foreach", "git", "status"]));
         assert!(!form(&["-q", "update"]));
@@ -114,8 +121,21 @@ mod tests {
         // It reads each submodule's own configuration, which the
         // superproject-rooted probe never saw.
         assert!(!form(&["status", "--recursive"]));
-        assert!(!form(&["status", "--cached", "--recursive"]));
         assert!(!form(&["status", "--recursive", "vendor/lib"]));
+    }
+
+    /// `--cached` describes the id the superproject records rather than the
+    /// submodule's own `HEAD`. A partial-clone submodule may not hold that
+    /// object, and `git describe` fetches it through the submodule's promisor
+    /// remote, so the cached listing keeps its review wherever the option
+    /// stands.
+    #[test]
+    fn the_cached_listing_keeps_its_review() {
+        assert!(!form(&["status", "--cached"]));
+        assert!(!form(&["--cached", "status"]));
+        assert!(!form(&["--cached"]));
+        assert!(!form(&["--quiet", "--cached", "status"]));
+        assert!(!form(&["status", "--cached", "--", "vendor/lib"]));
     }
 
     #[test]
