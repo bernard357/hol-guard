@@ -171,6 +171,9 @@ assert.equal(
   "Partial coverage",
   "an expired lease is retried, so the last assessed result still stands",
 );
+const timedOut = worktreeStatus(worktree, { ...failedRun, errorCode: "assessment_timed_out" }, assessment);
+assert.equal(timedOut.label, "Assessment failed", "a run stopped after its retry is not retried again");
+assert.match(timedOut.detail ?? "", /took too long twice/);
 
 const markup = renderToStaticMarkup(
   createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment, busyKey: null, onAction: () => {} }),

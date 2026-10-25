@@ -60,6 +60,11 @@ _LOOKUP_UNAVAILABLE: Final = frozenset(
 _NO_CACHED_MATCH: Final = "no_cached_match"
 
 
+# A run that lost its lease (canceled, expired or fenced) records nothing;
+# finish refuses it.
+_LEASE_LOST: Final = assessments.RunOutcome(state="failed", error_code="lease_lost")
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -74,7 +79,7 @@ def run_next(
     )
     if claimed is None:
         return False
-    outcome = execute(store, config, claimed)
+    outcome = execute(store, config, claimed, clock=clock)
     try:
         assessments.finish(store, claimed, outcome, now_ms=clock())
     except ValueError:
@@ -85,7 +90,15 @@ def run_next(
     return True
 
 
-def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments.RunOutcome:
+def execute(
+    store: Any, config: Any, run: assessments.ClaimedRun, *, clock: Callable[[], int] = now_ms
+) -> assessments.RunOutcome:
+    """Run each stage while ``run`` still holds its lease.
+
+    The lease is renewed between stages, so a slow workspace keeps its run
+    instead of being retried, and a canceled run stops before its next stage.
+    """
+
     root = Path(run.private_root)
     try:
         feed_digest = feed_context_digest(store)
@@ -99,6 +112,8 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
     if before.worktree_key != run.keys.worktree_key or before.codebase_key != run.keys.codebase_key:
         # The path now names a different worktree (moved, re-cloned, replaced).
         return assessments.RunOutcome(state="failed", error_code="workspace_identity_changed")
+    if not assessments.renew_lease(store, run, now_ms=clock()):
+        return _LEASE_LOST
     automatic = run.trigger_kind not in assessments.USER_TRIGGERS
     try:
         with offline_egress() if automatic else nullcontext(None) as offline:
@@ -110,9 +125,13 @@ def execute(store: Any, config: Any, run: assessments.ClaimedRun) -> assessments
             input_manifest_digest=before.input_manifest_digest,
             error_code="supply_chain_detector_failed",
         )
+    if not assessments.renew_lease(store, run, now_ms=clock()):
+        return _LEASE_LOST
     posture = _runtime_posture(store, root)
+    if not assessments.renew_lease(store, run, now_ms=clock()):
+        return _LEASE_LOST
     context_digest = assessment_context_digest(
-        feed_digest, remember_runtime_posture(store, run.keys.worktree_key, posture, now_ms=now_ms())
+        feed_digest, remember_runtime_posture(store, run.keys.worktree_key, posture, now_ms=clock())
     )
     try:
         after = workspace_snapshot(root, mode="content")

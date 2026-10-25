@@ -365,7 +365,6 @@ _PENDING_AUTHORITY_PATHS: Final = frozenset(
         # long after the leg that owned it landed, so the gate rejects a stale
         # entry rather than trusting this list to be pruned by hand.
         "src/codex_plugin_scanner/guard/cli/commands_hook_native_floor.py",
-        "src/codex_plugin_scanner/guard/cli/commands_hook_native_prepare.py",
         "src/codex_plugin_scanner/guard/cli/commands_support_codex_paths.py",
         "src/codex_plugin_scanner/guard/cli/commands_support_runtime_artifacts.py",
         "src/codex_plugin_scanner/guard/runtime/approval_context.py",

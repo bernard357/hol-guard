@@ -46,6 +46,7 @@ const FAILURE_REASONS: Record<string, string> = {
   supply_chain_detector_failed: "The dependency check stopped before it finished.",
   assessment_result_too_large: "The result was too large to store.",
   lease_expired: "The assessment took too long and was retried.",
+  assessment_timed_out: "The assessment took too long twice and was stopped. It runs again when files change or you choose Assess now.",
   feed_context_unavailable: "Guard could not read its cached advisories.",
 };
 

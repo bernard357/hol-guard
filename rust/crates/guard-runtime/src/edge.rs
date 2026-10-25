@@ -176,11 +176,12 @@ fn canonical_event(value: &str) -> Result<String, String> {
     bounded_nonempty(value, MAX_EVENT_BYTES, "native_hook_event_invalid")?;
     let compact = value.trim().to_ascii_lowercase().replace(['_', '-'], "");
     match compact.as_str() {
-        "pretool" | "pretooluse" => Ok("PreToolUse".to_owned()),
+        // Hermes names its hooks `pre_tool_call` and `post_tool_call`.
+        "pretool" | "pretooluse" | "pretoolcall" => Ok("PreToolUse".to_owned()),
         "beforeshellexecution" | "beforereadfile" | "beforewritefile" | "beforemcpexecution" => {
             Ok("PreToolUse".to_owned())
         }
-        "posttool" | "posttooluse" => Ok("PostToolUse".to_owned()),
+        "posttool" | "posttooluse" | "posttoolcall" => Ok("PostToolUse".to_owned()),
         "aftershellexecution" | "afterreadfile" | "afterwritefile" | "aftermcpexecution" => {
             Ok("PostToolUse".to_owned())
         }
