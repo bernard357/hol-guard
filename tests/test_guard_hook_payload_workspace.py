@@ -66,10 +66,7 @@ def test_grok_and_zcode_payloads_keep_workspace_root_when_cwd_differs(tmp_path: 
 
 
 @pytest.mark.usefixtures("native_hook_force")
-def test_run_guard_hook_uses_payload_cwd_when_cli_workspace_omitted(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_run_guard_hook_uses_payload_cwd_when_cli_workspace_omitted(tmp_path: Path) -> None:
     home = tmp_path / "home"
     guard_home = tmp_path / "guard-home"
     home.mkdir()
@@ -82,6 +79,7 @@ def test_run_guard_hook_uses_payload_cwd_when_cli_workspace_omitted(
         "toolInput": {"command": "git rev-parse --show-toplevel"},
         "cwd": str(repository),
     }
+    output = io.StringIO()
 
     result = commands_hook._run_guard_hook_command(
         argparse.Namespace(
@@ -99,9 +97,9 @@ def test_run_guard_hook_uses_payload_cwd_when_cli_workspace_omitted(
         store=store,
         config=config,
         input_text=json.dumps(event),
-        output_stream=io.StringIO(),
+        output_stream=output,
     )
-    payload = json.loads(capsys.readouterr().out)
+    payload = json.loads(output.getvalue())
 
     assert result == 0
-    assert payload["policy_composition"]["configured_default_disposition"] == "relaxed_verified_benign"
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
