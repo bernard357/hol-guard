@@ -52,6 +52,7 @@ POSTURE_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
     "extra_careful": {
         "local_secret_read": "require-reapproval",
@@ -74,6 +75,7 @@ POSTURE_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
 }
 

@@ -2,8 +2,8 @@
 //! without starting them.
 //!
 //! For each path the probe follows symlinks, hashes the file it finds, reads
-//! the header for operating system and architecture, and takes family and
-//! version from the install layout. It never executes the file, so an
+//! the header for operating system and architecture, and takes family,
+//! version and, for known installers, vendor from the install layout. It never executes the file, so an
 //! executable that prints a version, or does anything else when launched, is
 //! never launched. Layout and name claims are `self_reported` at most; the
 //! probe cannot produce a locally trusted or vendor verified identity.
@@ -150,6 +150,15 @@ fn probe(request: &Request) -> Result<Value, String> {
         "launches": collected.launches,
         "candidate_limit_reached": collected.truncated,
     }))
+}
+
+/// One executable for launch admission: its resolved path and artifact, or
+/// `None` when it cannot be identified, which stays unknown and never clears.
+pub(crate) fn probe_one(path: &Path) -> Option<(String, Value)> {
+    match observe(&path.to_string_lossy(), &mut Hashing::default()) {
+        Outcome::Present { resolved, artifact } => Some((resolved, *artifact)),
+        Outcome::Missing | Outcome::Unknown { .. } => None,
+    }
 }
 
 fn location_id(requested: &str) -> String {
@@ -305,6 +314,7 @@ fn artifact(resolved: &str, sha256: &str, format: &Format) -> Value {
         sha256,
         family,
         hint.version.as_deref().unwrap_or(""),
+        hint.vendor.unwrap_or(""),
         format.os,
         format.arch,
     ];
@@ -313,7 +323,7 @@ fn artifact(resolved: &str, sha256: &str, format: &Format) -> Value {
         hex::encode(Sha256::digest(fields.join("\0").as_bytes()))
     );
     json!({
-        "artifact_id": id, "family": family, "vendor": null, "version": hint.version,
+        "artifact_id": id, "family": family, "vendor": hint.vendor, "version": hint.version,
         "build_id": null, "os": format.os, "arch": format.arch,
         "executable_sha256": sha256, "component_identity_sha256": null,
         "identity_assurance": assurance,

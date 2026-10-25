@@ -201,7 +201,31 @@ struct Artifact<'a> {
 
 pub(crate) fn assess(request: &Request) -> Result<Value, String> {
     let (bundled, advisory_source) = bundle::bundle_advisories(request.cached_bundle.as_ref());
-    let supplied: Vec<&AdvisoryInput> = request.advisories.iter().chain(&bundled).collect();
+    assess_with(request, &bundled, &advisory_source)
+}
+
+/// Launch admission: one probed artifact against advisories already taken
+/// from the cached bundle by [`launch_advisories`].
+pub(crate) fn assess_launch(artifact: &Value, bundled: &LaunchAdvisories) -> Result<Value, String> {
+    let artifact = ArtifactInput::deserialize(artifact)
+        .map_err(|_| "runtime_identity_request_invalid".to_owned())?;
+    let request = Request {
+        artifacts: vec![artifact],
+        locations: Vec::new(),
+        instances: Vec::new(),
+        advisories: Vec::new(),
+        scope_complete: false,
+        cached_bundle: None,
+    };
+    assess_with(&request, &bundled.advisories, &bundled.source)
+}
+
+fn assess_with(
+    request: &Request,
+    bundled: &[AdvisoryInput],
+    advisory_source: &Value,
+) -> Result<Value, String> {
+    let supplied: Vec<&AdvisoryInput> = request.advisories.iter().chain(bundled).collect();
     validate_bounds(request, &supplied)?;
     let artifacts = artifacts_by_id(&request.artifacts)?;
     let locations = locations_by_id(&request.locations, &artifacts)?;
@@ -440,7 +464,10 @@ use verdict::{advisory_verdict, match_artifact, parse_intervals};
 
 #[path = "runtime_identity_bundle.rs"]
 mod bundle;
-pub(crate) use bundle::FEATURE as BUNDLE_FEATURE;
+pub(crate) use bundle::{
+    launch_bundle_advisories as launch_advisories, CachedBundleInput, LaunchAdvisories,
+    FEATURE as BUNDLE_FEATURE,
+};
 
 #[cfg(test)]
 #[path = "runtime_identity_tests.rs"]

@@ -96,6 +96,61 @@ pub(crate) fn bundle_advisories(input: Option<&CachedBundleInput>) -> (Vec<Advis
     let Some(input) = input else {
         return (Vec::new(), source("absent", None, None));
     };
+    evaluate(input, input.now)
+}
+
+/// Launch admission keeps an expired bundle's rules for positive matches only:
+/// PRD retains stale affected verdicts while stale absence stays unknown. The
+/// bundle is re-checked as of its own expiry, so scope, payload hash,
+/// signature, key state and rollback are still enforced; only freshness is
+/// relaxed, and the report stays `stale` so callers never clear on it.
+pub(crate) fn launch_bundle_advisories(input: Option<&CachedBundleInput>) -> LaunchAdvisories {
+    let (advisories, source) = bundle_advisories(input);
+    let current = LaunchAdvisories { advisories, source };
+    let (Some(input), Some("bundle_expired")) = (input, current.source["reason"].as_str()) else {
+        return current;
+    };
+    let Some(expired_at) = load_supply_chain_bundle_response(&input.response)
+        .ok()
+        .and_then(|typed| typed.bundle.expires_at_timestamp().ok())
+    else {
+        return current;
+    };
+    let (advisories, mut source) = evaluate(input, Some(expired_at));
+    if source["state"] != "verified" {
+        return current;
+    }
+    source["state"] = json!("stale");
+    source["reason"] = json!("bundle_expired");
+    source["expired_at"] = json!(expired_at);
+    LaunchAdvisories { advisories, source }
+}
+
+/// Bundle rules verified once and reused across launch checks.
+#[derive(Debug)]
+pub(crate) struct LaunchAdvisories {
+    pub(super) advisories: Vec<AdvisoryInput>,
+    pub(crate) source: Value,
+}
+
+impl CachedBundleInput {
+    pub(crate) fn new(
+        response: Value,
+        workspace_id: String,
+        sync_keyring: Option<Value>,
+        synced_bundle_version: Option<String>,
+    ) -> Self {
+        Self {
+            response,
+            workspace_id,
+            sync_keyring,
+            synced_bundle_version,
+            now: None,
+        }
+    }
+}
+
+fn evaluate(input: &CachedBundleInput, now: Option<f64>) -> (Vec<AdvisoryInput>, Value) {
     let typed = match load_supply_chain_bundle_response(&input.response) {
         Ok(typed) => typed,
         Err(_) => {
@@ -108,7 +163,7 @@ pub(crate) fn bundle_advisories(input: Option<&CachedBundleInput>) -> (Vec<Advis
     let anchored = match validate_cached_supply_chain_bundle(
         &typed,
         &input.workspace_id,
-        input.now,
+        now,
         input.sync_keyring.as_ref(),
         input.synced_bundle_version.as_deref(),
     ) {

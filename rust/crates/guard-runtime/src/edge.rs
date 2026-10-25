@@ -2,6 +2,7 @@
 
 use crate::hook_decision_containment_route::edge_route;
 use crate::policy_enforcement::AdmittedPolicySnapshot;
+use crate::runtime_known_vulnerable as runtime_risk;
 use guard_contracts::{
     GuardHookEdgeResultV2, GuardHookEnvelopeV2, GuardHookPayloadKindV2, HookOutputSummaryV1,
     HookSourceFileRefV1, NativeHookRequestV1, PreToolResultV1, GUARD_HOOK_EDGE_RESULT_V2_SCHEMA,
@@ -365,6 +366,7 @@ fn evaluate_validated_envelope(
                 evaluated,
             );
             let evaluated = crate::network_protection::apply_to_envelope(&envelope, evaluated);
+            let evaluated = runtime_risk::apply_to_envelope(&envelope, policy_snapshot, evaluated);
             let value = serde_json::to_value(evaluated)
                 .map_err(|_| "native_hook_edge_response_invalid".to_owned())?;
             validate_pre_tool_result(&value)?;

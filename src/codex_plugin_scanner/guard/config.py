@@ -125,6 +125,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "warn",
+        "runtime_known_vulnerable": "warn",
     },
     "gentle": {
         "local_secret_read": "warn",
@@ -147,6 +148,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "warn",
+        "runtime_known_vulnerable": "warn",
     },
     "balanced": {
         "local_secret_read": "require-reapproval",
@@ -169,6 +171,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
     "strict": {
         "local_secret_read": "require-reapproval",
@@ -191,6 +194,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "block",
     },
     "paranoid": {
         "local_secret_read": "block",
@@ -213,6 +217,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "block",
         "package_install": "block",
         "low_trust_artifact": "block",
+        "runtime_known_vulnerable": "block",
     },
     "custom": {
         "local_secret_read": "require-reapproval",
@@ -235,6 +240,7 @@ SECURITY_LEVEL_RISK_ACTIONS: dict[str, dict[str, GuardAction]] = {
         "package_custom_registry": "allow",
         "package_install": "allow",
         "low_trust_artifact": "require-reapproval",
+        "runtime_known_vulnerable": "require-reapproval",
     },
 }
 VALID_RECEIPT_REDACTION_LEVELS = frozenset({"full", "partial", "none"})

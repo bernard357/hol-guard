@@ -80,7 +80,13 @@ fn layouts_name_family_and_version() {
             (Some("node"), version.map(str::to_owned)),
             "{path}"
         );
+        // Only an installer layout names the upstream vendor; a bare system
+        // path may hold a distribution build with backports.
+        let vendor = version.map(|_| "nodejs.org");
+        assert_eq!(hint_for(path).vendor, vendor, "{path}");
     }
+    assert_eq!(hint_for("/usr/bin/python3.12").vendor, None);
+    assert_eq!(hint_for("/x/node/v20.11/bin/node").vendor, None);
 }
 
 #[test]
@@ -128,7 +134,7 @@ fn layout_inferred_runtime_is_self_reported_with_hash() {
     assert_eq!(artifact["version"], "20.11.1");
     assert_eq!(artifact["identity_assurance"], "self_reported");
     assert_eq!(artifact["executable_sha256"], sha256_hex(body));
-    assert_eq!(artifact["vendor"], Value::Null);
+    assert_eq!(artifact["vendor"], "nodejs.org");
     assert_eq!(result["locations"][0]["state"], "present");
     assert_eq!(
         result["observations"][0]["resolved_path"],
@@ -189,6 +195,25 @@ fn spoofed_version_never_exceeds_self_reported() {
         reply["result"]["advisories"][0]["verdict"],
         "fixed_verified"
     );
+
+    // Its layout vendor flags an in-range build of the upstream release...
+    let vendor_rule = |fixed: &str| {
+        json!({
+            "artifacts": result["artifacts"], "locations": result["locations"],
+            "advisories": [{
+                "advisory_id": "ADV-2", "family": "node", "vendor": "nodejs.org",
+                "version_scheme": "semver",
+                "ranges": [{"introduced": "22.0.0", "fixed": fixed}],
+            }],
+        })
+    };
+    let status = |request: Value| {
+        let reply = crate::runtime_identity::run_command(request.to_string().as_bytes()).unwrap();
+        reply["result"]["artifacts"][0]["matches"][0]["status"].clone()
+    };
+    assert_eq!(status(vendor_rule("22.5.0")), "affected");
+    // ...but a self-reported vendor still cannot clear an out-of-range one.
+    assert_eq!(status(vendor_rule("22.4.1")), "unknown");
 }
 
 #[test]
