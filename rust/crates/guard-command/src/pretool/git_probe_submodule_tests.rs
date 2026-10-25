@@ -47,6 +47,15 @@ impl Fixture {
         fs::create_dir_all(&repo).unwrap();
         let git = |arguments: &[&str]| {
             let mut command = Command::new("git");
+            // `HOME` redirects only the global file. Command-scope
+            // configuration (`GIT_CONFIG_COUNT` and the indexed key/value
+            // pairs it counts), an explicit global or system file, and an
+            // inherited `XDG_CONFIG_HOME` all still reach this child, and any
+            // of them may name a `core.hooksPath` whose pre-commit hook
+            // rejects the synthetic commit below. Drop every one of them so
+            // the fixture builds the same repository on any developer's
+            // machine. With `XDG_CONFIG_HOME` gone, git falls back to the fixture
+            // `HOME`, so no second variable has to be invented here.
             for name in [
                 "GIT_DIR",
                 "GIT_WORK_TREE",
@@ -54,6 +63,10 @@ impl Fixture {
                 "GIT_INDEX_FILE",
                 "GIT_OBJECT_DIRECTORY",
                 "GIT_NAMESPACE",
+                "GIT_CONFIG_COUNT",
+                "GIT_CONFIG_GLOBAL",
+                "GIT_CONFIG_SYSTEM",
+                "XDG_CONFIG_HOME",
             ] {
                 command.env_remove(name);
             }

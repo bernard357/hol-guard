@@ -144,15 +144,15 @@ fn a_submodule_status_listing_invents_no_unrelated_git_owners() {
     for command in [
         "git submodule",
         "git submodule status",
-        "git submodule status --cached",
         "git submodule status -q",
         "git submodule status --quiet",
         "git submodule status vendor/lib",
-        "git submodule status --cached -- vendor/lib",
     ] {
         assert!(observations(command).rule_matches.is_empty(), "{command}");
     }
     for command in [
+        "git submodule status --cached",
+        "git submodule status --cached -- vendor/lib",
         "git submodule status --recursive",
         "git submodule update",
         "git submodule update --init --recursive",
