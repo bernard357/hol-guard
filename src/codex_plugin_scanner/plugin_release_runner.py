@@ -93,11 +93,13 @@ def register_step() -> int:
     status = result.get("status")
     url = result.get("releaseUrl")
     offer = result.get("offerUrl")
+    allowed = _env("OFFER_LINE", "true") != "false"
+    offer_url = offer if allowed and isinstance(offer, str) and _is_offer_url(offer) else ""
     _write_outputs(
         {
             "release_status": status if isinstance(status, str) else "unavailable",
             "release_url": url if isinstance(url, str) and url.startswith("https://") else "",
-            "offer_url": offer if _env("OFFER_LINE", "true") != "false" and _is_offer_url(offer) else "",
+            "offer_url": offer_url,
         }
     )
     return 0

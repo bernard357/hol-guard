@@ -41,6 +41,11 @@ on:
         required: false
         type: boolean
         default: true
+      offer_line:
+        description: Allow one HOL Blue line in the job summary, at most once in 28 days, for a listing without a membership
+        required: false
+        type: boolean
+        default: true
     outputs:
       score:
         description: Scanner score
@@ -98,4 +103,5 @@ jobs:
           upload_sarif: ${{ inputs.upload_sarif }}
           visibility: ${{ inputs.visibility }}
           register_release: ${{ inputs.register_release }}
+          offer_line: ${{ inputs.offer_line }}
           release_endpoint: https://hol.org/api/guard/plugins/releases/attestations
