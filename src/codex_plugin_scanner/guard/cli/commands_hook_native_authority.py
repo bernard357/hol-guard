@@ -10,19 +10,23 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ..adapters.base import HarnessContext
-from ..adapters.bounded_cli_hook_daemon import _daemon_response_to_native, _policy_action_from_daemon
+from ..adapters.bounded_cli_hook_daemon import (
+    _consistent_native_response,
+    _daemon_response_to_native,
+    _policy_action_from_daemon,
+)
 from ..config import GuardConfig
 from ..daemon.diagnostics import DaemonDiagnostics
-from ..daemon.hook_availability_policy import availability_harness_response
+from ..daemon.hook_availability_policy import availability_harness_response, hook_event_pauses_when_unavailable
 from ..daemon.hook_request_parsing import runtime_hook_event_name
 from ..daemon.hook_worker import HookWorker
 from ..daemon.runtime_hook_deadline import RuntimeHookDeadline
 from ..hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 from ..native_hook_evidence_writer import NativeHookEvidenceWriter
 from ..store import GuardStore
+from .commands_support_hook_payload import _emit_native_hook_json_document
 from .commands_support_runtime_resolution import _canonical_harness_name
 from .native_hook_exit_code import native_hook_verdict_exit_code
-from .render import emit_guard_payload
 
 _DIAGNOSTIC_DRAIN_TIMEOUT_SECONDS = 0.25
 
@@ -162,10 +166,24 @@ def emit_hook_review(
         if stderr:
             print(stderr, file=sys.stderr)
         return exit_code
+    if not response and not hook_event_pauses_when_unavailable(event_name):
+        # An empty answer to an event that cannot pause the turn carries no
+        # decision; writing nothing lets the harness continue on its own.
+        return 0
     # Every other caller reads the daemon's response document; a hook caller
-    # need not pass --json to receive a parseable one.
-    emit_guard_payload("hook", response, True, output_stream)
-    policy_action = _policy_action_from_daemon(response, event_name=event_name)
+    # need not pass --json to receive a parseable one. Secrets are masked, but
+    # the signed approval link the user is meant to open stays intact.
+    _emit_native_hook_json_document(response, output_stream=output_stream)
+    if canonical == "claude-code":
+        # Claude reads a hook's JSON only on exit 0; any other status discards
+        # the document, a PostToolUse block and its reason included.
+        return 0
+    if "policy_action" not in response and ("hookSpecificOutput" in response or "decision" in response):
+        # A notice or dialog answer names no policy action; its envelope's own
+        # decision is the verdict, so context alone never reads as a block.
+        _, policy_action = _consistent_native_response(response, harness=canonical, event_name=event_name)
+    else:
+        policy_action = _policy_action_from_daemon(response, event_name=event_name)
     return native_hook_verdict_exit_code(canonical, policy_action, event_name=event_name)
 
 

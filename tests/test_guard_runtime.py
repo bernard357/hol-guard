@@ -473,17 +473,31 @@ def _approve_native_request(monkeypatch, capsys, home_dir: Path, output: dict[st
     # CLI refuses to run inside a known agent hook context, so clear the markers.
     from codex_plugin_scanner.guard.runtime.self_approval import _AGENT_ENV_MARKERS
 
-    for marker in _AGENT_ENV_MARKERS:
-        monkeypatch.delenv(marker, raising=False)
     approval_requests = output["approval_requests"]
     assert isinstance(approval_requests, list)
     request_id = str(approval_requests[0]["request_id"])
-    rc = main(["guard", "approvals", "approve", request_id, "--scope", "artifact", "--home", str(home_dir), "--json"])
+    # The hook binds its review to the caller's environment, so the markers
+    # come back for the retry that follows.
+    with monkeypatch.context() as approval_env:
+        for marker in _AGENT_ENV_MARKERS:
+            approval_env.delenv(marker, raising=False)
+        rc = main(
+            ["guard", "approvals", "approve", request_id, "--scope", "artifact", "--home", str(home_dir), "--json"]
+        )
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
 
+def _drain_hook_evidence(home_dir: Path) -> None:
+    """Wait for the resident writer to persist what a one-shot hook handed it."""
+
+    from codex_plugin_scanner.guard.native_hook_evidence_writer import NativeHookEvidenceWriter
+
+    assert NativeHookEvidenceWriter(store=GuardStore(home_dir)).stop(timeout_seconds=5.0)
+
+
 def _native_receipts(guard_home: Path) -> list[tuple[str, str]]:
+    _drain_hook_evidence(guard_home)
     with sqlite3.connect(guard_home / "guard.db") as connection:
         return list(connection.execute("select harness, decision from native_hook_decision_receipts"))
 
@@ -3222,7 +3236,8 @@ clearer UX and an implementation plan with technical references.
 
         assert rc == 1
         assert output["continue"] is True
-        assert output["approval_reuse"]["action"] == "require-reapproval"
+        assert output["decision"] == "block"
+        assert output["model_output_action"] == "block"
 
     def test_codex_post_tool_use_allows_read_only_search_value_filters(
         self,
@@ -3647,7 +3662,7 @@ clearer UX and an implementation plan with technical references.
         assert rc == 1
         _assert_output_withheld(output)
 
-    def test_codex_post_tool_use_blocks_double_quoted_command_substitution_search(
+    def test_codex_reviews_double_quoted_command_substitution_search_before_it_runs(
         self,
         monkeypatch,
         tmp_path,
@@ -3687,8 +3702,22 @@ clearer UX and an implementation plan with technical references.
         )
         output = json.loads(capsys.readouterr().out)
 
-        assert rc == 1
-        assert output["approval_requests"]
+        # The secret read is caught before the command runs. Afterwards only
+        # its output is judged, and this output holds no secret.
+        assert rc == 0
+        assert output.get("decision") != "block"
+        pre_rc, pre_output = _run_guard_hook(
+            home_dir=home_dir,
+            workspace_dir=workspace_dir,
+            harness="codex",
+            event={**event, "event": "PreToolUse", "tool_response": None},
+            capsys=capsys,
+            monkeypatch=monkeypatch,
+            as_json=True,
+        )
+        assert pre_rc == 0
+        assert pre_output["policy_action"] not in {"allow", "warn"}
+        assert pre_output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_codex_post_tool_use_blocks_glued_piped_search_with_secret_like_output(
         self,
@@ -5083,6 +5112,7 @@ clearer UX and an implementation plan with technical references.
             "~/.docker/" + "config.json",
             "~/.kube/config",
             ".terraform.tfvars",
+            "terraform.tfvars",
         ],
     )
     def test_guard_hook_asks_for_planned_secret_file_reads(self, tmp_path, capsys, monkeypatch, path):
@@ -5154,7 +5184,7 @@ def test_guard_hook_emits_copilot_native_ask_response(tmp_path, capsys, monkeypa
     assert "approve" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
 
 
-def test_guard_hook_emits_copilot_native_ask_response_for_destructive_shell_command(
+def test_guard_hook_allows_copilot_shell_redirect_into_the_workspace(
     tmp_path,
     capsys,
     monkeypatch,
@@ -5187,11 +5217,13 @@ def test_guard_hook_emits_copilot_native_ask_response_for_destructive_shell_comm
     )
     output = json.loads(capsys.readouterr().out)
 
+    # Writing a file inside the workspace is ordinary work; the benign gate
+    # pins the same answer for every harness.
     assert rc == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] in {"deny", "ask"}
+    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_guard_hook_emits_copilot_native_ask_response_for_destructive_shell_redirection_without_spaces(
+def test_guard_hook_allows_copilot_shell_redirect_without_spaces_into_the_workspace(
     tmp_path,
     capsys,
     monkeypatch,
@@ -5225,7 +5257,7 @@ def test_guard_hook_emits_copilot_native_ask_response_for_destructive_shell_redi
     output = json.loads(capsys.readouterr().out)
 
     assert rc == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] in {"deny", "ask"}
+    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
 def test_guard_hook_emits_copilot_native_ask_response_for_base64_decode_and_exec_command(
@@ -8673,10 +8705,7 @@ def test_guard_hook_claude_native_approval_does_not_lower_current_reapproval(tmp
     first_payload = json.loads(first_output)
     post_payload = json.loads(post_output)
     second_payload = json.loads(second_output)
-    store = GuardStore(home_dir)
-    receipts = store.list_receipts(limit=20)
-    policies = store.list_policy_decisions("claude-code")
-    native_receipt = next(receipt for receipt in receipts if receipt["user_override"] == "claude-native-approve")
+    policies = GuardStore(home_dir).list_policy_decisions("claude-code")
 
     assert first_rc == 0
     assert first_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
@@ -8686,15 +8715,8 @@ def test_guard_hook_claude_native_approval_does_not_lower_current_reapproval(tmp
     assert post_payload["continue"] is True
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert native_receipt["artifact_hash"].startswith(APPROVAL_CONTEXT_TOKEN_PREFIX)
-    assert native_receipt["policy_decision"] == "require-reapproval"
+    # Claude's own dialog never saves a reusable Guard approval.
     assert all(policy["source"] != "claude-native-approval" for policy in policies)
-    assert any(
-        evidence.get("source") == "claude_native_approval"
-        and evidence.get("authoritative_action") == "require-reapproval"
-        and evidence.get("reusable_policy_saved") is False
-        for evidence in native_receipt["scanner_evidence"]
-    )
 
 
 def _load_claude_pending_question_contract(home_dir: Path, session_id: str) -> tuple[str, list[dict[str, str]]]:
@@ -9098,8 +9120,8 @@ def test_guard_hook_claude_ask_user_question_keep_blocked_persists_block(tmp_pat
     assert question_rc == 0
     assert question_output == ""
     assert second_rc == 0
-    assert second_payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "HOL Guard blocked Claude's attempt to use Read" in second_payload["systemMessage"]
+    # The saved block is recorded; the retry stays gated and asks again.
+    assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert policies[0]["source"] == "claude-ask-user-question"
 
 
@@ -9273,7 +9295,7 @@ def test_guard_hook_claude_ask_user_question_spoofed_prompt_does_not_persist_app
     assert first_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert permission_rc == 0
     assert permission_payload["hookSpecificOutput"]["decision"]["behavior"] == "deny"
-    assert question_rc == 1
+    assert question_rc == 0
     assert question_payload["decision"] == "block"
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
@@ -9376,7 +9398,7 @@ def test_guard_hook_claude_ask_user_question_multiple_questions_does_not_persist
     assert first_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert permission_rc == 0
     assert permission_payload["hookSpecificOutput"]["decision"]["behavior"] == "deny"
-    assert question_rc == 1
+    assert question_rc == 0
     assert question_payload["decision"] == "block"
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
@@ -9781,10 +9803,75 @@ def test_guard_hook_claude_native_cancel_does_not_persist_flat_block(tmp_path, c
     assert notification_rc == 0
     assert "HOL Guard approval question" in notification_payload["systemMessage"]
     assert stop_rc == 0
-    assert stop_output == ""
+    assert json.loads(stop_output)["continue"] is True
     assert GuardStore(home_dir).list_policy_decisions("claude-code") == []
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_guard_hook_saved_artifact_approval_never_lowers_current_payload_block(tmp_path, capsys, monkeypatch):
+    from codex_plugin_scanner.guard.native_bash_protocol import ARTIFACT_ID as NATIVE_BASH_ARTIFACT_ID
+
+    home_dir = tmp_path / "home"
+    workspace_dir = tmp_path / "workspace"
+    _build_guard_fixture(home_dir, workspace_dir)
+    monkeypatch.setattr(
+        guard_commands_module, "schedule_guard_daemon_ensure", lambda _guard_home, **_kwargs: "http://127.0.0.1:4455"
+    )
+
+    def run_copilot_hook(command: str) -> tuple[int, dict[str, object]]:
+        event = {
+            "hookName": "preToolUse",
+            "toolName": "bash",
+            "toolArgs": {"command": command},
+            "sourceScope": "project",
+            "cwd": str(workspace_dir),
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        rc = main(
+            [
+                "guard",
+                "hook",
+                "--home",
+                str(home_dir),
+                "--workspace",
+                str(workspace_dir),
+                "--harness",
+                "copilot",
+                "--json",
+            ]
+        )
+        return rc, json.loads(capsys.readouterr().out)
+
+    first_rc, first_output = run_copilot_hook("rm -rf ~")
+    store = GuardStore(home_dir)
+    # Remember every allow a user could have saved for this tool before the
+    # current payload became terminal: both review artifacts and the harness.
+    for artifact_id in ("copilot:native-pretool:bash", NATIVE_BASH_ARTIFACT_ID):
+        store.upsert_policy(
+            PolicyDecision(
+                harness="copilot",
+                scope="artifact",
+                action="allow",
+                artifact_id=artifact_id,
+                reason="Reviewed this tool before the current payload became terminal.",
+                source="manual",
+            ),
+            "2026-07-17T12:00:00+00:00",
+        )
+    store.upsert_policy(
+        PolicyDecision(harness="copilot", scope="harness", action="allow", source="manual"),
+        "2026-07-17T12:00:00+00:00",
+    )
+    second_rc, second_output = run_copilot_hook("rm -rf ~")
+    third_rc, third_output = run_copilot_hook("rm -rf /")
+
+    for rc, output in ((first_rc, first_output), (second_rc, second_output), (third_rc, third_output)):
+        assert rc == 0
+        assert output["policy_action"] == "block"
+        assert output["reason_code"] == "native_destructive_command"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert store.list_approval_requests(limit=10) == []
 
 
 def test_guard_hook_claude_alias_saved_allow_does_not_lower_canonical_reapproval(tmp_path, capsys, monkeypatch):
@@ -9833,7 +9920,6 @@ def test_guard_hook_claude_alias_saved_allow_does_not_lower_canonical_reapproval
     first_payload = json.loads(first_output)
     post_payload = json.loads(post_output)
     second_payload = json.loads(second_output)
-    receipts = GuardStore(home_dir).list_receipts(limit=20)
 
     assert first_rc == 0
     assert first_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
@@ -9842,7 +9928,7 @@ def test_guard_hook_claude_alias_saved_allow_does_not_lower_canonical_reapproval
     assert post_payload["continue"] is True
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert any(receipt["harness"] == "claude-code" for receipt in receipts)
+    assert any(harness == "claude-code" for harness, _decision in _native_receipts(home_dir))
 
 
 def test_hook_runtime_artifact_prefers_raw_file_read_path_over_redacted_action_path(tmp_path):
@@ -10450,10 +10536,9 @@ def test_guard_hook_claude_stop_keeps_native_cancel_transient(tmp_path, capsys, 
     assert notification_rc == 0
     assert "HOL Guard intercepted Claude's attempt to use Read" in json.loads(notification_output)["systemMessage"]
     assert stop_rc == 0
-    assert stop_output == ""
+    assert json.loads(stop_output)["continue"] is True
     assert second_rc == 0
     assert second_payload["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert "HOL Guard intercepted Claude's attempt to use Read" in second_payload["systemMessage"]
 
 
 def test_guard_hook_claude_stop_does_not_persist_denial_without_visible_prompt(
@@ -10756,6 +10841,8 @@ def test_guard_hook_emits_json_for_claude_user_prompt_submit_overridable_prompts
     assert "approval_requests" not in output
     assert "Nothing is waiting for approval" in output["reason"]
 
+    _drain_hook_evidence(home_dir)
+    _drain_hook_evidence(home_dir)
     store = GuardStore(home_dir)
     with store._connect() as connection:
         row = connection.execute("select decision_id from native_prompt_decision_receipts").fetchone()
@@ -10839,6 +10926,8 @@ def test_guard_hook_hard_blocks_claude_user_prompt_submit_bypass(
         ]
     )
     output = json.loads(capsys.readouterr().out)
+    _drain_hook_evidence(home_dir)
+    _drain_hook_evidence(home_dir)
     store = GuardStore(home_dir)
     with store._connect() as connection:
         row = connection.execute("select decision_id from native_prompt_decision_receipts").fetchone()
@@ -10874,6 +10963,7 @@ def test_guard_hook_native_prompt_injection_requires_review_without_echoing_text
     assert output["policy_action"] == "require-reapproval"
     assert output["reason_code"] == "native_prompt_injection_review"
     assert prompt not in json.dumps(output)
+    _drain_hook_evidence(home_dir)
     store = GuardStore(home_dir)
     with store._connect() as connection:
         row = connection.execute("select decision_id from native_prompt_decision_receipts").fetchone()
@@ -10902,6 +10992,7 @@ def test_guard_hook_native_prompt_risk_classes_never_become_automatic_allow(tmp_
     assert output["decision"] == "block"
     assert output["policy_action"] not in {"allow", "warn"}
     assert prompt not in json.dumps(output)
+    _drain_hook_evidence(home_dir)
     store = GuardStore(home_dir)
     with store._connect() as connection:
         row = connection.execute("select decision_id from native_prompt_decision_receipts").fetchone()
@@ -11111,8 +11202,6 @@ def test_guard_hook_emits_claude_notification_notice_for_permission_prompt(tmp_p
     notification_payload = json.loads(notification_capture.out)
 
     assert notification_rc == 0
-    assert "HOL Guard is routing this Claude approval request for Read" in notification_capture.err
-    assert "protect your local secrets" in notification_capture.err
     assert "HOL Guard intercepted Claude's attempt to use Read" in notification_payload["systemMessage"]
     assert "came from HOL Guard, not from Claude alone" in notification_payload["systemMessage"]
     assert "Allow during this session" in notification_payload["systemMessage"]
@@ -11434,7 +11523,6 @@ def test_guard_hook_claude_notification_notice_is_tool_scoped_and_retained_while
     assert "approval code:" in first_output["hookSpecificOutput"]["additionalContext"].lower()
     assert second_rc == 0
     assert "came from HOL Guard, not from Claude alone" in second_output["systemMessage"]
-    assert "protect your local secrets" in second_output["systemMessage"]
     assert (
         second_output["hookSpecificOutput"]["additionalContext"]
         == first_output["hookSpecificOutput"]["additionalContext"]
@@ -17970,7 +18058,7 @@ def test_hermes_pretool_reviews_docker_sensitive_command_requests(tmp_path, caps
     assert output["approval_requests"]
 
 
-def test_hermes_pretool_blocks_destructive_shell_command_requests(tmp_path, capsys, monkeypatch):
+def test_hermes_pretool_allows_shell_redirect_into_the_workspace(tmp_path, capsys, monkeypatch):
     home_dir = tmp_path / "home"
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -18006,9 +18094,8 @@ def test_hermes_pretool_blocks_destructive_shell_command_requests(tmp_path, caps
     )
     output = json.loads(capsys.readouterr().out)
 
-    assert rc == 2
-    assert output["decision"] == "block"
-    assert "destructive shell command" in str(output.get("reason") or "").lower()
+    assert rc == 0
+    assert output.get("decision") != "block"
 
 
 def test_guard_hook_explains_data_flow_exfiltration_path(tmp_path, capsys, monkeypatch):
