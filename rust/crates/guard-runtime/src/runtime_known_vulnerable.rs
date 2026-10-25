@@ -204,8 +204,8 @@ impl Default for Known {
 
 impl Known {
     /// The context after `segment` runs. A directory change leaves relative
-    /// paths unresolvable, a `PATH` change bare names; a sourced script may
-    /// do either.
+    /// paths unresolvable, a `PATH` change or a `hash` entry bare names; a
+    /// sourced script or an `eval` may do either.
     fn after(mut self, segment: &CommandSegment) -> Self {
         let assigns_path = || {
             segment
@@ -215,13 +215,17 @@ impl Known {
         };
         match segment.executable.as_deref() {
             Some("cd" | "pushd" | "popd") => self.cwd = false,
-            Some("source" | ".") => {
+            Some("source" | "." | "eval") => {
                 self.cwd = false;
                 self.path = false;
             }
             Some("export" | "declare" | "typeset" | "readonly" | "local") if assigns_path() => {
                 self.path = false;
             }
+            Some("unset") if segment.arguments.iter().any(|argument| argument == "PATH") => {
+                self.path = false;
+            }
+            Some("hash") => self.path = false,
             None if segment.path_overridden => self.path = false,
             _ => {}
         }

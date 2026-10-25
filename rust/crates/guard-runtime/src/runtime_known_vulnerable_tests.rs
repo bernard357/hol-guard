@@ -232,6 +232,10 @@ fn launches_resolve_the_way_the_shell_would() {
         "export PATH=/x:$PATH; node a.js",
         "PATH=/x; node a.js",
         "source env.sh && node a.js",
+        "eval 'cd x'; ./tools/node a.js",
+        "eval 'export PATH=/x'; node a.js",
+        "hash -p /x/node node; node a.js",
+        "unset PATH; node a.js",
     ] {
         assert!(launches(command).is_empty(), "{command}");
     }
