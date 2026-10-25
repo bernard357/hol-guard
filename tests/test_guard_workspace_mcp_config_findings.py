@@ -138,6 +138,8 @@ def test_a_runtime_without_the_check_reports_it_not_run(tmp_path: Path, monkeypa
     [
         {"schema": "unreadable"},
         mcp_result(status="unknown"),
+        mcp_result(status=[]),
+        mcp_result(status={}),
         {key: value for key, value in mcp_result().items() if key != "findings"},
     ],
 )
@@ -179,9 +181,9 @@ def test_a_check_at_its_cap_marks_findings_truncated() -> None:
 
 
 def test_an_unreadable_harness_leaves_the_check_incomplete(tmp_path: Path, monkeypatch) -> None:
-    found = bridge.WorkspaceServers(servers=(), skipped_harnesses=("cursor",))
+    found = bridge.WorkspaceServers(servers=(), roots=(str(tmp_path),), skipped_harnesses=("cursor",))
     monkeypatch.setattr(bridge, "workspace_mcp_servers", lambda store, root: found)
-    monkeypatch.setattr(bridge, "assess_mcp_servers", lambda servers: mcp_result(servers_scanned=0))
+    monkeypatch.setattr(bridge, "assess_mcp_servers", lambda found: mcp_result(servers_scanned=0))
     result = mcp_findings.assess_workspace_mcp_configs(GuardStore(tmp_path / "home"), tmp_path)
     coverage = mcp_findings.with_mcp_config_coverage({"status": "complete", "reasons": [], "detectors": {}}, result)
     assert coverage["detectors"]["mcp_config_v1"] == "incomplete"
@@ -189,13 +191,13 @@ def test_an_unreadable_harness_leaves_the_check_incomplete(tmp_path: Path, monke
 
 
 def test_a_failed_check_is_an_error_and_a_missing_one_is_not_run(tmp_path: Path, monkeypatch) -> None:
-    found = bridge.WorkspaceServers(servers=(), skipped_harnesses=())
+    found = bridge.WorkspaceServers(servers=(), roots=(str(tmp_path),), skipped_harnesses=())
     monkeypatch.setattr(bridge, "workspace_mcp_servers", lambda store, root: found)
 
-    def failed(servers):
+    def failed(found):
         raise RuntimeError("mcp_config_failed")
 
-    def missing(servers):
+    def missing(found):
         raise bridge.McpConfigUnavailableError("mcp_config_unavailable")
 
     store = GuardStore(tmp_path / "home")
@@ -205,41 +207,37 @@ def test_a_failed_check_is_an_error_and_a_missing_one_is_not_run(tmp_path: Path,
     assert mcp_findings.assess_workspace_mcp_configs(store, tmp_path) is None
 
 
-def test_only_servers_configured_inside_the_worktree_are_sent(tmp_path: Path) -> None:
+def test_every_server_goes_to_the_runtime_with_only_its_launch_settings(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     home = tmp_path / "home"
-    servers = bridge.servers_in_root(
+    rows = bridge.server_rows(
         [
             detection(
                 artifact("setup", root / ".mcp.json", **REMOTE_CODE_SERVER, transport="stdio"),
-                artifact("setup", root / ".mcp.json", command="node"),
-                artifact("remote", root / ".cursor/mcp.json", url="http://mcp.example.com/sse"),
                 artifact("global", home / ".claude.json", command="sudo", args=("node",)),
-                artifact("relative", Path("rel/.mcp.json"), command="sudo"),
                 artifact("hook", root / ".claude/settings.json", artifact_type="hook", command="sudo"),
             )
-        ],
-        root,
+        ]
     )
-    assert servers == (
+    assert rows == (
+        {"config_path": str(root / ".mcp.json"), "server": "setup", "url": None, **REMOTE_CODE_SERVER},
         {
-            "path": ".cursor/mcp.json",
-            "server": "remote",
-            "command": None,
-            "args": [],
-            "url": "http://mcp.example.com/sse",
+            "config_path": str(home / ".claude.json"),
+            "server": "global",
+            "command": "sudo",
+            "args": ["node"],
+            "url": None,
         },
-        {"path": ".mcp.json", "server": "setup", "url": None, **REMOTE_CODE_SERVER},
     )
 
 
-def test_a_linked_worktree_root_still_matches_its_configurations(tmp_path: Path) -> None:
+def test_a_linked_worktree_sends_both_of_its_roots(tmp_path: Path) -> None:
     real = tmp_path / "real"
     real.mkdir()
     linked = tmp_path / "linked"
     linked.symlink_to(real, target_is_directory=True)
-    servers = bridge.servers_in_root([detection(artifact("a", real / ".mcp.json", command="node"))], linked)
-    assert [server["path"] for server in servers] == [".mcp.json"]
+    assert bridge.workspace_roots(linked) == (str(linked), str(real.resolve()))
+    assert bridge.workspace_roots(real.resolve()) == (str(real.resolve()),)
 
 
 @pytest.fixture
@@ -250,11 +248,18 @@ def native_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: empty_audit)
 
 
-def test_compiled_runtime_reports_a_risky_server_without_quoting_it(tmp_path: Path, native_binary: None) -> None:
+def test_compiled_runtime_reports_a_risky_server_without_quoting_it(
+    tmp_path: Path, native_binary: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     config = {"mcpServers": {"setup": REMOTE_CODE_SERVER, "files": {"command": "npx", "args": ["-y", "server"]}}}
     (workspace / ".mcp.json").write_text(json.dumps(config), encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    global_config = {"mcpServers": {"global": {"command": "sudo", "args": ["node", "s.js"]}}}
+    (home / ".claude.json").write_text(json.dumps(global_config), encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     store = GuardStore(tmp_path / "guard-home")
     admitted = worker.admit_workspace(store, str(workspace))
     keys = assessments.WorktreeKeys(str(admitted["codebase_key"]), str(admitted["worktree_key"]))

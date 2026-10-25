@@ -26,22 +26,32 @@ pub(crate) const ENVIRONMENT_EXFILTRATION: (&str, &str) = (
 
 const MAX_STEPS: usize = 64;
 
-/// The attack `model` pipes, as `(reason_code, reason)`.
+/// The first attack `model` pipes, as `(reason_code, reason)`.
 pub(crate) fn pipe_attack(model: &CanonicalCommandV1) -> Option<(&'static str, &'static str)> {
+    pipe_attacks(model).into_iter().next()
+}
+
+/// Every distinct attack `model` pipes, in the order its pipelines show them.
+pub(crate) fn pipe_attacks(model: &CanonicalCommandV1) -> Vec<(&'static str, &'static str)> {
+    let mut found = Vec::new();
     if model.dialect != "posix" || model.transport != "shell_string" {
-        return None;
+        return found;
     }
     let raw = model.normalized_text.as_str();
     let preserve_backslash = cfg!(windows);
-    let segments = split_pipelines_including_background(raw, preserve_backslash).ok()?;
+    let Ok(segments) = split_pipelines_including_background(raw, preserve_backslash) else {
+        return found;
+    };
     if segments.len() > MAX_STEPS {
-        return None;
+        return found;
     }
     let chars: Vec<char> = raw.chars().collect();
     let mut steps = Vec::with_capacity(segments.len());
     for segment in segments {
         let text: String = chars[segment.start..segment.end].iter().collect();
-        let tokens = shell_tokens(&text, preserve_backslash).ok()?;
+        let Ok(tokens) = shell_tokens(&text, preserve_backslash) else {
+            return found;
+        };
         steps.push((segment.group_index, segment.pipeline_index, tokens));
     }
     for (index, (group, position, earlier)) in steps.iter().enumerate() {
@@ -53,15 +63,18 @@ pub(crate) fn pipe_attack(model: &CanonicalCommandV1) -> Option<(&'static str, &
             })
         {
             let later = program_words(later);
-            if fetches(earlier) && runs_stdin_program(later) {
-                return Some(REMOTE_CODE);
+            if fetches(earlier) && runs_stdin_program(later) && !found.contains(&REMOTE_CODE) {
+                found.push(REMOTE_CODE);
             }
-            if dumps_environment(earlier) && sends_stdin(later) {
-                return Some(ENVIRONMENT_EXFILTRATION);
+            if dumps_environment(earlier)
+                && sends_stdin(later)
+                && !found.contains(&ENVIRONMENT_EXFILTRATION)
+            {
+                found.push(ENVIRONMENT_EXFILTRATION);
             }
         }
     }
-    None
+    found
 }
 
 /// The program and its arguments after assignments and launch wrappers.
