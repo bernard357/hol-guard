@@ -62,7 +62,7 @@ pub(super) fn status_echo(model: &CanonicalCommandV1, segment: &CommandSegmentV1
             .is_some_and(|source| status_echo_syntax(&source))
 }
 
-fn status_echo_syntax(source: &str) -> bool {
+pub(super) fn status_echo_syntax(source: &str) -> bool {
     status_echo_label(source).is_some()
 }
 
@@ -142,13 +142,14 @@ fn within(target: &std::path::Path, root: &std::path::Path) -> bool {
     target.starts_with(root)
 }
 
-/// Whether the sink peels a relative leading `cd` into the workspace: only on
-/// Windows, and only when `&&` joins it to the next command
-/// (`peel_contained_wrapper`).
+/// Whether a relative leading `cd` into the workspace has the shape the sink
+/// peels: `&&` joining it to the next command (`peel_contained_wrapper`).
+///
+/// This asks about the text alone. Which hosts peel that shape is the caller's
+/// question, so a test can exercise both answers from one host.
 fn relative_inside_peeled(model: &CanonicalCommandV1, segments: &[CommandSegmentV1]) -> bool {
-    cfg!(windows)
-        && matches!(segments, [cd, next, ..]
-            if text(model, cd.span.end, next.span.start).as_deref() == Some("&&"))
+    matches!(segments, [cd, next, ..]
+        if text(model, cd.span.end, next.span.start).as_deref() == Some("&&"))
 }
 
 /// [`sibling_project_root`] on Windows, where the same containment question is
@@ -328,7 +329,7 @@ pub(crate) fn contained_plan(
         let anchored = spelled.starts_with('~') || std::path::Path::new(spelled).is_absolute();
         let peeled_inside = inside
             && relative_inside_peeled(model, segments)
-            && sink.is_none_or(|sink| sink.peels_relative_inside);
+            && sink.map_or(cfg!(windows), |sink| sink.peels_relative_inside);
         if !anchored && !peeled_inside && (inside || sibling.as_deref() != Some(target)) {
             return None;
         }

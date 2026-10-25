@@ -69,3 +69,28 @@ fn an_absolute_cd_into_the_workspace_is_peeled_on_every_host() {
         assert_eq!(peeled.core, "pytest -q");
     }
 }
+
+/// A pipeline the parse cannot model is still a wrapped shape.
+///
+/// `xargs` runs a program this model does not read, so the whole command
+/// parses uncertain and carries no segments. The Python peel lexed the text,
+/// saw the pipe and raised for the filter, and the sink answered that by
+/// running the command whole in its sandbox. A silent `None` would send it
+/// down the sink's other routes instead.
+#[test]
+fn an_unmodeled_pipeline_is_refused_rather_than_left_alone() {
+    let root = workspace("plan-unmodeled-pipe", true);
+    let workspace_path = root.to_str().expect("workspace path");
+
+    for peels_relative_inside in [true, false] {
+        let answer = wrapper_plan(
+            "pytest -q | xargs rm",
+            workspace_path,
+            Some(workspace_path),
+            Some(HOME),
+            peels_relative_inside,
+        );
+        assert_eq!(answer.plan, None);
+        assert_eq!(answer.refusal, Some(CONTAINED_WRAPPER_PLAN_UNSUPPORTED));
+    }
+}

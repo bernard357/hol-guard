@@ -221,6 +221,9 @@ fn stage_count(stage: &[String]) -> u32 {
 /// A shape the Python peel would have accepted or rejected outright, rather
 /// than left alone: a `cd` prefix, an output filter, a merge or a status echo.
 fn wrapped_shape(model: &CanonicalCommandV1) -> bool {
+    if model.segments.is_empty() {
+        return unmodeled_wrapped_shape(&model.normalized_text);
+    }
     model
         .segments
         .first()
@@ -239,6 +242,41 @@ fn wrapped_shape(model: &CanonicalCommandV1) -> bool {
             .segments
             .last()
             .is_some_and(|segment| contained_wrapper::status_echo(model, segment))
+}
+
+/// The same question asked of text the parse could not model.
+///
+/// `pytest -q | xargs rm` is uncertain, because `xargs` runs a program this
+/// model does not read, and an uncertain parse carries no segments at all.
+/// The Python peel lexed that same text, saw the pipe, and raised for the
+/// filter it could not read; the sink answered that by running the command
+/// whole in its sandbox. Reading the shape from the text keeps that answer,
+/// where an empty segment list would silently send the command down the
+/// sink's other routes instead.
+fn unmodeled_wrapped_shape(raw: &str) -> bool {
+    // The flag the parser itself lexed this text with: unquoted Windows path
+    // separators stay separators there. It decides how the text is read, not
+    // which answer this returns.
+    let preserve_unquoted_backslash = cfg!(windows);
+    let Ok(segments) =
+        crate::parser_segments::split_execution_segments(raw, preserve_unquoted_backslash)
+    else {
+        return false;
+    };
+    let characters: Vec<char> = raw.chars().collect();
+    let text = |segment: &crate::RawSegment| -> String {
+        characters[segment.start..segment.end].iter().collect()
+    };
+    segments.iter().any(|segment| segment.pipeline_index != 0)
+        || segments.first().is_some_and(|segment| {
+            text(segment)
+                .strip_prefix("cd")
+                .is_some_and(|rest| rest.starts_with([' ', '\t']))
+        })
+        || segments.last().is_some_and(|segment| {
+            let last = text(segment);
+            last.ends_with("2>&1") || contained_wrapper::status_echo_syntax(&last)
+        })
 }
 
 #[cfg(test)]
