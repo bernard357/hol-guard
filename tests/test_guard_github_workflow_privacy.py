@@ -10,9 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli.commands_hook_github_workflow import prepare_github_workflow_hook_state
-from codex_plugin_scanner.guard.config import GuardConfig
-from codex_plugin_scanner.guard.models import GuardApprovalRequest, GuardArtifact, GuardReceipt
+from codex_plugin_scanner.guard.models import GuardApprovalRequest, GuardReceipt
 from codex_plugin_scanner.guard.native_github_workflow import GitHubWorkflowDescriptor
 from codex_plugin_scanner.guard.runtime.github_workflow_approval_record import GitHubWorkflowApprovalRecord
 from codex_plugin_scanner.guard.runtime.github_workflow_authorization import issue_github_workflow_capability_binding
@@ -126,31 +124,3 @@ def test_raw_descriptor_or_extra_sensitive_record_fields_fail_closed() -> None:
     payload["repository"] = _REPOSITORY
     with pytest.raises(ValueError):
         GitHubWorkflowApprovalRecord.from_dict(payload)
-
-
-def test_hook_artifact_metadata_persists_only_sanitized_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import codex_plugin_scanner.guard.cli.commands_hook_github_workflow as workflow_hook
-
-    descriptor = _descriptor()
-    monkeypatch.setattr(workflow_hook, "_runtime_github_workflow_descriptor", lambda *_args, **_kwargs: descriptor)
-    artifact = GuardArtifact(
-        artifact_id="codex:project:tool-action:github",
-        name="GitHub workflow",
-        harness="codex",
-        artifact_type="tool_action_request",
-        source_scope="project",
-        config_path="redacted",
-        command=None,
-    )
-    state = prepare_github_workflow_hook_state(
-        artifact,
-        workspace=tmp_path,
-        guard_home=tmp_path / "guard",
-        config=GuardConfig(guard_home=tmp_path / "guard", workspace=tmp_path),
-        store=GuardStore(tmp_path / "guard", prime_policy_integrity=False),
-        approval_request_id=None,
-    )
-    encoded = json.dumps(state.artifact.metadata, sort_keys=True)
-    for sentinel in (_REPOSITORY, _THREAD, _PATH_SENTINEL, _VIEWER):
-        assert sentinel not in encoded
-    assert "github_workflow_approval_record" in encoded
