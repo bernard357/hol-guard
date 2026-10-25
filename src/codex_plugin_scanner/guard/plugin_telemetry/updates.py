@@ -59,7 +59,9 @@ def check_updates(guard_home: Path) -> dict[str, Any]:
 
     index = installed_index(fetch_index())
     slugs = {entry["slug"] for entry in index}
-    releases = [entry for entry in fetch_release_index() if entry.get("slug") in slugs]
+    releases = [
+        entry for entry in fetch_release_index() if isinstance(entry.get("slug"), str) and entry["slug"] in slugs
+    ]
     return _native_request(
         {
             "command": "updates",

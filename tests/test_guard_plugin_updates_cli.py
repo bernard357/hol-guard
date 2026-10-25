@@ -170,7 +170,8 @@ def test_a_malformed_release_does_not_hide_other_updates(
                 {"version": 2},
                 {"version": "1.3.0", "maxSeverity": "none", "fixesSecurity": False},
             ],
-        }
+        },
+        {"slug": ["not", "hashable"], "releasesUrl": RELEASES_URL, "releases": []},
     ]
     monkeypatch.setattr(plugin_updates, "fetch_release_index", lambda: releases)
     exit_code, output, error = _run(["plugin", "updates", "--json"])

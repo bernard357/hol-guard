@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use crate::installed::InstalledPlugin;
 use crate::report::{match_listing, IndexEntry};
-use crate::MAX_ENTRIES;
+use crate::{valid_version, MAX_ENTRIES};
 
 /// The file in the Guard home that holds dismissed prompts.
 pub const DISMISSALS_FILE: &str = "plugin-updates.json";
@@ -55,7 +55,11 @@ pub fn parse_release_index(entries: &[Value]) -> Vec<ReleaseIndexEntry> {
         .filter_map(|entry| {
             Some(ReleaseIndexEntry {
                 slug: entry.get("slug")?.as_str()?.to_owned(),
-                releases_url: entry.get("releasesUrl")?.as_str()?.to_owned(),
+                releases_url: entry
+                    .get("releasesUrl")?
+                    .as_str()
+                    .filter(|url| printable_https_url(url))?
+                    .to_owned(),
                 releases: entry
                     .get("releases")?
                     .as_array()?
@@ -77,6 +81,11 @@ pub fn parse_release_index(entries: &[Value]) -> Vec<ReleaseIndexEntry> {
             })
         })
         .collect()
+}
+
+/// An `https://` URL without whitespace or control characters, safe to print.
+fn printable_https_url(url: &str) -> bool {
+    url.len() <= 512 && url.starts_with("https://") && url.chars().all(|c| c.is_ascii_graphic())
 }
 
 /// The dismissals saved in the Guard home; empty when the file is missing
@@ -178,7 +187,12 @@ struct Version<'a> {
 }
 
 /// `MAJOR.MINOR.PATCH[-pre][+build]`, with an optional leading `v`; None otherwise.
+/// Anything outside the portal's version shape, such as a terminal control
+/// sequence in a release index, is not a version.
 fn parse_version(value: &str) -> Option<Version<'_>> {
+    if !valid_version(value, 64) {
+        return None;
+    }
     let value = value.strip_prefix('v').unwrap_or(value);
     let value = value.split('+').next()?;
     let (core, pre) = match value.split_once('-') {
@@ -555,6 +569,28 @@ mod tests {
             versions,
             [("1.3.0", None, false), ("1.2.0", Some("high"), true)]
         );
+    }
+
+    #[test]
+    fn control_characters_never_reach_a_prompt() {
+        assert_eq!(compare_versions("1.2.0-\u{1b}[2J", "1.0.0"), None);
+        let entries: Vec<Value> = serde_json::from_str(
+            r#"[
+                {"slug":"a","releasesUrl":"https://hol.org/r\u001b[2J","releases":[]},
+                {"slug":"b","releasesUrl":"javascript:alert(1)","releases":[]},
+                {"slug":"c","releasesUrl":"https://hol.org/r","releases":[]}
+            ]"#,
+        )
+        .unwrap();
+        let slugs: Vec<_> = parse_release_index(&entries)
+            .into_iter()
+            .map(|entry| entry.slug)
+            .collect();
+        assert_eq!(slugs, ["c"]);
+        let index = [listing("demo", REPO)];
+        let list = releases(vec![release("1.3.0-\u{1b}[2J", "none", false)]);
+        let check = check_updates(&index, &list, &[installed(REPO, Some("1.0.0"))], &[]);
+        assert!(check.updates.is_empty());
     }
 
     #[test]
