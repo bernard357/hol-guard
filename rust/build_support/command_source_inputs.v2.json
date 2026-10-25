@@ -379,6 +379,7 @@
       "src/pretool/git_object_reads.rs",
       "src/pretool/git_probe.rs",
       "src/pretool/git_probe_repository.rs",
+      "src/pretool/git_probe_submodule_tests.rs",
       "src/pretool/git_push.rs",
       "src/pretool/git_read_floor.rs",
       "src/pretool/git_reads.rs",
