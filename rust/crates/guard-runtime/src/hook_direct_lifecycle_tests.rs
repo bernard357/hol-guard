@@ -374,6 +374,8 @@ fn a_tool_call_notice_stores_its_command_with_credentials_masked() {
     let (lane, connection) = keyed_lane("permission-notice-masked");
     let token = "synthetic0secret0token";
     let command = format!("curl -H 'Authorization: Bearer {token}' https://example.invalid");
+    // An argument such as `--api-key=…` is masked as well as a header.
+    let command = format!("{command} --api-key={token}");
     for (session, artifact_type) in [("masked", "tool_call"), ("kept", "package_request")] {
         let mut sent = notice(session, artifact_type);
         sent["command"] = json!(command);
@@ -393,6 +395,7 @@ fn a_tool_call_notice_stores_its_command_with_credentials_masked() {
             let stored = row[field].as_str().unwrap();
             assert!(!stored.contains("synthetic0secret0token"), "{row}");
             assert!(stored.contains("Bearer *****"), "{row}");
+            assert!(stored.contains("--api-key=*****"), "{row}");
         }
     }
     // Only a tool call is masked; other artifact types keep the command.

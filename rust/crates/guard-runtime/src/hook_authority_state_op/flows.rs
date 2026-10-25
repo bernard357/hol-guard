@@ -5,9 +5,9 @@ use super::*;
 
 /// A `tool_call` notice keeps its command only to tie the notice to its
 /// pending row and to show it, never to bind an approval: that rides on
-/// `artifact_hash`. Both rows are stored with credentials masked, the way the
-/// review queue stores the same command. Other artifact types are returned
-/// as `None` and stored as sent.
+/// `artifact_hash`. Both rows are stored with credentials masked, including
+/// the ones passed as arguments (`--api-key=…`). Other artifact types are
+/// returned as `None` and stored as sent.
 fn mask_tool_call_command(payload: &Value) -> Option<Value> {
     if payload.get("artifact_type").and_then(Value::as_str) != Some("tool_call") {
         return None;
@@ -15,7 +15,7 @@ fn mask_tool_call_command(payload: &Value) -> Option<Value> {
     let mut masked = payload.clone();
     for field in ["command", "raw_command_text"] {
         if let Some(Value::String(text)) = masked.get_mut(field) {
-            *text = guard_command::redacted_command_tokens::redact_text(text).text;
+            *text = guard_command::redacted_command_tokens::redact_command_text(text);
         }
     }
     Some(masked)
