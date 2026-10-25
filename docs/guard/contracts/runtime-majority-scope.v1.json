@@ -542,6 +542,18 @@
           "src/codex_plugin_scanner/guard/protection_capabilities.py"
         ],
         "reason": "Static protection-capability payloads for the dashboard and settings views. Its only callers are daemon/server_common.py's _settings_response_payload (called only from server_dashboard_runtime_read.py, server_control_repair.py and server_control_sync.py), server_dashboard_runtime_read.py and the excluded approvals runtime snapshot; no hook or tool request reads it."
+      },
+      {
+        "category": "offline_reporting",
+        "id": "runtime-identity-posture",
+        "path": [
+          "src/codex_plugin_scanner/guard/runtime_identity_assessment.py",
+          "src/codex_plugin_scanner/guard/runtime_identity_candidates.py",
+          "src/codex_plugin_scanner/guard/runtime_identity_probe.py",
+          "src/codex_plugin_scanner/guard/runtime_posture.py",
+          "src/codex_plugin_scanner/guard/cli/runtime_posture_command.py"
+        ],
+        "reason": "Read-only `guard runtime posture` report: collects configured launch executables, calls the native runtime-identity probe and assessment (the decision logic lives in Rust), and formats the result. Reached only from the CLI dispatcher for that subcommand; no hook, approval, allow or deny path reads it."
       }
     ],
     "reviewed_runtime": [
