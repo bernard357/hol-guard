@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,7 +21,6 @@ from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.conftest import guard_commands_module
 from tests.package_review_settings import prove_npm_install
-from tests.sandbox_route_diagnostics import sandbox_route_context
 from tests.test_guard_supply_chain_evaluator import _force_unpaid_entitlement
 
 pytestmark = pytest.mark.usefixtures("approval_questionnaire_mode")
@@ -337,10 +337,13 @@ def test_guard_hook_requires_contained_run_for_repository_local_vitest(
     assert rc == 0
     assert captured.err == ""
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert payload["policy_action"] == "sandbox-required", (
-        payload.get("reason_code"),
-        sandbox_route_context(workspace_dir),
-    )
+    if sys.platform.startswith("linux"):
+        # Linux has no native read-only Vitest profile, so the run is
+        # reviewed instead of contained.
+        assert payload["policy_action"] == "review", payload
+        assert payload["reason_code"] == "native_command_review_required"
+        return
+    assert payload["policy_action"] == "sandbox-required", payload.get("reason_code")
     assert payload["reason_code"] == "native_vitest_readonly_containment_required"
     assert payload["required_execution_profile"] == "vitest-readonly-v1"
     assert "protected read-only execution" in payload["hookSpecificOutput"]["permissionDecisionReason"]
