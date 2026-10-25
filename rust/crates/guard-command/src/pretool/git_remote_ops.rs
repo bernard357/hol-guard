@@ -292,6 +292,7 @@ pub(super) fn verified(segment: &CommandSegmentV1, context: super::PathContext<'
 /// settles the read when no include reaches into the work tree.
 pub(super) fn verified_refresh(
     segment: &CommandSegmentV1,
+    later: &CommandSegmentV1,
     context: super::PathContext<'_>,
     deadline: Option<Instant>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
@@ -307,8 +308,12 @@ pub(super) fn verified_refresh(
     if upstream.is_none() {
         return true;
     }
+    let Some(route) = read_route(later, context) else {
+        return false;
+    };
     let mut key = memo_key(segment, context);
-    key.0.push_str(":settles");
+    key.0.push_str(":settles:");
+    key.0.push_str(&route.to_string_lossy());
     super::git_probe::memoized(key, || {
         let executable = segment.executable.as_deref()?;
         let probe = Probe::new(
@@ -318,15 +323,44 @@ pub(super) fn verified_refresh(
             deadline,
             execution_environment,
         )?;
-        Some(work_tree_includes_absent(&probe))
+        Some(work_tree_settles(&probe, &route))
     })
     .unwrap_or(false)
 }
 
-/// No configuration include names a file the work tree holds, so no commit the
-/// fast-forward checks out can become configuration. A relative include, or
-/// one whose location this cannot resolve, counts as reaching the work tree.
-fn work_tree_includes_absent(probe: &Probe) -> bool {
+/// The directory the later read runs Git in: the segment's working directory
+/// folded through its leading `-C` routes, as Git folds them. `None` when a
+/// leading option could send the read somewhere this cannot name, which
+/// `--git-dir` and `--work-tree` do.
+fn read_route(
+    later: &CommandSegmentV1,
+    context: super::PathContext<'_>,
+) -> Option<std::path::PathBuf> {
+    let mut route = std::path::PathBuf::from(context.cwd?);
+    let mut arguments = later.arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "-P" | "--no-pager" | "--no-optional-locks" | "--literal-pathspecs" => {}
+            // A relative path joins what came before it; an absolute one
+            // replaces it, which `PathBuf::push` already does.
+            "-C" => route.push(arguments.next()?),
+            "-c" => {
+                arguments.next()?;
+            }
+            _ if argument.starts_with('-') => return None,
+            // The subcommand: every later word is its own.
+            _ => break,
+        }
+    }
+    std::fs::canonicalize(route).ok()
+}
+
+/// Whether the later read, routed to `route`, reads only what this checkout
+/// already proved: it runs at this very top level, and no configuration
+/// include names a file the work tree holds, so no commit the fast-forward
+/// checks out can become configuration. A relative include, or one whose
+/// location this cannot resolve, counts as reaching the work tree.
+fn work_tree_settles(probe: &Probe, route: &std::path::Path) -> bool {
     let Some((effective, _)) = probe.config() else {
         return false;
     };
@@ -336,6 +370,13 @@ fn work_tree_includes_absent(probe: &Probe) -> bool {
     else {
         return false;
     };
+    // The fetched commit may add a directory Git reads as a repository of its
+    // own: `safe.bareRepository=all`, Git's default, finds one anywhere below
+    // the checkout, and a read routed into it would take its configuration.
+    // Only a read that runs at this very top level is answered for.
+    if toplevel != route {
+        return false;
+    }
     !effective.iter().any(|(key, values)| {
         (key == "include.path" || (key.starts_with("includeif.") && key.ends_with(".path")))
             && values
@@ -557,3 +598,7 @@ fn fast_forward_inert(
     }) && probe.hooks_inert(["reference-transaction", "pre-auto-gc"])
         && pull::pull_inert(effective, repository, shape, probe)
 }
+
+#[cfg(test)]
+#[path = "git_remote_ops_tests.rs"]
+mod tests;

@@ -130,12 +130,15 @@ fn configuration_routed(effective: &GitConfig, repository: &GitConfig, pull: Pul
     effective.iter().any(|(key, values)| {
         let enabled = values.iter().any(|value| !disabled(value));
         (key.starts_with("filter.") && (!standard_lfs(key, values) || repository.contains_key(key)))
-            // `gpg.*` names a program that only a signature check
-            // (`*.verifysignatures` below) or commit signing starts. A
-            // fast-forward writes no commit and verifies nothing, so only a
-            // merge reads a repository's choice, and `merge_inert` refuses it
-            // there.
-            || (pull.merge && key.starts_with("gpg.") && repository.contains_key(key))
+            // `gpg.*` names a program that a signature check
+            // (`*.verifysignatures` below), commit signing, or the merge
+            // message starts: Git builds that message before it decides to
+            // fast-forward, and verifies a signed tag there with
+            // `gpg.program`. A repository's own copy of the key is refused
+            // unless it only restates what the user already set.
+            || (key.starts_with("gpg.")
+                && repository.contains_key(key)
+                && !repository_restates_user(effective, repository, key))
             || key.starts_with("hook.")
             || key == "core.worktree"
             || (key == "core.fsmonitor" && enabled)
@@ -156,6 +159,22 @@ fn configuration_routed(effective: &GitConfig, repository: &GitConfig, pull: Pul
                 && key.ends_with(".remote")
                 && values.iter().any(|value| value.trim() != "origin"))
     })
+}
+
+/// Whether the user's own configuration already sets this key to the value
+/// the repository's copy holds, so the repository changes nothing Git would
+/// do. `git config --show-scope --list` reports every scope's entry in Git's
+/// own order, so an effective key holding more entries than the repository
+/// scope does is one an outer scope sets too; when every entry is the same
+/// value, which scope wins does not matter.
+fn repository_restates_user(effective: &GitConfig, repository: &GitConfig, key: &str) -> bool {
+    let Some(local) = repository.get(key) else {
+        return false;
+    };
+    let Some(all) = effective.get(key) else {
+        return false;
+    };
+    all.len() > local.len() && all.windows(2).all(|pair| pair[0] == pair[1])
 }
 
 /// Whether nothing the fast-forward or merge runs after the fetch can start
@@ -268,7 +287,8 @@ mod tests {
     }
 
     /// The signing settings an identity hook writes into every checkout it
-    /// touches, beside the user's own global copy of them.
+    /// touches, beside the user's own global copy of them. `--show-scope`
+    /// reports both, so the effective entry for each key holds two values.
     fn signed() -> (GitConfig, GitConfig) {
         let repository = config(&[
             ("gpg.format", "openpgp"),
@@ -278,7 +298,11 @@ mod tests {
             ("pager.log", "false"),
             ("pull.rebase", "false"),
         ]);
-        (repository.clone(), repository)
+        let effective = repository
+            .iter()
+            .map(|(key, values)| (key.clone(), [values.clone(), values.clone()].concat()))
+            .collect();
+        (effective, repository)
     }
 
     #[test]
@@ -309,15 +333,53 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_signing_program_still_routes_a_merge() {
+    fn a_repository_signing_program_still_refuses_a_merge() {
         let (effective, repository) = signed();
         let pull = Pull {
             upstream: false,
             merge: true,
             fetches: true,
         };
-        assert!(configuration_routed(&effective, &repository, pull));
+        // The commit a merge writes is signed with it, which `merge_inert`
+        // refuses whichever scope holds the program.
+        assert!(!configuration_routed(&effective, &repository, pull));
         assert!(!merge_inert(&effective, &repository));
+    }
+
+    /// Git builds the merge message before it decides to fast-forward, and
+    /// verifies a signed tag there with `gpg.program`. A repository that names
+    /// its own program keeps the review even for a fast-forward.
+    #[test]
+    fn a_repository_program_the_user_never_set_routes_a_fast_forward() {
+        let (mut effective, mut repository) = signed();
+        let planted = vec!["/src/.git/hooks/sign.sh".to_owned()];
+        effective.insert("gpg.program".to_owned(), planted.clone());
+        repository.insert("gpg.program".to_owned(), planted);
+        let pull = Pull {
+            upstream: false,
+            merge: false,
+            fetches: true,
+        };
+        assert!(configuration_routed(&effective, &repository, pull));
+    }
+
+    /// A repository that overrides the user's own program with a different
+    /// one keeps the review too: the effective entries disagree.
+    #[test]
+    fn a_repository_program_that_differs_routes_a_fast_forward() {
+        let (mut effective, mut repository) = signed();
+        let planted = "/src/.git/hooks/sign.sh".to_owned();
+        effective
+            .get_mut("gpg.program")
+            .expect("signed")
+            .push(planted.clone());
+        repository.insert("gpg.program".to_owned(), vec![planted]);
+        let pull = Pull {
+            upstream: false,
+            merge: false,
+            fetches: true,
+        };
+        assert!(configuration_routed(&effective, &repository, pull));
     }
 
     #[test]

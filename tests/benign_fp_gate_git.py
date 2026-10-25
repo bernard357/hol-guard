@@ -129,12 +129,29 @@ def _signed_checkout(home: Path) -> None:
     _git(repository, "add", "-A", home=home)
     _git(repository, "commit", "--quiet", "-m", "app-signed base", home=home)
     _git(repository, "remote", "add", "origin", "https://github.com/example-org/app-signed.git", home=home)
+    # `origin/main` is one commit ahead, so a `--ff-only` pull or merge has
+    # something to fast-forward to. With it equal to `HEAD` every such case
+    # would be already up to date and prove nothing.
+    base = _git(repository, "rev-parse", "HEAD", home=home).strip()
+    _write(repository / "src" / "report.ts", "export const report = 'signed';\n")
+    _git(repository, "add", "-A", home=home)
+    _git(repository, "commit", "--quiet", "-m", "app-signed upstream", home=home)
     _git(repository, "update-ref", "refs/remotes/origin/main", "HEAD", home=home)
     _git(repository, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", home=home)
+    _git(repository, "reset", "--quiet", "--hard", base, home=home)
     _git(repository, "branch", "feat/signed-lane", home=home)
     signing_program = home / ".git-hooks" / "sign-commit.sh"
     _write(signing_program, '#!/bin/sh\nexec gpg "$@"\n')
     signing_program.chmod(0o755)
+    # The user's own global copy of the signing settings, beside the
+    # repository's. An identity hook writes the same program into both, and a
+    # repository copy that only restates the user's own choice changes nothing
+    # Git would do. `includeIf` keeps it to this checkout so the other fixture
+    # repositories keep the configuration they were built with.
+    user_signing = home / ".config" / "git" / "signed-lane.cfg"
+    _write(user_signing, f"[gpg]\n\tformat = openpgp\n\tprogram = {signing_program}\n[commit]\n\tgpgsign = true\n")
+    with (home / ".gitconfig").open("a", encoding="utf-8") as handle:
+        handle.write(f'[includeIf "gitdir:{repository}/"]\n\tpath = {user_signing}\n')
     for key, value in (
         ("commit.gpgsign", "true"),
         ("tag.gpgsign", "true"),
