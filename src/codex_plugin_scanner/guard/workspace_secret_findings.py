@@ -41,13 +41,25 @@ def load_fingerprint_key(store: Any, now: str) -> str:
     local store and is handed to the native process on stdin only.
     """
 
-    raw = store.get_sync_payload(FINGERPRINT_KEY_STATE_KEY)
-    existing = raw.get("key") if isinstance(raw, dict) else None
-    if isinstance(existing, str) and len(existing) >= 32:
+    existing = _stored_fingerprint_key(store)
+    if existing is not None:
         return existing
+    # Two first runs can race here; inserting only when absent and reading back
+    # gives both the same key instead of letting the last writer replace it.
+    store.insert_sync_payload_if_absent(FINGERPRINT_KEY_STATE_KEY, {"key": secrets.token_hex(32)}, now)
+    stored = _stored_fingerprint_key(store)
+    if stored is not None:
+        return stored
+    # A row that holds no usable key is replaced.
     created = secrets.token_hex(32)
     store.set_sync_payload(FINGERPRINT_KEY_STATE_KEY, {"key": created}, now)
     return created
+
+
+def _stored_fingerprint_key(store: Any) -> str | None:
+    raw = store.get_sync_payload(FINGERPRINT_KEY_STATE_KEY)
+    existing = raw.get("key") if isinstance(raw, dict) else None
+    return existing if isinstance(existing, str) and len(existing) >= 32 else None
 
 
 def project_secret_findings(result: object) -> list[dict[str, object]]:

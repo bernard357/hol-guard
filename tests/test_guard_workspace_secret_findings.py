@@ -154,6 +154,29 @@ def test_fingerprint_key_is_created_once_and_kept_in_the_local_store(tmp_path: P
     assert other != first
 
 
+def test_a_concurrent_first_run_reuses_the_key_another_worker_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = GuardStore(tmp_path / "home")
+    winner = "a" * 64
+    store.set_sync_payload(secret_findings.FINGERPRINT_KEY_STATE_KEY, {"key": winner}, "2026-10-24T00:00:00Z")
+    real_read = store.get_sync_payload
+    reads = iter([None])
+    # The first read happens before the other worker's write lands.
+    monkeypatch.setattr(store, "get_sync_payload", lambda key: next(reads, None) or real_read(key))
+
+    assert secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:01Z") == winner
+    assert real_read(secret_findings.FINGERPRINT_KEY_STATE_KEY) == {"key": winner}
+
+
+def test_a_stored_value_that_is_not_a_key_is_replaced(tmp_path: Path) -> None:
+    store = GuardStore(tmp_path / "home")
+    store.set_sync_payload(secret_findings.FINGERPRINT_KEY_STATE_KEY, {"key": "short"}, "2026-10-24T00:00:00Z")
+    created = secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:01Z")
+    assert len(created) >= 32
+    assert secret_findings.load_fingerprint_key(store, "2026-10-24T00:00:02Z") == created
+
+
 def test_complete_scan_makes_a_complete_run() -> None:
     coverage = runner.coverage_summary(SCANNED, AUDIT, findings_truncated=False)
     assert coverage["status"] == "complete"
