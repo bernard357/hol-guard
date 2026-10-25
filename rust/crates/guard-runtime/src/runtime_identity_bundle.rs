@@ -229,7 +229,7 @@ fn evaluate(
         }
     };
     let bundle_version = typed.bundle.bundle_version.as_str();
-    let valid_until = cached_supply_chain_bundle_valid_until(&typed.bundle);
+    let valid_until = cached_supply_chain_bundle_valid_until(&typed, input.sync_keyring.as_ref());
     let verified = |reason: Option<&str>, extra: Value| {
         let mut report = source("verified", reason, Some(bundle_version));
         report["anchored"] = json!(anchored);
