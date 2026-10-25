@@ -135,6 +135,7 @@ fn a_symlinked_root_is_refused() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn replaces_an_unchanged_manifest_and_leaves_no_scratch_files() {
     let (_dir, root) = project();
@@ -160,6 +161,7 @@ fn replaces_an_unchanged_manifest_and_leaves_no_scratch_files() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_manifest_changed_before_the_call_is_left_alone() {
     let (_dir, root) = project();
@@ -178,6 +180,7 @@ fn a_manifest_changed_before_the_call_is_left_alone() {
     assert_eq!(entries(&root), ["package.json", "packages"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_manifest_replaced_after_the_check_is_put_back_and_not_overwritten() {
     let (_dir, root) = project();
@@ -205,6 +208,7 @@ fn a_manifest_replaced_after_the_check_is_put_back_and_not_overwritten() {
     assert_eq!(entries(&root), ["package.json", "packages"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_file_created_in_the_gap_is_kept_and_the_moved_edit_is_preserved() {
     let (_dir, root) = project();
@@ -231,6 +235,7 @@ fn a_file_created_in_the_gap_is_kept_and_the_moved_edit_is_preserved() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_file_created_after_the_move_wins_over_the_fix() {
     let (_dir, root) = project();
@@ -251,6 +256,16 @@ fn a_file_created_after_the_move_wins_over_the_fix() {
         })
     );
     assert_eq!(fs::read_to_string(root.join("package.json")).unwrap(), user);
+    assert_eq!(entries(&root), ["package.json", "packages"]);
+}
+
+#[cfg(not(unix))]
+#[test]
+fn replacing_is_refused_without_descriptor_relative_writes() {
+    let (_dir, root) = project();
+    let before = fs::read(root.join("package.json")).unwrap();
+    assert_eq!(replace(&root, "package.json"), Err("fix_apply_unsupported"));
+    assert_eq!(fs::read(root.join("package.json")).unwrap(), before);
     assert_eq!(entries(&root), ["package.json", "packages"]);
 }
 

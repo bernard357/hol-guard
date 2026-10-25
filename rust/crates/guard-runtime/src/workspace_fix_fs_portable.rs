@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 use super::{Code, Entry, Kind};
 
+/// Replacing by path could follow a junction swapped in after the check.
+pub(super) const REPLACE_SUPPORTED: bool = false;
+
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 

@@ -167,6 +167,7 @@ fn the_scan_limit_drops_the_deepest_manifests_not_the_root() {
     assert_eq!(result["proposals"][0]["manifest_path"], "package.json");
 }
 
+#[cfg(unix)]
 #[test]
 fn apply_writes_the_reviewed_edit_and_lists_lockfiles() {
     let (_dir, root) = project();
@@ -185,6 +186,7 @@ fn apply_writes_the_reviewed_edit_and_lists_lockfiles() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn apply_goes_stale_when_the_manifest_changed_and_keeps_the_users_edit() {
     let (_dir, root) = project();
@@ -197,6 +199,7 @@ fn apply_goes_stale_when_the_manifest_changed_and_keeps_the_users_edit() {
     assert_eq!(fs::read_to_string(root.join("package.json")).unwrap(), user);
 }
 
+#[cfg(unix)]
 #[test]
 fn apply_refuses_edits_that_do_not_produce_the_reviewed_hash() {
     let (_dir, root) = project();

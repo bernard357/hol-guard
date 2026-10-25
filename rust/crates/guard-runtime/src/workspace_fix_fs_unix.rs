@@ -17,6 +17,8 @@ use nix::unistd::{fsync, linkat, unlinkat, UnlinkatFlags};
 
 use super::{Code, Entry, Kind};
 
+pub(super) const REPLACE_SUPPORTED: bool = true;
+
 pub(super) struct Dir {
     fd: OwnedFd,
 }

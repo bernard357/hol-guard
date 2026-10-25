@@ -247,6 +247,26 @@ def test_apply_on_a_paused_worktree_writes_nothing_and_claims_no_verification(tm
     assert resumed["verification_queued"] is True
 
 
+def test_apply_where_the_platform_cannot_write_safely_keeps_the_proposal_prepared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _root, manifest = _prepared(tmp_path)
+    [proposal] = _prepare(store)["proposals"]
+    before = manifest.read_bytes()
+
+    def unsupported(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise fixes.native.WorkspaceFixError("fix_apply_unsupported")
+
+    monkeypatch.setattr(fixes.native, "apply", unsupported)
+    with pytest.raises(fixes.FixProposalError) as caught:
+        fixes.apply(store, proposal["proposal_id"], now_ms=NOW + 5)
+
+    assert (caught.value.code, caught.value.status) == ("fix_apply_unsupported", 501)
+    assert manifest.read_bytes() == before
+    [listed] = fixes.list_proposals(store, KEYS, now_ms=NOW + 6)
+    assert listed["state"] == "prepared"
+
+
 def test_prepare_always_reports_whether_the_manifest_scan_was_truncated(tmp_path: Path) -> None:
     store, _root, _manifest = _prepared(tmp_path)
     assert _prepare(store)["truncated"] is False

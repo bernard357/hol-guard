@@ -428,6 +428,9 @@ def _native_failure(error: native.WorkspaceFixError) -> FixProposalError:
         return FixProposalError("worktree_unavailable", 409)
     if error.code == "fix_apply_failed":
         return FixProposalError("fix_apply_failed", 500)
+    if error.code == "fix_apply_unsupported":
+        # The platform cannot write the manifest safely; nothing was changed.
+        return FixProposalError("fix_apply_unsupported", 501)
     return FixProposalError("workspace_fix_failed", 500)
 
 

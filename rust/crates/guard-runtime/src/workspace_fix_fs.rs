@@ -18,6 +18,9 @@
 //! * a writer that still holds the old file open and writes to it after the
 //!   hash was taken is not detected. That window, from the hash to the final
 //!   link, and the moments the name is absent, are the remaining exposure.
+//!
+//! Off Unix the walk is by path, which a directory-to-junction swap can
+//! redirect, so manifests are read there but never replaced.
 
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -218,6 +221,11 @@ pub(crate) fn replace_if_unchanged(
     base_sha256: &str,
     bytes: &[u8],
 ) -> Result<Replaced, Code> {
+    // Without directory descriptors a parent swapped for a junction after the
+    // hash check would send the write outside the root, so nothing is written.
+    if !platform::REPLACE_SUPPORTED {
+        return Err("fix_apply_unsupported");
+    }
     replace_with_hooks(root, relative, base_sha256, bytes, || {}, || {})
 }
 
