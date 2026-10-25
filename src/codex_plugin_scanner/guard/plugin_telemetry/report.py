@@ -27,6 +27,9 @@ INDEX_URL = "https://hol.org/api/guard/plugins/install-telemetry/index"
 REPORT_URL = "https://hol.org/api/guard/plugins/install-telemetry"
 PRIVACY_URL = "https://hol.org/privacy#guard-plugin-install-telemetry"
 _TIMEOUT_SECONDS = 20.0
+# HOL builds the listing index from the whole plugin catalog, which can take
+# about 30 seconds on a server that has not built it yet.
+_INDEX_TIMEOUT_SECONDS = 60.0
 _NATIVE_TIMEOUT_SECONDS = 60.0
 # The full index is downloaded, then cut down to the installed repositories
 # before it reaches the native runtime, which reads at most 6 MiB of stdin.
@@ -70,7 +73,7 @@ def _request(url: str, *, body: bytes | None = None) -> urllib.request.Request:
 
 def fetch_index() -> list[dict[str, object]]:
     try:
-        with managed_urlopen(_request(INDEX_URL), timeout=_TIMEOUT_SECONDS) as response:
+        with managed_urlopen(_request(INDEX_URL), timeout=_INDEX_TIMEOUT_SECONDS) as response:
             raw = response.read(_INDEX_LIMIT_BYTES + 1)
     except (ManagedNetworkError, urllib.error.URLError, OSError) as error:
         raise PluginTelemetryError("The HOL plugin index could not be downloaded.") from error
