@@ -199,12 +199,14 @@ def claim_next(
     owner: str,
     now_ms: int,
     detector_set_digest: str | None = None,
+    user_only: bool = False,
 ) -> ClaimedRun | None:
     """Lease the next due run.
 
     ``detector_set_digest`` is the set the caller will execute. A run queued by
     an older daemon is relabelled with it at claim time, so the stored digest
     always names the detectors that actually produced the result.
+    ``user_only`` leaves automatic runs queued, for a host under pressure.
     """
 
     with store._connect() as connection:
@@ -228,13 +230,20 @@ def claim_next(
               )
               and (
                 r.trigger_kind in ({", ".join("?" for _ in USER_TRIGGERS)})
-                or ((r.triggered_at_ms <= ? or r.created_at_ms <= ?)
+                or (? = 0
+                    and (r.triggered_at_ms <= ? or r.created_at_ms <= ?)
                     and (s.last_scan_at_ms is null or s.last_scan_at_ms <= ?))
               )
             order by r.created_at_ms, r.run_id
             limit 1
             """,
-            (*USER_TRIGGERS, now_ms - DEBOUNCE_MS, now_ms - MAX_DEBOUNCE_WAIT_MS, now_ms - MIN_INTERVAL_MS),
+            (
+                *USER_TRIGGERS,
+                1 if user_only else 0,
+                now_ms - DEBOUNCE_MS,
+                now_ms - MAX_DEBOUNCE_WAIT_MS,
+                now_ms - MIN_INTERVAL_MS,
+            ),
         ).fetchone()
         if row is None:
             return None

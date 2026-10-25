@@ -5,7 +5,8 @@ harness install for (``install --workspace``) are watched. Guard never takes a
 root from repository text or from a hook's working directory.
 Each poll takes a cheap stat snapshot of every admitted worktree and a digest
 of the cached advisory bundles; a change queues an assessment, and the
-coordinator's debounce and interval decide when it runs. Nothing here runs in
+coordinator's debounce and interval decide when it runs. While the host is
+under resource pressure only user-requested runs start. Nothing here runs in
 a hook path, and the Cloud audit is never used.
 """
 
@@ -22,6 +23,7 @@ from typing import Any, Final
 from . import workspace_assessment_store as assessments
 from .native_workspace_snapshot import WorkspaceSnapshotError, workspace_snapshot
 from .workspace_assessment_admissions import admit_and_queue, end_unregistered_install_admissions, watched_roots
+from .workspace_assessment_pressure import host_resource_pressure, record_deferral
 from .workspace_assessment_runner import DETECTOR_SET_DIGEST, feed_context_digest, now_ms, run_next
 
 POLL_INTERVAL_SECONDS: Final = 30.0
@@ -168,14 +170,20 @@ def poll_once(
 ) -> int:
     from .config import load_guard_config
 
-    admit_registered_workspaces(store, attempted=attempted)
-    observe(store)
+    # A busy host defers admission, observation and automatic runs; a run the
+    # user asked for still starts. Observation resumes from the stored digests,
+    # so a change made while deferred still queues a run afterwards.
+    pressure = host_resource_pressure()
+    record_deferral(store, pressure)
+    if pressure is None:
+        admit_registered_workspaces(store, attempted=attempted)
+        observe(store)
     ran = 0
     config = None
     while ran < _MAX_RUNS_PER_POLL and not (stop is not None and stop.is_set()):
         if config is None:
             config = load_guard_config(store.guard_home)
-        if not run_next(store, config, owner=owner):
+        if not run_next(store, config, owner=owner, user_only=pressure is not None):
             break
         ran += 1
     return ran

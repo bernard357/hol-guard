@@ -17,6 +17,7 @@ from urllib.parse import parse_qs
 
 from .. import workspace_assessment_fix_proposals as fixes
 from .. import workspace_assessment_store as assessments
+from ..workspace_assessment_pressure import deferral_reason
 from ..workspace_assessment_worker import WorkspaceAdmissionError, admit_workspace, queue_manual_run
 
 ASSESSMENTS_PATH: Final = "/v1/supply-chain/workspace-assessments"
@@ -45,6 +46,8 @@ def handle_workspace_assessment_get(request_handler: object, path: str, query: s
                 # The newest run of each worktree, so a busy worktree keeps its
                 # queued or running state however long the history above is.
                 "latest_runs": assessments.latest_runs(store),
+                # Set while a busy host holds automatic runs back.
+                "deferred_reason": deferral_reason(store),
             }
         )
         return True

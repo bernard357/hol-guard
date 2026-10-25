@@ -61,6 +61,8 @@ export type WorkspaceFindingsState = {
   assessments: WorkspaceAssessment[];
   /** Whether the daemon already tracks the folder asked about; null when none was asked about. */
   suggestedRootTracked: boolean | null;
+  /** Set while a busy device holds automatic checks back; checks the user starts still run. */
+  deferredReason: string | null;
 };
 
 const RUN_STATES = new Set<string>(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -213,6 +215,7 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
       .map(normalizeAssessment)
       .filter((entry): entry is WorkspaceAssessment => entry !== null),
     suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null,
+    deferredReason: text(history.deferred_reason),
   };
 }
 

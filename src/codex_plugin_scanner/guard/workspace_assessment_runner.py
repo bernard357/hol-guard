@@ -51,10 +51,14 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def run_next(store: Any, config: Any, *, owner: str, clock: Callable[[], int] = now_ms) -> bool:
+def run_next(
+    store: Any, config: Any, *, owner: str, clock: Callable[[], int] = now_ms, user_only: bool = False
+) -> bool:
     """Claim and run one due assessment; return whether one ran."""
 
-    claimed = assessments.claim_next(store, owner=owner, now_ms=clock(), detector_set_digest=DETECTOR_SET_DIGEST)
+    claimed = assessments.claim_next(
+        store, owner=owner, now_ms=clock(), detector_set_digest=DETECTOR_SET_DIGEST, user_only=user_only
+    )
     if claimed is None:
         return False
     outcome = execute(store, config, claimed)

@@ -78,6 +78,11 @@ assert.equal(
   normalizeWorkspaceFindingsState({}, { worktrees: [], suggested_root_tracked: true }).suggestedRootTracked,
   true,
 );
+assert.equal(state.deferredReason, null, "no deferral unless the daemon reports one");
+assert.equal(
+  normalizeWorkspaceFindingsState({ deferred_reason: "resource_pressure" }, { worktrees: [] }).deferredReason,
+  "resource_pressure",
+);
 assert.equal(state.worktrees.length, 1, "worktrees without both keys are dropped");
 assert.deepEqual(
   state.runs.map((run) => run.runId),
