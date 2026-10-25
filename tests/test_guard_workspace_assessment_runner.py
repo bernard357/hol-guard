@@ -247,6 +247,13 @@ def test_workspace_without_manifests_reports_no_inputs() -> None:
     assert coverage["detectors"]["supply_chain"] == "no_inputs"
 
 
+def test_a_lockfile_without_packages_is_not_reported_as_no_inputs() -> None:
+    payload = {"audit_status": "incomplete", "manifest_paths": [], "lockfile_paths": ["poetry.lock"]}
+    coverage = runner.coverage_summary(SNAPSHOT, payload, findings_truncated=False)
+    assert coverage["detectors"]["supply_chain"] == "incomplete"
+    assert "supply_chain_incomplete" in coverage["reasons"]
+
+
 def test_refused_offline_lookup_leaves_supply_chain_incomplete() -> None:
     coverage = runner.coverage_summary(SNAPSHOT, AUDIT, findings_truncated=False, egress_refused=1)
     assert coverage["detectors"]["supply_chain"] == "incomplete"
