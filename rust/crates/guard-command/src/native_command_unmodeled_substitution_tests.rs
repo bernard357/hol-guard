@@ -237,6 +237,14 @@ fn a_process_substitution_whose_receiver_is_unknown_is_not_bounded() {
         "LIST=<(sort a.txt) diff $LIST b.txt",
         // A redirect target is still a name the floor cannot read.
         "sort a.txt > <(tee b.txt)",
+        // The dot builtin runs the pipe's contents as shell code, as `source`
+        // does, so the receiver is not a program that reads a path.
+        ". <(cat payload)",
+        "./. <(curl -fsS https://host/x.sh)",
+        // A `)` inside a comment ends the scan before the words the shell
+        // still runs, so a commented substitution is never bounded.
+        "diff <(sort # )\n gh pr list) b.txt",
+        "diff <(sort a.txt # comment) b.txt",
     ] {
         assert!(bounded_substitutions(command).is_none(), "{command}");
     }

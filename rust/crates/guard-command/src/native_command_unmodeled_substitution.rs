@@ -203,7 +203,8 @@ pub(super) fn bounded_substitutions(text: &str) -> Option<BoundedSubstitutions> 
 /// the `-p` of `command -p`, can be followed by the program itself. `env
 /// NAME=$(...)` and `make NAME=$(...)` set a variable the program reads, so a
 /// word shaped like a setting is never read as a substitution's result
-/// whatever program receives it.
+/// whatever program receives it. The POSIX dot builtin runs what it is given
+/// as shell code, exactly as `source` does, so it is refused the same way.
 fn receiving_program(words: &[String], word: &str, redirect_target: bool) -> Option<String> {
     if redirect_target || is_assignment(word) {
         return None;
@@ -214,6 +215,7 @@ fn receiving_program(words: &[String], word: &str, redirect_target: bool) -> Opt
         .find(|word| !is_assignment(word))?;
     let name = program_name(receiver);
     if receiver.starts_with('-')
+        || name == "."
         || INTERPRETERS.contains(&name.as_str())
         || LAUNCHERS.contains(&name.as_str())
         || words
@@ -249,8 +251,11 @@ fn closing_parenthesis(chars: &[char], start: usize) -> Option<usize> {
 }
 
 /// The programs a substitution's text runs when each is named and plain.
+/// A `#` is refused along with the other shell punctuation: the scan for the
+/// closing `)` does not read comments, so a `)` inside one ends the text early
+/// and the words after it would never reach this list.
 fn inner_programs(inner: &str) -> Option<Vec<String>> {
-    if inner.contains(['`', '<', '>', '(', ')', '{', '}', '\n', '\\'])
+    if inner.contains(['`', '<', '>', '(', ')', '{', '}', '\n', '\\', '#'])
         || inner.contains("$(")
         || !expansions_are_names(inner)
         || named_words(inner)
