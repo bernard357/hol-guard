@@ -64,6 +64,19 @@ fn a_quoted_or_escaped_builtin_stays_uncertain() {
 }
 
 #[test]
+fn a_wrapped_builtin_with_options_still_moves_the_shell() {
+    assert!(background_moves_shell(
+        "command -p cd sub && node server.js & node ../worker.js"
+    ));
+    assert!(background_moves_shell(
+        "time -p cd sub && node server.js & node ../worker.js"
+    ));
+    assert!(background_moves_shell(
+        "builtin -- cd sub && node server.js & node ../worker.js"
+    ));
+}
+
+#[test]
 fn a_builtin_name_as_an_argument_moves_nothing() {
     assert!(!background_moves_shell("echo cd & node server.js"));
     assert!(!background_moves_shell(

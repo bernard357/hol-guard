@@ -231,19 +231,19 @@ fn background_moves_shell(text: &str) -> bool {
 /// The word in command position of one simple command, past reserved words
 /// and the `command` and `builtin` wrappers that still run the builtin.
 fn command_word(command: &str) -> Option<&str> {
+    let mut wrapped = false;
     command.split_whitespace().find(|word| {
+        if matches!(*word, "command" | "builtin" | "time") {
+            wrapped = true;
+            return false;
+        }
+        // `command -p cd` and `time -p cd` still run the builtin.
+        if wrapped && word.starts_with('-') {
+            return false;
+        }
         !matches!(
             *word,
-            "!" | "if"
-                | "then"
-                | "else"
-                | "elif"
-                | "do"
-                | "while"
-                | "until"
-                | "time"
-                | "command"
-                | "builtin"
+            "!" | "if" | "then" | "else" | "elif" | "do" | "while" | "until"
         )
     })
 }
