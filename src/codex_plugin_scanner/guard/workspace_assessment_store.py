@@ -279,15 +279,23 @@ def _expire_leases_locked(connection: sqlite3.Connection, *, now_ms: int) -> Non
         (now_ms,),
     ).fetchall()
     for run_id, codebase_key, worktree_key, trigger_kind, detector_set_digest, kind in expired:
+        # The runner renews its lease between stages, so an expired lease means
+        # the worker died or one stage hung. Retry once; a retry that also
+        # expires would repeat forever, so the worktree stays stale until its
+        # next change or request instead.
+        retried = _previous_error_locked(connection, str(codebase_key), str(worktree_key), str(run_id))
+        error_code = "assessment_timed_out" if retried == "lease_expired" else "lease_expired"
         connection.execute(
             """
             update workspace_assessment_runs set
-              state = 'failed', error_code = 'lease_expired', finished_at_ms = ?,
+              state = 'failed', error_code = ?, finished_at_ms = ?,
               lease_generation = lease_generation + 1
             where run_id = ?
             """,
-            (now_ms, run_id),
+            (error_code, now_ms, run_id),
         )
+        if error_code != "lease_expired":
+            continue
         _enqueue_locked(
             connection,
             WorktreeKeys(str(codebase_key), str(worktree_key)),
@@ -360,6 +368,34 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
                 kind=run.kind,
             )
         return True
+
+
+def _previous_error_locked(
+    connection: sqlite3.Connection, codebase_key: str, worktree_key: str, run_id: str
+) -> str | None:
+    row = connection.execute(
+        """
+        select error_code from workspace_assessment_runs
+        where codebase_key = ? and worktree_key = ? and run_id != ? and finished_at_ms is not null
+        order by finished_at_ms desc, created_at_ms desc limit 1
+        """,
+        (codebase_key, worktree_key, run_id),
+    ).fetchone()
+    return None if row is None or row[0] is None else str(row[0])
+
+
+def renew_lease(store: Any, run: ClaimedRun, *, now_ms: int) -> bool:
+    """Extend ``run``'s lease between stages; False once it is canceled, expired or fenced."""
+
+    with store._connect() as connection:
+        cursor = connection.execute(
+            """
+            update workspace_assessment_runs set lease_until_ms = ?
+            where run_id = ? and state = 'running' and lease_generation = ? and lease_until_ms >= ?
+            """,
+            (now_ms + LEASE_MS, run.run_id, run.lease_generation, now_ms),
+        )
+        return cursor.rowcount == 1
 
 
 def cancel(store: Any, run_id: str, *, now_ms: int) -> bool:
@@ -447,5 +483,6 @@ __all__ = [
     "list_worktrees",
     "recent_runs",
     "record_observation",
+    "renew_lease",
     "set_paused",
 ]

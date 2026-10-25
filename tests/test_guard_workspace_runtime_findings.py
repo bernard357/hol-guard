@@ -176,7 +176,7 @@ def test_a_run_reports_runtime_findings_and_coverage(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         runner, "observe_workspace_runtimes", lambda store, root: posture(advisories=[advisory("affected")])
     )
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert outcome.state == "completed"
     assert outcome.coverage is not None
     assert outcome.coverage["detectors"]["runtime_identity_v1"] == "complete"
@@ -193,7 +193,7 @@ def test_a_failed_runtime_probe_leaves_the_run_partial(tmp_path: Path, monkeypat
         raise RuntimeError(f"cannot read {root}")
 
     monkeypatch.setattr(runner, "observe_workspace_runtimes", broken)
-    outcome = runner.execute(store, None, claimed)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
     assert outcome.state == "partial"
     assert outcome.coverage is not None
     assert "detector_not_run:runtime_identity_v1" in outcome.coverage["reasons"]
@@ -207,7 +207,7 @@ def test_runtime_findings_sync_without_paths(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(
         runner, "observe_workspace_runtimes", lambda store, root: posture(advisories=[advisory("affected")])
     )
-    assert assessments.finish(store, claimed, runner.execute(store, None, claimed), now_ms=T0 + 1)
+    assert assessments.finish(store, claimed, runner.execute(store, None, claimed, clock=lambda: T0), now_ms=T0 + 1)
     built = sync.build_workspace_assessment_sync(store, now="2026-01-01T00:00:00+00:00")
     assert built is not None
     text = json.dumps(built.payload)
@@ -229,7 +229,7 @@ def test_a_finished_run_leaves_the_next_observation_quiet(tmp_path: Path, monkey
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     monkeypatch.setattr(runner, "observe_workspace_runtimes", lambda store, root: posture())
     monkeypatch.setattr(runtimes, "observe_workspace_runtimes", lambda store, root, *, home_dir=None: posture())
-    assert assessments.finish(store, claimed, runner.execute(store, None, claimed), now_ms=T0 + 1)
+    assert assessments.finish(store, claimed, runner.execute(store, None, claimed, clock=lambda: T0), now_ms=T0 + 1)
     # The run stored the context it assessed; observing the same context must
     # not queue another run, or the worker would reassess forever.
     assert worker.observe(store, clock=lambda: T0 + 2) == 0
