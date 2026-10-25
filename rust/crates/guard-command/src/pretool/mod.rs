@@ -40,6 +40,8 @@ mod brace_group;
 mod contained_wrapper;
 pub(crate) mod curl_reads;
 pub use curl_reads::bound_curl_read_destinations;
+#[cfg(unix)]
+mod contained_exact_shape;
 pub(crate) mod dd_reads;
 mod digest_reads;
 pub(crate) mod docker_reads;
@@ -51,8 +53,6 @@ mod loopback_ports;
 pub(crate) mod port_probes;
 pub(crate) mod rsync_local;
 mod workspace_contained;
-#[cfg(unix)]
-mod contained_exact_shape;
 #[cfg(unix)]
 pub(crate) use contained_exact_shape::exact_shape as workspace_exact_shape;
 #[cfg(unix)]

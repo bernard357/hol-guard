@@ -66,11 +66,10 @@ fn the_launcher_runs_the_raw_text_that_enters_a_private_directory() {
     // A bootstrapped `git init` would run a rewritten remainder, not the raw
     // text the projection judged.
     let fresh = workspace("temp-cd-fresh", false);
-    assert!(crate::pretool::workspace_exact_shape(
-        "git init && cd \"$(mktemp -d)\" && ls",
-        &fresh
-    )
-    .is_none());
+    assert!(
+        crate::pretool::workspace_exact_shape("git init && cd \"$(mktemp -d)\" && ls", &fresh)
+            .is_none()
+    );
 }
 
 #[test]
