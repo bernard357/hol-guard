@@ -7,7 +7,9 @@ started and no running process is enumerated, so the scope is never complete and
 no runtime is reported safe.
 
 Observing launches hashes executables, which is too slow to repeat on every
-receipt sync, so the section is cached in the store for an hour.
+receipt sync, so the section is cached in the store for an hour. The cache entry
+is bound to the workspace it observed and to the key its location digests were
+made with, so a sync for another workspace or after a key change observes again.
 """
 
 from __future__ import annotations
@@ -49,9 +51,14 @@ def runtimes_section(
 ) -> dict[str, object] | None:
     """The cached section, refreshed when older than ``ttl_seconds``; ``None`` when it cannot be built."""
 
+    scope = _cache_scope(context, hash_key)
     if ttl_seconds > 0:
         cached = store.get_sync_payload(RUNTIMES_STATE_KEY)
-        if isinstance(cached, dict) and isinstance(section := cached.get("section"), dict):
+        if (
+            isinstance(cached, dict)
+            and cached.get("scope") == scope
+            and isinstance(section := cached.get("section"), dict)
+        ):
             fetched = parse_timestamp(cached.get("at"))
             if fetched is not None and 0 <= (now - fetched).total_seconds() < ttl_seconds:
                 return cast("dict[str, object]", section)
@@ -62,10 +69,18 @@ def runtimes_section(
         return None
     if ttl_seconds > 0:
         try:
-            store.set_sync_payload(RUNTIMES_STATE_KEY, {"at": iso(now), "section": section}, iso(now))
+            store.set_sync_payload(
+                RUNTIMES_STATE_KEY, {"at": iso(now), "scope": scope, "section": section}, iso(now)
+            )
         except Exception:
             _LOGGER.debug("fleet posture: runtime posture cache could not be saved", exc_info=True)
     return section
+
+
+def _cache_scope(context: HarnessContext, hash_key: bytes) -> str:
+    # Keyed, so the stored scope names no path and changes whenever the key does.
+    workspace = str(context.workspace_dir.resolve()) if context.workspace_dir is not None else ""
+    return keyed_digest(hash_key, f"fleet-posture-runtimes\0{workspace}")
 
 
 def _observe(context: HarnessContext, now: datetime) -> Mapping[str, Any]:

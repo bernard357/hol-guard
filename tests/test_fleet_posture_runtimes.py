@@ -200,6 +200,36 @@ def test_runtimes_are_observed_once_per_ttl(
     assert len(calls) == 2
 
 
+def test_cached_runtimes_are_bound_to_the_workspace_and_key(
+    store: GuardStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[object] = []
+
+    def observe(context: HarnessContext, _now: object) -> dict[str, object]:
+        observed.append(context.workspace_dir)
+        return _posture([_runtime(path=f"{context.workspace_dir}/bin/node")])
+
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    def section(workspace: Path, key: bytes) -> dict[str, object] | None:
+        context = HarnessContext(home_dir=tmp_path / "home", workspace_dir=workspace, guard_home=tmp_path / "guard")
+        return fpr.runtimes_section(store, context, hash_key=key, now=NOW)
+
+    alpha, beta = tmp_path / "alpha", tmp_path / "beta"
+    alpha.mkdir()
+    beta.mkdir()
+    first = section(alpha, b"k" * 32)
+    assert section(alpha, b"k" * 32) == first
+    other = section(beta, b"k" * 32)
+    rekeyed = section(beta, b"r" * 32)
+
+    assert observed == [alpha, beta, beta]
+    assert other is not None and rekeyed is not None and first is not None
+    assert other["items"][0]["locationHash"] == keyed_digest(b"k" * 32, f"{beta}/bin/node")
+    assert rekeyed["items"][0]["locationHash"] == keyed_digest(b"r" * 32, f"{beta}/bin/node")
+    assert json.dumps(store.get_sync_payload(fpr.RUNTIMES_STATE_KEY)).count(str(tmp_path)) == 0
+
+
 def test_failed_observation_omits_the_section_and_is_retried(
     store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
