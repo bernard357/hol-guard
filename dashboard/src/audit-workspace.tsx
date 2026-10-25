@@ -37,6 +37,7 @@ import { PackageWorkbenchPanel } from "./package-workbench-panel";
 import { listSupplyChainAuditWorkspaceChoices } from "./supply-chain-audit-workspace";
 import type { SupplyChainAuditSession } from "./use-supply-chain-audit-session";
 import { isBlockedGuardAction } from "./guard-action";
+import { auditPriorityBadgeLabel } from "./audit-priority-badge";
 
 export type AuditSeverity = "critical" | "high" | "medium" | "low" | "info";
 
@@ -267,20 +268,6 @@ export function deriveFrontendAuditResults(
   }
 
   return results;
-}
-
-/**
- * The header badge counts open critical and high results, so it must not call
- * them all critical: the Critical filter would then show fewer rows.
- */
-export function auditPriorityBadgeLabel(
-  results: readonly AuditResult[],
-  resolvedIds: ReadonlySet<string>,
-): string | null {
-  const count = results.filter(
-    (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id),
-  ).length;
-  return count > 0 ? `${count} high priority` : null;
 }
 
 function severityBadgeTone(

@@ -1,6 +1,7 @@
 import { resolveHomeProtectionStatus, resolveLastBlockedInstall, resolveIntelStaleness } from "./home-protection-module";
 import { buildSupplyChainStats } from "./supply-chain-workspace";
-import { auditPriorityBadgeLabel, deriveFrontendAuditResults, type AuditResult } from "./audit-workspace";
+import { auditPriorityBadgeLabel } from "./audit-priority-badge";
+import { deriveFrontendAuditResults, type AuditResult } from "./audit-workspace";
 import { groupPoliciesByHarness, resolveSecurityModeCopy } from "./policy-workspace";
 import { resolveFeedSourceMode, resolveFeedStaleness } from "./feed-health-workspace";
 import type { GuardRuntimeSnapshot, GuardManagedInstall, GuardReceipt, GuardPolicyDecision, PackageManagerProtection } from "./guard-types";

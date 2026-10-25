@@ -1,5 +1,5 @@
 import { j as jsxRuntimeExports, T as Tag, f as formatRelativeTime, r as reactExports, A as ActionButton, ee as HiMiniChevronLeft, H as HiMiniChevronRight, dj as IconActionButton, _ as HiMiniXMark, cT as GuardModalLayer, cF as HiMiniFunnel, p as HiMiniMagnifyingGlass, ef as HiMiniArrowDown, eg as HiMiniArrowUp, dO as HiMiniFolder, S as SectionLabel, d as HiMiniArrowPath, dn as HiMiniBugAnt, N as EmptyState, aM as HiMiniAdjustmentsHorizontal, dr as ConnectFlowCard, a4 as HiMiniExclamationTriangle, bQ as useResolvedApprovalGate, eh as runAuditRemediation, a6 as Badge, ed as isBlockedGuardAction, dh as isSupplyChainAuditEvidence, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, aG as ApprovalProofModal, q as HiMiniDocumentText, bc as guardAwareHref, R as HiMiniShieldCheck } from "../guard-dashboard.js";
-import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-BQuTJjUz.js";
+import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-dpEwcwLa.js";
 import { r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-CJkxdP0r.js";
 const STEPS = [
   { id: "preparing", label: "Prepare workspace" },
@@ -1013,6 +1013,12 @@ function PackageWorkbenchPanel({
     ) : null
   ] });
 }
+function auditPriorityBadgeLabel(results, resolvedIds) {
+  const count = results.filter(
+    (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id)
+  ).length;
+  return count > 0 ? `${count} high priority` : null;
+}
 function auditSeverityForDecision(decision, blockedCount) {
   if (decision === "block" || blockedCount > 0) {
     return "high";
@@ -1183,12 +1189,6 @@ function deriveFrontendAuditResults(receipts, snapshot) {
     });
   }
   return results;
-}
-function auditPriorityBadgeLabel(results, resolvedIds) {
-  const count = results.filter(
-    (r) => (r.severity === "critical" || r.severity === "high") && !r.resolved && !resolvedIds.has(r.id)
-  ).length;
-  return count > 0 ? `${count} high priority` : null;
 }
 function severityBadgeTone(severity) {
   if (severity === "critical") return "destructive";
@@ -1534,6 +1534,5 @@ function RemediationApprovalModal(props) {
 }
 export {
   AuditWorkspace,
-  auditPriorityBadgeLabel,
   deriveFrontendAuditResults
 };
