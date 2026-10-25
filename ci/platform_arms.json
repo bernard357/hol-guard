@@ -1483,6 +1483,14 @@
    "body": "21a1afbb5f71"
   },
   {
+   "verdict": "posix-primitive",
+   "note": "Windows has no execute bit, so any existing non-directory file passes the executable check; candidate_names applies PATHEXT instead and the resolved target must still be a regular file. Observation only: the probe never launches a candidate. The launch unit tests are unix-gated, so this arm is not run by a Windows test binary; it is checked through the Windows Gauntlet.",
+   "file": "rust/crates/guard-runtime/src/runtime_identity_launch.rs",
+   "item": "fn is_executable(_meta: &Metadata) -> bool",
+   "cfg": "not(unix)",
+   "body": "d1a21a8dce28"
+  },
+  {
    "file": "rust/crates/guard-runtime/src/shell_request_inspection_host.rs",
    "item": "fn current_uid -- non-Unix block",
    "verdict": "posix-primitive",
@@ -1497,6 +1505,14 @@
    "item": "fn open_without_following(path: &Path) -> std::io::Result<fs::File>",
    "cfg": "not(unix)",
    "body": "532a900bb473"
+  },
+  {
+   "verdict": "posix-primitive",
+   "note": "Windows has no openat/O_NOFOLLOW directory descriptors, so the manifest fix walks by path: symlink_metadata classifies symlinks and junctions as symlinks and each component is refused if it is one, and files open with FILE_FLAG_OPEN_REPARSE_POINT and must still be a regular file with the creation and last-write times inspected (stable std exposes no file index off Unix). That narrows but does not close a directory-to-junction swap race, which could redirect a write outside the root, so the arm sets REPLACE_SUPPORTED to false and replace_if_unchanged returns fix_apply_unsupported before writing anything: Windows can prepare and review a fix but never applies one. Reads stay path-based with the checks above. The arm is compiled by the windows-native-runtime CI job; the refusal has a not(unix) unit test that the job does not run, and the reparse-point refusal is covered only by the Unix symlink tests.",
+   "file": "rust/crates/guard-runtime/src/workspace_fix_fs.rs",
+   "item": "mod platform",
+   "cfg": "not(unix)",
+   "body": "0e244582f000"
   },
   {
    "file": "rust/crates/guard-runtime/src/workspace_review_business_budget.rs",

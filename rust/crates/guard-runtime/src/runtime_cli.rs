@@ -273,6 +273,10 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             write_json(&runtime_identity::run_command(&bytes)?)
         }
+        [command, flag] if command == runtime_identity_probe::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&runtime_identity_probe::run_command(&bytes)?)
+        }
         [command, flag] if command == secrets_cli::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             write_json(&secrets_cli::run_command(&bytes)?)
@@ -288,6 +292,10 @@ pub(super) fn run() -> Result<(), String> {
         [command, flag] if command == workspace_snapshot::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             write_json(&workspace_snapshot::run_command(&bytes)?)
+        }
+        [command, flag] if command == workspace_fix::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_fix::run_command(&bytes)?)
         }
         [command, flag] if command == "context-digest" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
