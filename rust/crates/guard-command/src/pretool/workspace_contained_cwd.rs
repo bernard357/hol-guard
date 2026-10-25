@@ -95,6 +95,10 @@ pub(super) fn depths(model: &CanonicalCommandV1, workspace: &Path) -> Vec<usize>
     // A command with no `cd` and no parent step cannot spend one, and the walk
     // reads the file system, so it is worth skipping.
     if !model.normalized_text.contains("..")
+        // A `CDPATH` the command sets sends a bare relative `cd` wherever that
+        // search finds the name first, which is not the directory `locations`
+        // joins it onto, so no segment may spend a step.
+        || model.normalized_text.contains("CDPATH")
         || !model.segments.iter().any(|segment| {
             segment
                 .executable

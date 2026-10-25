@@ -45,3 +45,19 @@ fn a_parent_step_after_a_proven_descent_stays_inside_the_workspace() {
         assert!(!shaped(command, &ws), "{command}");
     }
 }
+
+/// `CDPATH` makes bash search its own list before the current directory, so a
+/// bare `cd etc` can land outside the workspace while the walk here joins the
+/// name onto the directory it is tracking. No segment may spend a step then.
+#[test]
+fn a_command_that_mentions_cdpath_spends_no_descent() {
+    let ws = workspace("cwd-cdpath", true);
+    std::fs::create_dir_all(ws.join("etc")).unwrap();
+    for command in [
+        "CDPATH=/ cd etc && cat ../etc/passwd",
+        "export CDPATH=/ && cd etc && cat ../etc/passwd",
+        "CDPATH=/ cd etc && ls ..",
+    ] {
+        assert!(!shaped(command, &ws), "{command}");
+    }
+}
