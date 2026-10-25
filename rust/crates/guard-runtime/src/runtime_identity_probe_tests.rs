@@ -80,10 +80,8 @@ fn layouts_name_family_and_version() {
             (Some("node"), version.map(str::to_owned)),
             "{path}"
         );
-        // Only an installer layout names the upstream vendor; a bare system
-        // path may hold a distribution build with backports.
-        let vendor = version.map(|_| "nodejs.org");
-        assert_eq!(hint_for(path).vendor, vendor, "{path}");
+        // A bare system path may hold a distribution build with backports.
+        assert_eq!(hint_for(path).vendor, version.and(Some("nodejs.org")));
     }
     assert_eq!(hint_for("/usr/bin/python3.12").vendor, None);
     assert_eq!(hint_for("/x/node/v20.11/bin/node").vendor, None);
@@ -187,8 +185,7 @@ fn spoofed_version_never_exceeds_self_reported() {
     });
     let reply = crate::runtime_identity::run_command(request.to_string().as_bytes()).unwrap();
     assert_eq!(reply["ok"], true, "{reply}");
-    // Another vendor's rule yields no match row at all; either way it is
-    // never cleared.
+    // Another vendor's rule yields no match row; either way, never cleared.
     let status = reply["result"]["artifacts"][0]["matches"][0]["status"].as_str();
     assert_ne!(status, Some("not_affected"));
     assert_ne!(
@@ -196,24 +193,17 @@ fn spoofed_version_never_exceeds_self_reported() {
         "fixed_verified"
     );
 
-    // Its layout vendor flags an in-range build of the upstream release...
-    let vendor_rule = |fixed: &str| {
-        json!({
-            "artifacts": result["artifacts"], "locations": result["locations"],
-            "advisories": [{
-                "advisory_id": "ADV-2", "family": "node", "vendor": "nodejs.org",
-                "version_scheme": "semver",
-                "ranges": [{"introduced": "22.0.0", "fixed": fixed}],
-            }],
-        })
-    };
-    let status = |request: Value| {
+    // Its layout vendor flags an in-range build of the upstream release, but
+    // a self-reported vendor still cannot clear an out-of-range one.
+    for (fixed, expected) in [("22.5.0", "affected"), ("22.4.1", "unknown")] {
+        let rule = json!({"advisory_id": "ADV-2", "family": "node", "vendor": "nodejs.org",
+            "version_scheme": "semver", "ranges": [{"introduced": "22.0.0", "fixed": fixed}]});
+        let request = json!({"artifacts": result["artifacts"],
+            "locations": result["locations"], "advisories": [rule]});
         let reply = crate::runtime_identity::run_command(request.to_string().as_bytes()).unwrap();
-        reply["result"]["artifacts"][0]["matches"][0]["status"].clone()
-    };
-    assert_eq!(status(vendor_rule("22.5.0")), "affected");
-    // ...but a self-reported vendor still cannot clear an out-of-range one.
-    assert_eq!(status(vendor_rule("22.4.1")), "unknown");
+        let row = &reply["result"]["artifacts"][0]["matches"][0];
+        assert_eq!(row["status"], expected);
+    }
 }
 
 #[test]
