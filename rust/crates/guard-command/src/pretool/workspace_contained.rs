@@ -368,7 +368,7 @@ fn extensions_contain(
         && extensions.permission_observations.iter().all(|observation| {
             (package || super::restricted_test_commands::bun_inline_eval(model))
                 && observation.mcp_tool.is_none()
-                && package::PACKAGE_EXTENSIONS.contains(&observation.extension_id.as_str())
+                && crate::package_extension_ids::PACKAGE_EXTENSIONS.contains(&observation.extension_id.as_str())
                 && observation.uncertainty_reasons.is_empty()
         })
         && extensions.observations.iter().all(|observation| {

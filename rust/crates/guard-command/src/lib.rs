@@ -190,6 +190,7 @@ pub mod ordered_json;
 #[cfg(unix)]
 pub mod package_context_build;
 pub mod package_execution_context;
+mod package_extension_ids;
 pub mod package_intent_common;
 pub mod package_intent_parser;
 pub mod package_manager_command;

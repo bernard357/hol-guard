@@ -231,6 +231,7 @@
       "src/ordered_json.rs",
       "src/package_approval.rs",
       "src/package_execution_context.rs",
+      "src/package_extension_ids.rs",
       "src/package_intent_common.rs",
       "src/package_intent_parser.rs",
       "src/package_intent_parser/execution_context.rs",

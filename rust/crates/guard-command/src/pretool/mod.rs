@@ -53,7 +53,6 @@ pub(crate) mod rsync_local;
 mod workspace_contained;
 /// The package firewall's extensions, whose permission marks which
 /// ecosystem's manager ran rather than a risk the run carries.
-pub(crate) use workspace_contained::package::PACKAGE_EXTENSIONS;
 #[cfg(unix)]
 pub(crate) use workspace_contained::Shape;
 #[cfg(unix)]
