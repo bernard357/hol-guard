@@ -74,6 +74,7 @@ function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {
     prepared: null,
     busy: null,
     error: null,
+    loaded: true,
     loadError: null,
     applyUnsupported: false,
     notice: null,
@@ -129,6 +130,8 @@ assert.match(relisted, /Prepare again/);
 assert.doesNotMatch(relisted, />Fixed</);
 // Until the proposal list loads, Prepare stays off and the failure is shown with a retry.
 assert.match(render(createElement(FixCell, { finding, fixes: fixes({ loadError: "down" }) })), /<button[^>]*disabled/);
+// The first load has not finished yet, so a stored proposal could still be hidden.
+assert.match(render(createElement(FixCell, { finding, fixes: fixes({ loaded: false }) })), /<button[^>]*disabled/);
 assert.equal(render(createElement(FixLoadError, { fixes: fixes() })), "");
 const loadError = render(createElement(FixLoadError, { fixes: fixes({ loadError: "down" }) }));
 assert.match(loadError, /role="alert"/);

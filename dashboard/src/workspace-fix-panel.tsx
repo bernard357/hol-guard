@@ -35,6 +35,7 @@ export type WorktreeFixes = {
   busy: string | null;
   error: string | null;
   /** The proposal list could not be read, so stored fixes are unknown. */
+  loaded: boolean;
   loadError: string | null;
   /** The daemon cannot write fixes on this system; the diff stays for a manual edit. */
   applyUnsupported: boolean;
@@ -57,6 +58,7 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
   const [prepared, setPrepared] = useState<PreparedFix | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [applyUnsupported, setApplyUnsupported] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
       const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
       if (!mounted.current || request !== latestReload.current) return null;
       setProposals(next);
+      setLoaded(true);
       setLoadError(null);
       return next;
     } catch (reason) {
@@ -135,8 +138,9 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
         const next = await reload().catch(() => null);
         if (result && mounted.current) {
           setNotice(appliedNotice(proposal, result));
-          // Keep the review open while another package.json still waits for its own apply.
-          const remaining = (next ?? []).some(
+          // Keep the review open while another package.json still waits for its own apply,
+          // and when the reload failed or was superseded, since then it is unknown.
+          const remaining = next === null || next.some(
             (item) => item.findingId === proposal.findingId && item.state === "prepared",
           );
           if (!remaining) {
@@ -164,7 +168,7 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
   }, [reload]);
 
   return {
-    proposals, reviewing, prepared, busy, error, loadError, applyUnsupported, notice,
+    proposals, reviewing, prepared, busy, error, loaded, loadError, applyUnsupported, notice,
     prepare, review, close, apply, retry,
   };
 }
@@ -194,7 +198,7 @@ export function FixCell(props: { finding: WorkspaceFinding; fixes: WorktreeFixes
   const proposal = currentFor(fixes.proposals, finding.findingId);
   const preparing = fixes.busy === `prepare:${finding.findingId}`;
   // Until the list loads, a stored proposal could be hidden behind a second Prepare.
-  const blocked = fixes.busy !== null || fixes.loadError !== null;
+  const blocked = fixes.busy !== null || fixes.loadError !== null || !fixes.loaded;
   if (proposal?.state === "prepared") {
     return (
       <ActionButton variant="outline" onClick={() => fixes.review(finding.findingId)} disabled={fixes.busy !== null}>

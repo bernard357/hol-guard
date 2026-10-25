@@ -351,6 +351,7 @@ function useWorktreeFixes(worktree, assessmentRunId) {
   const [prepared, setPrepared] = reactExports.useState(null);
   const [busy, setBusy] = reactExports.useState(null);
   const [error, setError] = reactExports.useState(null);
+  const [loaded, setLoaded] = reactExports.useState(false);
   const [loadError, setLoadError] = reactExports.useState(null);
   const [applyUnsupported, setApplyUnsupported] = reactExports.useState(false);
   const [notice, setNotice] = reactExports.useState(null);
@@ -364,6 +365,7 @@ function useWorktreeFixes(worktree, assessmentRunId) {
       const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
       if (!mounted.current || request2 !== latestReload.current) return null;
       setProposals(next);
+      setLoaded(true);
       setLoadError(null);
       return next;
     } catch (reason) {
@@ -421,7 +423,7 @@ function useWorktreeFixes(worktree, assessmentRunId) {
         const next = await reload().catch(() => null);
         if (result && mounted.current) {
           setNotice(appliedNotice(proposal, result));
-          const remaining = (next ?? []).some(
+          const remaining = next === null || next.some(
             (item) => item.findingId === proposal.findingId && item.state === "prepared"
           );
           if (!remaining) {
@@ -451,6 +453,7 @@ function useWorktreeFixes(worktree, assessmentRunId) {
     prepared,
     busy,
     error,
+    loaded,
     loadError,
     applyUnsupported,
     notice,
@@ -477,7 +480,7 @@ function FixCell(props) {
   const { finding, fixes } = props;
   const proposal = currentFor(fixes.proposals, finding.findingId);
   const preparing = fixes.busy === `prepare:${finding.findingId}`;
-  const blocked = fixes.busy !== null || fixes.loadError !== null;
+  const blocked = fixes.busy !== null || fixes.loadError !== null || !fixes.loaded;
   if (proposal?.state === "prepared") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: () => fixes.review(finding.findingId), disabled: fixes.busy !== null, children: "Review fix" });
   }
