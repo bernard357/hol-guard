@@ -22,13 +22,6 @@
 //! forced push. `git add -f` stays reviewed: it is how an ignored secret file gets
 //! staged. `git branch -M` stays reviewed: it overwrites an existing branch.
 //!
-//! The chain may open with `git fetch origin <branch>`, which `git_remote_ops`
-//! proves on its own terms: it reaches only a GitHub origin through trusted
-//! credential helpers and writes refs and objects, leaving the work tree for
-//! the writes that follow. A warm-cache refresh spells the whole shape out —
-//! `git fetch origin main && git stash push -m msg -- <paths> &&
-//! git merge --ff-only origin/main && git stash pop && git status -sb`.
-//!
 //! The same chain may end by publishing that work: one `git push origin
 //! <branch>` proven by the runtime push verdict, for the branch the chain
 //! creates or the one checked out, and a `gh pr create` the user's GitHub
@@ -86,11 +79,6 @@ const RULES: &[&str] = &[
 
 /// The rule a proven `git push origin <branch>` step may raise.
 const PUSH_RULE: &str = "command.git.push";
-
-/// The rule a proven `git fetch origin <branch>` step may raise. The packaged
-/// catalog ships it disabled, so it records the match without asking for a
-/// review of its own.
-const FETCH_RULE: &str = "command.git.fetch";
 const PROPOSE_PERMISSION: &str = "command.github.permission.propose-remote";
 const READ_PERMISSION: &str = "command.github.permission.read-remote";
 
@@ -253,7 +241,6 @@ fn proven(
     let mut stashed = Vec::new();
     let mut starts = Vec::new();
     let mut safe = Vec::new();
-    let mut fetched = Vec::new();
     let mut created: Vec<(usize, &str)> = Vec::new();
     let mut moved = false;
     let mut push: Option<usize> = None;
@@ -309,14 +296,6 @@ fn proven(
             context
         };
         if !(read(index, step) || route.unlinks(model, index, shell)) {
-            // A proven `origin` fetch stands beside the writes: it reaches
-            // only a GitHub origin through trusted helpers, starts no program
-            // of its own, and writes refs and objects alone. It leaves the
-            // work tree as the writes below found it.
-            if super::git_remote_ops::proven_fetch(segment, step, deadline, execution_environment) {
-                fetched.push(index);
-                continue;
-            }
             return None;
         }
         safe.push(index);
@@ -360,8 +339,6 @@ fn proven(
                 && indexes.peek().is_some()
                 && if rule == PUSH_RULE {
                     indexes.all(|index| pushed(&index))
-                } else if rule == FETCH_RULE {
-                    indexes.all(|index| fetched.contains(&index))
                 } else {
                     RULES.contains(&rule) && indexes.all(|index| written(&index))
                 }

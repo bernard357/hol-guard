@@ -92,7 +92,7 @@ pub(crate) mod git_hash_object;
 mod git_init_chain;
 pub(crate) mod git_init_target;
 pub(crate) mod git_object_reads;
-pub(crate) mod git_read_floor;
+mod git_read_floor;
 mod git_reads;
 mod git_ref_listings;
 mod git_rev_list;

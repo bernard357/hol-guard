@@ -9573,23 +9573,6 @@
       "expect": "allow"
     },
     {
-      "id": "session-git-fetch-stash-pathspec-merge-pop-status-log",
-      "fix_area": "git",
-      "harnesses": [
-        "codex",
-        "zcode",
-        "claude-code",
-        "omp",
-        "cursor"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "git fetch origin main && git stash push -m \"warm-cache\" -- src/index.ts README.md && git merge --ff-only origin/main && git stash pop && git status -sb && git log -1 --oneline"
-      },
-      "cwd": "org_app",
-      "expect": "allow"
-    },
-    {
       "id": "neg-git-fetch-other-remote-then-stash-pathspec",
       "fix_area": "git",
       "harnesses": [

@@ -3,7 +3,6 @@
 //! reviews.
 
 use guard_contracts::{NativeCommandObservationBatchV1, PreToolResultV1};
-use std::time::Instant;
 
 use super::{rule_floor, CompiledNativeCommandControls};
 use crate::CanonicalCommandV1;
@@ -84,7 +83,6 @@ impl CompiledNativeCommandControls {
     /// programs, disabled permissions and evaluation failures are fixed
     /// floors. Allowed uncertainty also needs every segment to stay inside
     /// what its text proves ([`settles_enabled_uncertainty`]).
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn explicit_allow(
         &self,
         result: &PreToolResultV1,
@@ -92,15 +90,12 @@ impl CompiledNativeCommandControls {
         command: Option<&CanonicalCommandV1>,
         context: crate::pretool::PathContext<'_>,
         enabled_uncertainty: bool,
-        deadline: Option<Instant>,
-        execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
     ) -> bool {
         batch.evaluation_error.is_none()
             && result.action.bounded
             && !result.action.sensitive_target
             && (result.minimum_action == "allow"
-                || OVERRIDABLE_NATIVE_REASONS.contains(&result.reason_code.as_str())
-                || git_read_order_floor(result, command, context, deadline, execution_environment))
+                || OVERRIDABLE_NATIVE_REASONS.contains(&result.reason_code.as_str()))
             && command.is_some_and(|model| {
                 !crate::pretool::fixed_command_floor(model)
                     && (!enabled_uncertainty
@@ -108,42 +103,14 @@ impl CompiledNativeCommandControls {
                             .segments
                             .iter()
                             .all(|segment| settles_enabled_uncertainty(segment, context)))
-                    && self.explicit_permissions_cover_command(model, batch, context)
+                    && self.explicit_permissions_cover_command(
+                        model,
+                        &batch.observations,
+                        &batch.permission_observations,
+                        context,
+                    )
             })
     }
-}
-
-/// Whether the Git execution-context floor rests on the order of the command's
-/// steps alone. Every Git read in such a command was proven helper-free
-/// against the configuration Guard read for it; what remains is that an
-/// earlier step could not be proven to leave that configuration alone.
-///
-/// That is a judgment of the command's shape, so a user who allowed each of
-/// its steps settles it, exactly as they settle the other shape judgments
-/// above. The floor stays fixed for the rest of the reason's meaning: a read
-/// whose own configuration names a pager, diff driver or textconv helper, and
-/// a configuration Guard could not read at all, both reach
-/// an outright review rather than this case and keep their review. So does a
-/// segment that runs a configured Git program, which
-/// [`crate::pretool::fixed_command_floor`] screens before any Allow is
-/// consulted.
-fn git_read_order_floor(
-    result: &PreToolResultV1,
-    command: Option<&CanonicalCommandV1>,
-    context: crate::pretool::PathContext<'_>,
-    deadline: Option<Instant>,
-    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
-) -> bool {
-    result.reason_code == "native_git_execution_context_review"
-        && command.is_some_and(|model| {
-            crate::pretool::git_read_floor::unsettled_steps_before_reads(
-                model,
-                context,
-                deadline,
-                execution_environment,
-            )
-            .is_some()
-        })
 }
 
 /// Whether a segment's own shape stays inside what its text proves, so an

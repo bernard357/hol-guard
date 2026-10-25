@@ -163,7 +163,8 @@ fn a_refresh_without_an_allow_still_waits_for_review() {
     let controls = fixture::github_controls("default");
     for command in [
         "git fetch upstream && git stash push -m 'warm-cache' -- src/index.ts && git status -sb",
-        "git stash push -m 'warm-cache' -- src/index.ts && git stash pop && git status -sb",
+        "git fetch origin main && git stash push -m 'warm-cache' -- src/index.ts README.md \
+         && git merge --ff-only origin/main && git stash pop && git status -sb && git log -1 --oneline",
     ] {
         let result = decide(&root, "omp", command, &controls);
         assert_ne!(
