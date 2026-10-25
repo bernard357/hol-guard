@@ -137,7 +137,7 @@ export function resolveSupplyChainWorkspaceHero(
   const stats = buildSupplyChainStats(snapshot);
   const preventedLabel =
     stats.preventedInstalls > 0
-      ? `${stats.preventedInstalls} blocked install${stats.preventedInstalls === 1 ? "" : "s"}`
+      ? `${stats.preventedInstalls} recent blocked install${stats.preventedInstalls === 1 ? "" : "s"}`
       : "No blocked installs yet";
   const stagedGuidance =
     protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;

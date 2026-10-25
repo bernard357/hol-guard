@@ -1,3 +1,4 @@
+import { i as isPackageBlockReceipt } from "./supply-chain-evidence-rail-Bq37hbRn.js";
 function resolveManagerCoverageManagers(protection) {
   if (protection === void 0) {
     return [];
@@ -38,7 +39,9 @@ function buildSupplyChainStats(snapshot) {
   return {
     totalApps: managedInstalls.length,
     activeApps: managedInstalls.filter((install) => install.active).length,
-    preventedInstalls: managedInstalls.filter((install) => !install.active).length,
+    // Managed installs are connected apps; an inactive one is not a blocked
+    // package. Count the package blocks among the receipts the snapshot carries.
+    preventedInstalls: (snapshot.latest_receipts ?? []).filter(isPackageBlockReceipt).length,
     protectedManagers,
     stagedManagers,
     repairRequiredManagers,

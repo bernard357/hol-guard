@@ -174,13 +174,24 @@ assert(
 
 const recentDate = new Date(Date.now() - 1000).toISOString();
 const olderDate = new Date(Date.now() - 10000).toISOString();
+const newestDate = new Date(Date.now() - 500).toISOString();
+const packageBlock = (timestamp: string): GuardReceipt => ({
+  ...makeReceipt("block", timestamp),
+  harness: "package-firewall",
+});
 const lastBlocked = resolveLastBlockedInstall([
-  makeInstall(false, olderDate),
-  makeInstall(false, recentDate),
-  makeInstall(true, recentDate),
+  packageBlock(olderDate),
+  packageBlock(recentDate),
+  { ...makeReceipt("allow", newestDate), harness: "package-firewall" },
+  // A blocked tool call that is not a package install.
+  makeReceipt("block", newestDate),
 ]);
 assert(lastBlocked !== null, "SCRG159-E: should find a blocked install");
-assert(lastBlocked!.updated_at === recentDate, "SCRG159-F: should return the most recent blocked install");
+assert(lastBlocked!.timestamp === recentDate, "SCRG159-F: should return the most recent blocked install");
+assert(
+  resolveLastBlockedInstall([makeReceipt("block", recentDate)]) === null,
+  "SCRG159-F2: a blocked receipt that is not a package install is not a blocked install",
+);
 
 const intelResult = resolveIntelStaleness(baseSnapshot);
 assert(!intelResult.stale, "SCRG159-G: no receipts should not be stale");
@@ -202,7 +213,17 @@ const snapshotWithInstalls = {
 const statsWithInstalls = buildSupplyChainStats(snapshotWithInstalls);
 assert(statsWithInstalls.totalApps === 2, "SCRG160-C: 2 managed installs");
 assert(statsWithInstalls.activeApps === 1, "SCRG160-D: 1 active app");
-assert(statsWithInstalls.preventedInstalls === 1, "SCRG160-E: 1 prevented install");
+assert(
+  statsWithInstalls.preventedInstalls === 0,
+  "SCRG160-E: an inactive connected app is not a blocked install",
+);
+assert(
+  buildSupplyChainStats({
+    ...snapshotWithInstalls,
+    latest_receipts: [packageBlock(recentDate), makeReceipt("block", recentDate), makeReceipt("allow", recentDate)],
+  }).preventedInstalls === 1,
+  "SCRG160-E2: prevented installs count package block receipts only",
+);
 assert(statsWithInstalls.protectedManagers === 1, "SCRG160-F: 1 protected manager");
 assert(statsWithInstalls.unprotectedManagers === 1, "SCRG160-G: 1 unprotected manager");
 

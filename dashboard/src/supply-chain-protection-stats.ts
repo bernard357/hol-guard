@@ -1,4 +1,5 @@
 import type { GuardRuntimeSnapshot, PackageManagerProtection } from "./guard-types";
+import { isPackageBlockReceipt } from "./supply-chain-evidence-rail";
 
 export type ManagerCoverageStatus = "protected" | "restart_required" | "path_repair" | "unprotected";
 
@@ -60,7 +61,9 @@ export function buildSupplyChainStats(
   return {
     totalApps: managedInstalls.length,
     activeApps: managedInstalls.filter((install) => install.active).length,
-    preventedInstalls: managedInstalls.filter((install) => !install.active).length,
+    // Managed installs are connected apps; an inactive one is not a blocked
+    // package. Count the package blocks among the receipts the snapshot carries.
+    preventedInstalls: (snapshot.latest_receipts ?? []).filter(isPackageBlockReceipt).length,
     protectedManagers,
     stagedManagers,
     repairRequiredManagers,

@@ -1,10 +1,11 @@
 import { j as jsxRuntimeExports, r as reactExports, A as ActionButton, s as HiMiniCheckCircle, c as HiMiniChevronDown, ab as HiMiniExclamationCircle } from "../guard-dashboard.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-CBE-TPrC.js";
-import { r as resolveHomeProtectionStatus } from "./home-protection-module-DYHkHSPd.js";
-import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-CJkxdP0r.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-CiBhiuhn.js";
+import { r as resolveHomeProtectionStatus } from "./home-protection-module-BaDbuq0C.js";
+import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-NtheBh1x.js";
 import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-COty1p6U.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-CMXvC-ZB.js";
-import "./feed-health-workspace-353JT_AI.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-BBdFnG-P.js";
+import "./feed-health-workspace-DP7m4bKi.js";
+import "./supply-chain-evidence-rail-Bq37hbRn.js";
 const PROTECTION_BADGE = {
   protected: "Protected",
   partial: "Partly protected",
@@ -93,7 +94,7 @@ function setupStepsLabel(count) {
 function resolveSupplyChainWorkspaceHero(snapshot, options) {
   const protectionStatus = resolveHomeProtectionStatus(snapshot);
   const stats = buildSupplyChainStats(snapshot);
-  const preventedLabel = stats.preventedInstalls > 0 ? `${stats.preventedInstalls} blocked install${stats.preventedInstalls === 1 ? "" : "s"}` : "No blocked installs yet";
+  const preventedLabel = stats.preventedInstalls > 0 ? `${stats.preventedInstalls} recent blocked install${stats.preventedInstalls === 1 ? "" : "s"}` : "No blocked installs yet";
   const stagedGuidance = protectionStatus === "staged" ? protectionDetail(snapshot, protectionStatus) : null;
   const counts = badgeManagerCounts(snapshot);
   const facts = [

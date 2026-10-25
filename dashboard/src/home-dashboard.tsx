@@ -434,7 +434,6 @@ export function HomeWorkspace(props: {
 
           <HomeProtectionModule
             snapshot={snapshot}
-            managedInstalls={managedInstalls}
             onOpenFleet={props.onOpenFleet}
             onOpenSupplyChain={props.onOpenSupplyChain}
           />
