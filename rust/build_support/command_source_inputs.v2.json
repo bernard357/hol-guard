@@ -752,7 +752,8 @@
       "src/supply_chain_support.rs",
       "src/target_identities.rs",
       "src/typescript_launch_evidence.rs",
-      "src/workspace_inventory.rs"
+      "src/workspace_inventory.rs",
+      "src/workspace_roots.rs"
     ]
   }
 }

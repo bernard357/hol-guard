@@ -453,6 +453,8 @@ pub mod prompt_analysis;
 pub mod redacted_command_tokens;
 pub mod supply_chain_package_eval;
 pub mod target_identities;
+#[cfg(unix)]
+mod workspace_roots;
 pub mod workspace_inventory;
 #[cfg(test)]
 mod workspace_path_guard_tests;

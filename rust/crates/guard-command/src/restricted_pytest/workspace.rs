@@ -34,14 +34,6 @@ fn invalid(message: &str) -> RestrictedPytestError {
     RestrictedPytestError::new(PYTEST_INVALID_COMMAND_REASON_CODE, message)
 }
 
-/// The canonical workspace for `cwd`, or `None` for a missing directory or a
-/// filesystem, home, temporary or credential-directory root.
-pub(crate) fn workspace_admissible(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    let resolved = cwd.canonicalize().ok()?;
-    (resolved.is_dir() && !workspace_is_broad_or_sensitive_for_home(&resolved, home))
-        .then_some(resolved)
-}
-
 fn prepare(input: &Input) -> Result<Value, RestrictedPytestError> {
     let host = if cfg!(target_os = "macos") {
         input.platform == "darwin"

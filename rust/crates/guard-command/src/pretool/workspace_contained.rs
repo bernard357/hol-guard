@@ -12,7 +12,8 @@ use guard_contracts::{GuardExecutionEnvironmentV1, PreToolActionTypeV1, PreToolR
 use std::path::Path;
 
 #[cfg(unix)]
-use crate::restricted_pytest::{linux_workspace_sandbox_available, workspace_admissible};
+use crate::restricted_pytest::linux_workspace_sandbox_available;
+use crate::workspace_roots::workspace_admissible;
 
 /// The workspace sandbox runs on macOS and Linux; Windows never admits a workspace.
 #[cfg(not(unix))]
