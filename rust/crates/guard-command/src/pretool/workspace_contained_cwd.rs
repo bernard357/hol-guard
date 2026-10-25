@@ -5,6 +5,18 @@ use std::path::{Path, PathBuf};
 
 const MAX_STATES: usize = 64;
 
+/// Whether this segment is the shell builtin that moves the shell itself.
+///
+/// Only the bare spelling counts. `cd` and `pushd` change the directory of the
+/// shell that reads them, which is why a proven descent may spend a `..` step
+/// later in the same command; a program at `./tools/cd` or `/usr/local/bin/cd`
+/// is an ordinary child process that cannot move its parent, so reading it by
+/// basename would credit the walk with a descent the real shell never made and
+/// let the next `..` leave the workspace.
+fn moves_the_shell(executable: Option<&str>) -> bool {
+    matches!(executable, Some("cd") | Some("pushd"))
+}
+
 pub(super) fn locations(model: &CanonicalCommandV1, workspace: &Path) -> Option<Vec<Vec<PathBuf>>> {
     let mut states = vec![(workspace.to_path_buf(), true)];
     let mut result = Vec::new();
@@ -24,7 +36,7 @@ pub(super) fn locations(model: &CanonicalCommandV1, workspace: &Path) -> Option<
         if !matches!(connector, "" | "&&" | "||" | ";" | "|" | "\n") {
             return None;
         }
-        let name = crate::pretool::executable_basename(segment.executable.as_deref()?);
+        let name = segment.executable.as_deref()?;
         let mut executing = Vec::new();
         let mut next = Vec::new();
         for (cwd, succeeded) in states {
@@ -33,7 +45,7 @@ pub(super) fn locations(model: &CanonicalCommandV1, workspace: &Path) -> Option<
                 continue;
             }
             executing.push(cwd.clone());
-            if matches!(name, "cd" | "pushd") {
+            if moves_the_shell(Some(name)) {
                 let [target] = segment.arguments.as_slice() else {
                     return None;
                 };
@@ -104,13 +116,10 @@ pub(super) fn depths(model: &CanonicalCommandV1, workspace: &Path) -> Vec<usize>
             .normalized_text
             .to_ascii_lowercase()
             .contains("cdpath")
-        || !model.segments.iter().any(|segment| {
-            segment
-                .executable
-                .as_deref()
-                .map(crate::pretool::executable_basename)
-                .is_some_and(|name| matches!(name, "cd" | "pushd"))
-        })
+        || !model
+            .segments
+            .iter()
+            .any(|segment| moves_the_shell(segment.executable.as_deref()))
     {
         return zeros;
     }

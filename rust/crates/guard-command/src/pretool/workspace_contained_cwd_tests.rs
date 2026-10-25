@@ -66,3 +66,22 @@ fn a_command_that_mentions_cdpath_spends_no_descent() {
         assert!(!shaped(command, &ws), "{command}");
     }
 }
+
+/// Only the bare builtin moves the shell. A program the workspace happens to
+/// carry at `tools/cd` is an ordinary child process: it cannot change its
+/// parent's directory, so the shell is still at the root when the next segment
+/// runs and the `..` there leaves the workspace.
+#[test]
+fn a_program_named_cd_spends_no_descent() {
+    let ws = workspace("cwd-named-cd", true);
+    std::fs::create_dir_all(ws.join("build")).unwrap();
+    std::fs::create_dir_all(ws.join("tools")).unwrap();
+    for command in [
+        "./tools/cd build && ls ..",
+        "tools/cd build && cat ../package.json",
+        "/usr/local/bin/cd build && ls ..",
+        "./tools/pushd build && ls ..",
+    ] {
+        assert!(!shaped(command, &ws), "{command}");
+    }
+}
