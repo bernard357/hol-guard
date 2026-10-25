@@ -81,14 +81,12 @@ pub(super) fn exact_safe_command(
         let candidate = stripped.as_ref().unwrap_or(segment);
         if let Some((leading, operation)) = parse(candidate, context) {
             let merge = operation.upstream.is_some_and(|shape| !shape.fetches);
-            // Only `git fetch origin` then `git merge --ff-only origin/main`
-            // pair; a pull, a second fetch or a second merge stands alone.
-            let repeated = if merge {
-                merged || pulled
-            } else {
-                fetch_seen || merged
-            };
-            if repeated
+            // Only a change to the checkout bars a later operation: a pull or
+            // a fast-forward merge may leave files the proofs still to come
+            // never saw. A fetch writes refs and objects alone, so it may
+            // stand before a pull, a merge or another fetch.
+            if merged
+                || pulled
                 || !proven(
                     candidate,
                     leading,

@@ -8999,6 +8999,57 @@
       "expect": "allow"
     },
     {
+      "id": "session-git-fetch-then-pull-ff-only",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin && git pull --ff-only origin main"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "session-git-fetch-quiet-then-pull-then-log",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin --quiet && git pull --ff-only origin main && git log -1 --oneline"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "session-git-fetch-then-fetch-branch",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git fetch origin && git fetch origin main"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
       "id": "session-git-fetch-main-then-merge-ff-only-tail",
       "fix_area": "git",
       "harnesses": [
