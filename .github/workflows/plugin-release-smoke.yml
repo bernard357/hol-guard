@@ -54,3 +54,15 @@ jobs:
           test "$SUPPORTED_RUNTIMES" -ge 1
           [[ "$EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$ATTESTATION_URL" == https://github.com/* ]]
+      - name: Native runtime diagnostics
+        if: ${{ failure() }}
+        run: |
+          python3 - <<'PY'
+          from codex_plugin_scanner.guard.native_runtime import native_runtime_status
+          s = native_runtime_status()
+          print("available", s.available, "compatible", s.compatible, "identity", s.identity is not None)
+          print("reason", getattr(s, "reason", None), getattr(s, "detail", None))
+          c = s.capabilities
+          print("plugin-kit-v1", None if c is None else "plugin-kit-v1" in c.features)
+          PY
+          sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null || true
