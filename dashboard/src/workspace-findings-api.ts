@@ -264,6 +264,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   workspace_root_missing: "That folder no longer exists. Choose it again.",
   workspace_root_not_directory: "That path is a file. Choose its folder instead.",
   invalid_worktree: "This workspace is no longer tracked. Refresh the list.",
+  workspace_snapshot_failed: "Guard could not read that folder. Check that it is a readable repository, then retry.",
+  workspace_snapshot_native_unavailable: "The Guard runtime that reads workspace files is unavailable. Restart Guard, then retry.",
 };
 
 export function workspaceErrorMessage(code: string | null): string {

@@ -204,6 +204,9 @@ assert.ok(paused.includes("Resume"), "paused rows offer resume");
 assert.match(paused, /<button[^>]*disabled=""[^>]*>.*?Assess now/s, "paused rows cannot start an assessment");
 
 assert.equal(workspaceErrorMessage("workspace_root_missing"), "That folder no longer exists. Choose it again.");
+assert.match(workspaceErrorMessage("workspace_snapshot_failed"), /could not read that folder/);
+assert.doesNotMatch(workspaceErrorMessage("workspace_snapshot_failed"), /Check that Guard is running/);
+assert.match(workspaceErrorMessage("workspace_snapshot_native_unavailable"), /runtime that reads workspace files is unavailable/);
 assert.match(workspaceErrorMessage("anything_else"), /Check that Guard is running/);
 assert.match(workspaceErrorMessage(null), /Check that Guard is running/);
 

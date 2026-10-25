@@ -1,14 +1,14 @@
-import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useMemo, useCallback, type ReactNode } from "react";
 import {
   HiMiniExclamationTriangle,
   HiMiniBugAnt,
   HiMiniArrowTopRightOnSquare,
 } from "react-icons/hi2";
 import { Badge } from "./approval-center-primitives";
-import { formatRelativeTime } from "./approval-center-utils";
-import { fetchSupplyChainBundle } from "./guard-api";
-import type { SupplyChainBundle, SupplyChainBundleAdvisory } from "./guard-types";
+import type { SupplyChainBundleAdvisory } from "./guard-types";
 import { SupplyChainDetailSection } from "./supply-chain-detail-section";
+import { formatBundleExpiry, isBundleExpired } from "./supply-chain-intel-freshness";
+import { useSupplyChainBundle } from "./use-supply-chain-bundle";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const tone =
@@ -74,31 +74,11 @@ function IntelSection({ action, children }: { action?: ReactNode; children: Reac
   );
 }
 
-export function SupplyChainBundlePanel() {
-  const [bundle, setBundle] = useState<SupplyChainBundle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetchSupplyChainBundle()
-      .then((data) => {
-        if (cancelled) return;
-        setBundle(data);
-        setError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+export function SupplyChainBundlePanel({ refreshKey = "" }: { refreshKey?: string }) {
+  const load = useSupplyChainBundle(refreshKey);
+  const bundle = load.phase === "ready" ? load.bundle : null;
+  const loading = load.phase === "loading";
+  const error = load.phase === "error" ? load.message : null;
 
   const severityCounts = useMemo(() => {
     if (!bundle) return null;
@@ -164,6 +144,10 @@ export function SupplyChainBundlePanel() {
     );
   }
 
+  const nowMs = Date.now();
+  const expiry = bundle.expiresAt ? formatBundleExpiry(bundle.expiresAt, nowMs) : null;
+  const expired = isBundleExpired(bundle, nowMs);
+
   return (
     <IntelSection
       action={
@@ -190,10 +174,10 @@ export function SupplyChainBundlePanel() {
           <dt className="text-slate-600">Packages</dt>
           <dd className="font-medium tabular-nums text-brand-dark">{bundle.packages.length}</dd>
         </div>
-        {bundle.expiresAt && (
+        {expiry !== null && (
           <div className="flex items-baseline gap-2">
-            <dt className="text-slate-600">Expires</dt>
-            <dd className="font-medium text-brand-dark">{formatRelativeTime(bundle.expiresAt)}</dd>
+            <dt className="text-slate-600">{expired ? "Expired" : "Expires"}</dt>
+            <dd className={`font-medium ${expired ? "text-brand-attention-text" : "text-brand-dark"}`}>{expiry}</dd>
           </div>
         )}
       </dl>

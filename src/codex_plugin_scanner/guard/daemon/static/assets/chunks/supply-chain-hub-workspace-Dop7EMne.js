@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-ChsxHqSm.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-BLapd7LV.js","assets/chunks/feed-health-workspace-B4WCTrqZ.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-uYuMGTTz.js","assets/chunks/audit-workspace-NtEvQeqH.js","assets/chunks/workspace-findings-workspace-DXcbvEeq.js"])))=>i.map(i=>d[i]);
-import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dj as IconActionButton, aA as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dn as HiMiniBugAnt, s as HiMiniCheckCircle, _ as HiMiniXMark, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dp as ConnectFlowCard, dq as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, dr as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, ds as fetchPackageFirewallStatus, dt as runPackageAudit, du as resolveSupplyChainAuditFailure, dv as runPackageSync, dw as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dx as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dy as repairSupplyChainProtection, dz as runPackageFirewallAction, dA as parseInterceptProofSnapshot, dB as activatePackageFirewallRuntime, dC as EntitlementNotice, aG as ApprovalProofModal, dD as chooseSupplyChainAuditFolder, dE as fetchReceipts, ba as WorkspacePageHeader, dF as lazyWorkspace, dG as __vitePreload } from "../guard-dashboard.js";
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-BUvcTcAC.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-4KKXCVsM.js","assets/chunks/feed-health-workspace-5h2OG9Ba.js","assets/chunks/home-protection-module-DYHkHSPd.js","assets/chunks/supply-chain-protection-stats-CJkxdP0r.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Dx6m8iTJ.js","assets/chunks/audit-workspace-BrJWAKcw.js","assets/chunks/workspace-findings-workspace-C5UPieT5.js"])))=>i.map(i=>d[i]);
+import { dg as isSupplyChainAuditIncomplete, dh as isSupplyChainAuditEvidence, cV as GuardHarnessActionError, di as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dj as IconActionButton, aA as HiMiniXCircle, cX as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dk as HiMiniBeaker, dl as ActivationSummary, dm as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dn as HiMiniBugAnt, a2 as useFocusTrap, s as HiMiniCheckCircle, _ as HiMiniXMark, dp as closeOnEscape, aS as buildApprovalProofCredentials, cT as GuardModalLayer, dq as ConnectFlowCard, dr as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, ds as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, dt as fetchPackageFirewallStatus, du as runPackageAudit, dv as resolveSupplyChainAuditFailure, dw as runPackageSync, dx as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dy as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dz as repairSupplyChainProtection, dA as runPackageFirewallAction, dB as parseInterceptProofSnapshot, dC as activatePackageFirewallRuntime, dD as EntitlementNotice, aG as ApprovalProofModal, dE as chooseSupplyChainAuditFolder, dF as fetchReceipts, ba as WorkspacePageHeader, dG as lazyWorkspace, dH as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
   high: 3,
@@ -462,6 +462,12 @@ function readHarnessActionUserMessage(error, fallback) {
     return structuredMessage;
   }
   return fallback;
+}
+function readPackageFirewallActionFailure(error) {
+  if (error instanceof Error && GUARD_FETCH_NETWORK_ERROR_MESSAGE.test(error.message)) {
+    return "Guard lost connection to the local daemon. Confirm it is still running, then try again.";
+  }
+  return error instanceof Error ? error.message : "Action failed.";
 }
 function isApprovalGateRequiredError(error) {
   const code = readHarnessActionErrorCode(error);
@@ -951,6 +957,19 @@ function GlobalActionsBar({ anyPending, pendingOp, onAudit, onSync }) {
     ] })
   ] });
 }
+const FAILURE_SUBJECTS = {
+  install: "Enabling protection",
+  repair: "Repairing protection",
+  test: "The intercept test",
+  remove: "Removing protection",
+  audit: "The audit",
+  sync: "The sync",
+  fix_all: "Restoring protection"
+};
+function describeFirewallFailure(failed) {
+  const subject = FAILURE_SUBJECTS[failed.op] ?? "The action";
+  return `${subject} failed${failed.manager !== null ? ` for ${failed.manager}` : ""}`;
+}
 function FailureBanner({ failed }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
@@ -961,11 +980,7 @@ function FailureBanner({ failed }) {
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "mt-0.5 h-4 w-4 shrink-0 text-brand-attention", "aria-hidden": "true" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-medium text-brand-dark", children: [
-            failed.op,
-            " failed",
-            failed.manager !== null ? ` for ${failed.manager}` : ""
-          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-brand-dark", children: describeFirewallFailure(failed) }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-xs text-slate-600", children: failed.message })
         ] })
       ]
@@ -1130,17 +1145,22 @@ function ManagerProofRow({
   ] });
 }
 function InterceptProofModal({ proof, onClose }) {
+  const dialogRef = reactExports.useRef(null);
+  useFocusTrap(true, dialogRef);
   const toneClass = proof.interceptProved ? "border-brand-green/20 bg-brand-green/[0.04]" : "border-brand-attention/20 bg-brand-attention/[0.04]";
   const Icon = proof.interceptProved ? HiMiniCheckCircle : HiMiniExclamationTriangle;
   const iconClass = proof.interceptProved ? "text-brand-green" : "text-brand-attention";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
+      ref: dialogRef,
       role: "dialog",
       "aria-label": "Intercept proof details",
       "aria-modal": "true",
-      className: "fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4",
+      tabIndex: -1,
+      className: "fixed inset-0 z-50 flex items-end justify-center p-4 focus:outline-none sm:items-center",
       "data-testid": "intercept-proof-modal",
+      onKeyDown: closeOnEscape(onClose),
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-black/30 backdrop-blur-sm", onClick: onClose, "aria-hidden": "true" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl", children: [
@@ -1223,6 +1243,8 @@ function SupplyChainManagerDrawer({
   actionHandlers,
   onClose
 }) {
+  const dialogRef = reactExports.useRef(null);
+  useFocusTrap(true, dialogRef);
   const status = resolveShimStatus(shim);
   const installAvailable = actionIsAvailable(actions.install);
   const repairAvailable = actionIsAvailable(actions.repair);
@@ -1235,11 +1257,14 @@ function SupplyChainManagerDrawer({
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
+      ref: dialogRef,
       role: "dialog",
       "aria-label": `${manager} manager details`,
       "aria-modal": "true",
-      className: "fixed inset-0 z-50 flex items-end sm:items-stretch sm:justify-end",
+      tabIndex: -1,
+      className: "fixed inset-0 z-50 flex items-end focus:outline-none sm:items-stretch sm:justify-end",
       "data-testid": "supply-chain-manager-drawer",
+      onKeyDown: closeOnEscape(onClose),
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute inset-0 bg-black/30 backdrop-blur-sm", onClick: onClose, "aria-hidden": "true" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative flex h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:h-full sm:rounded-none", children: [
@@ -2319,8 +2344,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
           setPendingApprovalOp({ op, manager });
           return;
         }
-        const message = err instanceof Error ? err.message : "Action failed.";
-        setLastFailed({ op, manager, message });
+        setLastFailed({ op, manager, message: readPackageFirewallActionFailure(err) });
       } finally {
         setPendingOp(null);
       }
@@ -2793,23 +2817,23 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-ChsxHqSm.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-BUvcTcAC.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
 );
 const SupplyChainWorkspaceDetails = lazyWorkspace(
   "supply-chain-workspace-details",
-  () => __vitePreload(() => import("./supply-chain-workspace-details-uYuMGTTz.js"), true ? __vite__mapDeps([8,1,2,3,4,5,6]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
+  () => __vitePreload(() => import("./supply-chain-workspace-details-Dx6m8iTJ.js"), true ? __vite__mapDeps([8,1,2,4,3,5,6]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-NtEvQeqH.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-BrJWAKcw.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const WorkspaceFindingsWorkspace = lazyWorkspace(
   "workspace-findings-workspace",
-  () => __vitePreload(() => import("./workspace-findings-workspace-DXcbvEeq.js"), true ? __vite__mapDeps([10,1,2]) : void 0).then((m) => ({ default: m.WorkspaceFindingsWorkspace }))
+  () => __vitePreload(() => import("./workspace-findings-workspace-C5UPieT5.js"), true ? __vite__mapDeps([10,1,2]) : void 0).then((m) => ({ default: m.WorkspaceFindingsWorkspace }))
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",
-  () => __vitePreload(() => import("./feed-health-workspace-B4WCTrqZ.js"), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
+  () => __vitePreload(() => import("./feed-health-workspace-5h2OG9Ba.js").then((n) => n.c), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
 );
 const hubTabs = [
   { value: "supply-chain", label: "Supply Chain" },

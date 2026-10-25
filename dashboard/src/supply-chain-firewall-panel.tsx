@@ -23,6 +23,7 @@ import {
   isSupplyChainSyncRetryableError,
   readHarnessActionUserMessage,
   readHarnessActionErrorCode,
+  readPackageFirewallActionFailure,
   resolveApprovalGateSyncFailure,
 } from "./harness-action-errors";
 import {
@@ -799,8 +800,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           setPendingApprovalOp({ op, manager });
           return;
         }
-        const message = err instanceof Error ? err.message : "Action failed.";
-        setLastFailed({ op, manager, message });
+        setLastFailed({ op, manager, message: readPackageFirewallActionFailure(err) });
       } finally {
         setPendingOp(null);
       }

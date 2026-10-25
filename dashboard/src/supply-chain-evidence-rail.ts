@@ -1,6 +1,7 @@
 import type {
   GuardReceipt,
   GuardRuntimeSnapshot,
+  GuardSupplyChainScannerEvidence,
 } from "./guard-types";
 import { isSupplyChainScannerEvidence } from "./guard-types";
 import { guardActionPresentation, isBlockedGuardAction } from "./guard-action";
