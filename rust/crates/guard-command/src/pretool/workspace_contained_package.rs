@@ -83,10 +83,6 @@ const UV_GLOBAL_FLAGS: &[&str] = &[
 // uv's global options that move the project a verb works on, so the
 // environment the check below looks for moves with them.
 const UV_PROJECT_OPTIONS: &[&str] = &["--directory", "--project"];
-// How much of a script is read to find the dependency block. PEP 723 allows
-// the block anywhere in the file, so the whole script is read, up to a bound
-// that keeps a hook from paging in an arbitrarily large one.
-const SCRIPT_BYTES: u64 = 1 << 20;
 // Verbs that fetch from, or publish to, a registry. Without network they would
 // fail silently, so they keep supply-chain admission or consent instead. This
 // excludes by effect; local verbs and script names are never enumerated.
@@ -193,6 +189,7 @@ struct UvCommand {
     verb: usize,
     directory: PathBuf,
     project: PathBuf,
+    discovered: bool,
     operand: Option<usize>,
 }
 
@@ -260,39 +257,22 @@ fn uv_command(arguments: &[&str], directory: &Path, workspace: &Path) -> Option<
         verb,
         directory: run,
         project,
+        discovered: named.is_none(),
         operand,
     })
 }
 
-/// Whether `path` is a script that carries its own dependencies. uv installs
-/// those into a fresh environment before it runs the script, which the
-/// sandbox has no network for.
-fn declares_dependencies(path: &Path) -> bool {
-    use std::io::Read;
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut text = Vec::new();
-    if file.take(SCRIPT_BYTES).read_to_end(&mut text).is_err() {
-        return false;
-    }
-    String::from_utf8_lossy(&text)
-        .lines()
-        .any(|line| line.trim_end() == "# /// script")
-}
-
-/// Whether `uv` runs a local verb against an environment the project
-/// already holds. uv materializes a project environment before it runs
-/// anything, so without `.venv` the run would have to install, which the
-/// sandbox has no network for; those commands keep the admission they have.
-/// An operand uv has to write, fetch or install for keeps it for the same
-/// reason.
-/// A member of a uv workspace has no `.venv` of its own: uv resolves the
-/// workspace root by ascending and runs the environment that root holds, so
-/// the search ascends the same way and stops at that root. A nested project
-/// that is not a member is admitted on it too; uv would sync its own instead,
-/// which the sandbox's missing network turns into an error the caller sees
-/// rather than anything the run reaches.
+/// Whether `uv` runs a local verb against an environment the project already
+/// holds. uv materializes one before it runs anything, so without `.venv` the
+/// run would have to install, which the sandbox has no network for; those
+/// commands keep the admission they have, as does an operand uv must write,
+/// fetch or install for. Which project holds the environment is found the way
+/// uv finds it: with no `--project` uv ascends from the directory the run
+/// enters to the nearest `pyproject.toml`, so a run standing below a
+/// single-project repository reaches the root's `.venv`, and the ascent stops
+/// at that project as uv's does — one holding no environment is a project uv
+/// would sync, not one borrowing the root's. `--project` names the project
+/// outright and uv reads no other, so that path is checked where it stands.
 fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Path) -> bool {
     let Some(uv) = uv_command(arguments, directory, workspace) else {
         return false;
@@ -310,12 +290,18 @@ fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Path) -> bool
         // script carrying a dependency block has those installed first.
         if verb == "version"
             || operand.contains("://")
-            || declares_dependencies(&uv.directory.join(operand))
+            || super::python::declares_dependencies(&uv.directory.join(operand))
         {
             return false;
         }
     }
-    super::cd::found_from(&uv.project, workspace, |probe| probe.join(".venv").is_dir())
+    if !uv.discovered {
+        return uv.project.join(".venv").is_dir();
+    }
+    super::cd::first_from(&uv.project, workspace, |probe| {
+        probe.join("pyproject.toml").is_file()
+    })
+    .is_some_and(|project| project.join(".venv").is_dir())
 }
 
 /// Whether `name` runs Maven, by either spelling the JVM extension claims.

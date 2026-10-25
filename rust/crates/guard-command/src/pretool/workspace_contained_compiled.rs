@@ -67,7 +67,8 @@ pub(super) fn local_go_work(arguments: &[&str], directory: &Path, workspace: &Pa
         && !rest
             .iter()
             .any(|argument| names_a_go_fetch(argument) || argument.contains('@'))
-        && super::cd::found_from(directory, workspace, |probe| probe.join("go.mod").is_file())
+        && super::cd::first_from(directory, workspace, |probe| probe.join("go.mod").is_file())
+            .is_some()
 }
 
 /// Whether `cargo` runs a local verb against a package reachable from
@@ -82,9 +83,10 @@ pub(super) fn local_cargo_work(arguments: &[&str], directory: &Path, workspace: 
         .iter()
         .find(|argument| !argument.starts_with('+'))
         .is_some_and(|verb| CARGO_LOCAL_VERBS.contains(&verb.to_ascii_lowercase().as_str()))
-        && super::cd::found_from(directory, workspace, |probe| {
+        && super::cd::first_from(directory, workspace, |probe| {
             probe.join("Cargo.toml").is_file()
         })
+        .is_some()
 }
 
 /// Whether an argument names one of the flags that send a Go verb to a module

@@ -104,7 +104,7 @@ pub(super) fn installed_tools(model: &CanonicalCommandV1, workspace: &Path) -> O
             std::fs::metadata(probe.join("node_modules").join(".bin").join(tool))
                 .is_ok_and(|metadata| metadata.is_file())
         };
-        if !bare || !super::cd::found_from(&directory, workspace, installed) {
+        if !bare || super::cd::first_from(&directory, workspace, installed).is_none() {
             return None;
         }
         tools.push(tool.clone());
