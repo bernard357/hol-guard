@@ -16,10 +16,11 @@ use std::path::Path;
 /// caller exported no `CDPATH`. Containment needs no such proof: the launcher
 /// builds the run's environment from an allow-list
 /// (`restricted_pytest::environment::filter`), `CDPATH` is on no list, and a
-/// `CDPATH` the command sets itself is already refused by `cwd::locations`.
-/// So the search a shell would make cannot happen inside the sandbox, and the
-/// name resolves to exactly the directory this reading names. `environment_tests`
-/// pins that, so a name added to the allow-list later cannot quietly undo it.
+/// `CDPATH` the command sets itself is refused by [`sets_search_path`] before
+/// the shape is admitted. So the search a shell would make cannot happen
+/// inside the sandbox, and the name resolves to exactly the directory this
+/// reading names. `environment_tests` pins the allow-list half, so a name
+/// added to it later cannot quietly undo this.
 pub(super) fn below(target: &str, workspace: &Path) -> bool {
     let path = Path::new(target);
     !target.is_empty()
@@ -29,6 +30,34 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
             .components()
             .all(|component| !matches!(component, std::path::Component::ParentDir))
         && (path.is_relative() || path.starts_with(workspace))
+}
+
+/// Whether `segment` sets `CDPATH`, the list a shell searches before the
+/// current directory for a bare relative `cd` operand. The launcher hands the
+/// sandbox no such list, but the command text is run as written, so a run that
+/// sets one itself would land a `cd` the checks read as one directory in
+/// another — `CDPATH=/ cd etc` enters `/etc`. zsh ties the same search to a
+/// lowercase `cdpath` array and `export cdpath=...` there sets both, so the
+/// name is matched without case, in a leading assignment and in the arguments
+/// of the builtins that export one.
+pub(super) fn sets_search_path(segment: &CommandSegmentV1) -> bool {
+    fn is_search_path(name: &str) -> bool {
+        name.trim().eq_ignore_ascii_case("CDPATH")
+    }
+    segment
+        .environment_names
+        .iter()
+        .any(|name| is_search_path(name))
+        || (matches!(
+            segment
+                .executable
+                .as_deref()
+                .map(crate::pretool::executable_basename),
+            Some("export" | "declare" | "typeset" | "setenv" | "set")
+        ) && segment
+            .arguments
+            .iter()
+            .any(|argument| is_search_path(argument.split('=').next().unwrap_or(argument))))
 }
 
 /// Whether `target`, the only operand of a `cd` or `pushd`, is a directory
@@ -89,3 +118,9 @@ pub(super) fn assigns_private(model: &CanonicalCommandV1, segment: &CommandSegme
 #[cfg(all(test, unix))]
 #[path = "workspace_contained_cd_tests.rs"]
 mod tests;
+
+// [`sets_search_path`] reads the command's own text, so the shells it has to
+// answer for are the ones every platform the sandbox runs on may use.
+#[cfg(test)]
+#[path = "workspace_contained_cd_search_path_tests.rs"]
+mod search_path_tests;

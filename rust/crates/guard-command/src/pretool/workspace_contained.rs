@@ -230,6 +230,9 @@ pub(crate) fn command_shape(
                 .environment_names
                 .iter()
                 .any(|name| name.to_ascii_uppercase().starts_with("GIT_"))
+            // A directory search path would send a bare relative `cd` operand
+            // somewhere other than the directory the shape reads it as.
+            || cd::sets_search_path(segment)
         {
             return None;
         }
