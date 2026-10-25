@@ -74,6 +74,20 @@ def check_updates(guard_home: Path) -> dict[str, Any]:
     )
 
 
+def dismiss_update(guard_home: Path, slug: str, version: str) -> dict[str, Any]:
+    """Stop prompting for ``slug`` until a release newer than ``version`` is checked."""
+
+    return _native_request(
+        {
+            "command": "updates-dismiss",
+            "guardHome": str(guard_home),
+            "slug": slug,
+            "version": version,
+        },
+        feature=PLUGIN_UPDATES_FEATURE,
+    )
+
+
 def build_parser(*, program_name: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=program_name,
@@ -114,15 +128,7 @@ def main(argv: Sequence[str], *, program_name: str = "hol-guard plugin updates")
     guard_home = resolve_guard_home(args.guard_home)
     try:
         if args.action == "dismiss":
-            payload = _native_request(
-                {
-                    "command": "updates-dismiss",
-                    "guardHome": str(guard_home),
-                    "slug": args.slug,
-                    "version": args.version,
-                },
-                feature=PLUGIN_UPDATES_FEATURE,
-            )
+            payload = dismiss_update(guard_home, args.slug, args.version)
             print(json.dumps(payload, sort_keys=True) if args.json else f"Dismissed {args.slug} {args.version}.")
             return 0
         if args.action == "reset":
