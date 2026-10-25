@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..daemon.native_review_allow_hint import reviewed_command_extension_allow_hint
 from ..native_codex_tool_output import codex_tool_output_native
 from ..native_context import bound_context_digest_home
 from ..native_data_flow import DataFlowArtifactNaming
@@ -21,7 +22,6 @@ from ..native_sensitive_request import (
 from ..native_tool_action_identity import NativeToolActionIdentityError
 from ..runtime.command_decision_adapter import effect_decision_to_dict
 from ..runtime.direct_vitest import direct_local_typescript_execution_context
-from ..runtime.extension_allow_hint import compute_extension_allow_hint
 from ..runtime.native_command_evaluation import NativeCommandEvaluation, review_command_native
 from ._commands_shared import *
 from .commands_parser_helpers import *
@@ -364,14 +364,13 @@ def _hook_runtime_artifact_with_native(
                 native_extension_evidence=(native_review.payload if native_review is not None else None),
                 native_evaluation=(native_review.evaluation if native_review is not None else None),
                 extension_allow_hint=(
-                    compute_extension_allow_hint(
-                        native_review.evaluation,
-                        command_text=raw_command_text,
+                    reviewed_command_extension_allow_hint(
+                        raw_command_text,
+                        native_result=native_review.payload,
                         snapshot=native_review.snapshot,
-                        native_evidence=native_review.payload,
+                        guard_home=guard_home,
                         cwd=workspace,
                         home_dir=home_dir,
-                        guard_home=guard_home,
                     )
                     if native_review is not None and raw_command_text is not None
                     else None

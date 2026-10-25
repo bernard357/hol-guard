@@ -298,6 +298,12 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::ExtensionAllowHint(request) => {
                 crate::extension_allow_hint_op::evaluate_with_store(&request, policy_store)
             }
+            ResidentOperationV1::ExtensionReviewHint(request) => {
+                crate::hook_direct::saved_decision::review_hint::op::evaluate_with_store(
+                    &request,
+                    policy_store,
+                )
+            }
             ResidentOperationV1::ApprovalExtensionRecommendation(request) => {
                 crate::approval_extension_recommendation_op::evaluate_with_store(&request, policy_store)
             }
