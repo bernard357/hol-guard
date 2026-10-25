@@ -5,7 +5,7 @@
 //! them unproven. The status listing stays in the superproject, so the same
 //! record must not stop it.
 
-use super::super::PathContext;
+use super::super::super::PathContext;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -113,7 +113,7 @@ fn a_gitlink_stops_a_descending_read_and_not_the_status_listing() {
     };
     let environment = declared_environment(&home);
     let free = |arguments: &[&str]| {
-        super::super::git_config::execution_free(
+        super::super::super::git_config::execution_free(
             "git",
             &arguments
                 .iter()
