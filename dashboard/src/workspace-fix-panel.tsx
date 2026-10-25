@@ -6,9 +6,11 @@ import type { WorkspaceFinding, WorktreeKeys } from "./workspace-findings-api";
 import {
   applyFix,
   fetchFixProposals,
+  FixRequestError,
   prepareFix,
   skippedManifestMessage,
   type FixProposal,
+  type AppliedFix,
   type FixProposalState,
   type PreparedFix,
 } from "./workspace-fix-api";
@@ -32,11 +34,16 @@ export type WorktreeFixes = {
   prepared: PreparedFix | null;
   busy: string | null;
   error: string | null;
+  /** The proposal list could not be read, so stored fixes are unknown. */
+  loadError: string | null;
+  /** The daemon cannot write fixes on this system; the diff stays for a manual edit. */
+  applyUnsupported: boolean;
   notice: string | null;
   prepare: (finding: WorkspaceFinding) => void;
   review: (findingId: string) => void;
   close: () => void;
   apply: (proposal: FixProposal) => void;
+  retry: () => void;
 };
 
 function message(error: unknown): string {
@@ -50,21 +57,33 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
   const [prepared, setPrepared] = useState<PreparedFix | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [applyUnsupported, setApplyUnsupported] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const mounted = useRef(true);
+  const latestReload = useRef(0);
   const { codebaseKey, worktreeKey } = worktree;
 
-  const reload = useCallback(async (signal?: AbortSignal) => {
-    const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
-    if (mounted.current) setProposals(next);
+  /** Resolves to the list it applied, or null when a newer reload started first. */
+  const reload = useCallback(async (signal?: AbortSignal): Promise<FixProposal[] | null> => {
+    latestReload.current += 1;
+    const request = latestReload.current;
+    try {
+      const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
+      if (!mounted.current || request !== latestReload.current) return null;
+      setProposals(next);
+      setLoadError(null);
+      return next;
+    } catch (reason) {
+      if (mounted.current && request === latestReload.current && !signal?.aborted) setLoadError(message(reason));
+      throw reason;
+    }
   }, [codebaseKey, worktreeKey]);
 
   useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
-    reload(controller.signal).catch((reason: unknown) => {
-      if (!controller.signal.aborted && mounted.current) setError(message(reason));
-    });
+    reload(controller.signal).catch(() => undefined);
     return () => {
       mounted.current = false;
       controller.abort();
@@ -78,7 +97,9 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
     try {
       await operation();
     } catch (reason) {
-      if (mounted.current) setError(message(reason));
+      if (!mounted.current) return;
+      setError(message(reason));
+      if (reason instanceof FixRequestError && reason.code === "fix_apply_unsupported") setApplyUnsupported(true);
     } finally {
       if (mounted.current) setBusy(null);
     }
@@ -88,7 +109,16 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
     setReviewing(finding.findingId);
     setPrepared(null);
     void run(`prepare:${finding.findingId}`, async () => {
-      const result = await prepareFix({ codebaseKey, worktreeKey }, finding.findingId);
+      let result: PreparedFix;
+      try {
+        result = await prepareFix({ codebaseKey, worktreeKey }, finding.findingId);
+      } catch (reason) {
+        // A refusal still names the files it left unchanged.
+        if (mounted.current && reason instanceof FixRequestError && (reason.skipped.length > 0 || reason.truncated)) {
+          setPrepared({ proposals: [], skipped: reason.skipped, truncated: reason.truncated });
+        }
+        throw reason;
+      }
       if (!mounted.current) return;
       setPrepared(result);
       await reload();
@@ -97,19 +127,23 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
 
   const apply = useCallback((proposal: FixProposal) => {
     void run(`apply:${proposal.proposalId}`, async () => {
+      let result: AppliedFix | null = null;
       try {
-        const result = await applyFix(proposal.proposalId);
-        if (!mounted.current) return;
-        const lockfiles = result.lockfiles.length > 0 ? result.lockfiles.join(", ") : "your lockfile";
-        setNotice(
-          `Guard changed ${proposal.manifestPath}. Update ${lockfiles} with your package manager. ` +
-            "Guard checks again after each change and marks this fixed only when a complete check no longer finds it.",
-        );
-        setReviewing(null);
-        setPrepared(null);
+        result = await applyFix(proposal.proposalId);
       } finally {
         // A stale or refused apply changes the proposal's state too.
-        await reload().catch(() => undefined);
+        const next = await reload().catch(() => null);
+        if (result && mounted.current) {
+          setNotice(appliedNotice(proposal, result));
+          // Keep the review open while another package.json still waits for its own apply.
+          const remaining = (next ?? []).some(
+            (item) => item.findingId === proposal.findingId && item.state === "prepared",
+          );
+          if (!remaining) {
+            setReviewing(null);
+            setPrepared(null);
+          }
+        }
       }
     });
   }, [reload, run]);
@@ -125,18 +159,42 @@ export function useWorktreeFixes(worktree: WorktreeKeys, assessmentRunId: string
     setError(null);
   }, []);
 
-  return { proposals, reviewing, prepared, busy, error, notice, prepare, review, close, apply };
+  const retry = useCallback(() => {
+    void reload().catch(() => undefined);
+  }, [reload]);
+
+  return {
+    proposals, reviewing, prepared, busy, error, loadError, applyUnsupported, notice,
+    prepare, review, close, apply, retry,
+  };
 }
 
-function newestFor(proposals: FixProposal[], findingId: string): FixProposal | undefined {
+export function appliedNotice(proposal: FixProposal, result: AppliedFix): string {
+  const lockfiles = result.lockfiles.length > 0 ? result.lockfiles.join(", ") : "your lockfile";
+  const changed = `Guard changed ${proposal.manifestPath}. Update ${lockfiles} with your package manager. `;
+  if (!result.verificationQueued) {
+    return changed + "Guard could not schedule a check, so run Assess now once the lockfile is updated. " +
+      "It marks this fixed only when a complete check no longer finds it.";
+  }
+  return changed + "Guard checks again after each change and marks this fixed only when a complete check no longer finds it.";
+}
+
+/**
+ * One prepare stores a proposal per package.json with the same timestamp, so a
+ * proposal still waiting for review wins over whichever sibling sorts first.
+ */
+function currentFor(proposals: FixProposal[], findingId: string): FixProposal | undefined {
+  const own = proposals.filter((proposal) => proposal.findingId === findingId);
   // The daemon lists proposals newest first.
-  return proposals.find((proposal) => proposal.findingId === findingId);
+  return own.find((proposal) => proposal.state === "prepared") ?? own[0];
 }
 
 export function FixCell(props: { finding: WorkspaceFinding; fixes: WorktreeFixes }) {
   const { finding, fixes } = props;
-  const proposal = newestFor(fixes.proposals, finding.findingId);
+  const proposal = currentFor(fixes.proposals, finding.findingId);
   const preparing = fixes.busy === `prepare:${finding.findingId}`;
+  // Until the list loads, a stored proposal could be hidden behind a second Prepare.
+  const blocked = fixes.busy !== null || fixes.loadError !== null;
   if (proposal?.state === "prepared") {
     return (
       <ActionButton variant="outline" onClick={() => fixes.review(finding.findingId)} disabled={fixes.busy !== null}>
@@ -144,7 +202,8 @@ export function FixCell(props: { finding: WorkspaceFinding; fixes: WorktreeFixes
       </ActionButton>
     );
   }
-  if (proposal && proposal.state !== "stale") {
+  // A finding listed again after a verified fix (a reverted lockfile) needs a new fix, not "Fixed".
+  if (proposal && proposal.state !== "stale" && proposal.state !== "verified_fixed") {
     const tag = STATE_TAGS[proposal.state];
     return (
       <span className="inline-flex flex-col items-start gap-1">
@@ -157,9 +216,9 @@ export function FixCell(props: { finding: WorkspaceFinding; fixes: WorktreeFixes
   }
   if (!canPrepareFix(finding)) return <span className="text-slate-500">Manual update</span>;
   return (
-    <ActionButton variant="outline" className="gap-1.5" onClick={() => fixes.prepare(finding)} disabled={fixes.busy !== null}>
+    <ActionButton variant="outline" className="gap-1.5" onClick={() => fixes.prepare(finding)} disabled={blocked}>
       <HiMiniWrenchScrewdriver className="h-4 w-4" aria-hidden="true" />
-      {preparing ? "Preparing…" : proposal?.state === "stale" ? "Prepare again" : "Prepare fix"}
+      {preparing ? "Preparing…" : proposal ? "Prepare again" : "Prepare fix"}
     </ActionButton>
   );
 }
@@ -176,7 +235,10 @@ export function FixReview(props: { fixes: WorktreeFixes; findings: WorkspaceFind
   }, [fixes.reviewing]);
   if (fixes.reviewing === null) return null;
   const finding = props.findings.find((item) => item.findingId === fixes.reviewing);
-  const pending = fixes.proposals.filter((proposal) => proposal.findingId === fixes.reviewing && proposal.state === "prepared");
+  // A newer check that no longer lists the finding leaves nothing to apply.
+  const pending = finding
+    ? fixes.proposals.filter((proposal) => proposal.findingId === fixes.reviewing && proposal.state === "prepared")
+    : [];
   const preparing = fixes.busy === `prepare:${fixes.reviewing}`;
   const headingId = `fix-review-${fixes.reviewing.slice(0, 16)}`;
   const skipped = fixes.prepared?.skipped ?? [];
@@ -199,6 +261,9 @@ export function FixReview(props: { fixes: WorktreeFixes; findings: WorkspaceFind
       </div>
       {preparing && <div className="guard-skeleton h-24 w-full rounded-xl" aria-label="Preparing fix" />}
       {fixes.error && <FixNotice tone="error" text={fixes.error} />}
+      {!finding && !preparing && (
+        <FixNotice tone="success" text="The latest check no longer lists this finding, so there is nothing to apply." />
+      )}
       {pending.map((proposal) => (
         <ProposalReview key={proposal.proposalId} proposal={proposal} fixes={fixes} />
       ))}
@@ -239,9 +304,11 @@ function ProposalReview(props: { proposal: FixProposal; fixes: WorktreeFixes }) 
         ))}
       </ul>
       {proposal.diff && <DiffBlock diff={proposal.diff} label={`Proposed change to ${proposal.manifestPath}`} />}
-      <ActionButton variant="primary" onClick={() => fixes.apply(proposal)} disabled={fixes.busy !== null}>
-        {applying ? "Applying…" : `Apply to ${proposal.manifestPath}`}
-      </ActionButton>
+      {!fixes.applyUnsupported && (
+        <ActionButton variant="primary" onClick={() => fixes.apply(proposal)} disabled={fixes.busy !== null}>
+          {applying ? "Applying…" : `Apply to ${proposal.manifestPath}`}
+        </ActionButton>
+      )}
     </div>
   );
 }
@@ -310,6 +377,23 @@ export function FixHistory(props: { fixes: WorktreeFixes; findings: WorkspaceFin
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Shown above the findings so a failed load never reads as "no fixes yet". */
+export function FixLoadError(props: { fixes: WorktreeFixes }) {
+  if (props.fixes.loadError === null) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2">
+      <p className="flex gap-2 text-sm text-red-800" role="alert">
+        <HiMiniExclamationTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        Guard could not load the fixes prepared for this workspace, so Prepare stays off until they load. Check that
+        Guard is running, then retry.
+      </p>
+      <ActionButton variant="outline" onClick={props.fixes.retry}>
+        Retry
+      </ActionButton>
     </div>
   );
 }

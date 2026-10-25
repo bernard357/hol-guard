@@ -37,12 +37,17 @@ export type AppliedFix = { proposal: FixProposal; lockfiles: string[]; verificat
 export class FixRequestError extends Error {
   readonly code: string;
   readonly reason: string | null;
+  /** Files a refused prepare left unchanged, so the review can still list them. */
+  readonly skipped: SkippedManifest[];
+  readonly truncated: boolean;
 
-  constructor(code: string, reason: string | null) {
+  constructor(code: string, reason: string | null, skipped: SkippedManifest[] = [], truncated = false) {
     super(fixErrorMessage(code, reason));
     this.name = "FixRequestError";
     this.code = code;
     this.reason = reason;
+    this.skipped = skipped;
+    this.truncated = truncated;
   }
 }
 
@@ -110,6 +115,15 @@ export function normalizeFixProposal(value: unknown): FixProposal | null {
   };
 }
 
+function normalizeSkipped(value: unknown): SkippedManifest[] {
+  return list(value).flatMap((entry) => {
+    const item = record(entry);
+    const manifestPath = text(item.manifest_path);
+    const reason = text(item.reason);
+    return manifestPath && reason ? [{ manifestPath, reason }] : [];
+  });
+}
+
 function normalizeProposals(value: unknown): FixProposal[] {
   return list(value)
     .map(normalizeFixProposal)
@@ -121,7 +135,12 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const detail = record(body);
-    throw new FixRequestError(text(detail.error) ?? "workspace_fix_failed", text(detail.reason));
+    throw new FixRequestError(
+      text(detail.error) ?? "workspace_fix_failed",
+      text(detail.reason),
+      normalizeSkipped(detail.skipped),
+      detail.truncated === true,
+    );
   }
   return body;
 }
@@ -149,12 +168,7 @@ export async function prepareFix(worktree: WorktreeKeys, findingId: string): Pro
   );
   return {
     proposals: normalizeProposals(body.proposals),
-    skipped: list(body.skipped).flatMap((entry) => {
-      const item = record(entry);
-      const manifestPath = text(item.manifest_path);
-      const reason = text(item.reason);
-      return manifestPath && reason ? [{ manifestPath, reason }] : [];
-    }),
+    skipped: normalizeSkipped(body.skipped),
     truncated: body.truncated === true,
   };
 }

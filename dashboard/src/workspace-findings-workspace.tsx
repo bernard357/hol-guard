@@ -14,7 +14,7 @@ import {
   type WorkspaceWorktree,
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
-import { FixCell, FixHistory, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
+import { FixCell, FixHistory, FixLoadError, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
 const REFRESH_MS = 15_000;
 
@@ -283,6 +283,7 @@ function AssessmentFindings(props: { worktree: WorkspaceWorktree; assessment: Wo
   const fixes = useWorktreeFixes(props.worktree, runId);
   return (
     <div className="space-y-4">
+      <FixLoadError fixes={fixes} />
       <FindingsTable findings={findings} fixes={fixes} />
       <FixReview fixes={fixes} findings={findings} />
       <FixHistory fixes={fixes} findings={findings} />

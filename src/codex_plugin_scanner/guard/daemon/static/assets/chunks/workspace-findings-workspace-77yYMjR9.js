@@ -1,4 +1,4 @@
-import { cY as fetchGuardApi, r as reactExports, j as jsxRuntimeExports, A as ActionButton, f as formatRelativeTime, T as Tag, ap as HiMiniWrenchScrewdriver, s as HiMiniCheckCircle, a4 as HiMiniExclamationTriangle, N as EmptyState, eh as HiMiniFolderOpen, d as HiMiniArrowPath } from "../guard-dashboard.js";
+import { cY as fetchGuardApi, r as reactExports, j as jsxRuntimeExports, a4 as HiMiniExclamationTriangle, A as ActionButton, f as formatRelativeTime, T as Tag, ap as HiMiniWrenchScrewdriver, s as HiMiniCheckCircle, N as EmptyState, eh as HiMiniFolderOpen, d as HiMiniArrowPath } from "../guard-dashboard.js";
 const ASSESSMENTS_PATH = "/v1/supply-chain/workspace-assessments";
 const FINDINGS_PATH = "/v1/supply-chain/workspace-findings";
 const RUN_STATES = /* @__PURE__ */ new Set(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -158,11 +158,16 @@ const FIX_PROPOSALS_PATH = "/v1/supply-chain/workspace-fix-proposals";
 class FixRequestError extends Error {
   code;
   reason;
-  constructor(code, reason) {
+  /** Files a refused prepare left unchanged, so the review can still list them. */
+  skipped;
+  truncated;
+  constructor(code, reason, skipped = [], truncated = false) {
     super(fixErrorMessage(code, reason));
     this.name = "FixRequestError";
     this.code = code;
     this.reason = reason;
+    this.skipped = skipped;
+    this.truncated = truncated;
   }
 }
 const STATES = /* @__PURE__ */ new Set(["prepared", "applied", "verified_fixed", "still_present", "stale"]);
@@ -217,6 +222,14 @@ function normalizeFixProposal(value) {
     verifiedAtMs: time(item.verified_at_ms)
   };
 }
+function normalizeSkipped(value) {
+  return list(value).flatMap((entry) => {
+    const item = record(entry);
+    const manifestPath = text(item.manifest_path);
+    const reason = text(item.reason);
+    return manifestPath && reason ? [{ manifestPath, reason }] : [];
+  });
+}
 function normalizeProposals(value) {
   return list(value).map(normalizeFixProposal).filter((entry) => entry !== null);
 }
@@ -225,7 +238,12 @@ async function request(path, init) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = record(body);
-    throw new FixRequestError(text(detail.error) ?? "workspace_fix_failed", text(detail.reason));
+    throw new FixRequestError(
+      text(detail.error) ?? "workspace_fix_failed",
+      text(detail.reason),
+      normalizeSkipped(detail.skipped),
+      detail.truncated === true
+    );
   }
   return body;
 }
@@ -250,12 +268,7 @@ async function prepareFix(worktree, findingId) {
   );
   return {
     proposals: normalizeProposals(body.proposals),
-    skipped: list(body.skipped).flatMap((entry) => {
-      const item = record(entry);
-      const manifestPath = text(item.manifest_path);
-      const reason = text(item.reason);
-      return manifestPath && reason ? [{ manifestPath, reason }] : [];
-    }),
+    skipped: normalizeSkipped(body.skipped),
     truncated: body.truncated === true
   };
 }
@@ -338,19 +351,30 @@ function useWorktreeFixes(worktree, assessmentRunId) {
   const [prepared, setPrepared] = reactExports.useState(null);
   const [busy, setBusy] = reactExports.useState(null);
   const [error, setError] = reactExports.useState(null);
+  const [loadError, setLoadError] = reactExports.useState(null);
+  const [applyUnsupported, setApplyUnsupported] = reactExports.useState(false);
   const [notice, setNotice] = reactExports.useState(null);
   const mounted = reactExports.useRef(true);
+  const latestReload = reactExports.useRef(0);
   const { codebaseKey, worktreeKey } = worktree;
   const reload = reactExports.useCallback(async (signal) => {
-    const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
-    if (mounted.current) setProposals(next);
+    latestReload.current += 1;
+    const request2 = latestReload.current;
+    try {
+      const next = await fetchFixProposals({ codebaseKey, worktreeKey }, signal);
+      if (!mounted.current || request2 !== latestReload.current) return null;
+      setProposals(next);
+      setLoadError(null);
+      return next;
+    } catch (reason) {
+      if (mounted.current && request2 === latestReload.current && !signal?.aborted) setLoadError(message(reason));
+      throw reason;
+    }
   }, [codebaseKey, worktreeKey]);
   reactExports.useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
-    reload(controller.signal).catch((reason) => {
-      if (!controller.signal.aborted && mounted.current) setError(message(reason));
-    });
+    reload(controller.signal).catch(() => void 0);
     return () => {
       mounted.current = false;
       controller.abort();
@@ -363,7 +387,9 @@ function useWorktreeFixes(worktree, assessmentRunId) {
     try {
       await operation();
     } catch (reason) {
-      if (mounted.current) setError(message(reason));
+      if (!mounted.current) return;
+      setError(message(reason));
+      if (reason instanceof FixRequestError && reason.code === "fix_apply_unsupported") setApplyUnsupported(true);
     } finally {
       if (mounted.current) setBusy(null);
     }
@@ -372,7 +398,15 @@ function useWorktreeFixes(worktree, assessmentRunId) {
     setReviewing(finding.findingId);
     setPrepared(null);
     void run(`prepare:${finding.findingId}`, async () => {
-      const result = await prepareFix({ codebaseKey, worktreeKey }, finding.findingId);
+      let result;
+      try {
+        result = await prepareFix({ codebaseKey, worktreeKey }, finding.findingId);
+      } catch (reason) {
+        if (mounted.current && reason instanceof FixRequestError && (reason.skipped.length > 0 || reason.truncated)) {
+          setPrepared({ proposals: [], skipped: reason.skipped, truncated: reason.truncated });
+        }
+        throw reason;
+      }
       if (!mounted.current) return;
       setPrepared(result);
       await reload();
@@ -380,17 +414,21 @@ function useWorktreeFixes(worktree, assessmentRunId) {
   }, [codebaseKey, worktreeKey, reload, run]);
   const apply = reactExports.useCallback((proposal) => {
     void run(`apply:${proposal.proposalId}`, async () => {
+      let result = null;
       try {
-        const result = await applyFix(proposal.proposalId);
-        if (!mounted.current) return;
-        const lockfiles = result.lockfiles.length > 0 ? result.lockfiles.join(", ") : "your lockfile";
-        setNotice(
-          `Guard changed ${proposal.manifestPath}. Update ${lockfiles} with your package manager. Guard checks again after each change and marks this fixed only when a complete check no longer finds it.`
-        );
-        setReviewing(null);
-        setPrepared(null);
+        result = await applyFix(proposal.proposalId);
       } finally {
-        await reload().catch(() => void 0);
+        const next = await reload().catch(() => null);
+        if (result && mounted.current) {
+          setNotice(appliedNotice(proposal, result));
+          const remaining = (next ?? []).some(
+            (item) => item.findingId === proposal.findingId && item.state === "prepared"
+          );
+          if (!remaining) {
+            setReviewing(null);
+            setPrepared(null);
+          }
+        }
       }
     });
   }, [reload, run]);
@@ -404,19 +442,46 @@ function useWorktreeFixes(worktree, assessmentRunId) {
     setPrepared(null);
     setError(null);
   }, []);
-  return { proposals, reviewing, prepared, busy, error, notice, prepare, review, close, apply };
+  const retry = reactExports.useCallback(() => {
+    void reload().catch(() => void 0);
+  }, [reload]);
+  return {
+    proposals,
+    reviewing,
+    prepared,
+    busy,
+    error,
+    loadError,
+    applyUnsupported,
+    notice,
+    prepare,
+    review,
+    close,
+    apply,
+    retry
+  };
 }
-function newestFor(proposals, findingId) {
-  return proposals.find((proposal) => proposal.findingId === findingId);
+function appliedNotice(proposal, result) {
+  const lockfiles = result.lockfiles.length > 0 ? result.lockfiles.join(", ") : "your lockfile";
+  const changed = `Guard changed ${proposal.manifestPath}. Update ${lockfiles} with your package manager. `;
+  if (!result.verificationQueued) {
+    return changed + "Guard could not schedule a check, so run Assess now once the lockfile is updated. It marks this fixed only when a complete check no longer finds it.";
+  }
+  return changed + "Guard checks again after each change and marks this fixed only when a complete check no longer finds it.";
+}
+function currentFor(proposals, findingId) {
+  const own = proposals.filter((proposal) => proposal.findingId === findingId);
+  return own.find((proposal) => proposal.state === "prepared") ?? own[0];
 }
 function FixCell(props) {
   const { finding, fixes } = props;
-  const proposal = newestFor(fixes.proposals, finding.findingId);
+  const proposal = currentFor(fixes.proposals, finding.findingId);
   const preparing = fixes.busy === `prepare:${finding.findingId}`;
+  const blocked = fixes.busy !== null || fixes.loadError !== null;
   if (proposal?.state === "prepared") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: () => fixes.review(finding.findingId), disabled: fixes.busy !== null, children: "Review fix" });
   }
-  if (proposal && proposal.state !== "stale") {
+  if (proposal && proposal.state !== "stale" && proposal.state !== "verified_fixed") {
     const tag = STATE_TAGS[proposal.state];
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "inline-flex flex-col items-start gap-1", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: tag.tone, children: tag.label }),
@@ -424,9 +489,9 @@ function FixCell(props) {
     ] });
   }
   if (!canPrepareFix(finding)) return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-slate-500", children: "Manual update" });
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "outline", className: "gap-1.5", onClick: () => fixes.prepare(finding), disabled: fixes.busy !== null, children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "outline", className: "gap-1.5", onClick: () => fixes.prepare(finding), disabled: blocked, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniWrenchScrewdriver, { className: "h-4 w-4", "aria-hidden": "true" }),
-    preparing ? "Preparing…" : proposal?.state === "stale" ? "Prepare again" : "Prepare fix"
+    preparing ? "Preparing…" : proposal ? "Prepare again" : "Prepare fix"
   ] });
 }
 function FixReview(props) {
@@ -440,7 +505,7 @@ function FixReview(props) {
   }, [fixes.reviewing]);
   if (fixes.reviewing === null) return null;
   const finding = props.findings.find((item) => item.findingId === fixes.reviewing);
-  const pending = fixes.proposals.filter((proposal) => proposal.findingId === fixes.reviewing && proposal.state === "prepared");
+  const pending = finding ? fixes.proposals.filter((proposal) => proposal.findingId === fixes.reviewing && proposal.state === "prepared") : [];
   const preparing = fixes.busy === `prepare:${fixes.reviewing}`;
   const headingId = `fix-review-${fixes.reviewing.slice(0, 16)}`;
   const skipped = fixes.prepared?.skipped ?? [];
@@ -457,6 +522,7 @@ function FixReview(props) {
     ] }),
     preparing && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "guard-skeleton h-24 w-full rounded-xl", "aria-label": "Preparing fix" }),
     fixes.error && /* @__PURE__ */ jsxRuntimeExports.jsx(FixNotice, { tone: "error", text: fixes.error }),
+    !finding && !preparing && /* @__PURE__ */ jsxRuntimeExports.jsx(FixNotice, { tone: "success", text: "The latest check no longer lists this finding, so there is nothing to apply." }),
     pending.map((proposal) => /* @__PURE__ */ jsxRuntimeExports.jsx(ProposalReview, { proposal, fixes }, proposal.proposalId)),
     skipped.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-brand-dark", children: "Left unchanged" }),
@@ -485,7 +551,7 @@ function ProposalReview(props) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono text-xs font-semibold", children: edit.toSpec })
     ] }, `${edit.section}:${edit.fromSpec}`)) }),
     proposal.diff && /* @__PURE__ */ jsxRuntimeExports.jsx(DiffBlock, { diff: proposal.diff, label: `Proposed change to ${proposal.manifestPath}` }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "primary", onClick: () => fixes.apply(proposal), disabled: fixes.busy !== null, children: applying ? "Applying…" : `Apply to ${proposal.manifestPath}` })
+    !fixes.applyUnsupported && /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "primary", onClick: () => fixes.apply(proposal), disabled: fixes.busy !== null, children: applying ? "Applying…" : `Apply to ${proposal.manifestPath}` })
   ] });
 }
 function lineClass(line) {
@@ -537,6 +603,16 @@ function FixHistory(props) {
         /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: tag.tone, children: tag.label })
       ] }, proposal.proposalId);
     }) })
+  ] });
+}
+function FixLoadError(props) {
+  if (props.fixes.loadError === null) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "flex gap-2 text-sm text-red-800", role: "alert", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniExclamationTriangle, { className: "mt-0.5 h-4 w-4 shrink-0", "aria-hidden": "true" }),
+      "Guard could not load the fixes prepared for this workspace, so Prepare stays off until they load. Check that Guard is running, then retry."
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: props.fixes.retry, children: "Retry" })
   ] });
 }
 function FixNotice(props) {
@@ -744,6 +820,7 @@ function AssessmentFindings(props) {
   const { findings, runId } = props.assessment;
   const fixes = useWorktreeFixes(props.worktree, runId);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(FixLoadError, { fixes }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FindingsTable, { findings, fixes }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixReview, { fixes, findings }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(FixHistory, { fixes, findings })

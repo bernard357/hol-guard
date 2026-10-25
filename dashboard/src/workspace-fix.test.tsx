@@ -12,7 +12,16 @@ import {
   skippedManifestMessage,
   type FixProposal,
 } from "./workspace-fix-api";
-import { canPrepareFix, DiffBlock, FixCell, FixHistory, FixReview, type WorktreeFixes } from "./workspace-fix-panel";
+import {
+  appliedNotice,
+  canPrepareFix,
+  DiffBlock,
+  FixCell,
+  FixHistory,
+  FixLoadError,
+  FixReview,
+  type WorktreeFixes,
+} from "./workspace-fix-panel";
 
 const CODEBASE = "c".repeat(64);
 const WORKTREE = "w".repeat(64);
@@ -65,11 +74,14 @@ function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {
     prepared: null,
     busy: null,
     error: null,
+    loadError: null,
+    applyUnsupported: false,
     notice: null,
     prepare: noop,
     review: noop,
     close: noop,
     apply: noop,
+    retry: noop,
     ...overrides,
   };
 }
@@ -106,6 +118,21 @@ assert.match(
   /Review fix/,
 );
 assert.match(render(createElement(FixCell, { finding, fixes: fixes({ busy: `prepare:${FINDING}` }) })), /Preparing…/);
+// A sibling manifest still waiting for review keeps Review reachable whichever sibling sorts first.
+assert.match(
+  render(createElement(FixCell, { finding, fixes: fixes({ proposals: [proposal({ state: "applied", proposal_id: "a".repeat(32) }), prepared] }) })),
+  /Review fix/,
+);
+// A finding listed again after a verified fix offers a new one instead of claiming it is fixed.
+const relisted = render(createElement(FixCell, { finding, fixes: fixes({ proposals: [proposal({ state: "verified_fixed" })] }) }));
+assert.match(relisted, /Prepare again/);
+assert.doesNotMatch(relisted, />Fixed</);
+// Until the proposal list loads, Prepare stays off and the failure is shown with a retry.
+assert.match(render(createElement(FixCell, { finding, fixes: fixes({ loadError: "down" }) })), /<button[^>]*disabled/);
+assert.equal(render(createElement(FixLoadError, { fixes: fixes() })), "");
+const loadError = render(createElement(FixLoadError, { fixes: fixes({ loadError: "down" }) }));
+assert.match(loadError, /role="alert"/);
+assert.match(loadError, /Retry/);
 
 // The review shows the exact change and one Apply per manifest; nothing renders while closed.
 assert.equal(render(createElement(FixReview, { fixes: fixes({ proposals: [prepared] }), findings: [finding] })), "");
@@ -132,6 +159,16 @@ assert.match(review, /another package in this workspace/);
 assert.match(review, /stopped before reading every package\.json/);
 assert.match(review, /Nothing is written until you apply it/);
 assert.match(render(createElement(FixReview, { findings: [finding], fixes: fixes({ reviewing: FINDING, error: "boom" }) })), /role="alert"/);
+// A newer check that no longer lists the finding leaves nothing to apply.
+const obsolete = render(createElement(FixReview, { findings: [], fixes: fixes({ reviewing: FINDING, proposals: [prepared] }) }));
+assert.doesNotMatch(obsolete, /Apply to /);
+assert.match(obsolete, /no longer lists this finding/);
+// Once the daemon says it cannot write fixes here, the diff stays but Apply goes away.
+const unsupported = render(
+  createElement(FixReview, { findings: [finding], fixes: fixes({ reviewing: FINDING, proposals: [prepared], applyUnsupported: true }) }),
+);
+assert.doesNotMatch(unsupported, /Apply to /);
+assert.match(unsupported, /bg-emerald-50/);
 
 const diff = render(createElement(DiffBlock, { diff: DIFF, label: "Proposed change" }));
 assert.match(diff, /bg-emerald-50[^>]*>\+ {4}&quot;lodash&quot;: &quot;\^4\.17\.21&quot;/);
@@ -155,6 +192,11 @@ assert.match(history, /Fixed/);
 assert.match(history, /Confirmed by a complete check/);
 assert.doesNotMatch(history, /left-pad|minimist/);
 assert.equal(render(createElement(FixHistory, { findings: [finding], fixes: fixes({ proposals: [proposal({ state: "applied" })] }) })), "");
+
+// The notice only promises a re-check that was actually scheduled.
+const appliedProposal = proposal({ state: "applied" });
+assert.match(appliedNotice(appliedProposal, { proposal: appliedProposal, lockfiles: ["package-lock.json"], verificationQueued: true }), /Update package-lock\.json.*checks again/);
+assert.match(appliedNotice(appliedProposal, { proposal: appliedProposal, lockfiles: [], verificationQueued: false }), /could not schedule a check.*Assess now/);
 
 // Copy names the problem and the recovery, and never offers to write what the daemon refused.
 assert.match(fixErrorMessage("fix_unsupported", "transitive_dependency"), /update that dependency instead/);
@@ -204,6 +246,13 @@ try {
     error instanceof FixRequestError && error.code === "fix_proposal_stale" && !error.message.includes("private-server-marker"));
   reply = { status: 422, body: { error: "fix_unsupported", reason: "no_fix_version" } };
   await assert.rejects(prepareFix(worktree, FINDING), /No fixed version has been published yet/);
+  // A refusal keeps the files it left unchanged so the review can still list them.
+  reply = {
+    status: 422,
+    body: { error: "fix_unsupported", reason: "spec_npm_alias", skipped: [{ manifest_path: "a/package.json", reason: "spec_npm_alias" }, { reason: 1 }], truncated: true },
+  };
+  await assert.rejects(prepareFix(worktree, FINDING), (error: unknown) =>
+    error instanceof FixRequestError && error.skipped.length === 1 && error.skipped[0]?.manifestPath === "a/package.json" && error.truncated);
   reply = { status: 200, body: { proposal: { proposal_id: "x" } } };
   await assert.rejects(applyFix("p".repeat(32)), FixRequestError);
 } finally {
