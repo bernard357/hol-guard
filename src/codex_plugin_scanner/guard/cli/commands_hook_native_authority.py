@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, TextIO
@@ -149,6 +150,19 @@ def _payload_workspace(payload: dict[str, object]) -> Path | None:
     return None
 
 
+def _cli_review_deadline(payload: dict[str, object]) -> float:
+    """The absolute deadline a one-shot CLI review runs under.
+
+    A harness hint is already absolute. Without one, the CLI's explicit
+    maximum bounds the review; the edge's own default is far shorter.
+    """
+
+    timing = RuntimeHookDeadline.cli_edge_kwargs(payload)
+    if "deadline" in timing:
+        return timing["deadline"]
+    return time.monotonic() + timing["edge_budget_seconds"]
+
+
 def emit_hook_review(
     harness: str,
     response: dict[str, Any],
@@ -170,7 +184,10 @@ def emit_hook_review(
         if stdout:
             _ = stream.write(stdout + "\n")
         if stderr:
-            print(stderr, file=sys.stderr)
+            # The verdict is already on stdout; a closed stderr must not turn
+            # the supplementary reason into a second, failing answer.
+            with suppress(OSError, ValueError):
+                print(stderr, file=sys.stderr)
         return exit_code
     if not response and not hook_event_pauses_when_unavailable(event_name):
         # An empty answer to an event that cannot pause the turn carries no
@@ -228,7 +245,7 @@ def route_native_hook(
             guard_home=context.guard_home,
             workspace=runtime_workspace or _payload_workspace(payload),
             store=store,
-            deadline=RuntimeHookDeadline.cli_edge_kwargs(payload).get("deadline"),
+            deadline=_cli_review_deadline(payload),
             claim_saved_approval=_claim_saved_approval,
             claimed_saved_allow_hash=_claimed_saved_allow_hash,
             claimed_approval_request_id=_claimed_approval_request_id,
