@@ -7,7 +7,6 @@ import shlex
 from collections.abc import Mapping
 from pathlib import Path
 
-SELF_APPROVAL_ACTION_CLASS = "Guard approval self-authorization command"
 SELF_APPROVAL_REASON = (
     "Guard blocks AI agents from approving or weakening Guard approval state from inside a protected shell. "
     "Review the original request in the local approval center or native harness prompt."
@@ -19,7 +18,6 @@ _GUARD_BINARIES = frozenset({"hol-guard", "plugin-guard"})
 _PYTHON_MODULES = frozenset({"codex_plugin_scanner", "codex_plugin_scanner.cli"})
 _PYTHON_OPTIONS_WITH_VALUES = frozenset({"-W", "-X", "--check-hash-based-pycs"})
 _RUN_WRAPPERS = frozenset({"hatch", "mise", "nix", "pipx", "poetry", "uv", "uvx"})
-_SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&"})
 _AGENT_ENV_MARKERS = frozenset(
     {
         "HOL_GUARD_HOOK_ARGV",
@@ -36,44 +34,11 @@ _AGENT_ENV_MARKERS = frozenset(
 )
 
 
-def is_guard_approval_mutation_command(command_text: str) -> bool:
-    """Return True for commands that let an agent mutate Guard approval state."""
-
-    parts = _split_shell_parts(command_text)
-    if not parts:
-        return False
-    return any(_segment_is_guard_approval_mutation(segment) for segment in _shell_segments(parts))
-
-
 def approval_resolution_invoked_from_agent(env: Mapping[str, str] | None = None) -> bool:
     """Detect known AI harness hook contexts for approval CLI mutation defense-in-depth."""
 
     source = env if env is not None else os.environ
     return any(str(source.get(key) or "").strip() for key in _AGENT_ENV_MARKERS)
-
-
-def _split_shell_parts(command_text: str) -> list[str]:
-    try:
-        lexer = shlex.shlex(command_text.replace("\n", " ; "), posix=True, punctuation_chars=";&|")
-        lexer.whitespace_split = True
-        return list(lexer)
-    except ValueError:
-        return command_text.split()
-
-
-def _shell_segments(parts: list[str]) -> list[list[str]]:
-    segments: list[list[str]] = []
-    current: list[str] = []
-    for part in parts:
-        if part in _SHELL_SEPARATORS:
-            if current:
-                segments.append(current)
-                current = []
-            continue
-        current.append(part)
-    if current:
-        segments.append(current)
-    return segments
 
 
 def _segment_is_guard_approval_mutation(segment: list[str], *, depth: int = 0) -> bool:
@@ -209,8 +174,6 @@ def _approval_tail_has_mutation(args: list[str]) -> bool:
 
 
 __all__ = [
-    "SELF_APPROVAL_ACTION_CLASS",
     "SELF_APPROVAL_REASON",
     "approval_resolution_invoked_from_agent",
-    "is_guard_approval_mutation_command",
 ]
