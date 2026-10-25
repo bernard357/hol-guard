@@ -34,23 +34,26 @@ _UNPRINTABLE = re.compile(r"[^\x20-\x7e]")
 
 _lock = threading.Lock()
 _sink: BackgroundSink | None = None
+_notice_sink: BackgroundSink | None = None
 
 
-def install_sink(sink: BackgroundSink) -> None:
-    """Route later background events to ``sink`` until it is released."""
+def install_sink(sink: BackgroundSink, *, notice: BackgroundSink | None = None) -> None:
+    """Route later background failures to ``sink`` and expected states to ``notice``."""
 
-    global _sink
+    global _sink, _notice_sink
     with _lock:
         _sink = sink
+        _notice_sink = notice
 
 
 def release_sink(sink: BackgroundSink) -> None:
-    """Stop routing to ``sink``; a newer daemon's sink is left alone."""
+    """Stop routing to ``sink`` and its notice sink; a newer daemon's are left alone."""
 
-    global _sink
+    global _sink, _notice_sink
     with _lock:
         if _sink == sink:
             _sink = None
+            _notice_sink = None
 
 
 def record_background_event(event: str, detail: str) -> bool:
@@ -61,6 +64,19 @@ def record_background_event(event: str, detail: str) -> bool:
     if sink is None:
         return False
     # A background worker must never die because diagnostics are closing.
+    with suppress(Exception):
+        sink(event, detail)
+        return True
+    return False
+
+
+def record_background_notice(event: str, detail: str) -> bool:
+    """Record an expected background state that is not a failure."""
+
+    with _lock:
+        sink = _notice_sink
+    if sink is None:
+        return False
     with suppress(Exception):
         sink(event, detail)
         return True
@@ -87,5 +103,6 @@ __all__ = [
     "failure_detail",
     "install_sink",
     "record_background_event",
+    "record_background_notice",
     "release_sink",
 ]
