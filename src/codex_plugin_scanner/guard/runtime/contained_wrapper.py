@@ -323,12 +323,14 @@ def _names_directory_flag(word: str, flags: tuple[str, ...]) -> bool:
 
 
 def _package_directory(tokens: list[tuple[str, bool]], base: Path) -> tuple[list[tuple[str, bool]], Path] | None:
-    """`bun --cwd <dir> run build` as `bun run build` in `<dir>`, as native authority reads it.
+    """`bun --cwd <dir> build` as `bun build` in `<dir>`, as native authority reads it.
 
-    One directory flag, before the verb or right after `run`. The directory is
-    joined to the physical working directory and normalized lexically, as the
-    package manager's `path.resolve` does, then resolved on disk. Other
-    spellings return None and keep the unwrapped path.
+    One directory flag, before the verb or right after `run`. Whatever follows
+    the flag is carried over whole, so an implicit script run such as
+    `pnpm build` is read in `<dir>` the way `pnpm run build` already was. The
+    directory is joined to the physical working directory and normalized
+    lexically, as the package manager's `path.resolve` does, then resolved on
+    disk. Other spellings return None and keep the unwrapped path.
     """
     flags = _DIRECTORY_FLAGS.get(tokens[0][0]) if tokens and not tokens[0][1] else None
     if flags is None:
@@ -348,10 +350,6 @@ def _package_directory(tokens: list[tuple[str, bool]], base: Path) -> tuple[list
         return None
     rest = words[:index] + words[index + consumed :]
     if value.startswith(("-", "~")) or "//" in value or not _PLAIN_WORD.fullmatch(value) or not rest:
-        return None
-    # Only scripts are projected; `bun x`, `npm exec` and other runners keep
-    # their own tool-runner path, as on the native side.
-    if rest[0] not in ("run", "test"):
         return None
     directory = Path(os.path.realpath(os.path.normpath(os.path.join(os.path.realpath(base), value))))
     if not directory.is_dir():
