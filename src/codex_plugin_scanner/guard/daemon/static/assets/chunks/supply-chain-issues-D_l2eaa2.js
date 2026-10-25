@@ -1,4 +1,4 @@
-import { a as resolveFeedStaleness } from "./feed-health-workspace-4Mbn3sjS.js";
+import { a as resolveFeedStaleness } from "./feed-health-workspace-D_7l7VbI.js";
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-BN08Sv5L.js";
 import { b as buildSupplyChainStats, r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus, c as resolveSupplyChainCloudDegradedState } from "./supply-chain-protection-stats-Bc9FBgdN.js";
 function resolveSupplyChainIssues(snapshot) {
