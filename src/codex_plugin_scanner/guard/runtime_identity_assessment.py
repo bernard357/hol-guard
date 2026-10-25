@@ -63,6 +63,14 @@ def assess_runtime_identity(request: dict[str, object]) -> RuntimeIdentityAssess
 
 
 def _native_request(request: dict[str, object]) -> dict[str, object]:
+    return run_native_identity_command(RUNTIME_IDENTITY_FEATURE, RUNTIME_IDENTITY_COMMAND, request)
+
+
+def run_native_identity_command(
+    feature: str, command: str, request: dict[str, object], *, timeout_seconds: float = _TIMEOUT_SECONDS
+) -> dict[str, object]:
+    """Send ``request`` to one native runtime-identity command and return its decoded reply object."""
+
     import os
 
     from .codex_hook_launch_runtime import run_isolated_hook_process
@@ -74,7 +82,7 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
         or not status.compatible
         or status.identity is None
         or status.capabilities is None
-        or RUNTIME_IDENTITY_FEATURE not in status.capabilities.features
+        or feature not in status.capabilities.features
     ):
         raise RuntimeIdentityError("runtime_identity_native_unavailable")
     runtime = status.identity.path
@@ -86,11 +94,11 @@ def _native_request(request: dict[str, object]) -> dict[str, object]:
         if dll_path:
             environment["PATH"] = dll_path
     completed = run_isolated_hook_process(
-        (str(runtime), RUNTIME_IDENTITY_COMMAND, "--stdin"),
+        (str(runtime), command, "--stdin"),
         input_text=json.dumps(request, sort_keys=True, separators=(",", ":")),
         cwd=runtime.parent,
         environment=environment,
-        timeout_seconds=_TIMEOUT_SECONDS,
+        timeout_seconds=timeout_seconds,
         output_limit=_OUTPUT_LIMIT_BYTES,
     )
     if (
@@ -176,4 +184,5 @@ __all__ = [
     "RuntimeIdentityAssessment",
     "RuntimeIdentityError",
     "assess_runtime_identity",
+    "run_native_identity_command",
 ]
