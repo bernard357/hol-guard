@@ -103,7 +103,10 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
     assert assessments.finish(store, claimed, outcome, now_ms=T0 + 1)
 
 
-def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("code", ["cloud_auth_error", "cloud_http_error", "cloud_timeout", "cloud_validation_error"])
+def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(
+    tmp_path: Path, monkeypatch, code: str
+) -> None:
     store, claimed = queued_run(tmp_path)
     snapshots(monkeypatch, runner, SNAPSHOT)
     unanswered = {
@@ -111,7 +114,7 @@ def test_a_package_cloud_could_not_answer_is_a_coverage_gap_not_a_finding(tmp_pa
         "ecosystem": "npm",
         "name": "left-pad",
         "resolvedVersion": "1.3.0",
-        "reasons": [{"code": "cloud_auth_error", "message": "m", "severity": "high"}],
+        "reasons": [{"code": code, "message": "m", "severity": "high"}],
     }
     audit = {**AUDIT, "evaluation": {"packages": [BLOCKED_PACKAGE, unanswered]}}
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: audit)

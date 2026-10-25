@@ -42,7 +42,9 @@ _FINDING_DECISIONS: Final = frozenset({"block", "ask", "warn"})
 # An automatic run never asks Cloud, so a package the cached bundle does not
 # cover comes back with one of these codes. They mean the answer is unknown,
 # which is a coverage gap rather than evidence that the package is risky.
-_LOOKUP_UNAVAILABLE: Final = frozenset({"cloud_auth_error", "cloud_http_error", "cloud_timeout"})
+_LOOKUP_UNAVAILABLE: Final = frozenset(
+    {"cloud_auth_error", "cloud_http_error", "cloud_timeout", "cloud_validation_error"}
+)
 
 
 def now_ms() -> int:

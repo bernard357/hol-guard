@@ -13,7 +13,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -42,11 +45,42 @@ def native_binary() -> None:
 
 
 @pytest.fixture
-def offline(monkeypatch: pytest.MonkeyPatch) -> None:
+def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     def no_network(*args, **kwargs):
         raise AssertionError("a background assessment must not open a connection")
 
     monkeypatch.setattr(egress_module, "_fetch_raw", no_network)
+    # Give Guard sync, Python and native alike, credentials that point at a
+    # local listener, so a Cloud request from any layer is caught rather than
+    # skipped for want of credentials.
+    listener = socket.create_server(("127.0.0.1", 0))
+    listener.settimeout(0.2)
+    attempts: list[object] = []
+    stopped = threading.Event()
+
+    def accept() -> None:
+        while not stopped.is_set():
+            try:
+                connection, _address = listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            attempts.append(connection.getsockname())
+            connection.close()
+
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    port = listener.getsockname()[1]
+    monkeypatch.setenv("HOL_GUARD_TEST_SYNC_URL", f"http://127.0.0.1:{port}/api/guard/receipts/sync")
+    monkeypatch.setenv("HOL_GUARD_TEST_ACCESS_TOKEN", "scenario-token")
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join()
+        listener.close()
+    assert attempts == [], "a background assessment must not contact Guard Cloud"
 
 
 class Clock:
