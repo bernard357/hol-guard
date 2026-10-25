@@ -86,6 +86,12 @@ fn a_missing_operand_is_not_proven_beside_a_step_that_could_create_it() {
         (format!("grep -rln x {r}/cfg"), true),
         (format!("mkdir -p {r}/cfg; grep -rln x {r}/cfg"), false),
         (format!("grep -rln x {r}/cfg; mkdir -p {r}/cfg"), false),
+        // A branch that only prints puts nothing at the missing root, so the
+        // probe shape agents write keeps the proof.
+        (format!("grep -rln x {r}/cfg || echo none"), true),
+        (format!("grep -rln x {r}/cfg || printf 'none\\n'"), true),
+        (format!("grep -rln x {r}/cfg || touch {r}/cfg"), false),
+        (format!("grep -rln x {r}/cfg || echo none > {r}/cfg"), false),
     ] {
         let model = crate::parse_command(&crate::CommandModelRequestV1 {
             command: command.clone(),

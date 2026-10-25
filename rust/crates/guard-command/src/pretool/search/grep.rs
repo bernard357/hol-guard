@@ -43,7 +43,10 @@ pub(crate) fn safe_grep_segment(
 
 /// A peer that cannot create a filesystem entry: no output redirect beyond
 /// `/dev/null`, and a command that only prints, filters or changes directory.
-/// `strict` admits only `cd` and stdin filters after a pipe.
+/// `strict` admits `cd`, stdin filters after a pipe, and the builtins that
+/// touch no path at all: `ls -R missing || echo absent` is how an agent probes
+/// for an optional tree, and the `echo` branch can no more create the root than
+/// `cd` can.
 pub(in crate::pretool) fn creates_nothing(segment: &crate::CommandSegmentV1, strict: bool) -> bool {
     let text = ["2>&1", "2>/dev/null", ">/dev/null"]
         .iter()
@@ -53,9 +56,10 @@ pub(in crate::pretool) fn creates_nothing(segment: &crate::CommandSegmentV1, str
     }
     match segment.executable.as_deref() {
         Some("cd") => true,
-        Some(_) if strict => {
-            segment.pipeline_index > 0
-                && crate::pretool::segment_proof::stdin_filter_segment(segment)
+        Some(executable) if strict => {
+            (segment.pipeline_index > 0
+                && crate::pretool::segment_proof::stdin_filter_segment(segment))
+                || pathless_builtin(executable)
         }
         Some(executable) => matches!(
             executable,
@@ -81,6 +85,16 @@ pub(in crate::pretool) fn creates_nothing(segment: &crate::CommandSegmentV1, str
         ),
         None => false,
     }
+}
+
+/// A program that writes nothing and opens no path: its operands are words it
+/// prints or compares, never names it creates. Without a redirect, which the
+/// caller has already refused, it cannot put an entry where a missing root is.
+fn pathless_builtin(executable: &str) -> bool {
+    matches!(
+        crate::pretool::executable_basename(executable),
+        "echo" | "printf" | "pwd" | "true" | "false" | ":"
+    )
 }
 
 pub(super) fn safe_stdin_arguments(arguments: &[String]) -> bool {
