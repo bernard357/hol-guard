@@ -10,11 +10,11 @@ The supported claim is intentionally narrow:
 
 ## Pieces
 
-- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its PyPI provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off. The `fail_on_severity` and `fail_on_check_errors` gates run after the attestation, so a release that fails a gate still gets an attested record of why.
+- `plugin-release/action.yml` is the composite action. It installs a pinned, hash-checked `hol-guard` Linux wheel after verifying its provenance against this repository, runs the scan and the Kit check, builds the evidence, and attests it. Registration with HOL defaults off. The `fail_on_severity` and `fail_on_check_errors` gates run after the attestation, so a release that fails a gate still gets an attested record of why.
 - `src/codex_plugin_scanner/plugin_release_evidence.py` defines the evidence contract.
 - `src/codex_plugin_scanner/plugin_release_runner.py` runs the evidence, registration and summary steps.
 
-The composite runs the evidence code from the installed wheel, so it needs a `hol-guard` release that contains these modules. The release pin (`plugin-release/guard-version.txt` and `plugin-release/guard-sha256.txt`) and the trusted reusable workflow `.github/workflows/plugin-release.yml` land after that release, the same way `guarded-repository.yml` pins its composite.
+The composite runs the evidence code from the installed wheel, so it needs a `hol-guard` release that contains these modules. `plugin-release/guard-version.txt` and `plugin-release/guard-sha256.txt` pin that wheel. A stable pin is downloaded from PyPI and its PyPI provenance is verified. An alpha pin (`X.Y.ZaN`) is downloaded from the `alpha/vX.Y.ZaN` GitHub prerelease, because alpha native wheels are not published to PyPI, and its GitHub attestation must name this repository's `publish.yml` on `main` as the signer. Either way the SHA-256 must match the pin. `.github/workflows/plugin-release-smoke.yml` runs the composite on a Plugin Kit fixture whenever the pin or the locks change. The trusted reusable workflow `.github/workflows/plugin-release.yml` pins this composite by commit, the same way `guarded-repository.yml` pins its composite.
 
 ## Trusted workflow
 

@@ -1,0 +1,56 @@
+name: Plugin Release smoke
+
+# Runs the HOL Plugin Release composite against a Plugin Kit fixture with the
+# pinned Guard wheel, so a pin bump or lock change that breaks the install,
+# scan, check or attestation steps fails here before a plugin author sees it.
+# Registration stays off: HOL accepts evidence only from the reusable workflow.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "plugin-release/**"
+      - "action/scanner-runtime-requirements.txt"
+      - "action/pypi-attestations-*.txt"
+      - ".github/workflows/plugin-release-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-release-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Plugin Release composite runs on a Kit fixture
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+      - name: Run HOL Plugin Release
+        id: release
+        uses: ./plugin-release
+        with:
+          plugin_dir: rust/crates/guard-plugin-kit/tests/fixtures/claude-plugin
+          fail_on_severity: none
+          register_release: "false"
+      - name: Check the outputs
+        env:
+          CHECK_PASSED: ${{ steps.release.outputs.check_passed }}
+          SUPPORTED_RUNTIMES: ${{ steps.release.outputs.supported_runtimes }}
+          EVIDENCE_SHA256: ${{ steps.release.outputs.evidence_sha256 }}
+          ATTESTATION_URL: ${{ steps.release.outputs.attestation_url }}
+        run: |
+          set -euo pipefail
+          test "$CHECK_PASSED" = "true"
+          test "$SUPPORTED_RUNTIMES" -ge 1
+          [[ "$EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ATTESTATION_URL" == https://github.com/* ]]
