@@ -44,3 +44,29 @@ fn a_background_job_that_moves_the_shell_stays_uncertain() {
         "node server.js --port=3000 & echo started"
     ));
 }
+
+#[test]
+fn a_quoted_or_escaped_builtin_stays_uncertain() {
+    // Either the split refuses the text or the prefix is read as moving the shell.
+    let uncertain = |text: &str| sequential_jobs(text).is_none() || background_moves_shell(text);
+    assert!(uncertain("'cd' sub && node server.js & node ../worker.js"));
+    assert!(uncertain(
+        "\"cd\" sub && node server.js & node ../worker.js"
+    ));
+    assert!(uncertain("c\\d sub && node server.js & node ../worker.js"));
+    assert!(uncertain(
+        "$(echo cd) sub && node server.js & node ../worker.js"
+    ));
+    assert!(uncertain(
+        "command cd sub && node server.js & node ../worker.js"
+    ));
+    assert!(uncertain("if true; then cd sub; fi & node ../worker.js"));
+}
+
+#[test]
+fn a_builtin_name_as_an_argument_moves_nothing() {
+    assert!(!background_moves_shell("echo cd & node server.js"));
+    assert!(!background_moves_shell(
+        "node server.js --port $PORT --env export & echo started"
+    ));
+}

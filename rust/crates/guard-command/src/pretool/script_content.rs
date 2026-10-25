@@ -208,8 +208,8 @@ pub(crate) fn sequential_jobs(text: &str) -> Option<String> {
 /// A background job runs in a subshell, so `cd app && npm start & curl ...`
 /// leaves `curl` in the starting directory. Read as a list, the `cd` would
 /// move every command after it, and the paths those commands name would
-/// resolve somewhere the shell never looks. Any such builtin or assignment
-/// ahead of the last job keeps the text uncertain.
+/// resolve somewhere the shell never looks. Any such builtin or assignment in
+/// command position ahead of the last job keeps the text uncertain.
 fn background_moves_shell(text: &str) -> bool {
     let Some((chars, separators)) = job_separators(text) else {
         return false;
@@ -221,35 +221,64 @@ fn background_moves_shell(text: &str) -> bool {
         .max()
         .unwrap_or(0);
     let prefix: String = chars[..ahead].iter().collect();
+    // Splitting ignores quoting, so it can only add candidate command words,
+    // never hide one that follows a real separator.
     prefix
-        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')'))
-        .any(|word| {
-            matches!(
-                word,
-                "cd" | "pushd"
-                    | "popd"
-                    | "source"
-                    | "."
-                    | "set"
-                    | "shopt"
-                    | "umask"
-                    | "export"
-                    | "unset"
-                    | "alias"
-                    | "declare"
-                    | "typeset"
-                    | "readonly"
-                    | "local"
-                    | "eval"
-                    | "exec"
-                    | "trap"
-                    | "ulimit"
-                    | "hash"
-                    | "enable"
-            ) || word.split_once('=').is_some_and(|(name, _)| {
-                name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            })
+        .split([';', '&', '|', '(', ')', '{', '}', '\n'])
+        .any(|command| command_word(command).is_some_and(moves_shell))
+}
+
+/// The word in command position of one simple command, past reserved words
+/// and the `command` and `builtin` wrappers that still run the builtin.
+fn command_word(command: &str) -> Option<&str> {
+    command.split_whitespace().find(|word| {
+        !matches!(
+            *word,
+            "!" | "if"
+                | "then"
+                | "else"
+                | "elif"
+                | "do"
+                | "while"
+                | "until"
+                | "time"
+                | "command"
+                | "builtin"
+        )
+    })
+}
+
+fn moves_shell(word: &str) -> bool {
+    // The shell strips quotes and escapes before it looks a builtin up, and a
+    // substitution can expand to one, so `'cd'`, `c\d` and `$(echo cd)` may
+    // all move the shell. Such a word is not unquoted here; it stays uncertain.
+    word.contains(['\'', '"', '\\', '`', '$'])
+        || matches!(
+            word,
+            "cd" | "pushd"
+                | "popd"
+                | "source"
+                | "."
+                | "set"
+                | "shopt"
+                | "umask"
+                | "export"
+                | "unset"
+                | "alias"
+                | "declare"
+                | "typeset"
+                | "readonly"
+                | "local"
+                | "eval"
+                | "exec"
+                | "trap"
+                | "ulimit"
+                | "hash"
+                | "enable"
+        )
+        || word.split_once('=').is_some_and(|(name, _)| {
+            name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         })
 }
 
