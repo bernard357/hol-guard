@@ -478,6 +478,9 @@ fn local_writes_in_a_linked_worktree_are_quiet_only_without_programs() {
         "git add notes.md > out.txt",
         "git switch -c feat/retry",
         "git checkout -b feat/retry",
+        // Moving to a branch the repository already holds writes only the
+        // index and work tree the checkout already owns.
+        "git switch main",
         "git stash",
         "git stash list",
         "git stash apply",
@@ -493,7 +496,6 @@ fn local_writes_in_a_linked_worktree_are_quiet_only_without_programs() {
         "git commit -e -m x",
         "git -c core.hooksPath=/tmp/hooks commit -m x",
         "git add notes.md && rm -rf build",
-        "git switch main",
         "git stash drop",
     ] {
         assert!(allowed(command).is_err(), "{command}");
