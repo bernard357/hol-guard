@@ -1,4 +1,5 @@
 import { fetchPluginUpdatesApi } from "../guard-api";
+import { isGuardDemoMode } from "../guard-demo";
 
 /**
  * Plugin update prompts. The daemon downloads HOL's public plugin and release
@@ -81,6 +82,8 @@ async function failureMessage(response: Response): Promise<string> {
 }
 
 export async function checkPluginUpdates(signal?: AbortSignal): Promise<PluginUpdatesResult> {
+  // The demo never reads or changes the real Guard home.
+  if (isGuardDemoMode()) return { status: "ok", updates: [], dismissed: 0 };
   let response: Response;
   try {
     response = await fetchPluginUpdatesApi("/v1/plugins/updates", { cache: "no-store", signal });
@@ -106,6 +109,7 @@ export async function checkPluginUpdates(signal?: AbortSignal): Promise<PluginUp
 }
 
 export async function dismissPluginUpdate(update: Pick<PluginUpdate, "slug" | "latestVersion">): Promise<void> {
+  if (isGuardDemoMode()) return;
   const response = await fetchPluginUpdatesApi("/v1/plugins/updates/dismiss", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

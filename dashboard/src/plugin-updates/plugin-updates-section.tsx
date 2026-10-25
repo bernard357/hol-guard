@@ -11,6 +11,7 @@ const RUNTIME_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
   "gemini-cli": "Gemini CLI",
   opencode: "OpenCode",
   vscode: "VS Code",
@@ -30,6 +31,17 @@ function updateKey(update: PluginUpdate): string {
   return `${update.slug}\u0000${update.runtime}`;
 }
 
+function dismissalKey(update: Pick<PluginUpdate, "slug" | "latestVersion">): string {
+  return `${update.slug}\u0000${update.latestVersion}`;
+}
+
+/** Drops prompts the reader dismissed while this answer was in flight. */
+export function withoutDismissed(result: PluginUpdatesResult, dismissed: ReadonlySet<string>): PluginUpdatesResult {
+  if (result.status !== "ok" || dismissed.size === 0) return result;
+  const updates = result.updates.filter((update) => !dismissed.has(dismissalKey(update)));
+  return { status: "ok", updates, dismissed: result.dismissed + result.updates.length - updates.length };
+}
+
 /**
  * "Update available" for installed plugins whose authors recorded a newer,
  * checked release on HOL. The check runs only when the reader asks, and a
@@ -41,17 +53,19 @@ export function PluginUpdatesSection() {
   const [dismissing, setDismissing] = useState<string | null>(null);
   const [dismissError, setDismissError] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const dismissedDuringCheck = useRef(new Set<string>());
   useEffect(() => () => controller.current?.abort(), []);
 
   const check = async () => {
     controller.current?.abort();
     const next = new AbortController();
     controller.current = next;
+    dismissedDuringCheck.current = new Set();
     setChecking(true);
     setDismissError(null);
     try {
       const answer = await checkPluginUpdates(next.signal);
-      if (!next.signal.aborted) setResult(answer);
+      if (!next.signal.aborted) setResult(withoutDismissed(answer, dismissedDuringCheck.current));
     } catch {
       // Aborted because the reader left or checked again.
     } finally {
@@ -68,15 +82,8 @@ export function PluginUpdatesSection() {
     setDismissError(null);
     try {
       await dismissPluginUpdate(update);
-      setResult((current) =>
-        current?.status === "ok"
-          ? {
-              status: "ok",
-              updates: current.updates.filter((item) => item.slug !== update.slug),
-              dismissed: current.dismissed + 1,
-            }
-          : current,
-      );
+      dismissedDuringCheck.current.add(dismissalKey(update));
+      setResult((current) => (current ? withoutDismissed(current, new Set([dismissalKey(update)])) : current));
     } catch (caught) {
       setDismissError(caught instanceof Error ? caught.message : "Guard could not dismiss this update.");
     } finally {

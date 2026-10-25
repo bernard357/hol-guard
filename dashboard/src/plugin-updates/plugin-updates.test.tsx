@@ -24,7 +24,9 @@ installWindow();
 const { checkPluginUpdates, dismissPluginUpdate, parsePluginUpdate, safeReleasesUrl } = await import(
   "./plugin-updates-api"
 );
-const { PluginUpdatesSection, runtimeLabel, urgentReasonCopy } = await import("./plugin-updates-section");
+const { PluginUpdatesSection, runtimeLabel, urgentReasonCopy, withoutDismissed } = await import(
+  "./plugin-updates-section"
+);
 const { fetchPluginUpdatesApi } = await import("../guard-api");
 
 type Seen = { url: string; method: string; body: string | null };
@@ -147,8 +149,36 @@ assert.equal(
   }),
   "Urgent: the installed release had a high or critical finding.",
 );
-assert.equal(runtimeLabel("gemini-cli"), "Gemini CLI");
+assert.equal(runtimeLabel("gemini"), "Gemini CLI");
 assert.equal(runtimeLabel("unknown-runtime"), "unknown-runtime");
+
+// A dismissal hides that version in every runtime, counts each hidden prompt,
+// and also applies to a check that was already in flight.
+{
+  const prompt = (slug: string, runtime: string, latestVersion: string) => ({
+    slug,
+    runtime,
+    installedVersion: "1.0.0",
+    latestVersion,
+    urgent: false,
+    reason: null,
+    releasesUrl: null,
+  });
+  const result = withoutDismissed(
+    {
+      status: "ok",
+      updates: [prompt("acme/kit", "codex", "2.0.0"), prompt("acme/kit", "claude-code", "2.0.0"), prompt("b/c", "codex", "1.1.0")],
+      dismissed: 1,
+    },
+    new Set(["acme/kit\u00002.0.0"]),
+  );
+  assert.deepEqual(result.status === "ok" ? [result.updates.map((u) => u.slug), result.dismissed] : null, [["b/c"], 3]);
+  const newer = withoutDismissed(
+    { status: "ok", updates: [prompt("acme/kit", "codex", "2.1.0")], dismissed: 0 },
+    new Set(["acme/kit\u00002.0.0"]),
+  );
+  assert.equal(newer.status === "ok" ? newer.updates.length : -1, 1);
+}
 
 // Nothing is fetched until the reader asks.
 {

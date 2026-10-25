@@ -78,7 +78,11 @@ def test_dismiss_passes_the_slug_and_version(monkeypatch: pytest.MonkeyPatch) ->
         {"slug": "acme/deploy-kit"},
         {"slug": "", "version": "0.4.0"},
         {"slug": "acme/deploy-kit", "version": 4},
-        {"slug": "a" * 513, "version": "0.4.0"},
+        {"slug": "a" * 257, "version": "0.4.0"},
+        {"slug": "é" * 129, "version": "0.4.0"},
+        {"slug": "acme/deploy-kit", "version": "-1.0"},
+        {"slug": "acme/deploy-kit", "version": "1.0 beta"},
+        {"slug": "acme/deploy-kit", "version": "1" * 65},
     ],
 )
 def test_dismiss_rejects_a_malformed_request(monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]) -> None:
@@ -89,5 +93,10 @@ def test_dismiss_rejects_a_malformed_request(monkeypatch: pytest.MonkeyPatch, pa
     plugin_updates_http.handle_plugin_updates_dismiss(_handler(answers), payload)
 
     assert called == []
-    assert answers[0][0] == 400
-    assert answers[0][1]["error"] == "invalid_plugin_update"
+    assert answers == [
+        (
+            400,
+            {"error": "invalid_plugin_update", "message": "Name the listing slug and the version to dismiss."},
+            _NO_STORE,
+        )
+    ]

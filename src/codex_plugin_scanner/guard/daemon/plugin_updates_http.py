@@ -9,6 +9,7 @@ plugins leaves the device.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,10 @@ from ..plugin_telemetry.report import PluginTelemetryError
 from ..plugin_telemetry.updates import check_updates, dismiss_update
 
 _NO_STORE = {"Cache-Control": "no-store, max-age=0"}
-_FIELD_LIMIT = 512
+# Match the native runtime's dismissal checks so a bad request is a 400 here
+# rather than a 503 from the runtime.
+_SLUG_BYTES = 256
+_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}")
 
 
 def _guard_home(handler: object) -> Path:
@@ -45,19 +49,26 @@ def handle_plugin_updates_read(handler: object) -> None:
     _writer(handler)(payload, extra_headers=_NO_STORE)
 
 
-def _field(payload: dict[str, object], name: str) -> str | None:
+def _text(payload: dict[str, object], name: str) -> str | None:
     value = payload.get(name)
     if not isinstance(value, str):
         return None
-    value = value.strip()
-    if not value or len(value) > _FIELD_LIMIT:
-        return None
-    return value
+    return value.strip() or None
+
+
+def _slug(payload: dict[str, object]) -> str | None:
+    slug = _text(payload, "slug")
+    return slug if slug is not None and len(slug.encode("utf-8")) <= _SLUG_BYTES else None
+
+
+def _version(payload: dict[str, object]) -> str | None:
+    version = _text(payload, "version")
+    return version if version is not None and _VERSION.fullmatch(version) else None
 
 
 def handle_plugin_updates_dismiss(handler: object, payload: dict[str, object]) -> None:
-    slug = _field(payload, "slug")
-    version = _field(payload, "version")
+    slug = _slug(payload)
+    version = _version(payload)
     if slug is None or version is None:
         _writer(handler)(
             {"error": "invalid_plugin_update", "message": "Name the listing slug and the version to dismiss."},

@@ -1,4 +1,4 @@
-import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bV as bulkCommandState, H as HiMiniChevronRight, bW as fetchLocalCliApi, bX as ExtensionBrandMark, c as HiMiniChevronDown, bY as fetchMcpProviderActions, bZ as previewLocalCliMutation, b_ as applyLocalCliMutation, b$ as LOCAL_CLI_CAPABILITIES, c0 as readJson, c1 as enrollablePackageScriptCommands, c2 as seenSuggestionMeta, c3 as HiMiniPlus, c4 as looksLikeProjectRelocatePaste, c5 as packageScriptFilterNeedle, e as HiMiniCheck, c6 as suggestedPackageScriptExtensions, c7 as filterExtensionSuggestions, c8 as suggestedHarnessExtensions, c9 as suggestedSeenExtensions, ca as keepsPackageScriptCatalog, cb as recognizeLocalCli, cc as preferredPackageScriptExtension, cd as looksLikePackageScriptPaste, ce as enrollmentCommandStates, cf as isBulkApproveGateReady, cg as HiMiniArrowLeft, ch as fetchLocalCliList, ci as normalizeLocalCliList, cj as unreviewedToolChangeCount, ck as refreshMcpInventory, cl as startGuardCloudConnect, cm as extensionEffectiveState, cn as permissionEffectiveState, co as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cp as fetchExtensionControlApi, cq as permissionForRule, cr as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cs as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, ct as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cu as startCancelableDiscoveryJob, cv as waitForMcpDiscoveryJob, cw as isLocalCliId, bc as guardAwareHref, cx as localCliHref, cy as fetchPluginUpdatesApi, cz as filterCodexHostApps, cA as connectorWorkspaceItems, cB as customExtensionNeedsReview, aM as HiMiniAdjustmentsHorizontal, cC as extensionDisplayName, cD as catalogRowSecondLine, cE as extensionStateLabel, cF as HiMiniGlobeAlt, cG as HiMiniFunnel, cH as discoveryFailureMessage, ba as WorkspacePageHeader, cI as refreshCodexHostInventory, cJ as CODEX_HOST_FALLBACK, cK as CONFIGURED_CONNECTIONS_FALLBACK, cL as loadCurrentDashboardBuild, cM as canonicalExtensionId, cN as extensionDetailHref, cO as DEFAULT_EXTENSION_DETAIL_URL_STATE, cP as acknowledgeDegradedExtensionControlAuthority, cQ as recoverExtensionControlAuthority, cR as readExtensionDetailUrlState, cS as parseProtectionRoute, cT as addCustomExtensionHref } from "../guard-dashboard.js";
+import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bV as bulkCommandState, H as HiMiniChevronRight, bW as fetchLocalCliApi, bX as ExtensionBrandMark, c as HiMiniChevronDown, bY as fetchMcpProviderActions, bZ as previewLocalCliMutation, b_ as applyLocalCliMutation, b$ as LOCAL_CLI_CAPABILITIES, c0 as readJson, c1 as enrollablePackageScriptCommands, c2 as seenSuggestionMeta, c3 as HiMiniPlus, c4 as looksLikeProjectRelocatePaste, c5 as packageScriptFilterNeedle, e as HiMiniCheck, c6 as suggestedPackageScriptExtensions, c7 as filterExtensionSuggestions, c8 as suggestedHarnessExtensions, c9 as suggestedSeenExtensions, ca as keepsPackageScriptCatalog, cb as recognizeLocalCli, cc as preferredPackageScriptExtension, cd as looksLikePackageScriptPaste, ce as enrollmentCommandStates, cf as isBulkApproveGateReady, cg as HiMiniArrowLeft, ch as fetchLocalCliList, ci as normalizeLocalCliList, cj as unreviewedToolChangeCount, ck as refreshMcpInventory, cl as startGuardCloudConnect, cm as extensionEffectiveState, cn as permissionEffectiveState, co as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cp as fetchExtensionControlApi, cq as permissionForRule, cr as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cs as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, ct as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cu as startCancelableDiscoveryJob, cv as waitForMcpDiscoveryJob, cw as isLocalCliId, bc as guardAwareHref, cx as localCliHref, bi as isGuardDemoMode, cy as fetchPluginUpdatesApi, cz as filterCodexHostApps, cA as connectorWorkspaceItems, cB as customExtensionNeedsReview, aM as HiMiniAdjustmentsHorizontal, cC as extensionDisplayName, cD as catalogRowSecondLine, cE as extensionStateLabel, cF as HiMiniGlobeAlt, cG as HiMiniFunnel, cH as discoveryFailureMessage, ba as WorkspacePageHeader, cI as refreshCodexHostInventory, cJ as CODEX_HOST_FALLBACK, cK as CONFIGURED_CONNECTIONS_FALLBACK, cL as loadCurrentDashboardBuild, cM as canonicalExtensionId, cN as extensionDetailHref, cO as DEFAULT_EXTENSION_DETAIL_URL_STATE, cP as acknowledgeDegradedExtensionControlAuthority, cQ as recoverExtensionControlAuthority, cR as readExtensionDetailUrlState, cS as parseProtectionRoute, cT as addCustomExtensionHref } from "../guard-dashboard.js";
 import { u as useConfirmDialog } from "./confirm-dialog-C2SCoXLE.js";
 const PROFILE_SETUP_COMMANDS = { wrangler: "npx wrangler" };
 const PROFILE_COMMAND_PARAM = "command";
@@ -7681,6 +7681,7 @@ async function failureMessage(response) {
   return FALLBACK_FAILURE;
 }
 async function checkPluginUpdates(signal) {
+  if (isGuardDemoMode()) return { status: "ok", updates: [], dismissed: 0 };
   let response;
   try {
     response = await fetchPluginUpdatesApi("/v1/plugins/updates", { cache: "no-store", signal });
@@ -7698,6 +7699,7 @@ async function checkPluginUpdates(signal) {
   return { status: "ok", updates, dismissed };
 }
 async function dismissPluginUpdate(update) {
+  if (isGuardDemoMode()) return;
   const response = await fetchPluginUpdatesApi("/v1/plugins/updates/dismiss", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -7709,6 +7711,7 @@ const RUNTIME_LABELS = {
   "claude-code": "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
   "gemini-cli": "Gemini CLI",
   opencode: "OpenCode",
   vscode: "VS Code"
@@ -7724,22 +7727,32 @@ function urgentReasonCopy(update) {
 function updateKey(update) {
   return `${update.slug}\0${update.runtime}`;
 }
+function dismissalKey(update) {
+  return `${update.slug}\0${update.latestVersion}`;
+}
+function withoutDismissed(result, dismissed) {
+  if (result.status !== "ok" || dismissed.size === 0) return result;
+  const updates = result.updates.filter((update) => !dismissed.has(dismissalKey(update)));
+  return { status: "ok", updates, dismissed: result.dismissed + result.updates.length - updates.length };
+}
 function PluginUpdatesSection() {
   const [result, setResult] = reactExports.useState(null);
   const [checking, setChecking] = reactExports.useState(false);
   const [dismissing, setDismissing] = reactExports.useState(null);
   const [dismissError, setDismissError] = reactExports.useState(null);
   const controller = reactExports.useRef(null);
+  const dismissedDuringCheck = reactExports.useRef(/* @__PURE__ */ new Set());
   reactExports.useEffect(() => () => controller.current?.abort(), []);
   const check = async () => {
     controller.current?.abort();
     const next = new AbortController();
     controller.current = next;
+    dismissedDuringCheck.current = /* @__PURE__ */ new Set();
     setChecking(true);
     setDismissError(null);
     try {
       const answer = await checkPluginUpdates(next.signal);
-      if (!next.signal.aborted) setResult(answer);
+      if (!next.signal.aborted) setResult(withoutDismissed(answer, dismissedDuringCheck.current));
     } catch {
     } finally {
       if (controller.current === next) {
@@ -7754,13 +7767,8 @@ function PluginUpdatesSection() {
     setDismissError(null);
     try {
       await dismissPluginUpdate(update);
-      setResult(
-        (current) => current?.status === "ok" ? {
-          status: "ok",
-          updates: current.updates.filter((item) => item.slug !== update.slug),
-          dismissed: current.dismissed + 1
-        } : current
-      );
+      dismissedDuringCheck.current.add(dismissalKey(update));
+      setResult((current) => current ? withoutDismissed(current, /* @__PURE__ */ new Set([dismissalKey(update)])) : current);
     } catch (caught) {
       setDismissError(caught instanceof Error ? caught.message : "Guard could not dismiss this update.");
     } finally {
