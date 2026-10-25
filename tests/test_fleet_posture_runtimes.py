@@ -150,7 +150,7 @@ def test_posture_carries_runtimes_and_matches_the_contract(
     store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _set_inventory(store, monkeypatch, [_row("skill-a")])
-    monkeypatch.setattr(fpr, "_observe", lambda _context, _now: _posture([_runtime()]))
+    monkeypatch.setattr(fpr, "_observe", lambda *_: _posture([_runtime()]))
 
     payload = _build(store, context, [FakeAdapter("claude-code")]).payload
 
@@ -176,7 +176,7 @@ def test_runtimes_are_observed_once_per_ttl(
     _set_inventory(store, monkeypatch, [])
     calls: list[object] = []
 
-    def observe(_context: object, now: object) -> dict[str, object]:
+    def observe(_context: object, now: object, _advisory: object) -> dict[str, object]:
         calls.append(now)
         return _posture([_runtime()])
 
@@ -205,7 +205,7 @@ def test_cached_runtimes_are_bound_to_the_workspace_and_key(
 ) -> None:
     observed: list[object] = []
 
-    def observe(context: HarnessContext, _now: object) -> dict[str, object]:
+    def observe(context: HarnessContext, _now: object, _advisory: object) -> dict[str, object]:
         observed.append(context.workspace_dir)
         return _posture([_runtime(path=f"{context.workspace_dir}/bin/node")])
 
@@ -235,14 +235,14 @@ def test_failed_observation_omits_the_section_and_is_retried(
 ) -> None:
     _set_inventory(store, monkeypatch, [])
 
-    def broken(_context: object, _now: object) -> dict[str, object]:
+    def broken(*_: object) -> dict[str, object]:
         raise OSError("boom")
 
     monkeypatch.setattr(fpr, "_observe", broken)
     adapters = [FakeAdapter("claude-code")]
     assert "runtimes" not in _build(store, context, adapters).payload
 
-    monkeypatch.setattr(fpr, "_observe", lambda _context, _now: _posture([_runtime()]))
+    monkeypatch.setattr(fpr, "_observe", lambda *_: _posture([_runtime()]))
     assert "runtimes" in _build(store, context, adapters).payload
 
 
@@ -252,14 +252,102 @@ def test_runtimes_give_way_before_inventory_rows(
     rows = [_row(f"skill-{index}") for index in range(20)]
     _set_inventory(store, monkeypatch, rows)
     adapters = [FakeAdapter("claude-code")]
-    monkeypatch.setattr(fpr, "_observe", lambda _context, _now: _posture([]))
+    monkeypatch.setattr(fpr, "_observe", lambda *_: _posture([]))
     without = _build(store, context, adapters, runtimes_ttl_seconds=0).payload
     del without["runtimes"]
     budget = fp.json_size(without) + 16
     monkeypatch.setattr(fp, "MAX_PAYLOAD_BYTES", budget)
-    monkeypatch.setattr(fpr, "_observe", lambda _context, _now: _posture([_runtime()] * fpr.MAX_RUNTIMES))
+    monkeypatch.setattr(fpr, "_observe", lambda *_: _posture([_runtime()] * fpr.MAX_RUNTIMES))
 
     payload = _build(store, context, adapters, runtimes_ttl_seconds=0).payload
 
     assert "runtimes" not in payload
     assert len(payload["inventory"]["items"]) == len(rows)  # type: ignore[index, arg-type]
+
+
+def _bundle(version: str) -> dict[str, object]:
+    return {"response": {"bundle": {"bundleVersion": version}}, "workspace_id": "w", "now": 1.0}
+
+
+def test_cached_advisory_bundle_reaches_the_observation(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[object] = []
+
+    def observe(_context: object, _now: object, advisory: object) -> dict[str, object]:
+        seen.append(advisory)
+        return _posture([_runtime()], coverage={"mode": "observed_only", "advisories_available": True})
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: (_bundle("v7"), None))
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    section = fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+
+    assert seen == [(_bundle("v7"), None)]
+    assert section is not None and section["advisoriesAvailable"] is True
+    assert section["items"][0]["advisoryIds"] == ["GHSA-aaaa"]
+
+
+def test_a_newly_synced_bundle_is_rematched_before_the_cache_expires(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    advisory: list[tuple[dict[str, object] | None, str | None]] = [(None, "runtime_advisory_bundle_not_cached")]
+    calls: list[object] = []
+
+    def observe(_context: object, _now: object, current: object) -> dict[str, object]:
+        calls.append(current)
+        return _posture([_runtime()])
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: advisory[0])
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=5))
+    advisory[0] = (_bundle("v7"), None)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=10))
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=15))
+    advisory[0] = (_bundle("v8"), None)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=20))
+
+    assert [call[0] for call in calls] == [None, _bundle("v7"), _bundle("v8")]  # type: ignore[index]
+
+
+def test_cached_matches_lapse_when_their_bundle_does(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expires = (NOW + timedelta(minutes=10)).timestamp()
+    calls: list[object] = []
+
+    def observe(_context: object, now: object, _advisory: object) -> dict[str, object]:
+        calls.append(now)
+        return _posture([_runtime()], advisory_source={"state": "verified", "valid_until": expires})
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: (_bundle("v7"), None))
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=9))
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=10))
+
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("field", ["workspace_id", "sync_keyring", "entitlement"])
+def test_a_changed_verification_input_is_rematched(
+    store: GuardStore, context: HarnessContext, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    advisory = [(_bundle("v7"), None)]
+    calls: list[object] = []
+
+    def observe(_context: object, _now: object, current: object) -> dict[str, object]:
+        calls.append(current)
+        return _posture([_runtime()])
+
+    monkeypatch.setattr(fpr, "_advisory_bundle", lambda _store: advisory[0])
+    monkeypatch.setattr(fpr, "_observe", observe)
+
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW)
+    advisory[0] = ({**_bundle("v7"), field: {"changed": True}}, None)
+    fpr.runtimes_section(store, context, hash_key=KEY, now=NOW + timedelta(minutes=1))
+
+    assert len(calls) == 2

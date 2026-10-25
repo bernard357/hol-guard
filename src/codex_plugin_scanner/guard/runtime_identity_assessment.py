@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Literal, cast
 
 RUNTIME_IDENTITY_FEATURE = "runtime-identity-assess-v1"
+# Accepts ``cached_bundle`` and verifies the bundle's runtime advisories natively.
+RUNTIME_IDENTITY_BUNDLE_FEATURE = "runtime-identity-assess-bundle-v1"
 RUNTIME_IDENTITY_COMMAND = "runtime-identity-assess"
 RUNTIME_IDENTITY_SCHEMA = "guard.runtime-identity-assessment.v1"
 
@@ -45,6 +47,9 @@ class RuntimeAdvisoryVerdict:
     affected_artifact_ids: tuple[str, ...]
     affected_instance_ids: tuple[str, ...]
     replacement_instance_ids: tuple[str, ...]
+    severity: str | None = None
+    known_exploited: bool = False
+    title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,7 @@ class RuntimeIdentityAssessment:
     scope_complete: bool
     artifacts: tuple[dict[str, object], ...]
     advisories: tuple[RuntimeAdvisoryVerdict, ...]
+    advisory_source: dict[str, object] | None = None
 
 
 def assess_runtime_identity(request: dict[str, object]) -> RuntimeIdentityAssessment:
@@ -63,7 +69,8 @@ def assess_runtime_identity(request: dict[str, object]) -> RuntimeIdentityAssess
 
 
 def _native_request(request: dict[str, object]) -> dict[str, object]:
-    return run_native_identity_command(RUNTIME_IDENTITY_FEATURE, RUNTIME_IDENTITY_COMMAND, request)
+    feature = RUNTIME_IDENTITY_BUNDLE_FEATURE if "cached_bundle" in request else RUNTIME_IDENTITY_FEATURE
+    return run_native_identity_command(feature, RUNTIME_IDENTITY_COMMAND, request)
 
 
 def run_native_identity_command(
@@ -127,10 +134,12 @@ def _parse_result(result: object) -> RuntimeIdentityAssessment:
         raise RuntimeIdentityError("runtime_identity_failed")
     if not all(_artifact_row_ok(row) for row in artifacts):
         raise RuntimeIdentityError("runtime_identity_failed")
+    source = result.get("advisory_source")
     return RuntimeIdentityAssessment(
         scope_complete=scope_complete,
         artifacts=tuple(artifacts),
         advisories=tuple(_parse_verdict(row) for row in advisories),
+        advisory_source=source if isinstance(source, dict) else None,
     )
 
 
@@ -162,6 +171,7 @@ def _parse_verdict(row: object) -> RuntimeAdvisoryVerdict:
     if not isinstance(advisory_id, str) or not isinstance(verdict, str) or verdict not in _VERDICTS:
         raise RuntimeIdentityError("runtime_identity_failed")
     reasons, artifact_ids, instance_ids, replacement_ids = (_text_tuple(row.get(key)) for key in _VERDICT_LISTS)
+    severity, title = row.get("severity"), row.get("title")
     return RuntimeAdvisoryVerdict(
         advisory_id=advisory_id,
         verdict=cast(AdvisoryVerdict, verdict),
@@ -169,6 +179,9 @@ def _parse_verdict(row: object) -> RuntimeAdvisoryVerdict:
         affected_artifact_ids=artifact_ids,
         affected_instance_ids=instance_ids,
         replacement_instance_ids=replacement_ids,
+        severity=severity if isinstance(severity, str) else None,
+        known_exploited=row.get("known_exploited") is True,
+        title=title if isinstance(title, str) else None,
     )
 
 
@@ -179,6 +192,7 @@ def _text_tuple(value: object) -> tuple[str, ...]:
 
 
 __all__ = [
+    "RUNTIME_IDENTITY_BUNDLE_FEATURE",
     "RUNTIME_IDENTITY_FEATURE",
     "RuntimeAdvisoryVerdict",
     "RuntimeIdentityAssessment",

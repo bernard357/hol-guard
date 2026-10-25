@@ -16,6 +16,7 @@ import pytest
 from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard import runtime_identity_candidates, runtime_posture
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
+from codex_plugin_scanner.guard.runtime_advisory_bundle import NOT_CONNECTED
 from codex_plugin_scanner.guard.runtime_identity_assessment import RuntimeIdentityError
 from codex_plugin_scanner.guard.runtime_identity_probe import (
     RUNTIME_PROBE_FEATURE,
@@ -272,10 +273,30 @@ def test_cli_json_shape(
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == "guard.runtime-posture.v1"
     assert payload["scope_complete"] is False
-    assert payload["coverage"]["reason"] == ADVISORIES_UNAVAILABLE
+    assert payload["coverage"]["reason"] == NOT_CONNECTED
     assert {"status", "error", "runtimes", "advisories", "unresolved_launches", "candidate_limit_reached"} <= set(
         payload
     )
+    assert payload["runtimes"][0]["family"] == "node"
+
+
+def test_cli_unreadable_store_costs_the_advisories_not_the_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, native_runtime: Path
+) -> None:
+    from codex_plugin_scanner.guard import runtime_advisory_bundle
+
+    def locked(*_args: object, **_kwargs: object) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(runtime_advisory_bundle, "cached_advisory_bundle", locked)
+    node = _nvm_node(tmp_path)
+    _patch_detections(monkeypatch, [_detection("node")], path=str(node.parent))
+
+    code = main(["guard", "runtime", "posture", "--json", *_guard_args(tmp_path)])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["coverage"]["reason"] == runtime_advisory_bundle.BUNDLE_UNREADABLE
     assert payload["runtimes"][0]["family"] == "node"
 
 
@@ -292,7 +313,7 @@ def test_cli_human_output_is_honest_about_coverage(
     assert "node 20.11.1, assurance self_reported" in out
     assert "not found on PATH: ghost-tool" in out
     assert "scope complete: no" in out
-    assert ADVISORIES_UNAVAILABLE in out
+    assert NOT_CONNECTED in out
     assert "No runtime is reported safe." in out
 
 

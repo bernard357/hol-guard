@@ -556,6 +556,7 @@ pub mod skill_document_text_evidence;
 pub mod skill_identity;
 pub mod strict_json;
 pub mod supply_chain_bundle;
+pub mod supply_chain_bundle_cache_trust;
 pub mod supply_chain_package_identity;
 pub mod supply_chain_risk;
 pub mod supply_chain_support;
