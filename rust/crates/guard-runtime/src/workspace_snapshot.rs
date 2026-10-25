@@ -247,6 +247,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if walk.unsupported_dependency_input {
         partial_reasons.push("unsupported_dependency_input");
     }
+    if walk.undiscovered_dependency_input {
+        partial_reasons.push("undiscovered_dependency_input");
+    }
     let secrets = walk.secrets.take().map(|scan| {
         let incomplete: Vec<&str> = partial_reasons
             .iter()

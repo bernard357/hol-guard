@@ -436,6 +436,14 @@ def test_an_unchecked_lockfile_from_another_ecosystem_does_not_block_verificatio
     assert _state(store, proposal_id) == "verified_fixed"
 
 
+def test_a_dependency_file_below_audit_discovery_does_not_block_verification(tmp_path: Path) -> None:
+    # The deep file was never audited, before or after the fix, so it cannot hide this finding.
+    coverage = {**COMPLETE_SUPPLY_CHAIN, "reasons": ["snapshot_undiscovered_dependency_input"]}
+    store, proposal_id = _applied(tmp_path)
+    _verification_run(store, snapshot="after", findings=[], coverage=coverage)
+    assert _state(store, proposal_id) == "verified_fixed"
+
+
 def test_a_run_on_the_same_snapshot_does_not_count(tmp_path: Path) -> None:
     store, proposal_id = _applied(tmp_path)
     _verification_run(store, snapshot="before", findings=[])

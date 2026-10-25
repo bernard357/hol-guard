@@ -1,5 +1,5 @@
 import { s as HiMiniCheckCircle, bS as HiMiniInformationCircle, a4 as HiMiniExclamationTriangle, j as jsxRuntimeExports, A as ActionButton, S as SectionLabel, d as HiMiniArrowPath, ek as HiMiniSignal, aA as HiMiniXCircle, ct as HiMiniClock, f as formatRelativeTime, a6 as Badge, T as Tag } from "../guard-dashboard.js";
-import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-39icEx1O.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-DhO6mwVa.js";
 function bundleRefreshKey(snapshot) {
   return [
     snapshot.cloud_policy_bundle_hash ?? "",
