@@ -1500,7 +1500,7 @@
   },
   {
    "verdict": "posix-primitive",
-   "note": "Windows has no openat/O_NOFOLLOW directory descriptors, so the manifest fix walks by path: symlink_metadata classifies symlinks and junctions as symlinks and each component is refused if it is one, and files open with FILE_FLAG_OPEN_REPARSE_POINT and must match the node inspected. That narrows but does not close a directory-to-junction swap race. The replace still checks the prepared hash and keeps the moved-aside copy, so a lost race reports stale or preserves the user's file rather than overwriting it. File modes and directory syncs are no-ops off Unix. The arm is compiled by the windows-native-runtime CI job; its logic has no Windows-only test yet.",
+   "note": "Windows has no openat/O_NOFOLLOW directory descriptors, so the manifest fix walks by path: symlink_metadata classifies symlinks and junctions as symlinks and each component is refused if it is one, and files open with FILE_FLAG_OPEN_REPARSE_POINT and must still be a regular file with the creation and last-write times inspected (stable std exposes no file index off Unix). That narrows but does not close a directory-to-junction swap race. The replace still checks the prepared hash and keeps the moved-aside copy, so a lost race reports stale or preserves the user's file rather than overwriting it. File modes and directory syncs are no-ops off Unix. This is a documented weaker guarantee than the Unix descriptor walk. The arm is compiled by the windows-native-runtime CI job; its logic has no Windows-only test yet, and the reparse-point refusal is covered only by the Unix symlink tests.",
    "file": "rust/crates/guard-runtime/src/workspace_fix_fs.rs",
    "item": "mod platform",
    "cfg": "not(unix)",

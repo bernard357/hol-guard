@@ -34,7 +34,9 @@ fn entry(metadata: &Metadata) -> Entry {
         },
         len: metadata.len(),
         mode: 0,
-        id: (0, 0),
+        // Stable std has no file index off Unix; creation and last-write
+        // times still tell a replaced or rewritten file from the one inspected.
+        id: (metadata.creation_time(), metadata.last_write_time()),
     }
 }
 
