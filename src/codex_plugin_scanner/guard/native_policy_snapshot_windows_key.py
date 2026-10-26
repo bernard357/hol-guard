@@ -28,12 +28,14 @@ _PROVISION_RESPONSE_LIMIT = 4096
 # Provisioning is idempotent, but a policy decision lookup runs it before every
 # request that needs resident authority. One process may only pay for the
 # runtime launch once per guard home and master, so a success is remembered
-# here. The memo never substitutes for the key: callers still read the file
-# itself, and a key removed behind the memo leaves the resident failing closed
-# on `native_policy_verifier_key_missing` rather than serving unverified.
+# here. A memo entry stands for one key file and one master: it carries the
+# file's identity, so a key replaced behind the memo misses it and the native
+# provisioner runs again and reports the mismatch, instead of the memo
+# answering for a file the runtime never looked at.
 _PROVISIONED_MAX = 32
 _provisioned_lock = threading.Lock()
-_provisioned: dict[tuple[str, str], None] = {}
+_ProvisionEntry = tuple[str, str, tuple[int, int, int] | None]
+_provisioned: dict[_ProvisionEntry, None] = {}
 
 
 def _master_fingerprint(policy_integrity_key: bytes) -> str:
@@ -42,12 +44,31 @@ def _master_fingerprint(policy_integrity_key: bytes) -> str:
     return hashlib.blake2b(policy_integrity_key, digest_size=16).hexdigest()
 
 
-def _remembered(entry: tuple[str, str]) -> bool:
+def _key_identity(path: Path) -> tuple[int, int, int] | None:
+    """Identify the key already on disk without reading its bytes.
+
+    Any answer but a readable file's identity means the memo cannot stand for
+    it, so an unreadable or absent key provisions again rather than being
+    remembered as something the runtime has checked.
+    """
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+
+def _remembered(entry: _ProvisionEntry) -> bool:
+    if entry[2] is None:
+        return False
     with _provisioned_lock:
         return entry in _provisioned
 
 
-def _remember(entry: tuple[str, str]) -> None:
+def _remember(entry: _ProvisionEntry) -> None:
+    if entry[2] is None:
+        return
     with _provisioned_lock:
         if entry in _provisioned:
             return
@@ -96,8 +117,8 @@ def provision_native_policy_verifier_key(
 
     state_dir = _runtime_state_directory(guard_home)
     path = state_dir / NATIVE_POLICY_VERIFIER_KEY_NAME
-    entry = (str(state_dir), _master_fingerprint(policy_integrity_key))
-    if _remembered(entry):
+    fingerprint = _master_fingerprint(policy_integrity_key)
+    if _remembered((str(state_dir), fingerprint, _key_identity(path))):
         return path
 
     status = native_runtime_status()
@@ -133,5 +154,5 @@ def provision_native_policy_verifier_key(
     ):
         raise NativePolicySnapshotError("native_policy_verifier_provision_failed")
 
-    _remember(entry)
+    _remember((str(state_dir), fingerprint, _key_identity(path)))
     return path

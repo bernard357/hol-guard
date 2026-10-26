@@ -66,6 +66,7 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
     from codex_plugin_scanner.guard.native_policy_snapshot import (
         provision_native_policy_verifier_key,
     )
+    from codex_plugin_scanner.guard.native_policy_snapshot_constants import NativePolicySnapshotError
     from codex_plugin_scanner.guard.native_resident_client import close_native_residents
 
     guard_home = tmp_path_factory.mktemp("native-context-guard-home")
@@ -96,13 +97,23 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
             # The managed resident refuses to serve until the policy verifier
             # key exists, and only the runtime can write it. With no runtime
             # there is no resident to key, so the no-binary suite is unchanged.
-            provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
-            _FIXTURE_KEYS[guard_home] = b"\x07" * 32
-            native_context.native_context_digest(
-                "launch_argv_digest",
-                {"argv": ["guard-context-warmup"]},
-                guard_home=guard_home,
-            )
+            try:
+                provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
+            except NativePolicySnapshotError as error:
+                # A configured binary that is missing, stale, or built without
+                # the provisioning feature is the same situation as no binary
+                # at all, so leave ambient digests unavailable instead of
+                # failing every test in the session. Any other code is a real
+                # provisioning failure and must not be swallowed.
+                if str(error) != "native_policy_verifier_runtime_unavailable":
+                    raise
+            else:
+                _FIXTURE_KEYS[guard_home] = b"\x07" * 32
+                native_context.native_context_digest(
+                    "launch_argv_digest",
+                    {"argv": ["guard-context-warmup"]},
+                    guard_home=guard_home,
+                )
         finally:
             if previous_native is None:
                 os.environ.pop("HOL_GUARD_NATIVE", None)

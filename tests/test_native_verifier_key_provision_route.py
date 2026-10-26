@@ -82,7 +82,15 @@ def _install(
 ) -> None:
     def run(path: Path, args: tuple[str, ...], *, input_text: str, **_kwargs: object) -> BoundedHookProcessResult:
         calls.append((path, args, input_text))
-        return results.pop(0)
+        result = results.pop(0)
+        if result.returncode == 0:
+            # The real runtime leaves the key behind, and the memo stands for
+            # the file it wrote, so a fake that writes nothing would make every
+            # repeat look like a first provisioning.
+            state_dir = Path(args[-1])
+            state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            (state_dir / NATIVE_POLICY_VERIFIER_KEY_NAME).write_bytes(b"k" * 32)
+        return result
 
     monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status or _status())
     monkeypatch.setattr(native_runtime, "_run_native_process_result", run)
@@ -121,6 +129,46 @@ def test_a_repeat_for_the_same_master_does_not_launch_the_runtime_again(
 
     assert first == second
     assert len(calls) == 1
+
+
+def test_a_key_replaced_behind_the_memo_is_sent_back_to_the_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A remembered success must not answer for a file nothing has checked.
+
+    Python never reads the key, so the only honest way to notice a replacement
+    is to stop standing for the old file and let the native provisioner look at
+    the new one.
+    """
+
+    guard_home = tmp_path / "guard-home"
+    guard_home.mkdir(mode=0o700)
+    calls: list[tuple[Path, tuple[str, ...], str]] = []
+    _install(monkeypatch, calls, [_ok(_reply()), _failure("native_policy_verifier_key_mismatch\n")])
+
+    key_path = route.provision_native_policy_verifier_key(guard_home, MASTER)
+    key_path.write_bytes(b"x" * 48)
+
+    with pytest.raises(NativePolicySnapshotError, match="native_policy_verifier_key_mismatch"):
+        route.provision_native_policy_verifier_key(guard_home, MASTER)
+
+    assert len(calls) == 2
+
+
+def test_a_key_removed_behind_the_memo_is_sent_back_to_the_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    guard_home = tmp_path / "guard-home"
+    guard_home.mkdir(mode=0o700)
+    calls: list[tuple[Path, tuple[str, ...], str]] = []
+    _install(monkeypatch, calls, [_ok(_reply()), _ok(_reply())])
+
+    key_path = route.provision_native_policy_verifier_key(guard_home, MASTER)
+    key_path.unlink()
+
+    route.provision_native_policy_verifier_key(guard_home, MASTER)
+
+    assert len(calls) == 2
 
 
 def test_a_changed_master_is_always_sent_back_to_the_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
