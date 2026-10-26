@@ -121,9 +121,8 @@ fn repository_hidden_below(
             return false;
         };
         let name = name.to_string_lossy().to_ascii_lowercase();
-        !guarded_hidden_name(&name)
-            && !name.starts_with(".env")
-            && !(content_read && name == ".git")
+        let administrative = content_read && name == ".git";
+        !(guarded_hidden_name(&name) || name.starts_with(".env") || administrative)
     }) && std::fs::symlink_metadata(repository.join(".git")).is_ok()
         && guard_secure_fs::sensitive_path_family(canonical).is_none()
         && !guard_secure_fs::credential_named_path(canonical)
