@@ -295,6 +295,7 @@ mod guard_config_harness;
 mod guard_config_iso;
 mod guard_config_load;
 mod guard_config_managed;
+mod guard_config_resolve;
 mod guard_config_update;
 mod guard_config_update_coerce;
 mod guard_config_update_harness;
