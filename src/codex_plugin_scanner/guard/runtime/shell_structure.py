@@ -39,10 +39,6 @@ def extract_command_substitution_spans(command: str) -> tuple[ShellCommandSubsti
     return tuple(ShellCommandSubstitution(**row) for row in call("substitutions", command))
 
 
-def extract_expanded_heredoc_substitution_spans(command: str) -> tuple[ShellCommandSubstitution, ...]:
-    return tuple(ShellCommandSubstitution(**row) for row in call("expanded_substitutions", command))
-
-
 def extract_command_substitutions(command: str) -> tuple[str, ...]:
     return tuple(row.body for row in extract_command_substitution_spans(command))
 
