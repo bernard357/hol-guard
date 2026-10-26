@@ -109,19 +109,19 @@ pub(super) fn peel(
             return Err("unsupported cd prefix");
         }
         let sequenced = operator(&tokens[2]) == Some(";");
-        let spelled = tokens[1].0.clone();
+        let target_text = tokens[1].0.clone();
         let target = match home_dir.filter(|_| rewritten_home) {
             // Only an unquoted leading `~` expands, so the rest of the word
             // spells the path from home. `~//x` is home/x: joining a path that
             // starts with a slash would drop home.
             Some(home) => Path::new(home).join(
-                spelled
+                target_text
                     .chars()
                     .skip(2)
                     .collect::<String>()
                     .trim_start_matches('/'),
             ),
-            None => PathBuf::from(&spelled),
+            None => PathBuf::from(&target_text),
         };
         if !exact {
             return Err("relative cd target");
