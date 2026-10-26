@@ -94,6 +94,12 @@ class FakeStore:
             "policy_bundle_keyring": review_trusted_keyring_payload(),
         }
 
+    def _policy_integrity_secret_material(self, *, create: bool) -> tuple[bytes | None, str | None]:
+        # The real store answers with no key until one is created; the resident
+        # reads that as ``local_signing_key_unavailable`` rather than an error.
+        del create
+        return None, None
+
     def get_sync_payload(self, key: str) -> dict[str, object] | list[object] | None:
         return self.payloads.get(key)
 
@@ -118,6 +124,9 @@ class FakeStore:
 
     def get_or_create_installation_id(self) -> str:
         return "22222222-2222-4222-8222-222222222222"
+
+    def get_device_metadata(self) -> dict[str, object]:
+        return {"installation_id": self.get_or_create_installation_id()}
 
     def get_guard_operation_for_approval_request(self, request_id: str) -> dict[str, object]:
         return {
