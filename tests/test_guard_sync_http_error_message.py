@@ -15,6 +15,7 @@ from codex_plugin_scanner.guard.runtime.runner import (
     _check_plan_restriction_403,
     _cloud_edge_block_from_http_error,
     _fetch_supply_chain_bundle_payload,
+    _refresh_guard_oauth_access_token_once,
     _sync_http_error_message,
     _urlopen_json_with_timeout_retry,
     _urlopen_with_timeout_retry,
@@ -265,6 +266,48 @@ def test_fetch_supply_chain_bundle_payload_reports_unreachable_guard_cloud_as_re
     assert exc_info.value.retryable is True
     assert str(exc_info.value) == "Guard Cloud could not be reached. Local Guard keeps protecting this machine."
     assert "Errno" not in str(exc_info.value)
+
+
+def _refresh_with_urlopen_failure(monkeypatch: pytest.MonkeyPatch, reason: BaseException) -> None:
+    def _raise(*_args: object, **_kwargs: object) -> object:
+        raise urllib.error.URLError(reason)
+
+    monkeypatch.setattr("codex_plugin_scanner.guard.runtime.runner._guard_runtime_was_upgraded", lambda: False)
+    monkeypatch.setattr("codex_plugin_scanner.guard.runtime.runner._sign_guard_dpop_proof", lambda **_kwargs: "proof")
+    monkeypatch.setattr("codex_plugin_scanner.guard.runtime.runner.managed_urlopen", _raise)
+    _refresh_guard_oauth_access_token_once(
+        token_endpoint="https://hol.org/api/guard/oauth/token",
+        client_id="client",
+        refresh_token="refresh",
+        dpop_key_material=object(),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        ConnectionRefusedError(61, "Connection refused"),
+        ConnectionResetError(54, "Connection reset by peer"),
+        socket.gaierror(8, "nodename nor servname provided, or not known"),
+        TimeoutError("timed out"),
+    ],
+)
+def test_oauth_refresh_reports_unreachable_guard_cloud_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    reason: OSError,
+) -> None:
+    with pytest.raises(GuardSyncNotAvailableError) as exc_info:
+        _refresh_with_urlopen_failure(monkeypatch, reason)
+    assert exc_info.value.retryable is True
+    assert str(exc_info.value) == "Guard Cloud could not be reached. Local Guard keeps protecting this machine."
+    assert "Errno" not in str(exc_info.value)
+
+
+def test_oauth_refresh_keeps_tls_failures_non_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        _refresh_with_urlopen_failure(monkeypatch, ssl.SSLCertVerificationError(1, "certificate verify failed"))
+    assert not isinstance(exc_info.value, GuardSyncNotAvailableError)
+    assert "certificate verify failed" in str(exc_info.value)
 
 
 def test_fetch_supply_chain_bundle_payload_keeps_tls_failures_non_retryable(

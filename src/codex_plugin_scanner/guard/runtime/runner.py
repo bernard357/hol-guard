@@ -2383,6 +2383,8 @@ def _refresh_guard_oauth_access_token_once(
             refresh_error_message = _oauth_refresh_error_message(error)
             raise RuntimeError(f"Guard OAuth token refresh failed: {refresh_error_message}") from error
         except OSError as error:
+            if _is_guard_cloud_unreachable_error(error):
+                raise GuardSyncNotAvailableError(_GUARD_CLOUD_UNREACHABLE_MESSAGE, retryable=True) from error
             raise RuntimeError(_sync_url_error_message(error)) from error
         if not isinstance(payload, dict):
             raise GuardSyncAuthorizationExpiredError(_guard_oauth_reauthorization_message())
