@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use guard_contracts::MAX_NATIVE_RESPONSE_BYTES;
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 
@@ -45,9 +46,26 @@ const OBSERVATION_COLUMNS: [&str; 16] = [
 
 const GRANT_ONLY_PREFIX: &str = "local-cli.";
 
+/// One inventory page stops here so a device with many connectors cannot
+/// build a reply the resident has to refuse, which the caller only ever sees
+/// as the store being unavailable. The slack covers the envelope the reply is
+/// framed in. Nothing is dropped: the page names the offset the caller reads
+/// from next, and the caller walks the offsets until the reply names none.
+const PAGE_BUDGET_BYTES: usize = MAX_NATIVE_RESPONSE_BYTES - 128 * 1024;
+
 /// `list_local_cli_items`: observations merged with grants, ranked,
 /// capability-annotated and, for MCP connectors, described.
-pub(crate) fn list_items(connection: &Connection, _args: &Args) -> StoreResult<Value> {
+///
+/// `offset` names the first item of the page, defaulting to the start of the
+/// list. The reply is `{"items": [...], "next_offset": int | null}`.
+pub(crate) fn list_items(connection: &Connection, args: &Args) -> StoreResult<Value> {
+    let offset = match args.raw("offset") {
+        None => 0,
+        Some(_) => match usize::try_from(args.int("offset")?) {
+            Ok(offset) => offset,
+            Err(_) => return value_error("offset must not be negative"),
+        },
+    };
     let observation_rows = observations(connection)?;
     let grant_rows = grants(connection)?;
     let authority_revision = authority_revision(connection)?;
@@ -142,7 +160,28 @@ pub(crate) fn list_items(connection: &Connection, _args: &Args) -> StoreResult<V
         command.insert("classification".to_owned(), classification);
     }
 
-    Ok(Value::Array(items.into_iter().map(Value::Object).collect()))
+    Ok(inventory_page(items, offset))
+}
+
+/// The items from `offset` that fit one reply, and the offset the caller
+/// reads from next. One item over the budget still comes back, so a page
+/// always advances rather than stalling on an item it cannot skip.
+pub(crate) fn inventory_page(items: Vec<Map<String, Value>>, offset: usize) -> Value {
+    let total = items.len();
+    let mut listed = Vec::new();
+    let mut bytes = 0;
+    for item in items.into_iter().skip(offset) {
+        bytes += serde_json::to_vec(&item).map_or(0, |encoded| encoded.len());
+        if !listed.is_empty() && bytes > PAGE_BUDGET_BYTES {
+            break;
+        }
+        listed.push(Value::Object(item));
+    }
+    let next = offset.saturating_add(listed.len());
+    json!({
+        "items": Value::Array(listed),
+        "next_offset": if next < total { json!(next) } else { Value::Null },
+    })
 }
 
 /// Observation rows in display order, with the columns a store that predates

@@ -118,12 +118,30 @@ class StoreLocalCliMixin:
         )
 
     def list_local_cli_items(self) -> list[dict[str, object]]:
-        """Every observed CLI and this-device grant, as the resident assembles it."""
+        """Every observed CLI and this-device grant, as the resident assembles it.
 
-        items = self._native_store_call("list_local_cli_items", {})
-        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
-            raise sqlite3.DatabaseError("native_local_cli_items_invalid")
-        return items
+        A connector carries its whole command catalog, so a device with many
+        of them holds more inventory than one reply may frame. The resident
+        answers a page at a time and names the offset the next page starts
+        at; this walks those offsets so callers still see the full list.
+        """
+
+        items: list[dict[str, object]] = []
+        offset = 0
+        while True:
+            page = self._native_store_call("list_local_cli_items", {"offset": offset})
+            if not isinstance(page, dict):
+                raise sqlite3.DatabaseError("native_local_cli_items_invalid")
+            listed = page.get("items")
+            if not isinstance(listed, list) or any(not isinstance(item, dict) for item in listed):
+                raise sqlite3.DatabaseError("native_local_cli_items_invalid")
+            items.extend(listed)
+            following = page.get("next_offset")
+            if following is None:
+                return items
+            if type(following) is not int or following <= offset or not listed:
+                raise sqlite3.DatabaseError("native_local_cli_items_invalid")
+            offset = following
 
     def read_local_cli_surface(self, cli_id: str) -> str | None:
         """The observed surface of ``cli_id``, or ``None`` when never observed."""

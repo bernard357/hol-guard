@@ -365,6 +365,8 @@ mod guard_store_local_cli_inventory_rows;
 #[cfg(test)]
 mod guard_store_local_cli_inventory_rows_tests;
 #[cfg(test)]
+mod guard_store_local_cli_inventory_tests;
+#[cfg(test)]
 mod guard_store_local_cli_inventory_vectors_tests;
 mod guard_store_local_cli_mcp_snapshot;
 #[cfg(test)]
