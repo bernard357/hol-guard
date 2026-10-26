@@ -31,6 +31,7 @@ from .network_status_command import load_network_status_payload
 _EPHEMERAL_SIGNED_APPROVAL_PLACEHOLDER = _protect_output._EPHEMERAL_SIGNED_APPROVAL_PLACEHOLDER
 _protect_payload_for_human_output = _protect_output._protect_payload_for_human_output
 
+_INLINE_APPROVAL_TIMEOUT_SECONDS = 300
 _PACKAGE_SHIM_PENDING_APPROVAL_STATUS = "HOL Guard: package approval pending; review it in Guard Inbox."
 
 
@@ -483,24 +484,30 @@ def _run_guard_protect_command(
             harness=harness,
         ),
     )
-    if (
-        bool(getattr(args, "package_shim_ui", False))
-        and not bool(getattr(args, "json", False))
-        and config.approval_wait_timeout_seconds > 0
-    ):
+    wait_result: dict[str, object] | None = None
+    if bool(getattr(args, "package_shim_ui", False)) and not bool(getattr(args, "json", False)):
+        from .protect_inline_approval import inline_package_approval
+
+        wait_result = inline_package_approval(
+            payload,
+            store=store,
+            workspace=protect_workspace,
+            timeout_seconds=config.approval_wait_timeout_seconds or _INLINE_APPROVAL_TIMEOUT_SECONDS,
+        )
         approval_request_ids = payload.get("approval_request_ids")
         request_ids = [
             str(item)
             for item in (approval_request_ids if isinstance(approval_request_ids, list) else [])
             if isinstance(item, str) and item
         ]
-        if request_ids:
+        if wait_result is None and request_ids and config.approval_wait_timeout_seconds > 0:
             _emit_package_shim_pending_approval_status()
             wait_result = wait_for_approval_requests(
                 store=store,
                 request_ids=request_ids,
                 timeout_seconds=config.approval_wait_timeout_seconds,
             )
+        if wait_result is not None:
             payload["approval_wait"] = wait_result
             wait_items = wait_result.get("items")
             resolved_items = [
