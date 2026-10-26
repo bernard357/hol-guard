@@ -367,6 +367,35 @@ fn retry_overflow_admissions(
     }
 }
 
+/// Auth workers only authenticate and read the frame header. Evaluation runs
+/// on the evaluation pool even when the whole payload arrived with the header:
+/// an auth worker held by a slow evaluation cannot answer the next caller's
+/// challenge, and that caller gives up after `AUTH_TIMEOUT` and falls back to
+/// the daemon. Concurrent hooks then miss the direct lane in bursts.
+fn dispatch_authenticated(
+    pending: PendingRequest,
+    control_sender: &SyncSender<PendingRequest>,
+    evaluation_sender: &SyncSender<PendingRequest>,
+) {
+    if pending.payload_prefix.len() == pending.length
+        && control::is_request(&pending.payload_prefix)
+    {
+        control::enqueue(control_sender, pending);
+        return;
+    }
+    match evaluation_sender.try_send(pending) {
+        Ok(()) => {}
+        Err(TrySendError::Full(mut returned)) => write_overload(&mut returned),
+        Err(TrySendError::Disconnected(returned)) => {
+            resident_diagnostics::finish_since(
+                Phase::ResidentDispatchWait,
+                Status::Error,
+                returned.accepted_at,
+            );
+        }
+    }
+}
+
 pub(crate) fn start_resident_workers(
     token: Arc<[u8; crate::AUTH_TOKEN_BYTES]>,
     policy_store: Option<Arc<crate::policy_store::PolicySnapshotStore>>,
@@ -374,7 +403,7 @@ pub(crate) fn start_resident_workers(
     let (control_sender, mut workers) = control::start(policy_store.clone());
     let (evaluation_sender, evaluation_receiver) =
         sync_channel::<PendingRequest>(crate::evaluation_queue_capacity() - control::capacity());
-    let evaluation_policy_store = policy_store.clone();
+    let evaluation_policy_store = policy_store;
     let evaluation_control_sender = control_sender.clone();
     workers.extend(spawn_workers(
         crate::evaluation_workers() - control::WORKERS,
@@ -416,28 +445,7 @@ pub(crate) fn start_resident_workers(
                 Err(_) => return,
             };
             pending.payload_prefix.truncate(available);
-            if available == pending.length {
-                if control::is_request(&pending.payload_prefix) {
-                    control::enqueue(&control_sender, pending);
-                } else {
-                    handle_pending_request(pending, policy_store.clone(), Some(&control_sender));
-                }
-                return;
-            }
-            match evaluation_sender.try_send(pending) {
-                Ok(()) => {}
-                Err(TrySendError::Full(returned)) => {
-                    let mut pending = returned;
-                    write_overload(&mut pending);
-                }
-                Err(TrySendError::Disconnected(returned)) => {
-                    resident_diagnostics::finish_since(
-                        Phase::ResidentDispatchWait,
-                        Status::Error,
-                        returned.accepted_at,
-                    );
-                }
-            }
+            dispatch_authenticated(pending, &control_sender, &evaluation_sender);
         },
     ));
     let overflow_primary = authentication_sender.clone();
