@@ -87,27 +87,30 @@ pub(crate) fn upsert_policy(connection: &Connection, args: &Args) -> StoreResult
     let decision_id = connection.last_insert_rowid();
 
     let next_control_state = match signing_material(args)? {
-        Some((key, key_id, current_generation)) if !is_remote_policy_source(Some(source)) => {
-            advance_generation(
-                connection,
-                &key,
-                key_id,
-                now,
-                current_generation,
-                decision_id,
-            )?
-        }
+        Some(material) if !is_remote_policy_source(Some(source)) => advance_generation(
+            connection,
+            &material.key,
+            material.key_id,
+            now,
+            material.current_generation,
+            decision_id,
+        )?,
         _ => Value::Null,
     };
     Ok(json!({ "decision_id": decision_id, "next_control_state": next_control_state }))
 }
 
-/// The key, its id and the generation to advance from, when the caller shipped
-/// all three. A partial set is a caller contract error, not a quiet unsigned
-/// write: the Python store only ships the key once it has resolved every part.
-fn signing_material<'a>(
-    args: &Args<'a>,
-) -> StoreResult<Option<(Zeroizing<Vec<u8>>, &'a str, i64)>> {
+/// The key, its id and the generation to advance from.
+struct SigningMaterial<'a> {
+    key: Zeroizing<Vec<u8>>,
+    key_id: &'a str,
+    current_generation: i64,
+}
+
+/// The signing material, when the caller shipped all three parts. A partial
+/// set is a caller contract error, not a quiet unsigned write: the Python
+/// store only ships the key once it has resolved every part.
+fn signing_material<'a>(args: &Args<'a>) -> StoreResult<Option<SigningMaterial<'a>>> {
     let encoded = args.opt_str("integrity_key_b64")?;
     let key_id = args.opt_str("integrity_key_id")?;
     let generation = match args.raw("current_generation") {
@@ -123,7 +126,11 @@ fn signing_material<'a>(
             if key.is_empty() || key.len() > MAX_KEY_BYTES || key_id.is_empty() || generation < 0 {
                 return value_error("native_policy_integrity_key_invalid");
             }
-            Ok(Some((key, key_id, generation)))
+            Ok(Some(SigningMaterial {
+                key,
+                key_id,
+                current_generation: generation,
+            }))
         }
         _ => value_error("native_guard_store_invalid"),
     }
