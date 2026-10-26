@@ -1,4 +1,8 @@
-"""Strict resident transport for source-faithful shell helpers."""
+"""Test client for the resident shell-helper op.
+
+No runtime module calls the op through Python any more; the tests keep using
+this strict transport to drive the resident directly.
+"""
 
 from __future__ import annotations
 
@@ -13,20 +17,14 @@ class NativeShellHelpersError(RuntimeError, ValueError):
     """The native shell owner could not supply a bound answer."""
 
 
-def runtime_key() -> tuple[object, ...]:
-    from .native_context import _native_runtime_status_memo as native_runtime_status
-
-    status = native_runtime_status()
-    if not status.available or not status.compatible or status.identity is None:
-        raise NativeShellHelpersError("native_shell_helpers_unavailable")
-    identity = status.identity
-    return (identity.path, identity.size, identity.mtime_ns, identity.sha256)
-
-
 def call(action: str, command: str, **fields: Any) -> Any:
-    from . import native_execution
-    from .native_context import _canonical_request_sha256, _resolve_digest_home, ensure_resident_prerequisite
-    from .native_context import _native_runtime_status_memo as native_runtime_status
+    from codex_plugin_scanner.guard import native_execution
+    from codex_plugin_scanner.guard.native_context import (
+        _canonical_request_sha256,
+        _resolve_digest_home,
+        ensure_resident_prerequisite,
+    )
+    from codex_plugin_scanner.guard.native_context import _native_runtime_status_memo as native_runtime_status
 
     deadline = time.monotonic() + 8.0
     home = _resolve_digest_home(None)

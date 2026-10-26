@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.native_shell_helpers import _valid, call
+from tests.native_shell_helpers_client import _valid, call
 
 _VECTORS = json.loads(
     (
