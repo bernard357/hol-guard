@@ -15,7 +15,11 @@ The Kit runs inside the HOL Guard native runtime. It reads only the folder you n
 | `hol-guard plugin links [path]` | Prints the install command for each runtime the repository already supports, and what is left to list it everywhere. | 0, or 2 could not run |
 | `hol-guard plugin init [path] [--name NAME]` | In a plugin repository, writes `hol.json`. In a new folder (empty, or holding only a README, a LICENSE or dotfiles) with `--name`, scaffolds a minimal Claude Code plugin with one skill. Never overwrites a file. | 0, or 2 could not run |
 
+| `hol-guard plugin stats <owner/plugin>` | For a HOL listing you own, prints its views, unique visitors and install clicks for the last 28 days and last week's attested installs by runtime. Reads a stats key from `HOL_API_KEY`; create one under Stats in your terminal in the HOL plugin workspace. The key can only read listings its account owns, and HOL withholds any install count under its minimum. | 0, or 2 could not run |
+
 Every command accepts `--json` for the full machine-readable result.
+
+`stats` is the only command that sends anything: one request to HOL with the key. Keep the key in a secret store or CI secret, not in a script or shell history.
 
 ## Sources the Kit reads
 

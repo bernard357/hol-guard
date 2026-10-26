@@ -1,4 +1,4 @@
-"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|install|uninstall``.
+"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|install|uninstall|stats``.
 
 Detection, checks, packaging and file writes run in the native runtime's
 ``plugin-kit`` command. This module parses arguments, sends one request and
@@ -246,6 +246,16 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         if name == "install":
             command.add_argument("--spec-file", help="Read the install spec from a file instead of HOL (offline, CI).")
         command.add_argument("--json", action="store_true", help="Print the plan as JSON.")
+    stats = commands.add_parser(
+        "stats",
+        help="Print a listing you own's views and attested installs from HOL (needs HOL_API_KEY).",
+        description=(
+            "Print a listing you own's views for the last 28 days and last week's attested installs. "
+            "Reads a stats key from HOL_API_KEY; create one in the HOL plugin workspace."
+        ),
+    )
+    stats.add_argument("slug", help="HOL listing you own, such as owner/plugin.")
+    stats.add_argument("--json", action="store_true", help="Print HOL's answer as JSON.")
     return parser
 
 
@@ -402,12 +412,29 @@ def _install(args: argparse.Namespace) -> int:
         return 2
 
 
+def _stats(args: argparse.Namespace) -> int:
+    from . import stats
+
+    try:
+        result = stats.fetch_stats(args.slug, stats.read_key())
+    except stats.PluginStatsError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print("\n".join(stats.render_stats(result)))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard plugin") -> int:
     args = build_parser(program_name=program_name).parse_args(argv)
     if args.command in {"install", "uninstall"}:
         return _install(args)
     if args.command == "convert":
         return _convert(args)
+    if args.command == "stats":
+        return _stats(args)
     result = _call(_request(args))
     if result is None:
         return 2
