@@ -354,18 +354,25 @@ fn stale_anchor_is_a_rollback() {
 }
 
 #[test]
-fn abandoned_prepared_transition_is_rolled_back_by_the_writer() {
+fn an_abandoned_prepare_is_asked_about_once_then_stops_holding_the_read_back() {
     let home = Home::new();
     let anchor = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
     home.commit(2, &catalog('a'), &[], "prepared");
     let result = run(&read_request(&home, &catalog('a'), Some(anchor.clone())));
     assert_eq!(result["action"]["action"], json!("roll_back_abandoned"));
     assert_eq!(result["action"]["revision"], json!(1));
+    // The caller asked and the row is still here, which is what a reader
+    // holding only a shared lease always sees: it may not write. The prepare
+    // the anchor never moved past decides nothing, so the committed authority
+    // below it is served and keeps enforcing rather than stopping every
+    // command on the device.
     let retried = ExtensionControlAuthorityRequestV1 {
         rollback_attempted: true,
         ..read_request(&home, &catalog('a'), Some(anchor))
     };
-    assert_eq!(health(&run(&retried)), "recovery-required");
+    let served = run(&retried);
+    assert_eq!(health(&served), "protected");
+    assert_eq!(served["view"]["revision"], json!(1));
 }
 
 #[test]

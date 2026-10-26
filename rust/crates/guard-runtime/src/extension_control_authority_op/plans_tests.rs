@@ -270,6 +270,25 @@ fn commit_plan_rereads_once_before_giving_up_on_recovery() {
 }
 
 #[test]
+fn a_commit_waits_rather_than_take_another_requests_prepared_revision() {
+    let home = Home::new();
+    let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
+    home.commit(2, &catalog('a'), &[local(&catalog('a'))], "prepared");
+    // The read serves the committed view while that row waits, so the health
+    // this request was handed says nothing about the revision above it. The
+    // slot itself is what holds the commit back: a read that may roll the row
+    // back runs first, and once one has, the row is a live transition this
+    // request must not take.
+    let mut request = commit_request(&home, &head, view("protected", 1), commit(3, 1));
+    assert_eq!(run(&request)["plan"]["outcome"], json!("reread"));
+    request.rollback_attempted = true;
+    assert_eq!(
+        refusal(&run(&request)),
+        "extension control authority unavailable"
+    );
+}
+
+#[test]
 fn a_retry_resumes_its_own_prepared_transition() {
     let home = Home::new();
     let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");

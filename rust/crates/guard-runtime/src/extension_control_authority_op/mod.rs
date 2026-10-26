@@ -367,7 +367,7 @@ impl Ctx<'_> {
             }
             return recovery();
         }
-        if self.pending_transition(revision + 1)?.is_some() {
+        if let Some(pending) = self.pending_transition(revision + 1)? {
             if !self.request.rollback_attempted {
                 return Ok(Read::Action(json!({
                     "action": "roll_back_abandoned",
@@ -376,7 +376,21 @@ impl Ctx<'_> {
                     "anchor": anchor.to_value(),
                 })));
             }
-            return recovery();
+            // The caller asked and the row is still here: either its own retry
+            // window has not run out, or the caller reads under a shared lease
+            // and cannot write at all. Neither says anything about the
+            // authority this read already authenticated. A prepare the anchor
+            // never moved past carries nothing the device enforces, so the
+            // committed snapshot below it is served and the row is left to the
+            // next writer, which holds the lock exclusively and discards it
+            // once its window closes. Reporting recovery here instead would
+            // stop every command on the device -- with no approval to offer,
+            // since there is no decision left to make -- until a writer
+            // happened to run. A pending row of any other shape is a state
+            // this read may not discount, and still needs explicit recovery.
+            if !self.pending_carries_no_authority(&pending)? {
+                return recovery();
+            }
         }
         if anchor.phase != Phase::Committed {
             return recovery();

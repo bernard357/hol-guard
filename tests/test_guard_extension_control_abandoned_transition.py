@@ -89,7 +89,39 @@ def test_recent_prepared_transition_survives_reads_so_the_same_request_can_retry
 
     view = store.read_extension_control_authority_for_registry(BUILT_IN_COMMAND_EXTENSION_REGISTRY)
 
-    assert view.health is AuthorityHealth.RECOVERY_REQUIRED
+    # The row stays for its own retry, and the authority it never anchored
+    # keeps enforcing in the meantime.
+    assert view.health is AuthorityHealth.PROTECTED
+    assert view.revision == 0
+    assert _transition_count(store) == 1
+
+
+def test_read_only_reads_keep_enforcing_while_a_prepared_row_waits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader that cannot write must not turn an abandoned prepare into a global block.
+
+    Hook-path reads take a shared lease, so they can never remove the row no
+    matter how long it sits there. Reporting recovery to them would stop every
+    command on the device, with no approval to offer, until a writer happened
+    to run.
+    """
+
+    monkeypatch.setattr(transitions, "_now", _after_retry_window)
+    secrets = MemorySecretStore()
+    store = _store(tmp_path, secrets)
+    _crash_after_prepare(store, secrets, monkeypatch)
+    assert _transition_count(store) == 1
+    # A reader under a shared lease asks for the rollback and gets nowhere,
+    # however long the row has sat there.
+    monkeypatch.setattr(store, "_roll_back_abandoned_transition", lambda *_args, **_kwargs: False)
+
+    view = store.read_extension_control_authority_for_registry(
+        BUILT_IN_COMMAND_EXTENSION_REGISTRY, read_only=True
+    )
+
+    assert view.health is AuthorityHealth.PROTECTED
+    assert view.revision == 0
     assert _transition_count(store) == 1
 
 
