@@ -58,6 +58,7 @@ def _plan(tmp_path: Path, payload: object = PAYLOAD, **kwargs: Any) -> tuple[Any
         harness="codex",
         workspace=tmp_path / "workspace",
         guard_home=tmp_path / "guard",
+        review_reason=kwargs.pop("review_reason", "native_package_review"),
         **kwargs,
     )
 
@@ -78,6 +79,7 @@ def test_a_plan_returns_the_artifact_and_whether_it_may_allow(monkeypatch: pytes
     assert request["payload"] == PAYLOAD
     assert request["harness"] == "codex"
     assert request["home_dir"] == str(tmp_path / "home")
+    assert request["review_reason"] == "native_package_review"
 
 
 def test_no_artifact_is_an_answer_not_a_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -160,9 +162,36 @@ def test_the_resident_plans_exec_flows_and_copilot_tool_args(
     workspace.mkdir()
 
     artifact, may_allow = bridge.package_review_plan(
-        payload, harness="copilot", workspace=workspace, guard_home=package_intent_native
+        payload,
+        harness="copilot",
+        workspace=workspace,
+        guard_home=package_intent_native,
+        review_reason="native_package_review",
     )
 
     assert artifact is not None
     assert artifact.metadata["intent_kind"] == intent_kind
+    assert may_allow is False
+
+
+@pytest.mark.usefixtures("package_intent_native")
+@pytest.mark.parametrize(
+    ("command", "planned"),
+    [("npx create-vite@5.1.0", True), ("bunx @angular/cli@19.0.0", True), ("npm install minimist@1.2.8", False)],
+)
+def test_the_resident_plans_a_command_review_only_for_npx_and_bunx(
+    tmp_path: Path, package_intent_native: Path, command: str, planned: bool
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    artifact, may_allow = bridge.package_review_plan(
+        {"tool_input": {"command": command}},
+        harness="codex",
+        workspace=workspace,
+        guard_home=package_intent_native,
+        review_reason="native_command_review_required",
+    )
+
+    assert (artifact is not None) is planned
     assert may_allow is False

@@ -15,6 +15,7 @@ fn request(workspace: &str, payload: Value) -> PackageReviewPlanRequestV1 {
         harness: "codex".to_owned(),
         payload,
         home_dir: None,
+        review_reason: None,
     }
 }
 
@@ -55,6 +56,39 @@ fn exec_flows_are_planned_for_blocks_only() {
             "{command}"
         );
         assert_eq!(answer["may_allow"], false, "{command}");
+    }
+}
+
+/// The edge gives `npx` and `bunx` a command review. Their packages are still
+/// fetched, so the review is planned, for a block verdict only; any other
+/// command under that reason is left to the review.
+#[test]
+fn a_command_review_plans_only_npx_and_bunx_launches() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let answer = |command: &str| {
+        let mut input = request(&workspace.path().to_string_lossy(), shell(command));
+        input.review_reason = Some(super::LAUNCH_REVIEW_REASON.to_owned());
+        let bytes = evaluate_package_review_plan(&input).expect("request must encode a result");
+        serde_json::from_slice::<Value>(&bytes).expect("result")["payload"].clone()
+    };
+    for command in ["npx create-vite@5.1.0", "bunx @angular/cli@19.0.0"] {
+        let planned = answer(command);
+        assert_eq!(
+            planned["artifact"]["metadata"]["intent_kind"], "execute",
+            "{command}"
+        );
+        assert_eq!(planned["may_allow"], false, "{command}");
+    }
+    for command in [
+        "npm install zod --ignore-scripts --allow-git=none",
+        "pnpm dlx create-next-app@14.2.0",
+        "npm exec --package=create-vite@5.1.0 create-vite",
+    ] {
+        assert_eq!(
+            answer(command),
+            json!({"artifact": null, "may_allow": false}),
+            "{command}"
+        );
     }
 }
 

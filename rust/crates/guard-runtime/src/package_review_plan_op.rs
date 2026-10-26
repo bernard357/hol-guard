@@ -10,6 +10,11 @@
 //! A block verdict always applies: stopping a command runs nothing. Only an
 //! npm install whose npm the resident proved may continue on an allow or a
 //! script-free watch verdict.
+//!
+//! The edge reads an `npx` or `bunx` launch as a command review, not a package
+//! review, because the package's own CLI is what runs. The package is still
+//! fetched from the registry, so such a review is planned too, for a block
+//! verdict only.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -30,6 +35,10 @@ use crate::package_authority_op::request_digest;
 
 /// The review reason a package evaluation may settle before it is queued.
 pub(crate) const PACKAGE_REVIEW_REASON: &str = "native_package_review";
+/// The review reason the edge gives an `npx` or `bunx` launch.
+pub(crate) const LAUNCH_REVIEW_REASON: &str = "native_command_review_required";
+/// The launchers a command review is planned for.
+const LAUNCHERS: [&str; 2] = ["npx", "bunx"];
 /// The metadata key that tells the evaluator which npm the install runs.
 const VERIFIED_NPM_VERSION_KEY: &str = "verified_npm_version";
 /// The programs whose install and exec flows the evaluator reads.
@@ -63,8 +72,22 @@ pub(crate) struct ReviewShape {
 
 /// Whether the native result is a review a package evaluation may settle.
 pub(crate) fn settles(result: &Map<String, Value>) -> bool {
-    result.get("reason_code").and_then(Value::as_str) == Some(PACKAGE_REVIEW_REASON)
+    result
+        .get("reason_code")
+        .and_then(Value::as_str)
+        .is_some_and(|reason| [PACKAGE_REVIEW_REASON, LAUNCH_REVIEW_REASON].contains(&reason))
         && result.get("minimum_action").and_then(Value::as_str) == Some("review")
+}
+
+/// The shape of the command a review with this reason would settle. A
+/// command review settles only an `npx` or `bunx` launch.
+pub(crate) fn planned_shape(
+    payload: &Map<String, Value>,
+    review_reason: Option<&str>,
+) -> Option<ReviewShape> {
+    let shape = review_shape(payload)?;
+    let launch_only = review_reason == Some(LAUNCH_REVIEW_REASON);
+    (!launch_only || LAUNCHERS.contains(&shape.tokens[0].as_str())).then_some(shape)
 }
 
 /// The shape of the command a package review would settle, or `None` when
@@ -142,8 +165,10 @@ fn plan(
     harness: &str,
     workspace: &Path,
     home_dir: Option<&Path>,
+    review_reason: Option<&str>,
 ) -> Option<(Value, bool)> {
-    let shape = review_shape(payload)?;
+    let shape = planned_shape(payload, review_reason)?;
+    let launch_only = review_reason == Some(LAUNCH_REVIEW_REASON);
     let tokens = &shape.tokens;
     let intent = parse_package_intent(
         &crate::mcp_proxy_shlex::join(tokens),
@@ -162,8 +187,10 @@ fn plan(
     }
     let mut artifact =
         build_package_request_artifact(harness, &intent, "hol-guard.toml", "project");
-    // The npm layout proof is unproven off Unix, so Windows applies blocks only.
+    // The npm layout proof is unproven off Unix, so Windows applies blocks
+    // only, as does a command review.
     let version = (!cfg!(windows)
+        && !launch_only
         && intent.package_manager == "npm"
         && intent.intent_kind == "install"
         && intent.local_executions.is_empty())
@@ -216,6 +243,7 @@ pub(crate) fn evaluate_package_review_plan(
             &request.harness,
             workspace,
             request.home_dir.as_deref().map(Path::new),
+            request.review_reason.as_deref(),
         )
     });
     let (artifact, may_allow) = planned.unwrap_or((Value::Null, false));

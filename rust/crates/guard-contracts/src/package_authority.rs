@@ -439,6 +439,11 @@ pub struct PackageReviewPlanRequestV1 {
     pub payload: Value,
     #[serde(default)]
     pub home_dir: Option<String>,
+    /// The native review's reason code. A command review, which the edge
+    /// gives an `npx` or `bunx` launch, is planned only for those launchers
+    /// and only a block verdict applies to it. Absent means a package review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

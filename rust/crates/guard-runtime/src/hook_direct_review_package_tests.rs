@@ -65,3 +65,26 @@ fn other_commands_are_left_to_the_queue() {
         );
     }
 }
+
+/// The edge gives `npx` and `bunx` a command review; the daemon plans those
+/// launches so a package the bundle blocks is stopped. Any other command under
+/// that reason is queued as it stands.
+#[test]
+fn npx_and_bunx_command_reviews_stay_with_the_daemon() {
+    let result = json!({"reason_code": LAUNCH_REVIEW_REASON, "minimum_action": "review"});
+    let result = result.as_object().unwrap();
+    for (command, queued) in [
+        ("npx create-vite@5.1.0", false),
+        ("bunx @angular/cli@19.0.0", false),
+        ("npm install minimist@1.2.8", true),
+        ("pnpm dlx create-next-app@14.2.0", true),
+        ("make build", true),
+    ] {
+        let payload = json!({"tool_input": {"command": command}});
+        assert_eq!(
+            left_to_queue(payload.as_object().unwrap(), result),
+            queued,
+            "{command}"
+        );
+    }
+}

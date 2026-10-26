@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 PACKAGE_REVIEW_REASON = "native_package_review"
+# The edge reviews an `npx` or `bunx` launch as a command; the resident plans
+# it for a block verdict only.
+LAUNCH_REVIEW_REASON = "native_command_review_required"
 LIFECYCLE_SCRIPTS_ENABLED_CODE = "package_lifecycle_scripts_enabled"
 REGISTRY_STILL_LOADING_REASON = (
     "HOL Guard is still fetching registry metadata for this install. Run the same command again."
@@ -55,7 +58,7 @@ def native_package_review_response(
 
     if (
         workspace is None
-        or native_result.get("reason_code") != PACKAGE_REVIEW_REASON
+        or native_result.get("reason_code") not in {PACKAGE_REVIEW_REASON, LAUNCH_REVIEW_REASON}
         or native_result.get("minimum_action") != "review"
     ):
         return None
@@ -65,6 +68,7 @@ def native_package_review_response(
             harness=harness,
             workspace=workspace,
             guard_home=guard_home,
+            review_reason=str(native_result["reason_code"]),
             home_dir=home_dir,
             deadline=deadline,
         )

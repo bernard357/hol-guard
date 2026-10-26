@@ -11,12 +11,12 @@
 //! it queues any other, and so may the resident. A review that reaches the
 //! evaluator stays with the daemon.
 
-use crate::package_review_plan_op::{review_shape, settles};
+use crate::package_review_plan_op::{planned_shape, settles};
 use guard_command::hook_responses::Object;
 use serde_json::{Map, Value};
 
 #[cfg(test)]
-pub(super) use crate::package_review_plan_op::PACKAGE_REVIEW_REASON;
+pub(super) use crate::package_review_plan_op::{LAUNCH_REVIEW_REASON, PACKAGE_REVIEW_REASON};
 
 /// Whether `native_package_review_response` returns `None` for this review
 /// without asking the package evaluator, so the daemon goes on to queue it.
@@ -25,7 +25,8 @@ pub(super) use crate::package_review_plan_op::PACKAGE_REVIEW_REASON;
 /// a workspace, so that check never returns `None` here. `false` means the
 /// daemon may settle the review.
 pub(super) fn left_to_queue(payload: &Map<String, Value>, result: &Object) -> bool {
-    !settles(result) || review_shape(payload).is_none()
+    !settles(result)
+        || planned_shape(payload, result.get("reason_code").and_then(Value::as_str)).is_none()
 }
 
 #[cfg(test)]
