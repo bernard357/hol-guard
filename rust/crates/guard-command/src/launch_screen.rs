@@ -65,7 +65,8 @@ impl Screen {
                 argv = next;
             } else if let Some(next) = after_privilege(&argv) {
                 self.risk.privileged = true;
-                argv = next;
+                // `sudo` runs `VAR=value` words before the program as assignments.
+                argv = after_assignments(&next).to_vec();
             } else {
                 break;
             }
