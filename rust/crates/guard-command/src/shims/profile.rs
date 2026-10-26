@@ -151,56 +151,27 @@ fn profile_already_references_path(content: &str, shim_dir: &str) -> bool {
         })
 }
 
-/// Whether the last PATH assignment in `content` puts `shim_dir` ahead of the
-/// inherited PATH. An appended assignment still names the directory, but a new
-/// shell resolves the real binary first.
-fn profile_prepends_shim(content: &str, shim_dir: &str) -> bool {
-    let mut prepends = None;
-    for line in py_splitlines(content) {
-        if let Some(effect) = line_prepends_shim(&line, shim_dir) {
-            prepends = Some(effect);
-        }
-    }
-    prepends == Some(true)
-}
-
-fn line_prepends_shim(line: &str, shim_dir: &str) -> Option<bool> {
-    if line.trim_start_matches(py_is_space).starts_with('#') {
-        return None;
-    }
-    let stripped = py_strip(line);
-    if stripped == posix_path_export(shim_dir) || stripped == fish_path_prepend(shim_dir) {
-        return Some(true);
-    }
-    if stripped.contains("fish_add_path") && stripped.contains(shim_dir) {
-        let appends = stripped
-            .split_whitespace()
-            .any(|token| token == "-a" || token == "--append");
-        return Some(!appends);
-    }
-    if !line.contains(shim_dir) || !line.contains("PATH") {
-        return None;
-    }
-    let shim_at = line.find(shim_dir)?;
-    let variable_at = ["$PATH", "${PATH}", "%PATH%"]
-        .into_iter()
-        .filter_map(|token| line.find(token))
-        .min();
-    Some(variable_at.is_some_and(|variable_at| shim_at < variable_at))
-}
-
-/// Every profile target prepends the shim directory. A mention that only
-/// appends it does not.
-pub(crate) fn shell_profile_prepends_shim(context: &ShimContext) -> ShimResult<bool> {
+/// PATH a new shell would have after sourcing every profile target onto this
+/// process's PATH. `None` when a target never names the shim directory, or
+/// the targets disagree. Later assignments replace earlier ones, and a
+/// directory written ahead of the shim stays ahead of it.
+pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<String>> {
     let Some(home) = &context.home_dir else {
-        return Ok(false);
+        return Ok(None);
     };
     let facts = &context.facts;
     let shim_dir = context.shim_dir();
     let targets = profile_targets(facts, home, &shim_dir);
     if targets.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
+    let base: Vec<String> = context
+        .env_path()
+        .split(context.pathsep())
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let mut agreed: Option<Vec<String>> = None;
     for (path, _) in &targets {
         let existing = if facts.exists(path) {
             match facts.read_text(path) {
@@ -211,11 +182,228 @@ pub(crate) fn shell_profile_prepends_shim(context: &ShimContext) -> ShimResult<b
         } else {
             String::new()
         };
-        if !profile_prepends_shim(&existing, &shim_dir) {
-            return Ok(false);
+        let replayed = replay_profile(&existing, &base);
+        if !replayed.iter().any(|entry| entry == &shim_dir) {
+            return Ok(None);
+        }
+        if let Some(previous) = &agreed {
+            if previous != &replayed {
+                return Ok(None);
+            }
+        } else {
+            agreed = Some(replayed);
         }
     }
-    Ok(true)
+    let separator = context.pathsep().to_string();
+    Ok(agreed.map(|entries| entries.join(&separator)))
+}
+
+fn replay_profile(content: &str, base: &[String]) -> Vec<String> {
+    let mut entries = base.to_vec();
+    for line in py_splitlines(content) {
+        if line.trim_start_matches(py_is_space).starts_with('#') {
+            continue;
+        }
+        let stripped = py_strip(&line);
+        if stripped.is_empty() {
+            continue;
+        }
+        if let Some(next) = apply_fish_add_path(&stripped, &entries) {
+            entries = next;
+            continue;
+        }
+        if let Some(value) = path_assignment_value(&stripped) {
+            entries = expand_path_value(value, &entries);
+            continue;
+        }
+        if let Some(next) = apply_set_path(&stripped, &entries) {
+            entries = next;
+        }
+    }
+    entries
+}
+
+fn apply_fish_add_path(line: &str, current: &[String]) -> Option<Vec<String>> {
+    let words = shell_words(line);
+    let command = words.iter().position(|word| word == "fish_add_path")?;
+    let mut append = false;
+    let mut operands = Vec::new();
+    let mut literal = false;
+    for token in words.iter().skip(command + 1) {
+        if token == "--" {
+            literal = true;
+            continue;
+        }
+        if !literal && token.starts_with('-') {
+            if fish_path_flag_appends(token) {
+                append = true;
+            }
+            continue;
+        }
+        if !token.is_empty() {
+            operands.push(token.clone());
+        }
+    }
+    if operands.is_empty() {
+        return None;
+    }
+    let mut entries = current.to_vec();
+    if append {
+        for operand in operands {
+            entries.retain(|entry| entry != &operand);
+            entries.push(operand);
+        }
+    } else {
+        for operand in operands.iter().rev() {
+            entries.retain(|entry| entry != operand);
+        }
+        for (index, operand) in operands.into_iter().enumerate() {
+            entries.insert(index, operand);
+        }
+    }
+    Some(entries)
+}
+
+fn apply_set_path(line: &str, current: &[String]) -> Option<Vec<String>> {
+    let words = shell_words(line);
+    if words.first().map(String::as_str) != Some("set") {
+        return None;
+    }
+    let mut index = 1;
+    while words.get(index).is_some_and(|token| token.starts_with('-')) {
+        index += 1;
+    }
+    if words.get(index).map(String::as_str) != Some("PATH") {
+        return None;
+    }
+    let args = &words[index + 1..];
+    if args.is_empty() {
+        return None;
+    }
+    let mut entries = Vec::new();
+    for arg in args {
+        if matches!(arg.as_str(), "$PATH" | "${PATH}" | "%PATH%") {
+            entries.extend(current.iter().cloned());
+        } else {
+            entries.push(arg.clone());
+        }
+    }
+    Some(entries)
+}
+
+fn fish_path_flag_appends(token: &str) -> bool {
+    if token == "--append" {
+        return true;
+    }
+    let Some(flags) = token.strip_prefix('-') else {
+        return false;
+    };
+    !flags.is_empty() && !flags.starts_with('-') && flags.contains('a')
+}
+
+fn path_assignment_value(line: &str) -> Option<&str> {
+    let mut rest = line;
+    while let Some(at) = rest.find("PATH=") {
+        let absolute = line.len() - rest.len() + at;
+        let boundary = line[..absolute]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
+        if boundary {
+            return Some(shell_word(&line[absolute + "PATH=".len()..]));
+        }
+        rest = &rest[at + "PATH=".len()..];
+    }
+    None
+}
+
+fn shell_word(input: &str) -> &str {
+    let mut chars = input.char_indices();
+    let Some((_, first)) = chars.next() else {
+        return "";
+    };
+    if first == '"' || first == '\'' {
+        for (index, ch) in chars {
+            if ch == first {
+                return &input[..index + ch.len_utf8()];
+            }
+        }
+        return input;
+    }
+    match input.find(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '&' | '|')) {
+        Some(end) => &input[..end],
+        None => input,
+    }
+}
+
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in line.chars() {
+        match quote {
+            Some(active) if ch == active => quote = None,
+            Some(_) => current.push(ch),
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            None => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn expand_path_value(value: &str, current: &[String]) -> Vec<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut expanded = String::new();
+    let mut single = false;
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if !single && ch == '"' {
+            index += 1;
+            continue;
+        }
+        if ch == '\'' {
+            single = !single;
+            index += 1;
+            continue;
+        }
+        if !single {
+            if let Some(marker) = inherited_marker(&chars[index..]) {
+                expanded.push_str(&current.join(":"));
+                index += marker;
+                continue;
+            }
+        }
+        expanded.push(ch);
+        index += 1;
+    }
+    if expanded.is_empty() {
+        return Vec::new();
+    }
+    expanded.split(':').map(str::to_owned).collect()
+}
+
+fn inherited_marker(chars: &[char]) -> Option<usize> {
+    let text: String = chars.iter().collect();
+    for marker in ["${PATH}", "$PATH", "%PATH%"] {
+        if text.starts_with(marker)
+            && text[marker.len()..]
+                .chars()
+                .next()
+                .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
+        {
+            return Some(marker.chars().count());
+        }
+    }
+    None
 }
 
 /// `_package_shim_profile_status`.
@@ -530,5 +718,43 @@ mod tests {
         ));
         assert!(!profile.exists());
         fs::remove_dir_all(&home).expect("cleanup home");
+    }
+
+    #[test]
+    fn profile_replay_keeps_the_order_a_new_shell_would_search() {
+        let shim = "/opt/hol-guard/package-shims/bin";
+        let base = ["/usr/bin".to_owned(), "/bin".to_owned()];
+        let replay = |content: &str| super::replay_profile(content, &base);
+
+        let guarded = format!("[ -d {shim} ] && export PATH=\"$PATH:{shim}\"");
+        assert_eq!(replay(&guarded), vec!["/usr/bin", "/bin", shim]);
+        assert_eq!(
+            replay(&super::posix_path_export(shim)),
+            vec![shim, "/usr/bin", "/bin"]
+        );
+        assert_eq!(
+            replay(&format!("fish_add_path -ga {shim}")),
+            vec!["/usr/bin", "/bin", shim]
+        );
+        assert_eq!(
+            replay(&super::fish_path_prepend(shim)),
+            vec![shim, "/usr/bin", "/bin"]
+        );
+        assert_eq!(
+            replay(&format!(
+                "export PATH={shim}:$PATH\nexport PATH=/usr/bin:/bin\n"
+            )),
+            vec!["/usr/bin", "/bin"]
+        );
+        assert_eq!(
+            replay(&format!("export PATH=/real-bin:{shim}:$PATH")),
+            vec!["/real-bin", shim, "/usr/bin", "/bin"]
+        );
+        assert_eq!(
+            replay(&format!(
+                "export PATH={shim}:$PATH\nexport PATH=/cargo/bin:$PATH\n"
+            )),
+            vec!["/cargo/bin", shim, "/usr/bin", "/bin"]
+        );
     }
 }

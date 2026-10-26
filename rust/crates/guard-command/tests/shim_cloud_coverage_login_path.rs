@@ -136,4 +136,76 @@ fn an_appended_profile_stays_bypassed() {
     assert_eq!(coverage["pathActive"], false);
     assert_eq!(coverage["bypasses"][0]["manager"], "npm");
     assert_eq!(coverage["bypasses"][0]["reason"], "path_inactive");
+
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(
+            path,
+            format!("[ -d {shim_dir} ] && export PATH=\"$PATH:{shim_dir}\"\n"),
+        )
+        .expect("guarded append");
+    }
+    let guarded = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert!(names(&guarded, "protectedManagers").is_empty());
+    assert_eq!(guarded["pathActive"], false);
+    assert_eq!(guarded["bypasses"][0]["reason"], "path_inactive");
+}
+
+#[test]
+fn later_profile_lines_keep_their_search_order() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let root = fs::canonicalize(scratch.path()).expect("canonical scratch");
+    let home = root.join("home");
+    let real_bin = root.join("real-bin");
+    let other_bin = root.join("other-bin");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&real_bin).expect("real bin");
+    fs::create_dir_all(&other_bin).expect("other bin");
+    write_executable(&real_bin.join("npm"));
+    let home = home.to_string_lossy().into_owned();
+    let guard_home = format!("{home}/.hol-guard");
+    let process_path = format!("{}:/usr/bin:/bin", real_bin.display());
+    let context = ShimContext::new(&guard_home, Some(&home), None, facts(&home, &process_path));
+
+    shims::install_package_shims(&context, Some(&["npm".to_owned()]), Some(&process_path))
+        .expect("install");
+    shims::ensure_package_shim_path_in_shell_profile(&context).expect("profile");
+    let staged = shims::package_shim_status(&context, None).expect("status");
+    let shim_dir = staged["shim_dir"].as_str().expect("shim dir");
+    let profiles = staged["shell_profile_paths"].as_array().expect("profiles");
+    let other = other_bin.to_string_lossy();
+    let real = real_bin.to_string_lossy();
+
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(
+            path,
+            format!("export PATH={shim_dir}:$PATH\nexport PATH={other}:$PATH\n"),
+        )
+        .expect("unrelated directory");
+    }
+    let unrelated = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert_eq!(names(&unrelated, "protectedManagers"), ["npm"]);
+    assert_eq!(unrelated["pathActive"], true);
+
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(path, format!("export PATH={real}:{shim_dir}:$PATH\n")).expect("real first");
+    }
+    let shadowed = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert!(names(&shadowed, "protectedManagers").is_empty());
+    assert_eq!(shadowed["pathActive"], false);
+    assert_eq!(shadowed["bypasses"][0]["reason"], "path_inactive");
+
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(
+            path,
+            format!("export PATH={shim_dir}:$PATH\nexport PATH=/usr/bin:/bin\n"),
+        )
+        .expect("replacement");
+    }
+    let replaced = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert!(names(&replaced, "protectedManagers").is_empty());
+    assert_eq!(replaced["pathActive"], false);
 }
