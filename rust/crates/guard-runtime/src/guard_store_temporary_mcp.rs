@@ -13,7 +13,9 @@ use serde_json::{json, Value};
 
 use crate::context_digest::python_strip;
 use crate::guard_store_approval_page_reads::ORDER;
-use crate::guard_store_approval_queue_result::{block_reason, queue_result, request, unresolved};
+use crate::guard_store_approval_queue_result::{
+    block_reason, fits, queue_result, request, unresolved,
+};
 use crate::guard_store_approval_read_scope::project;
 use crate::guard_store_approval_reads::{payloads, COLUMNS};
 use crate::guard_store_args::Args;
@@ -50,15 +52,15 @@ pub(crate) fn apply_temporary_mcp_grant(
     let cwd = args.opt_str("cwd")?;
 
     let Value::Object(fields) = request(connection, guard_home, request_id, cwd, owner)? else {
-        return Ok(settled(
+        return settled(
             unresolved(connection, guard_home, cwd, "not_found", Value::Null, owner)?,
             Vec::new(),
             Value::Null,
-        ));
+        );
     };
     let source = Value::Object(fields);
     if source["status"] != "pending" {
-        return Ok(settled(
+        return settled(
             unresolved(
                 connection,
                 guard_home,
@@ -69,7 +71,7 @@ pub(crate) fn apply_temporary_mcp_grant(
             )?,
             Vec::new(),
             Value::Null,
-        ));
+        );
     }
     // `require_resolvable_approval_request`: a terminal or contract-invalid row
     // is a caller contract error here, not a queue answer, so nothing is
@@ -88,17 +90,22 @@ pub(crate) fn apply_temporary_mcp_grant(
     ];
     let result = queue_result(connection, guard_home, request_id, &resolution, cwd, owner)?;
     resolve_covered(connection, &covered, &resolution)?;
-    Ok(settled(result, covered, next_control_state))
+    settled(result, covered, next_control_state)
 }
 
 /// The reply: what the queue says now, which other requests the grant
 /// answered, and the integrity state the caller finalizes after the commit.
-fn settled(result: Value, covered: Vec<String>, next_control_state: Value) -> Value {
-    json!({
+///
+/// It goes through the same size check as every other queue-resolving reply.
+/// A grant covering a large pending queue can outgrow the response budget, and
+/// failing here rolls the whole resolution back rather than committing a grant
+/// whose answer the dashboard never receives.
+fn settled(result: Value, covered: Vec<String>, next_control_state: Value) -> StoreResult<Value> {
+    fits(json!({
         "result": result,
         "covered_request_ids": covered,
         "next_control_state": next_control_state,
-    })
+    }))
 }
 
 /// The grant's policy decision. `upsert_policy` owns the row and its signing;

@@ -157,7 +157,7 @@ pub(crate) fn resolve_native_workspace_review_request(
 /// The reply goes out after the commit. One too large to send fails here, so
 /// the caller's transaction rolls the resolution back instead of committing a
 /// decision the dashboard never hears about.
-fn fits(reply: Value) -> StoreResult<Value> {
+pub(crate) fn fits(reply: Value) -> StoreResult<Value> {
     if serde_json::to_vec(&reply).map_or(usize::MAX, |bytes| bytes.len()) > REPLY_LIMIT_BYTES {
         return value_error("approval_queue_result_too_large");
     }
