@@ -74,3 +74,28 @@ fn a_scoped_name_is_an_inert_value() {
         2
     );
 }
+
+/// pnpm's `{<dir>}` selector names a directory, a drive letter opens one on
+/// Windows, and a `$` hides what the value names, so none of the three is a
+/// value an option may carry past the verb.
+#[test]
+fn a_directory_selector_is_not_an_inert_value() {
+    for arguments in [
+        vec!["--filter", "{/opt/other}", "build"],
+        vec!["--filter", "{packages/web}", "build"],
+        vec!["--filter=C:/other", "build"],
+        vec!["--filter", "C:\\other", "build"],
+        vec!["--filter", "$HOME/other", "build"],
+    ] {
+        assert_eq!(skip_inert_options("pnpm", &arguments), 0, "{arguments:?}");
+    }
+}
+
+/// A changed-since selector names a git ref, not a place on disk.
+#[test]
+fn a_changed_since_selector_is_an_inert_value() {
+    assert_eq!(
+        skip_inert_options("pnpm", &["--filter", "[origin/main]", "build"]),
+        2
+    );
+}

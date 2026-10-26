@@ -50,15 +50,27 @@ pub(super) fn skip_inert_options(manager: &str, arguments: &[&str]) -> usize {
 /// A value that names a path is refused. pnpm and npm both select a project
 /// by directory as well as by name — `--filter ./packages/web` — and a
 /// directory operand is how a selector would reach a project the workspace
-/// does not hold, whose scripts the sandbox would then run unreviewed. A
-/// scoped name such as `@acme/web` still passes: only a leading `.`, `/` or
-/// `~`, a parent step, or a Windows separator marks a path.
+/// does not hold, whose scripts the sandbox would then run unreviewed. So
+/// every spelling of a directory is read: a leading `.`, `/` or `~`, a parent
+/// step, a Windows separator, a drive letter in `C:/other`, and the braces of
+/// pnpm's own `{<dir>}` selector, whose contents are a directory by
+/// definition. A value carrying `$` is refused with them, since what it names
+/// is not in the text. A scoped name such as `@acme/web` still passes, and so
+/// does a changed-since selector such as `[origin/main]`, which names a git
+/// ref rather than a place on disk.
 fn inert_value(value: &str) -> bool {
     !value.is_empty()
-        && !value.starts_with(['-', '.', '/', '~'])
+        && !value.starts_with(['-', '.', '/', '~', '{'])
         && !value.contains("..")
-        && !value.contains('\\')
+        && !value.contains(['\\', '$'])
+        && !is_drive_prefixed(value)
         && !value.chars().any(char::is_whitespace)
+}
+
+/// Whether `value` opens with a Windows drive letter, as `C:/other` does.
+fn is_drive_prefixed(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() > 1 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// The flags and value-taking options `manager` reads before its verb.

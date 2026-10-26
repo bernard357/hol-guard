@@ -455,6 +455,11 @@ pub(super) fn local_package_work(
         // is read behind the words [`options::skip_inert_options`] knows; any
         // other leading option, `--cwd dir` among them, still hides it.
         let behind = &arguments[options::skip_inert_options(&name, &arguments)..];
+        // `yarn workspaces focus` installs the dependencies of the projects it
+        // selects, and `yarn workspaces foreach` runs a command of its own in
+        // each of them. The verb names neither effect, so the subcommand after
+        // it decides, and neither effect is the local script work this admits.
+        let workspace_fanout = name == "yarn" && behind.first() == Some(&"workspaces");
         let version_probe = behind
             .iter()
             .all(|argument| matches!(*argument, "-v" | "--version" | "-h" | "--help"));
@@ -473,6 +478,7 @@ pub(super) fn local_package_work(
         // like a registry verb keeps the command out rather than passing.
         !behind.is_empty()
             && (leading_verb || version_probe)
+            && !workspace_fanout
             && !positional_init
             && !arguments
                 .iter()
