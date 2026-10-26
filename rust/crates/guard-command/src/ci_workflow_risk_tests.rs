@@ -70,6 +70,14 @@ fn a_privileged_trigger_that_checks_out_the_base_branch_is_quiet() {
 }
 
 #[test]
+fn a_head_ref_outside_the_checkout_is_quiet() {
+    let text = format!(
+        "on: pull_request_target\nconcurrency:\n  group: ${{{{ github.workflow }}}}-${{{{ github.head_ref || github.run_id }}}}\njobs:\n  label:\n    steps:\n      - uses: actions/checkout@{PIN}\n      - run: echo \"head ${{{{ github.event.pull_request.head.sha }}}}\"\n"
+    );
+    assert!(ids(&text).is_empty(), "{text}");
+}
+
+#[test]
 fn a_commented_out_trigger_is_quiet() {
     let text = format!(
         "on:\n  pull_request:\n  # pull_request_target:\njobs:\n  b:\n{}",

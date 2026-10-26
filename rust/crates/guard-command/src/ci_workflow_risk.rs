@@ -83,6 +83,14 @@ static UNTRUSTED_REF: LazyLock<Regex> = LazyLock::new(|| {
     )
     .expect("valid untrusted ref pattern")
 });
+/// Lines that choose the code a checkout fetches: a checkout step's `ref` or
+/// `repository` input, or a `git checkout` or `git fetch` command. An
+/// untrusted ref anywhere else, such as a concurrency group or a log line,
+/// does not put pull request code in the workspace.
+static CHECKOUT_TARGET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:-\s*)?(?:ref|repository):|\bgit\s+(?:checkout|fetch)\b")
+        .expect("valid checkout target pattern")
+});
 static COMMIT_SHA: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[0-9a-fA-F]{40}$").expect("valid sha pattern"));
 
@@ -93,7 +101,10 @@ pub fn detect_ci_workflow_risk(text: &str) -> Vec<CiWorkflowRule> {
         .filter(|line| !line.trim_start().starts_with('#'))
         .collect();
     let any = |pattern: &Regex| lines.iter().any(|line| pattern.is_match(line));
-    let untrusted_checkout = any(&PRIVILEGED_TRIGGER) && any(&CHECKOUT) && any(&UNTRUSTED_REF);
+    let checks_out_head = lines
+        .iter()
+        .any(|line| CHECKOUT_TARGET.is_match(line) && UNTRUSTED_REF.is_match(line));
+    let untrusted_checkout = any(&PRIVILEGED_TRIGGER) && any(&CHECKOUT) && checks_out_head;
     let unpinned = lines
         .iter()
         .filter_map(|line| USES.captures(line))
