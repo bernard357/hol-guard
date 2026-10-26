@@ -205,7 +205,9 @@ def emit_hook_review(
             # among them); the generic renderer would drop the fields it reads.
             stdout, stderr, exit_code = json.dumps(response, ensure_ascii=True, separators=(",", ":")), "", 0
         else:
-            stdout, stderr, exit_code = _daemon_response_to_native(response, harness=canonical, event_name=event_name)
+            stdout, stderr, exit_code = _daemon_response_to_native(
+                response, harness=canonical, event_name=event_name, guard_home=guard_home
+            )
         stream = output_stream or sys.stdout
         if stdout:
             _ = stream.write(stdout + "\n")

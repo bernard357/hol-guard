@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from codex_plugin_scanner.guard.adapters._modules.zcode.zcode_hooks import (
     zcode_authority_block_reason,
     zcode_hook_process_exit,
@@ -13,6 +15,9 @@ from codex_plugin_scanner.guard.runtime.actions import (
     normalize_harness_payload,
     normalize_zcode_hook_payload,
 )
+
+
+_AUTHORITY_REASON = "HOL Guard requires the native command extension policy before this action can execute."
 
 
 def _fixture(name: str) -> dict[str, object]:
@@ -68,6 +73,46 @@ class TestZCodeHookResponses:
 
     def test_authority_block_reason_leaves_other_reasons_alone(self) -> None:
         assert zcode_authority_block_reason("Blocked by policy.") == "Blocked by policy."
+
+    def test_authority_block_reason_names_a_home_the_bare_command_misses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Pasting the bare command into a shell pointing at the default home
+        # would recover a different install while this one stays blocked.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        enriched = zcode_authority_block_reason(_AUTHORITY_REASON, Path("/opt/guards/ci"))
+        assert "hol-guard command --home /opt/guards/ci controls recover-authority" in enriched
+
+    def test_authority_block_reason_quotes_a_named_home_for_the_shell(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        enriched = zcode_authority_block_reason(_AUTHORITY_REASON, Path("/opt/shared guards/.hol-guard"))
+        assert "--home '/opt/shared guards/.hol-guard' controls recover-authority" in enriched
+
+    def test_authority_block_reason_keeps_the_short_command_for_the_default_home(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The short command is the one almost everyone needs, and a path that
+        # adds nothing only invites editing.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        enriched = zcode_authority_block_reason(_AUTHORITY_REASON, Path("/Users/casey/.hol-guard"))
+        assert "hol-guard command controls recover-authority" in enriched
+        assert "--home" not in enriched
+
+    def test_authority_block_reason_keeps_the_short_command_without_a_home(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Either side unknown leaves nothing to compare, so there is nothing
+        # worth adding to the command.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        assert "--home" not in zcode_authority_block_reason(_AUTHORITY_REASON)
+
+        def _no_home(cls: type[Path]) -> Path:
+            raise RuntimeError("home directory cannot be resolved")
+
+        monkeypatch.setattr(Path, "home", classmethod(_no_home))
+        assert "--home" not in zcode_authority_block_reason(_AUTHORITY_REASON, Path("/opt/guards/ci"))
 
     def test_process_exit_review_pretool_exits_zero_so_ask_json_is_parsed(self) -> None:
         # ZCode only parses stdout JSON for successful hook processes; exit 2

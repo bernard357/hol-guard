@@ -77,6 +77,7 @@ mod bounded_hook_bridge_grok;
 mod bounded_hook_bridge_grok_render;
 mod bounded_hook_bridge_grok_script;
 mod bounded_hook_bridge_hermes;
+mod bounded_hook_bridge_remediation;
 mod bounded_hook_bridge_render;
 mod browser_open;
 #[cfg(test)]

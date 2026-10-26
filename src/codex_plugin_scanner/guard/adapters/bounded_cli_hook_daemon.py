@@ -225,8 +225,13 @@ def _daemon_response_to_native(
     *,
     harness: str,
     event_name: str,
+    guard_home: Path | None = None,
 ) -> tuple[str, str, int]:
-    """Transform daemon policy data into harness-native output."""
+    """Transform daemon policy data into harness-native output.
+
+    ``guard_home`` is the home this hook read the decision from, which an
+    authority block names in the recovery command it offers.
+    """
     event_name = _canonical_event_token(event_name) or event_name
     canonical = harness.strip().lower().replace("_", "-")
     if canonical == "grok" and not daemon_response:
@@ -253,7 +258,7 @@ def _daemon_response_to_native(
             # missing reason falls back to a human-readable default.
             if not isinstance(reason, str) or not reason:
                 reason = f"HOL Guard blocked this action ({policy_action_for_exit})"
-            stderr = zcode_authority_block_reason(reason) if canonical == "zcode" else reason
+            stderr = zcode_authority_block_reason(reason, guard_home) if canonical == "zcode" else reason
         if exit_code == 2 and canonical == "devin":
             native_response["decision"] = "block"
             if not native_response.get("reason"):
@@ -316,7 +321,10 @@ def _daemon_response_to_native(
             payload["reason"] = reason or f"HOL Guard blocked this action ({policy_action})"
     stdout = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
     if exit_code == 2 and canonical == "zcode":
-        stderr = zcode_authority_block_reason(reason or f"HOL Guard blocked this action ({policy_action})")
+        stderr = zcode_authority_block_reason(
+            reason or f"HOL Guard blocked this action ({policy_action})",
+            guard_home,
+        )
     else:
         stderr = reason if exit_code == 2 and canonical in {"kimi", "devin"} else ""
     return stdout, stderr, exit_code
@@ -434,7 +442,7 @@ def try_daemon_hook(
 
         # Render within what is left of the hook's own budget, not a fresh timeout.
         return hermes_bridge_response(parsed, event_name=event_name, guard_home=guard_home, deadline=deadline)
-    return _daemon_response_to_native(parsed, harness=harness, event_name=event_name)
+    return _daemon_response_to_native(parsed, harness=harness, event_name=event_name, guard_home=guard_home)
 
 
 __all__ = ["try_daemon_hook"]

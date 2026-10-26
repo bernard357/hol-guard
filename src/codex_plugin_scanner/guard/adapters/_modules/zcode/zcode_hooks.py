@@ -20,7 +20,9 @@ stdout JSON for successful hook processes.
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
+from pathlib import Path
 
 # Review-tier actions become ZCode's ``ask`` so the native permission prompt
 # (allow once / always / deny) can satisfy them; hard denials stay ``deny``.
@@ -65,16 +67,50 @@ def _event_name_for_response(payload: Mapping[str, object]) -> str:
     return _canonical_zcode_event_name(raw_event) if raw_event else "PreToolUse"
 
 
-def zcode_authority_block_reason(reason: str) -> str:
+def _authority_block_remediation(guard_home: Path | None) -> str:
+    """Return the remediation sentence, naming ``guard_home`` when it needs it.
+
+    The block names the home the hook read its authority from. Someone who
+    pastes the bare command into a shell pointing somewhere else recovers a
+    different install while this one stays blocked, so the home travels with
+    the command whenever it is not ``<home>/.hol-guard``, shell-quoted for the
+    terminal it is pasted into. The default home is left out: the short
+    command is the one almost everyone needs, and a path that adds nothing only
+    invites editing. A home this process cannot resolve leaves the bare
+    command, because a runtime that cannot tell the two apart has nothing to
+    add.
+
+    ``--home`` goes on ``command``, the parser that carries it; after
+    ``recover-authority`` argparse hands it to the leaf, which takes no options
+    and would reject the whole line.
+    """
+
+    if guard_home is None:
+        return _AUTHORITY_BLOCK_REMEDIATION
+    try:
+        home_dir = Path.home()
+    except RuntimeError:
+        return _AUTHORITY_BLOCK_REMEDIATION
+    if home_dir / ".hol-guard" == guard_home:
+        return _AUTHORITY_BLOCK_REMEDIATION
+    return _AUTHORITY_BLOCK_REMEDIATION.replace(
+        "command controls recover-authority",
+        f"command --home {shlex.quote(str(guard_home))} controls recover-authority",
+    )
+
+
+def zcode_authority_block_reason(reason: str, guard_home: Path | None = None) -> str:
     """Append the control-floor remediation hint to authority block reasons.
 
     ZCode surfaces the deny reason directly to the user; without the hint a
     degraded control floor reads as an unactionable brick on every tool call.
+    ``guard_home`` is the home the hook read that floor from, which the hint
+    names when the bare command would not find it.
     """
 
     text = reason if isinstance(reason, str) else ""
     if _AUTHORITY_BLOCK_REASON_MARKER in text and "hol-guard command controls" not in text:
-        return text + _AUTHORITY_BLOCK_REMEDIATION
+        return text + _authority_block_remediation(guard_home)
     return text
 
 
