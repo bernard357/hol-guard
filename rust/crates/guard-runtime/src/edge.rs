@@ -438,13 +438,7 @@ fn evaluate_validated_envelope(
         crate::policy_store::native_review_origin::authenticate(store, &mut receipt)?;
     }
     if event_name == "PreToolUse" {
-        crate::command_policy_repair::apply(
-            &mut result,
-            policy_snapshot
-                .and_then(|snapshot| snapshot.command_extensions.as_ref())
-                .map(guard_command::native_command_controls::CompiledNativeCommandControls::health),
-            std::path::Path::new(&envelope.source.guard_home),
-        );
+        crate::command_policy_repair::apply_at_edge(&mut result, policy_snapshot, &envelope.source);
     }
     let harness_response = guard_command::hook_responses::render_edge_response(
         &harness,
