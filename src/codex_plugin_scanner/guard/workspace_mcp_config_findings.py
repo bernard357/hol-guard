@@ -51,12 +51,9 @@ def assess_workspace_mcp_configs(store: Any, root: Path) -> dict[str, object] | 
     except Exception as error:
         _LOGGER.debug("workspace MCP configuration check failed: %s", type(error).__name__)
         return {"schema": "unreadable"}
-    if found.skipped_harnesses and isinstance(result.get("truncation_reasons"), list):
-        result = {
-            **result,
-            "status": "incomplete",
-            "truncation_reasons": [*result["truncation_reasons"], "harness_unreadable"],
-        }
+    reasons = result.get("truncation_reasons")
+    if found.skipped_harnesses and isinstance(reasons, list):
+        result = {**result, "status": "incomplete", "truncation_reasons": [*reasons, "harness_unreadable"]}
     return result
 
 

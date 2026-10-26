@@ -101,22 +101,22 @@ fn assess(request: &Request) -> Result<Value, String> {
         return Err("mcp_config_request_roots".to_owned());
     }
     let mut truncation = BTreeSet::new();
-    if request.servers.len() > MAX_SERVERS {
-        truncation.insert("max_servers");
-    }
     let mut findings = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    let (mut scanned, mut oversize) = (0_usize, 0_usize);
-    for server in request.servers.iter().take(MAX_SERVERS) {
-        if !server.within_bounds() {
-            oversize += 1;
-            truncation.insert("server_oversize");
-            continue;
-        }
+    let (mut considered, mut scanned, mut oversize) = (0_usize, 0_usize, 0_usize);
+    // Servers configured outside the worktree are dropped before any bound
+    // applies, so a large home or global configuration never leaves a
+    // repository's check incomplete.
+    for server in &request.servers {
         let Some(path) = root_relative(&server.config_path, &roots) else {
             continue;
         };
-        if path.len() > MAX_PATH {
+        considered += 1;
+        if considered > MAX_SERVERS {
+            truncation.insert("max_servers");
+            break;
+        }
+        if !server.within_bounds() || path.len() > MAX_PATH {
             oversize += 1;
             truncation.insert("server_oversize");
             continue;

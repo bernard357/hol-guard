@@ -130,6 +130,28 @@ fn an_oversized_server_or_too_many_servers_leaves_the_scan_incomplete() {
 }
 
 #[test]
+fn servers_outside_the_worktree_never_count_toward_its_bounds() {
+    let home = under(
+        if cfg!(windows) {
+            "C:\\Users\\dev"
+        } else {
+            "/home/dev"
+        },
+        ".claude.json",
+    );
+    let args: Vec<String> = (0..=MAX_ARGS).map(|index| index.to_string()).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut servers = vec![server_at(&home, "big", "node", &args)];
+    servers
+        .extend((0..=MAX_SERVERS).map(|index| server_at(&home, &index.to_string(), "node", &[])));
+    servers.push(server("local", "node", &[]));
+    let result = assess(Value::Array(servers));
+    assert_eq!(result["status"], "complete", "{result}");
+    assert_eq!(result["servers_scanned"], 1);
+    assert_eq!(result["skipped"]["oversize"], 0);
+}
+
+#[test]
 fn findings_stop_at_their_cap() {
     let many: Vec<Value> = (0..=MAX_FINDINGS)
         .map(|index| server(&index.to_string(), "sudo", &["s"]))
