@@ -128,22 +128,20 @@ pub(super) fn safe_hol_guard_arguments(arguments: &[String]) -> bool {
         || record_inspection(&words)
 }
 
-/// The approval queue and the retry hint of one resolved request, plus
-/// `approvals open <id>`, which shows one request in the user's own approval
-/// center. Opening is what the admitted bare `approvals` form and `dashboard`
-/// already do, named at one request instead of the next pending one, and it
-/// resolves nothing. The decision subcommands (`approve`, `deny`), `resume`,
-/// `lock`, `unlock` and `clear-history`, and every root override (`--home`,
-/// `--guard-home`, `--workspace`), are not admitted.
+/// The approval queue and the retry hint of one resolved request. The
+/// decision subcommands (`approve`, `deny`), `resume`, `open`, `lock`,
+/// `unlock` and `clear-history`, and every root override (`--home`,
+/// `--guard-home`, `--workspace`), are not admitted. `open` launches the
+/// user's own approval center rather than printing anything, so it stays on
+/// the review path with the other launches.
 fn approval_inspection(words: &[&str]) -> bool {
     match words {
         ["approvals"]
         | ["approvals", "--json"]
         | ["approvals", "list"]
         | ["approvals", "list", "--json"] => true,
-        ["approvals", "retry-hint" | "wait" | "open", id]
-        | ["approvals", "retry-hint" | "wait" | "open", id, "--json"]
-        | ["approvals", "open", "--json", id] => request_id(id),
+        ["approvals", "retry-hint" | "wait", id]
+        | ["approvals", "retry-hint" | "wait", id, "--json"] => request_id(id),
         ["approvals", "wait", id, "--timeout", seconds]
         | ["approvals", "wait", id, "--timeout", seconds, "--json"] => {
             request_id(id) && seconds.parse::<u16>().is_ok_and(|seconds| seconds <= 600)
@@ -195,16 +193,10 @@ fn extension_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-/// `--help` for the launcher or any of its subcommands. The parser prints
-/// usage and exits before a subcommand runs, and an unknown name only prints
-/// usage and fails, so the name itself carries no privilege and the admitted
-/// set does not have to be kept in step with the CLI. What the leading word
-/// must not do is name something the launcher would run instead of parsing:
-/// a frozen launcher runs a generated package-manager shim when the first
-/// word resolves to one, so the word has to be a plain subcommand name, it
-/// must not be one of the managers Guard generates a shim for, and the
-/// working directory must not be a shim directory, which
-/// [`cwd_shadows_launcher`] refuses.
+/// `--help` for the launcher or a documented subcommand. The parser prints
+/// usage and exits before any subcommand runs. The leading word must name a
+/// known subcommand: a frozen launcher treats a leading word naming a package
+/// manager as a shim script path, which the working directory could supply.
 ///
 /// A leading `guard` is the launcher's no-op prefix (`hol-guard guard --help`
 /// runs `hol-guard --help`), so it is dropped before the same check.
@@ -213,33 +205,84 @@ fn help_request(words: &[&str]) -> bool {
         ["guard", rest @ ..] => rest,
         _ => words,
     };
-    let named = |word: &&str| subcommand_name(word);
     match words {
-        ["help", rest @ ..] => rest.len() <= 2 && rest.iter().all(named),
-        [rest @ .., "--help" | "-h"] => rest.len() <= 2 && rest.iter().all(named),
+        ["help", rest @ ..] => help_path(rest),
+        [rest @ .., "--help" | "-h"] => help_path(rest),
         _ => false,
     }
 }
 
-/// Whether `word` is spelled like one of the launcher's own subcommands: a
-/// short lower-case name, no separator a path could be written with, and not
-/// a package manager Guard generates a shim for.
-fn subcommand_name(word: &str) -> bool {
-    word.len() <= 32
-        && word.starts_with(|first: char| first.is_ascii_lowercase())
-        && word
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        && !SHIM_MANAGERS.contains(&word)
+/// The subcommand path a help request names. Only the leading word carries the
+/// shim risk the launcher has to rule out, so it is the only one matched
+/// against the known names. A subcommand's own verbs are never enumerated here:
+/// the list would go stale every time the CLI grows one, and `hol-guard command
+/// test --help` would ask for approval while `hol-guard command --help` stays
+/// silent. A verb only has to be shaped like one, which keeps out flags, paths
+/// and anything a value could carry.
+fn help_path(words: &[&str]) -> bool {
+    match words {
+        [] => true,
+        [subcommand] => HELP_SUBCOMMANDS.contains(subcommand),
+        [subcommand, verb] => HELP_SUBCOMMANDS.contains(subcommand) && subcommand_verb(verb),
+        _ => false,
+    }
 }
 
-/// The package managers Guard generates a shim for
-/// (`native_shim_admin.SUPPORTED_PACKAGE_SHIM_MANAGERS`). A frozen launcher
-/// handed one of these as its first word looks for the generated shim rather
-/// than parsing a subcommand, so none of them is read as a help request.
-const SHIM_MANAGERS: &[&str] = &[
-    "brew", "bun", "bundle", "bunx", "cargo", "composer", "go", "gradle", "mvn", "npm", "npx",
-    "pip", "pip3", "pipenv", "pipx", "pnpm", "poetry", "uv", "uvx", "yarn",
+fn subcommand_verb(word: &str) -> bool {
+    word.starts_with(|first: char| first.is_ascii_alphabetic())
+        && word
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+const HELP_SUBCOMMANDS: &[&str] = &[
+    "abom",
+    "advisories",
+    "allow",
+    "approvals",
+    "apps",
+    "bootstrap",
+    "command",
+    "daemon",
+    "dashboard",
+    "deny",
+    "detect",
+    "diff",
+    "doctor",
+    "events",
+    "exceptions",
+    "explain",
+    "export",
+    "history",
+    "hooks",
+    "import",
+    "init",
+    "install",
+    "inventory",
+    "list",
+    "mcp",
+    "policies",
+    "policy",
+    "receipts",
+    "repair",
+    "retry-hint",
+    "risk-report",
+    "run",
+    "scan",
+    "secrets",
+    "security-level",
+    "set",
+    "settings",
+    "show",
+    "skills",
+    "start",
+    "status",
+    "stop",
+    "sync",
+    "trust",
+    "uninstall",
+    "update",
+    "validate",
 ];
 
 /// Guard's own read-only records: the local event log, the active exceptions,
