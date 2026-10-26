@@ -126,6 +126,24 @@ pub(super) fn safe_hol_guard_arguments(arguments: &[String]) -> bool {
         || command_inspection(&words)
         || approval_inspection(&words)
         || record_inspection(&words)
+        || posture_inspection(&words)
+}
+
+/// Read-only posture checks that report what Guard would change and change
+/// nothing. `repair --dry-run` is the recovery path's own preview, and
+/// `package-shims status` reports which shims are installed.
+fn posture_inspection(words: &[&str]) -> bool {
+    let json_flags = words.iter().filter(|word| **word == "--json").count();
+    let rest: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| *word != "--json")
+        .collect();
+    json_flags <= 1
+        && matches!(
+            rest.as_slice(),
+            ["repair", "--dry-run"] | ["package-shims"] | ["package-shims", "status"]
+        )
 }
 
 /// The approval queue and the retry hint of one resolved request. The
@@ -166,23 +184,28 @@ fn command_inspection(words: &[&str]) -> bool {
     let ["command", rest @ ..] = words else {
         return false;
     };
-    let json_flags = rest.iter().filter(|word| **word == "--json").count();
-    let rest: Vec<&str> = rest
+    let (head, inspected) = match rest.iter().position(|word| *word == "--") {
+        Some(separator) => (&rest[..separator], Some(&rest[separator + 1..])),
+        None => (rest, None),
+    };
+    let json_flags = head.iter().filter(|word| **word == "--json").count();
+    let head: Vec<&str> = head
         .iter()
         .copied()
         .filter(|word| *word != "--json")
         .collect();
     json_flags <= 1
-        && match rest.as_slice() {
-            ["test" | "explain", text] => inspected_text(text),
-            ["extensions"] => true,
-            ["extensions", id] => extension_id(id),
+        && match (head.as_slice(), inspected) {
+            (["test" | "explain", text], None) => !text.starts_with('-') && inspected_text(text),
+            (["test" | "explain"], Some([text])) => inspected_text(text),
+            (["extensions"], None) => true,
+            (["extensions", id], None) => extension_id(id),
             _ => false,
         }
 }
 
 fn inspected_text(text: &str) -> bool {
-    !text.trim().is_empty() && !text.starts_with('-') && !text.contains('\0') && text.len() <= 4_096
+    !text.trim().is_empty() && !text.contains('\0') && text.len() <= 4_096
 }
 
 fn extension_id(id: &str) -> bool {
@@ -235,42 +258,71 @@ fn subcommand_verb(word: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
+/// Launcher words whose `--help` output is safe to print without a review.
+///
+/// This tracks the launcher's own parser set so an agent reading the CLI never
+/// collects an approval row. Three subcommands are deliberately absent:
+/// `protect`, `pytest-contained` and `run-shim` each take a trailing
+/// `argparse.REMAINDER`, so `hol-guard protect npm --help` would run `npm
+/// --help` rather than print help, and [`help_path`] only shape-checks the
+/// word after the subcommand.
 const HELP_SUBCOMMANDS: &[&str] = &[
     "abom",
+    "admin",
     "advisories",
+    "aibom",
     "allow",
     "approvals",
     "apps",
     "bootstrap",
+    "bridge",
+    "cloud",
+    "cloud-review",
     "command",
+    "commands",
+    "connect",
+    "contained-write",
     "daemon",
     "dashboard",
     "deny",
+    "desktop",
     "detect",
+    "device",
     "diff",
+    "disconnect",
     "doctor",
     "events",
     "exceptions",
     "explain",
     "export",
+    "health-leases",
     "history",
+    "hook",
     "hooks",
     "import",
     "init",
     "install",
     "inventory",
     "list",
+    "login",
     "mcp",
+    "mdm",
+    "network",
+    "package-shims",
     "policies",
     "policy",
+    "preflight",
     "receipts",
+    "remote-pair",
     "repair",
     "retry-hint",
     "risk-report",
     "run",
+    "runtime",
     "scan",
     "secrets",
     "security-level",
+    "service",
     "set",
     "settings",
     "show",
@@ -278,11 +330,14 @@ const HELP_SUBCOMMANDS: &[&str] = &[
     "start",
     "status",
     "stop",
+    "supply-chain",
     "sync",
+    "test-eval",
     "trust",
     "uninstall",
     "update",
     "validate",
+    "verified-read",
 ];
 
 /// Guard's own read-only records: the local event log, the active exceptions,
