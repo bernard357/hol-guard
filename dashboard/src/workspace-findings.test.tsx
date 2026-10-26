@@ -226,6 +226,28 @@ const cleanMarkup = renderToStaticMarkup(
 );
 assert.ok(cleanMarkup.includes("No dependency or secret findings in the checked files."), "a clean run says secrets were checked");
 assert.ok(!cleanMarkup.includes("not part of this check yet"));
+const noDependencyFiles = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-5",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "no_inputs", secrets: "complete" } },
+        findings: [],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(noDependencyFiles.dependencyFilesFound, false);
+assert.equal(secretsRan.dependencyFilesFound, true);
+const noDependencyMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: noDependencyFiles, busyKey: null, onAction: () => {} }),
+);
+assert.ok(noDependencyMarkup.includes("No dependency files were found"), "a workspace with nothing to audit says so");
+assert.ok(!noDependencyMarkup.includes("No dependency or secret findings"), "an empty audit is never described as clean dependencies");
 const incompleteMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
     worktree,
@@ -247,6 +269,75 @@ const runtimeGapMarkup = renderToStaticMarkup(
 );
 assert.ok(runtimeGapMarkup.includes("Guard has no runtime advisories cached"), "unchecked runtimes are never shown as clean");
 assert.ok(runtimeGapMarkup.includes("Runtime checking is not part of this check yet."));
+
+const skillState = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-skill",
+        state: "completed",
+        coverage: {
+          status: "complete",
+          reasons: [],
+          detectors: { supply_chain: "complete", secrets: "complete", skill_content_v1: "complete" },
+        },
+        findings: [
+          {
+            finding_id: "skill-1",
+            source_kind: "workspace_source",
+            detector: "skill_content_v1",
+            severity: "critical",
+            decision: "warn",
+            rule_ids: ["skill.remote-fetch-exec"],
+            path: ".claude/skills/setup/SKILL.md",
+            confidence: "strong",
+            title: "Skill downloads and runs remote code",
+            reason: "The skill tells the agent to pipe a download into a shell.",
+            false_positive_hint: null,
+          },
+          { finding_id: "skill-no-path", source_kind: "workspace_source", detector: "skill_content_v1", rule_ids: ["skill.cron"], title: "t", reason: "r" },
+          { finding_id: "skill-no-title", source_kind: "workspace_source", detector: "skill_content_v1", rule_ids: ["skill.cron"], path: "skills/a/SKILL.md", reason: "r" },
+        ],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(skillState.findings.length, 1, "a skill finding without a path or rule wording is dropped");
+const [skillFinding] = skillState.findings;
+assert.deepEqual(
+  [skillFinding.kind, skillFinding.path, skillFinding.ruleIds, skillFinding.packageName, skillFinding.skill?.confidence],
+  ["skill", ".claude/skills/setup/SKILL.md", ["skill.remote-fetch-exec"], null, "strong"],
+);
+const skillMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: skillState, busyKey: null, onAction: () => {} }),
+);
+assert.ok(skillMarkup.includes("Agent skills with risky instructions"), "skill findings get their own table");
+assert.ok(skillMarkup.includes("Skill downloads and runs remote code"));
+assert.ok(skillMarkup.includes(".claude/skills/setup/SKILL.md"));
+assert.ok(!skillMarkup.includes("No dependency or secret findings"), "a run with only skill findings is not shown as clean");
+const skillGapMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, {
+    worktree,
+    newestRun: partialRun,
+    assessment: { ...secretsRan, partial: true, reasons: ["skills_incomplete"], notRun: [] },
+    busyKey: null,
+    onAction: () => {},
+  }),
+);
+assert.ok(skillGapMarkup.includes("Some agent skills could not be read in full"), "an incomplete skill scan is named");
+const skillNotRunMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, {
+    worktree,
+    newestRun: partialRun,
+    assessment: { ...secretsRan, partial: true, notRun: ["skill_content_v1"] },
+    busyKey: null,
+    onAction: () => {},
+  }),
+);
+assert.ok(skillNotRunMarkup.includes("Skill checking is not part of this check yet."));
 
 const paused = renderToStaticMarkup(
   createElement(WorktreeRow, {

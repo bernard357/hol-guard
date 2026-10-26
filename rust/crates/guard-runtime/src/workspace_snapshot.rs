@@ -29,16 +29,20 @@ use crate::workspace_snapshot_git::{git_identity, GitIdentity};
 
 #[path = "workspace_snapshot_secrets.rs"]
 mod secrets;
+#[path = "workspace_snapshot_skills.rs"]
+mod skills;
 #[path = "workspace_snapshot_walk.rs"]
 mod walk;
 #[cfg(test)]
 use secrets::MAX_SECRET_FINDINGS;
 use secrets::{SecretKey, SecretScan, WalkSkips};
+use skills::SkillScan;
 use walk::{walk_directory, Walk, MAX_WALK_DEPTH};
 
 pub(crate) const COMMAND: &str = "workspace-snapshot";
 pub(crate) const FEATURE: &str = "workspace-snapshot-v1";
 pub(crate) const SECRETS_FEATURE: &str = "workspace-snapshot-secrets-v1";
+pub(crate) const SKILLS_FEATURE: &str = "workspace-snapshot-skills-v1";
 const RESULT_SCHEMA: &str = "guard.workspace-snapshot.v1";
 const CONTRACT_VERSION: u32 = 1;
 
@@ -52,9 +56,9 @@ const HARD_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 /// tree of empty or excluded entries cannot keep the walk running.
 const DEFAULT_MAX_VISITED_ENTRIES: usize = 250_000;
 const HARD_MAX_VISITED_ENTRIES: usize = 1_000_000;
-/// Snapshot limits that leave files unread, which leaves the secret scan
-/// incomplete too. An oversize file is excluded by policy and counted as a
-/// skip instead.
+/// Snapshot limits that leave files unread, which leaves the secret and skill
+/// scans incomplete too. An oversize file is excluded by policy and counted as
+/// a skip instead.
 const SECRET_SCAN_LIMITS: [&str; 6] = [
     "entry_cap",
     "byte_cap",
@@ -118,6 +122,10 @@ pub(crate) struct SnapshotRequest {
     /// `secrets`; never echoed in the result.
     #[serde(default)]
     pub(crate) secret_key: Option<SecretKey>,
+    /// Also run the skill-content rules over every agent skill the snapshot
+    /// hashes. Needs `content` mode.
+    #[serde(default)]
+    pub(crate) skills: bool,
 }
 
 struct Limits {
@@ -193,6 +201,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if request.secrets && request.mode != SnapshotMode::Content {
         return Err("workspace_snapshot_secrets_need_content".to_owned());
     }
+    if request.skills && request.mode != SnapshotMode::Content {
+        return Err("workspace_snapshot_skills_need_content".to_owned());
+    }
     let secret_key = match (request.secrets, request.secret_key.as_ref()) {
         (true, Some(key)) if key.is_usable() => Some(key),
         (true, _) => return Err("workspace_snapshot_secrets_need_key".to_owned()),
@@ -208,6 +219,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     );
     let mut walk = Walk {
         secrets: secret_key.map(|key| SecretScan::new(key, &codebase_key, &worktree_key)),
+        skills: request
+            .skills
+            .then(|| SkillScan::new(&worktree_key, &[&requested, &root])),
         ..Walk::default()
     };
     walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
@@ -247,12 +261,16 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if walk.unsupported_dependency_input {
         partial_reasons.push("unsupported_dependency_input");
     }
+    if walk.undiscovered_dependency_input {
+        partial_reasons.push("undiscovered_dependency_input");
+    }
+    let incomplete: Vec<&str> = partial_reasons
+        .iter()
+        .copied()
+        .filter(|reason| SECRET_SCAN_LIMITS.contains(reason))
+        .collect();
+    let skills = walk.skills.take().map(|scan| scan.report(&incomplete));
     let secrets = walk.secrets.take().map(|scan| {
-        let incomplete: Vec<&str> = partial_reasons
-            .iter()
-            .copied()
-            .filter(|reason| SECRET_SCAN_LIMITS.contains(reason))
-            .collect();
         let skips = WalkSkips {
             sensitive: walk.counts.sensitive,
             oversize: walk.counts.oversize,
@@ -297,8 +315,13 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
             "max_visited_entries": limits.visits,
         },
     });
-    if let (Some(secrets), Some(fields)) = (secrets, result.as_object_mut()) {
-        fields.insert("secrets".to_owned(), secrets);
+    if let Some(fields) = result.as_object_mut() {
+        if let Some(secrets) = secrets {
+            fields.insert("secrets".to_owned(), secrets);
+        }
+        if let Some(skills) = skills {
+            fields.insert("skills".to_owned(), skills);
+        }
     }
     Ok(result)
 }
@@ -364,6 +387,9 @@ fn snapshot_digest(
 #[cfg(test)]
 #[path = "workspace_snapshot_secrets_tests.rs"]
 mod secrets_tests;
+#[cfg(test)]
+#[path = "workspace_snapshot_skills_tests.rs"]
+mod skills_tests;
 #[cfg(test)]
 #[path = "workspace_snapshot_tests.rs"]
 mod tests;

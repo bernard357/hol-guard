@@ -67,6 +67,30 @@ fn a_command_that_mentions_cdpath_spends_no_descent() {
     }
 }
 
+/// A run that sets the search path itself is not contained at all, whether or
+/// not it spends a parent step. `CDPATH=/ cd etc && ls` reads here as a
+/// descent into `etc` below the workspace while the shell it describes lands
+/// in `/etc` and lists that.
+#[test]
+fn a_command_that_sets_a_directory_search_path_is_not_contained() {
+    let ws = workspace("cwd-cdpath-shape", true);
+    std::fs::create_dir_all(ws.join("etc")).unwrap();
+    for command in [
+        "CDPATH=/ cd etc && ls",
+        "CDPATH=/ cd etc && cat passwd",
+        "cdpath=/ cd etc && ls",
+        "CdPath=/ cd etc && ls",
+        "export CDPATH=/ && cd etc && ls",
+        "export cdpath=/ && cd etc && ls",
+    ] {
+        assert!(!shaped(command, &ws), "{command}");
+    }
+    // The same descent without a search path is the ordinary contained shape.
+    for command in ["cd etc && ls", "cd etc && ls ."] {
+        assert!(shaped(command, &ws), "{command}");
+    }
+}
+
 /// Only the bare builtin moves the shell. A program the workspace happens to
 /// carry at `tools/cd` is an ordinary child process: it cannot change its
 /// parent's directory, so the shell is still at the root when the next segment

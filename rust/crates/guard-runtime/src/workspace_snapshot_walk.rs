@@ -1,12 +1,17 @@
 //! The bounded, no-follow directory walk behind `workspace-snapshot`.
 
 use std::ffi::OsStr;
+use std::path::Path;
 
 use guard_command::local_supply_chain::is_audit_sensitive_basename;
 use sha2::{Digest, Sha256};
 
 use super::secrets::SecretScan;
+use super::skills::SkillScan;
 use super::{Limits, SnapshotMode, SKIP_DIRS};
+use crate::workspace_inventory_files::{
+    LOCKFILE_CANDIDATES, MANIFEST_CANDIDATES, MAX_DEPTH as AUDIT_DISCOVERY_DEPTH,
+};
 use crate::workspace_snapshot_file::{hash_stable, DirHandle, HashError, Kind, Node};
 
 /// Directories nested deeper than this below the root are recorded, not
@@ -79,9 +84,12 @@ pub(super) struct Walk {
     pub(super) depth_cap_hit: bool,
     pub(super) visit_cap_hit: bool,
     pub(super) unsupported_dependency_input: bool,
+    pub(super) undiscovered_dependency_input: bool,
     /// Present when the caller asked for secret detection over the bytes the
     /// walk hashes.
     pub(super) secrets: Option<SecretScan>,
+    /// Present when the caller asked for skill-content detection.
+    pub(super) skills: Option<SkillScan>,
 }
 
 #[derive(Default)]
@@ -98,6 +106,32 @@ impl Walk {
         self.exclusions.update(b"\nexclude\0");
         self.exclusions.update(record.as_bytes());
         self.exclusion_count += 1;
+    }
+
+    /// Record that the walk left `relative` unread, which matters only when it
+    /// is a skill the skill scan had to read.
+    fn left_unread(&mut self, relative: &str) {
+        if let Some(skills) = self.skills.as_mut() {
+            if skills.admits(relative) {
+                skills.left_unread();
+            }
+        }
+    }
+
+    /// Record a special file the walk did not follow, which the skill scan
+    /// counts when a skill could be there.
+    fn left_special(&mut self, relative: &str) {
+        if let Some(skills) = self.skills.as_mut() {
+            skills.left_special(relative);
+        }
+    }
+
+    /// Record a symlink the walk did not follow, which the skill scan counts
+    /// when a skill could be behind it.
+    fn left_link(&mut self, relative: &str, target: Option<&Path>) {
+        if let Some(skills) = self.skills.as_mut() {
+            skills.left_link(relative, target);
+        }
     }
 
     fn stopped(&self) -> bool {
@@ -157,11 +191,13 @@ pub(super) fn walk_directory(
         match node.kind {
             Kind::Symlink => {
                 walk.counts.symlinks += 1;
-                let target = directory
-                    .read_link(&os_name)
+                let target = directory.read_link(&os_name);
+                let digest = target
+                    .as_ref()
                     .map(|target| hex::encode(Sha256::digest(target.as_encoded_bytes())))
                     .unwrap_or_else(|| "-".to_owned());
-                walk.exclude(format!("{child}\0symlink\0{target}"));
+                walk.exclude(format!("{child}\0symlink\0{digest}"));
+                walk.left_link(&child, target.as_deref().map(Path::new));
             }
             Kind::Directory if SKIP_DIRS.contains(&name.as_str()) => {
                 walk.counts.directories += 1;
@@ -187,6 +223,7 @@ pub(super) fn walk_directory(
             Kind::Special => {
                 walk.counts.special += 1;
                 walk.exclude(format!("{child}\0special"));
+                walk.left_special(&child);
             }
             Kind::File if is_audit_sensitive_basename(&name) => {
                 walk.counts.sensitive += 1;
@@ -197,6 +234,13 @@ pub(super) fn walk_directory(
             ),
         }
     }
+}
+
+/// The workspace audit only discovers dependency files a few directories
+/// below the root, so a deeper one is never checked.
+fn is_beyond_audit_discovery(child: &str, name: &str) -> bool {
+    (MANIFEST_CANDIDATES.contains(&name) || LOCKFILE_CANDIDATES.contains(&name))
+        && child.matches('/').count() > AUDIT_DISCOVERY_DEPTH
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -213,6 +257,9 @@ fn admit_file(
     if UNSUPPORTED_DEPENDENCY_BASENAMES.contains(&name) {
         walk.unsupported_dependency_input = true;
     }
+    if is_beyond_audit_discovery(child, name) {
+        walk.undiscovered_dependency_input = true;
+    }
     if walk.entries.len() >= limits.entries {
         walk.entry_cap_hit = true;
         return;
@@ -223,6 +270,7 @@ fn admit_file(
         if DETECTOR_INPUT_BASENAMES.contains(&name) {
             walk.oversize_detector_input = true;
         }
+        walk.left_unread(child);
         walk.exclude(format!("{child}\0oversize\0{size}"));
         return;
     }
@@ -233,11 +281,13 @@ fn admit_file(
     }
     if walk.hashed_bytes.saturating_add(size) > limits.total_bytes {
         walk.byte_cap_hit = true;
+        walk.left_unread(child);
         walk.exclude(format!("{child}\0byte_budget\0{size}"));
         return;
     }
     let Some(file) = directory.open_file(os_name) else {
         walk.unreadable += 1;
+        walk.left_unread(child);
         walk.exclude(format!("{child}\0unreadable"));
         return;
     };
@@ -246,7 +296,11 @@ fn admit_file(
         .secrets
         .as_mut()
         .is_some_and(|secrets| secrets.admits(child));
-    let capture = scan_content.then_some(&mut captured);
+    let scan_skill = walk
+        .skills
+        .as_mut()
+        .is_some_and(|skills| skills.admits(child));
+    let capture = (scan_content || scan_skill).then_some(&mut captured);
     match hash_stable(file, node, limits.file_bytes, capture) {
         Ok((digest, read)) => {
             walk.hashed_bytes += read;
@@ -256,13 +310,20 @@ fn admit_file(
                     secrets.observe(child, &captured);
                 }
             }
+            if scan_skill {
+                if let Some(skills) = walk.skills.as_mut() {
+                    skills.observe(child, &captured);
+                }
+            }
         }
         Err(HashError::Unstable) => {
             walk.unstable += 1;
+            walk.left_unread(child);
             walk.exclude(format!("{child}\0unstable"));
         }
         Err(HashError::Unreadable) => {
             walk.unreadable += 1;
+            walk.left_unread(child);
             walk.exclude(format!("{child}\0unreadable"));
         }
     }

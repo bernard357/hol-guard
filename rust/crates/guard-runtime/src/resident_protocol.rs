@@ -118,6 +118,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         guard_plugin_telemetry::FEATURE.into(),
         crate::workspace_snapshot::FEATURE.into(),
         crate::workspace_snapshot::SECRETS_FEATURE.into(),
+        crate::workspace_snapshot::SKILLS_FEATURE.into(),
         crate::workspace_fix::FEATURE.into(),
         guard_plugin_telemetry::UPDATES_FEATURE.into(),
     ];

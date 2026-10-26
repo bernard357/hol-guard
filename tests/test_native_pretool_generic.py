@@ -248,6 +248,11 @@ def test_supported_cli_pretool_worker_exception_is_fail_safe(
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
 
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
+
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     response = commands_hook_native_authority.try_native_hook_authority(
         payload={"hook_event_name": "PreToolUse", "tool_input": {"url": "https://example.test"}},
@@ -276,6 +281,11 @@ def test_supported_cli_pretool_worker_exception_is_recorded_in_the_guard_log(
 
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
+
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
 
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     guard_home = tmp_path / "guard-home"
@@ -317,6 +327,11 @@ def test_supported_cli_pretool_worker_exception_points_stderr_at_the_guard_log(
 
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
+
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
 
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     with caplog.at_level(logging.WARNING, logger=commands_hook_native_authority.__name__):
