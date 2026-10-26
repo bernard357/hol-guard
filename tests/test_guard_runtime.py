@@ -9362,7 +9362,7 @@ def test_guard_hook_claude_tampered_pending_state_cannot_bootstrap_signed_allow(
             (json.dumps(tampered), pending_key),
         )
 
-    persisted = guard_commands_module._persist_claude_guard_question_decision(
+    persisted = guard_commands_module._settle_claude_guard_question(
         store,
         {
             "session_id": session_id,
@@ -9383,7 +9383,7 @@ def test_guard_hook_claude_tampered_pending_state_cannot_bootstrap_signed_allow(
         },
     )
 
-    assert persisted is False
+    assert persisted is None
     assert store.list_policy_decisions("claude-code") == []
     assert store.get_sync_payload(pending_key) is None
     events = store.list_events(event_name="rule.ignored.local_integrity")
@@ -9425,7 +9425,7 @@ def test_guard_hook_claude_signed_unseen_pending_cannot_bootstrap_allow(tmp_path
     approval_question = str(pending["approval_question"])
     approval_options = pending["approval_options"]
     assert isinstance(approval_options, list)
-    question_saved = guard_commands_module._persist_claude_guard_question_decision(
+    question_saved = guard_commands_module._settle_claude_guard_question(
         store,
         {
             "session_id": session_id,
@@ -9480,7 +9480,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_legacy_pending_state_canno
         now,
     )
 
-    persisted = guard_commands_module._persist_claude_guard_question_decision(
+    persisted = guard_commands_module._settle_claude_guard_question(
         store,
         {
             "session_id": session_id,
@@ -9517,7 +9517,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_legacy_pending_state_canno
     )
     policies = store.list_policy_decisions("claude-code")
 
-    assert persisted is False
+    assert persisted is None
     assert policies == []
     assert store.get_sync_payload(guard_commands_module._claude_pending_permission_index_key(session_id)) is None
     events = store.list_events(event_name="rule.ignored.local_integrity")
@@ -9556,7 +9556,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_bound_pending_cannot_persi
         now,
     )
 
-    persisted = guard_commands_module._persist_claude_guard_question_decision(
+    persisted = guard_commands_module._settle_claude_guard_question(
         store,
         {
             "session_id": session_id,
@@ -9593,7 +9593,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_bound_pending_cannot_persi
     )
     policies = store.list_policy_decisions("claude-code")
 
-    assert persisted is False
+    assert persisted is None
     assert policies == []
 
 

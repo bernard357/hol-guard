@@ -1,6 +1,7 @@
 """Find and start the runtime CLIs an install plan names.
 
-Programs come only from absolute PATH entries, never the current directory.
+Programs come only from absolute PATH entries, never the current directory,
+then from the folders each runtime's installer is known to use.
 On POSIX a folder or program every user can write to is skipped, since anyone
 could have planted it. On Windows an ``.exe`` wins over a ``.cmd`` or ``.bat``
 shim in the same folder, and every argument bound for a shim must stay clear
@@ -14,9 +15,10 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TextIO
+from typing import Any, TextIO
 
 COMMAND_TIMEOUT_SECONDS = 600.0
 _WINDOWS_EXTENSIONS = (".exe", ".cmd", ".bat")
@@ -33,6 +35,8 @@ class Program:
     name: str
     #: Absolute path; the plan shows it and the confirmation covers it.
     path: str
+    #: False when it was found in a known install folder that is not on PATH.
+    on_path: bool = True
 
     @property
     def batch(self) -> bool:
@@ -83,9 +87,14 @@ def _candidate(folder: str, name: str, *, windows: bool) -> str | None:
 
 
 def find_programs(
-    names: Iterable[str], environ: Mapping[str, str] | None = None, *, windows: bool | None = None
+    names: Iterable[str],
+    environ: Mapping[str, str] | None = None,
+    *,
+    windows: bool | None = None,
+    known: Sequence[str] = (),
 ) -> Lookup:
-    """Resolve each name to an absolute path Guard is willing to start."""
+    """Resolve each name to an absolute path Guard is willing to start: PATH
+    first, then the ``known`` install folders, with the same checks."""
 
     environ = os.environ if environ is None else environ
     windows = os.name == "nt" if windows is None else windows
@@ -117,8 +126,19 @@ def find_programs(
             planted = _candidate(os.path.abspath(entry), name, windows=windows)
             if planted:
                 lookup.ignored.append(f"Guard ignored {planted}: it is in {reason}.")
+    extra: list[str] = []
+    for entry in known:
+        if entry in seen or not os.path.isabs(entry):
+            continue
+        seen.add(entry)
+        try:
+            info = os.stat(entry)
+        except OSError:
+            continue
+        if stat.S_ISDIR(info.st_mode) and (windows or not _world_writable(info.st_mode)):
+            extra.append(entry)
     for name in names:
-        for folder in folders:
+        for folder in [*folders, *extra]:
             found = _candidate(folder, name, windows=windows)
             if found is None:
                 continue
@@ -134,7 +154,7 @@ def find_programs(
                 if folder_open is not None:
                     lookup.ignored.append(f"Guard ignored {found}: every user can change {folder_open}.")
                     continue
-            lookup.programs[name] = Program(name, found)
+            lookup.programs[name] = Program(name, found, on_path=folder in folders)
             break
     return lookup
 
@@ -160,6 +180,59 @@ class Completed:
     stdout: str
 
 
+# A runtime's reply is a short JSON document or a few lines of text; more
+# than this means something is wrong, and Guard stops reading rather than
+# holding it all in memory.
+OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024
+
+# How long to wait for the output reader once the command has exited. A
+# background process the command started can keep the pipe open after that.
+READER_GRACE_SECONDS = 5.0
+
+
+def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subprocess.CompletedProcess[str]:
+    """Run ``argv`` with stdout piped, keeping at most OUTPUT_LIMIT_BYTES."""
+
+    process = subprocess.Popen(list(argv), stdout=subprocess.PIPE, **options)
+    stream = process.stdout
+    assert stream is not None
+    chunks: list[bytes] = []
+    too_large = threading.Event()
+
+    def read() -> None:
+        size = 0
+        fd = stream.fileno()
+        with stream:
+            for chunk in iter(lambda: os.read(fd, 65536), b""):
+                size += len(chunk)
+                if size > OUTPUT_LIMIT_BYTES:
+                    too_large.set()
+                    process.kill()
+                    return
+                chunks.append(chunk)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        reader.join(timeout=READER_GRACE_SECONDS)
+        # A reader still blocked in read() holds the stream's lock, so close()
+        # would wait for whatever process still has the pipe open. Leave the
+        # stream to the daemon reader then; it closes the stream at EOF.
+        if not reader.is_alive():
+            stream.close()
+    if too_large.is_set():
+        name = os.path.basename(argv[0])
+        raise RunnerError(f"{name} printed more than {OUTPUT_LIMIT_BYTES // (1024 * 1024)} MiB, so Guard stopped it.")
+    text = b"".join(list(chunks)).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return subprocess.CompletedProcess(list(argv), returncode, text)
+
+
 def run(
     program: Program,
     arguments: Sequence[str],
@@ -177,16 +250,12 @@ def run(
     check_arguments(program, arguments)
     piped = capture or echo is not None
     try:
-        completed = subprocess.run(
-            [program.path, *arguments],
-            shell=False,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if piped else None,
-            text=True if piped else None,
-            errors="replace" if piped else None,
-            timeout=timeout,
-        )
+        if piped:
+            completed = _run_capped([program.path, *arguments], shell=False, stdin=subprocess.DEVNULL, timeout=timeout)
+        else:
+            completed = subprocess.run(
+                [program.path, *arguments], shell=False, check=False, stdin=subprocess.DEVNULL, timeout=timeout
+            )
     except subprocess.TimeoutExpired as error:
         raise RunnerError(f"{program.name} did not finish within {timeout:.0f} seconds.") from error
     except OSError as error:

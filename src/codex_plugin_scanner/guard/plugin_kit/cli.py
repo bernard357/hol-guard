@@ -10,10 +10,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .output import write_check, write_conformance, write_links
 
@@ -57,6 +58,13 @@ _ERRORS = {
         "The output folder is inside a folder the Kit reads the plugin from. Choose one outside it."
     ),
     "plugin_kit_output_unwritable": "The output folder could not be written.",
+    "plugin_kit_output_unsafe": (
+        "Choose another output folder. It can't be the plugin folder, a folder that holds it, your home folder or /."
+    ),
+    "plugin_kit_output_not_generated": (
+        "The output folder has a file Guard did not write where it would write one."
+        " Nothing was changed. Move that file or choose an empty folder."
+    ),
     "plugin_kit_package_too_large": "The plugin is too large to package.",
     "plugin_kit_package_path_conflict": "Two different files would be packaged at the same path.",
     "plugin_kit_init_needs_name": "This folder has no plugin yet. Pass --name to scaffold one.",
@@ -256,14 +264,32 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         command = commands.add_parser(
             name,
             help=help_text,
-            description=help_text,
+            description=help_text.replace(" Prints", "\nPrints"),
             epilog=(
-                "Exit codes: 0 done or plan shown; 1 a runtime command or check failed; 2 usage, or no "
-                "terminal to confirm in; 3 nothing Guard can install here; 4 stopped by HOL's scan result, "
-                "a commit other than the scanned one, or a declared command not accepted; 5 this Guard is "
-                "too old; 6 HOL unreachable; 130 interrupted. "
-                "To test against your own portal, set HOL_GUARD_PLUGIN_SPEC_URL to its install-spec URL "
-                "(https, or http on localhost). Guard warns on every run while it is set."
+                "examples:\n"
+                + (
+                    f"  {program_name} install acme/toolgate                  show the plan\n"
+                    f"  {program_name} install acme/toolgate --apply          install, asking first\n"
+                    f"  {program_name} install acme/toolgate --apply --runtime codex\n"
+                    if name == "install"
+                    else f"  {program_name} uninstall acme/toolgate                show the plan\n"
+                    f"  {program_name} uninstall acme/toolgate --apply        remove it\n"
+                )
+                + "\n"
+                "exit codes:\n"
+                "  0    done, or plan shown\n"
+                "  1    a runtime command or check failed\n"
+                "  2    usage, or no terminal to confirm in\n"
+                "  3    nothing Guard can install here\n"
+                "  4    stopped by HOL's scan result, a commit other than the scanned one,\n"
+                "       or a declared command not accepted\n"
+                "  5    this Guard is too old\n"
+                "  6    HOL unreachable\n"
+                "  130  interrupted\n"
+                "\n"
+                "To test against your own portal, set HOL_GUARD_PLUGIN_SPEC_URL to its\n"
+                "install-spec URL (https, or http on localhost). Guard warns on every run\n"
+                "while it is set."
             ),
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
@@ -305,6 +331,7 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
             action="store_true",
             help=f"Print one {INSTALL_DOCUMENT} document on stdout; everything else goes to stderr.",
         )
+    parser.set_defaults(program_name=program_name)
     stats = commands.add_parser(
         "stats",
         help="Print a listing you own's views and attested installs from HOL (needs HOL_API_KEY).",
@@ -481,6 +508,40 @@ def _install(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _progress_stream(args: argparse.Namespace) -> TextIO | None:
+    """stderr when a person is watching it; never with --json (REM D15)."""
+
+    if args.json:
+        return None
+    try:
+        return sys.stderr if sys.stderr.isatty() else None
+    except (AttributeError, ValueError):
+        return None
+
+
+def _stdout_is_terminal() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _first_install_tip(args: argparse.Namespace, slug: str, installed: list[str], guard_home: Path) -> str:
+    """One tip after the first install (REM D13): protect a runtime Guard does
+    not cover yet, else how to remove the plugin. Nothing is set up here."""
+
+    from . import install
+
+    protected = install.protected_runtimes(guard_home)
+    unprotected = [runtime for runtime in installed if protected is not None and runtime not in protected]
+    if unprotected:
+        names = " and ".join(install.runtime_label(runtime) for runtime in unprotected)
+        return (
+            f"Guard does not check what runs in {names} yet. To turn that on: hol-guard install {' '.join(unprotected)}"
+        )
+    return f"{args.program_name} uninstall {slug} shows how to remove it again. Nothing changes until you add --apply."
+
+
 def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     from ..config import resolve_guard_home
     from . import install
@@ -499,7 +560,11 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
             )
         spec: dict[str, Any] | None = None
         if installing:
-            spec = install.read_spec_file(args.spec_file) if args.spec_file else install.fetch_spec(slug, endpoint)
+            spec = (
+                install.read_spec_file(args.spec_file)
+                if args.spec_file
+                else install.fetch_spec(slug, endpoint, progress=_progress_stream(args))
+            )
             install.check_guard_version(spec)
     except install.PluginInstallError as error:
         raise _InstallStopError(error.exit_code, error.code, str(error)) from error
@@ -520,7 +585,7 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     outcomes = install.planned(plan, lookup)
     document["runtimes"] = [outcome.as_json() for outcome in outcomes]
     if not args.json:
-        install.write_plan(plan, lookup, apply=args.apply)
+        install.write_plan(plan, lookup, apply=args.apply, program_name=args.program_name)
     gate = (plan.get("security") or {}).get("gate")
     if gate == "block":
         for outcome in outcomes:
@@ -541,10 +606,10 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     if not args.yes and not interactive:
         raise _InstallStopError(2, "no_terminal", _NO_TERMINAL)
     if gate == "confirm" and not getattr(args, "accept_risk", False):
-        if args.json:
+        if getattr(args, "json", False):
             for reason in (plan.get("security") or {}).get("reasons") or []:
                 print(f"  {reason}", file=sys.stderr)
-        if args.yes:
+        if getattr(args, "yes", False):
             raise _InstallStopError(
                 4,
                 "risk_not_accepted",
@@ -564,9 +629,18 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
             "and a new one started.",
             file=sys.stderr,
         )
+    first_install = installing and not installs.get("installs")
 
-    def record(runtime: str) -> None:
-        install.record(guard_home, slug, runtime, installed=installing, spec=spec, listing_origin=listing_origin)
+    def record(runtime: str, marketplace_added: bool) -> None:
+        install.record(
+            guard_home,
+            slug,
+            runtime,
+            installed=installing,
+            spec=spec,
+            listing_origin=listing_origin,
+            marketplace_added=marketplace_added,
+        )
 
     def progress(done: Sequence[install.Outcome]) -> None:
         document["runtimes"] = [outcome.as_json() for outcome in [*done, *outcomes[len(done) :]]]
@@ -584,6 +658,25 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     except install.PluginInstallError as error:
         raise _InstallStopError(error.exit_code, error.code, str(error)) from error
     document["runtimes"] = [outcome.as_json() for outcome in outcomes]
+    failed = [outcome.runtime for outcome in outcomes if outcome.status == "failed"]
+    if failed:
+        retry = [*args.program_name.split(), args.command, args.target, "--apply", "--runtime", ",".join(failed)]
+        # Keep the choices this run was given, so the retry stops where it did not.
+        if getattr(args, "spec_file", None):
+            retry += ["--spec-file", args.spec_file]
+        if getattr(args, "accept_command", None):
+            retry += ["--accept-command", args.accept_command]
+        if getattr(args, "accept_risk", False):
+            retry.append("--accept-risk")
+        if getattr(args, "yes", False):
+            retry.append("--yes")
+        if getattr(args, "json", False):
+            retry.append("--json")
+        document["retry"] = retry
+        print(f"Retry {', '.join(failed)} with: {shlex.join(retry)}", file=sys.stderr)
+    installed = [outcome.runtime for outcome in outcomes if outcome.status == "installed"]
+    if first_install and installed and not args.json and _stdout_is_terminal():
+        print(f"\nTip: {_first_install_tip(args, slug, installed, guard_home)}")
     return install.exit_code_for(outcomes)
 
 
