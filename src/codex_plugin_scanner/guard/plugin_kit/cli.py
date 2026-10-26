@@ -57,6 +57,7 @@ _ERRORS = {
     ),
     "plugin_kit_output_unwritable": "The output folder could not be written.",
     "plugin_kit_package_too_large": "The plugin is too large to package.",
+    "plugin_kit_package_path_conflict": "Two different files would be packaged at the same path.",
     "plugin_kit_init_needs_name": "This folder has no plugin yet. Pass --name to scaffold one.",
     "plugin_kit_init_name_invalid": "Use a kebab-case --name of at most 64 characters, such as my-plugin.",
     "plugin_kit_init_folder_not_empty": (

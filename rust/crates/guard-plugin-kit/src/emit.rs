@@ -23,7 +23,8 @@ use crate::model::Plugin;
 use crate::walk;
 
 use servers::{
-    agent_plugins_servers, gemini_settings, registry_document, servers, servers_left_out, Syntax,
+    agent_plugins_bundled, agent_plugins_servers, gemini_settings, registry_document, servers,
+    servers_left_out, Syntax,
 };
 
 /// The largest single file a package copies.
@@ -294,7 +295,11 @@ pub(crate) fn plan(
         }
         let copies = copies(runtime, root, plugin, excludes, &mut budget, sources)?;
         for (path, content) in copies {
-            outputs.insert(format!("{prefix}/{path}"), content);
+            let path = format!("{prefix}/{path}");
+            if outputs.contains_key(&path) {
+                return Err("plugin_kit_package_path_conflict".to_owned());
+            }
+            outputs.insert(path, content);
         }
     }
     Ok(outputs
@@ -372,32 +377,7 @@ fn copies(
         }
     }
     if runtime == Runtime::AgentPlugins {
-        // A server's command and args resolve against the package root, so
-        // the files they name travel at the same paths.
-        let (entries, _) = agent_plugins_servers(plugin);
-        let plugin_dir = root.join(&plugin.base);
-        let mut bundled = BTreeSet::new();
-        for name in entries.keys() {
-            bundled.extend(plugin.mcp_servers[name].bundled.iter().cloned());
-        }
-        for relative in bundled {
-            let path = plugin_dir.join(&relative);
-            if path.is_dir() {
-                let repository_path = if plugin.base.is_empty() {
-                    relative.clone()
-                } else {
-                    format!("{}/{relative}", plugin.base)
-                };
-                for file in walk::files(&path, &repository_path, excludes)? {
-                    found.push((
-                        path.join(&file),
-                        format!("{relative}/{}", walk::display(&file)),
-                    ));
-                }
-            } else {
-                found.push((path, relative));
-            }
-        }
+        found.extend(agent_plugins_bundled(root, plugin, excludes)?);
     }
     if runtime == Runtime::GeminiCli {
         // Detection keeps only a context file the walk found inside the
@@ -407,7 +387,17 @@ fn copies(
         }
     }
     let mut copied = Vec::new();
+    let mut targets: BTreeMap<String, PathBuf> = BTreeMap::new();
     for (source, target) in found {
+        // A file reached twice, as a skill file and a server file, is
+        // packaged once. Two different files at one path cannot both ship.
+        match targets.get(&target) {
+            Some(existing) if *existing == source => continue,
+            Some(_) => return Err("plugin_kit_package_path_conflict".to_owned()),
+            None => {
+                targets.insert(target.clone(), source.clone());
+            }
+        }
         let Some(content) = walk::read_bytes(&source, MAX_COPY_BYTES) else {
             continue;
         };

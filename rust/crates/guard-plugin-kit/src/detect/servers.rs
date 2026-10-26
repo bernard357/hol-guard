@@ -123,18 +123,20 @@ fn server_entry(config: &Map<String, Value>, gemini: bool) -> McpServer {
     }
 }
 
-/// Records, for each server, the paths below `plugin_dir` its command and
-/// args name, and whether any of them is missing there.
+/// Records, for each server, the paths below `plugin_dir` its command, args
+/// and `cwd` name, and whether any of them is missing there.
 pub(super) fn resolve_bundles(plugin_dir: &Path, servers: &mut BTreeMap<String, McpServer>) {
     let Ok(canonical_root) = plugin_dir.canonicalize() else {
         return;
     };
     for server in servers.values_mut() {
         for relative in root_references(server) {
+            // The canonical path must be the written one, so no part of it
+            // is a symlink, which the package walk would not follow.
             let present = plugin_dir
                 .join(&relative)
                 .canonicalize()
-                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
+                .is_ok_and(|resolved| resolved == canonical_root.join(&relative));
             if present {
                 if !server.bundled.contains(&relative) {
                     server.bundled.push(relative);
@@ -149,8 +151,11 @@ pub(super) fn resolve_bundles(plugin_dir: &Path, servers: &mut BTreeMap<String, 
 
 /// Paths below the plugin root named by a placeholder at the start of the
 /// command or anywhere in an argument, such as `dist/index.js` in
-/// `--entry=${CLAUDE_PLUGIN_ROOT}/dist/index.js`. A path that climbs out of
-/// the root is returned as written, so it never resolves inside it.
+/// `--entry=${CLAUDE_PLUGIN_ROOT}/dist/index.js`, and an Agent Plugins `cwd`
+/// inside the plugin. A reference the package cannot carry as one path (the
+/// bare root, or a path with `.` or `..` parts) is returned as `..`, so it
+/// never resolves inside the root and the server is reported, not shipped
+/// without its files.
 pub(crate) fn root_references(server: &McpServer) -> Vec<String> {
     let mut found = Vec::new();
     let values = server.command.iter().chain(&server.args);
@@ -160,22 +165,54 @@ pub(crate) fn root_references(server: &McpServer) -> Vec<String> {
             let mut rest = value.as_str();
             while let Some(index) = rest.find(placeholder) {
                 rest = &rest[index + placeholder.len()..];
-                let Some(path) = rest.strip_prefix('/') else {
-                    continue;
-                };
+                let path = rest.strip_prefix('/').unwrap_or("");
                 let end = path
                     .find(|c: char| {
                         c.is_whitespace() || matches!(c, '"' | '\'' | ',' | ';' | ':' | '$')
                     })
                     .unwrap_or(path.len());
-                let path = path[..end].trim_end_matches('/');
-                if !path.is_empty() {
-                    found.push(path.to_owned());
-                }
+                found.push(carried_path(&path[..end]));
             }
         }
     }
+    if let Some(cwd) = server.cwd.as_deref().and_then(cwd_reference) {
+        found.push(cwd);
+    }
     found
+}
+
+/// The folder an Agent Plugins `cwd` names inside the plugin: `./work`,
+/// `work` or `${PLUGIN_ROOT}/work`. The plugin root itself is always in the
+/// package, and an absolute or variable path is not a plugin file, so
+/// neither is returned.
+fn cwd_reference(cwd: &str) -> Option<String> {
+    let cwd = cwd.replace("${/}", "/");
+    let rooted = ROOT_PLACEHOLDERS
+        .iter()
+        .find_map(|placeholder| cwd.strip_prefix(placeholder));
+    let path = match rooted {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => rest.trim_start_matches('/'),
+        Some(_) => return Some("..".to_owned()),
+        None if cwd.starts_with('/') || cwd.contains(['$', ':', '\\']) => return None,
+        None => cwd.strip_prefix("./").unwrap_or(&cwd),
+    };
+    let path = path.trim_end_matches('/');
+    (!path.is_empty() && path != ".").then(|| carried_path(path))
+}
+
+/// `path` without a trailing slash, or `..` when it is empty or has an
+/// empty, `.` or `..` part.
+fn carried_path(path: &str) -> String {
+    let path = path.trim_end_matches('/');
+    if path.is_empty()
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        "..".to_owned()
+    } else {
+        path.to_owned()
+    }
 }
 
 /// An MCP Registry `server.json` becomes one server: its first package as a

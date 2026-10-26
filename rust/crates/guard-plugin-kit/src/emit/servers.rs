@@ -1,14 +1,17 @@
 //! MCP server entries in each runtime's config syntax, the MCP Registry
 //! `server.json`, and the Gemini CLI settings that pass variables through.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
 use crate::agent_plugins;
 use crate::check::is_kebab;
+use crate::config::Excludes;
 use crate::model::{McpServer, Plugin, ROOT_PLACEHOLDERS};
 use crate::reference;
+use crate::walk;
 
 const MCP_REGISTRY_SCHEMA: &str =
     "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json";
@@ -187,6 +190,45 @@ pub(super) struct AgentPluginsLoss {
     pub headers: bool,
 }
 
+/// Files an Agent Plugins package generates at its root.
+pub(super) const AGENT_PLUGINS_GENERATED: [&str; 2] = ["plugin.json", "mcp.json"];
+
+/// The files the kept Agent Plugins servers name, as (source, package path).
+/// A server's command and args resolve against the package root, so the
+/// files travel at the same paths.
+pub(super) fn agent_plugins_bundled(
+    root: &Path,
+    plugin: &Plugin,
+    excludes: &Excludes,
+) -> Result<Vec<(PathBuf, String)>, String> {
+    let (entries, _) = agent_plugins_servers(plugin);
+    let plugin_dir = root.join(&plugin.base);
+    let mut bundled = BTreeSet::new();
+    for name in entries.keys() {
+        bundled.extend(plugin.mcp_servers[name].bundled.iter().cloned());
+    }
+    let mut found = Vec::new();
+    for relative in bundled {
+        let path = plugin_dir.join(&relative);
+        if !path.is_dir() {
+            found.push((path, relative));
+            continue;
+        }
+        let repository_path = if plugin.base.is_empty() {
+            relative.clone()
+        } else {
+            format!("{}/{relative}", plugin.base)
+        };
+        for file in walk::files(&path, &repository_path, excludes)? {
+            found.push((
+                path.join(&file),
+                format!("{relative}/{}", walk::display(&file)),
+            ));
+        }
+    }
+    Ok(found)
+}
+
 /// Servers in Agent Plugins `mcp.json` syntax, and what was left out.
 pub(super) fn agent_plugins_servers(plugin: &Plugin) -> (Map<String, Value>, AgentPluginsLoss) {
     let mut entries = Map::new();
@@ -194,8 +236,14 @@ pub(super) fn agent_plugins_servers(plugin: &Plugin) -> (Map<String, Value>, Age
     for (name, server) in &plugin.mcp_servers {
         let mut entry = Map::new();
         if let Some(command) = &server.command {
-            // A server whose files the package cannot carry would not start.
-            let Some(command) = portable_command(command).filter(|_| !server.bundle_missing) else {
+            // A server whose files the package cannot carry would not start,
+            // and a bundled file may not replace the generated metadata.
+            let carried = !server.bundle_missing
+                && !server
+                    .bundled
+                    .iter()
+                    .any(|path| AGENT_PLUGINS_GENERATED.contains(&path.as_str()));
+            let Some(command) = portable_command(command).filter(|_| carried) else {
                 loss.servers = true;
                 continue;
             };

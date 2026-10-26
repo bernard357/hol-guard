@@ -536,6 +536,86 @@ fn servers_whose_files_or_variables_cannot_travel_are_left_out() {
 }
 
 #[test]
+fn a_root_reference_travels_only_as_plain_files_beside_the_metadata() {
+    let root = repo(&[
+        (
+            ".claude-plugin/plugin.json",
+            &json!({"name": "pdf-tools", "version": "1.0.0", "description": "Fill PDF forms."})
+                .to_string(),
+        ),
+        (
+            ".mcp.json",
+            &json!({"mcpServers": {
+                "whole": {"command": "uv", "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}", "server.py"]},
+                "dotted": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/lib/../server.js"]},
+                "metadata": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/mcp.json"]},
+                "skill": {
+                    "command": "${CLAUDE_PLUGIN_ROOT}/bin/server",
+                    "args": ["${CLAUDE_PLUGIN_ROOT}/skills/fill-forms/SKILL.md"],
+                },
+            }})
+            .to_string(),
+        ),
+        ("skills/fill-forms/SKILL.md", SKILL),
+        ("bin/server", "#!/bin/sh\n"),
+        ("lib/index.js", ""),
+        ("server.js", ""),
+        ("server.py", ""),
+        ("mcp.json", "{\"servers\": {}}"),
+    ]);
+    let out = package(&root, "agent-plugins");
+    assert_eq!(
+        read_json(&out.join("mcp.json"))["mcpServers"],
+        json!({"skill": {
+            "type": "stdio",
+            "command": "./bin/server",
+            "args": ["${PLUGIN_ROOT}/skills/fill-forms/SKILL.md"],
+        }})
+    );
+    assert_eq!(
+        fs::read_to_string(out.join("skills/fill-forms/SKILL.md")).expect("skill"),
+        SKILL
+    );
+    assert!(!out.join("server.py").exists());
+    assert!(!out.join("server.js").exists());
+    assert_eq!(
+        dropped_for(&root, "agent-plugins"),
+        json!(["mcp_servers_not_portable"])
+    );
+}
+
+#[test]
+fn a_working_folder_inside_the_plugin_travels_with_the_server() {
+    let root = repo(&[
+        (
+            "plugin.json",
+            &manifest(json!({"description": "Fill PDF forms."})),
+        ),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "local": {"type": "stdio", "command": "pdf-server", "cwd": "./work"},
+                "missing": {"type": "stdio", "command": "pdf-server", "cwd": "${PLUGIN_ROOT}/gone"},
+                "here": {"type": "stdio", "command": "pdf-server", "cwd": "${PLUGIN_ROOT}"},
+            })),
+        ),
+        ("work/config.json", "{}"),
+    ]);
+    let out = package(&root, "agent-plugins");
+    assert!(out.join("work/config.json").is_file());
+    let servers = read_json(&out.join("mcp.json"))["mcpServers"].clone();
+    let mut names: Vec<_> = servers
+        .as_object()
+        .expect("servers")
+        .keys()
+        .cloned()
+        .collect();
+    names.sort();
+    assert_eq!(names, ["here", "local"], "{servers}");
+    assert_eq!(conformance(&out, true)["passed"], json!(true));
+}
+
+#[test]
 fn an_agent_plugins_source_keeps_its_root_in_other_runtimes() {
     let plugin = json!({
         "$schema": PLUGIN_SCHEMA,
