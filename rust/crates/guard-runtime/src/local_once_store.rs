@@ -16,7 +16,6 @@ use guard_policy_snapshot::local_authority_integrity::{
 };
 
 pub const LOCAL_ONCE_INTEGRITY_PURPOSE: &str = "guard-local-once-approval";
-pub const LOCAL_ONCE_LEGACY_AUTHORITY_KIND: &str = "legacy";
 pub const EXACT_CLOUD_AUTHORITY_KIND: &str = "exact-cloud";
 pub const EXACT_CLOUD_INTEGRITY_PURPOSE: &str = "guard-exact-cloud-local-once-v1";
 
@@ -449,6 +448,7 @@ pub fn claim_local_once_approval_locked(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy_decision_lookup_op::LOCAL_ONCE_LEGACY_AUTHORITY_KIND;
     use rusqlite::Connection;
 
     const SEED: &str = include_str!("../testdata/local_once_claim_seed.json");
@@ -532,8 +532,10 @@ mod tests {
         assert_eq!(decision["request_id"].as_str().unwrap(), "req-a-1");
 
         // Post-claim row: claimed_at=now, integrity re-signed.
-        let sql = "select approval_id, request_id, harness, artifact_id, artifact_hash,              workspace, publisher, action, created_at, expires_at, claimed_at,              integrity_version, payload_hash, payload_mac, integrity_key_id, signed_at              from guard_local_once_approvals where approval_id='a-1'";
-        let row = conn.query_row(sql, [], row_to_value).unwrap();
+        let sql = format!(
+            "select {CLAIM_COLUMNS} from guard_local_once_approvals where approval_id='a-1'"
+        );
+        let row = conn.query_row(&sql, [], row_to_value).unwrap();
         assert_eq!(row["claimed_at"].as_str().unwrap(), now);
         assert_ne!(row["claimed_at"], Value::Null);
         // signed_at on the re-sign equals `now`.

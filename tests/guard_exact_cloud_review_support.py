@@ -13,7 +13,9 @@ from codex_plugin_scanner.guard.review_contracts import (
     payload_hash_for_remote_approval_envelope,
 )
 from codex_plugin_scanner.guard.runtime.exact_cloud_review import (
+    EXACT_CLOUD_REVIEW_CAPABILITY_STATE_KEY,
     EXACT_CLOUD_REVIEW_OPERATION,
+    _capability_digest,
     _oauth_metadata,
 )
 from codex_plugin_scanner.guard.store import GuardStore
@@ -120,9 +122,17 @@ def remote_approval(
     expires_at = expires_at or issued_at + timedelta(minutes=5)
     if authority == "workspace_admin_mfa":
         capability_id = "ab" * 32
-    else:
-        assert isinstance(advertisement, dict)
+    elif isinstance(advertisement, dict):
         capability_id = advertisement["capabilityId"]
+    else:
+        # The claim only advertises a capability whose window is still open,
+        # but the Cloud issues a receipt while that window is open and the
+        # local clock may have passed it by the time a test builds one. Bind
+        # the receipt to the stored capability itself so the expiry is judged
+        # where it belongs, in the write transaction.
+        capability = store.get_sync_payload(EXACT_CLOUD_REVIEW_CAPABILITY_STATE_KEY)
+        assert isinstance(capability, dict)
+        capability_id = _capability_digest(capability)
     envelope: dict[str, object] = {
         "actionEnvelopeHash": claim["actionEnvelopeHash"],
         "approvalId": claim["approvalId"],

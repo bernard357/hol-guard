@@ -278,9 +278,12 @@ fn persist_local_once_approval(
     Ok(true)
 }
 
+/// A local-once signing key and the id it is stored under.
+type IntegrityMaterial<'a> = (Zeroizing<Vec<u8>>, &'a str);
+
 /// The local-once signing key, when the caller shipped both halves of usable
 /// key material. An allow without it is refused before the transaction writes.
-fn integrity_material<'a>(args: &Args<'a>) -> StoreResult<Option<(Zeroizing<Vec<u8>>, &'a str)>> {
+fn integrity_material<'a>(args: &Args<'a>) -> StoreResult<Option<IntegrityMaterial<'a>>> {
     let (Some(encoded), Some(key_id)) = (
         args.opt_str("integrity_key_b64")?,
         args.opt_str("integrity_key_id")?,

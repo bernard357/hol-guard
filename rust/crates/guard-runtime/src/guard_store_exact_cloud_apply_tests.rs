@@ -29,6 +29,8 @@ fn connection() -> Connection {
                event_name text not null, payload_json text not null, occurred_at text not null);
              create table guard_exact_cloud_review_receipts (receipt_id text primary key,
                request_id text not null, claimed_at text not null);
+             create table approval_requests (request_id text primary key, status text not null,
+               harness text, policy_action text, created_at text);
              create table guard_local_once_approvals (approval_id text primary key,
                request_id text not null, harness text not null, artifact_id text not null,
                artifact_hash text not null, workspace text, publisher text, action text not null,
