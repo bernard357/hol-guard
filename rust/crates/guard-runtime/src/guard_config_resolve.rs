@@ -11,8 +11,11 @@
 //!   configuration and re-applies the managed policy, returning the fields
 //!   that composition decides. Without a payload it only re-applies the
 //!   managed policy.
+//! - `harness_postures` ranks each configured per-harness override against
+//!   the machine-wide baseline and derives the mode and security level an
+//!   override implies, so no caller recalculates a posture.
 //!
-//! Both are pure functions of the request; nothing on disk is read.
+//! All three are pure functions of the request; nothing on disk is read.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -20,7 +23,7 @@ use std::io::Read;
 use guard_command::action_lattice::normalize_guard_action;
 use guard_command::effect_decision::GuardAction;
 use guard_command::local_supply_chain::VALID_RISK_ACTION_KEYS;
-use guard_contracts::RiskActionConfigV1;
+use guard_contracts::{HarnessPostureConfigV1, RiskActionConfigV1};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
@@ -78,6 +81,9 @@ struct Request {
     /// `overlay`: the managed policy the loaded configuration carries.
     #[serde(default)]
     managed: Option<ManagedInput>,
+    /// `harness_postures`: the baseline and the configured overrides.
+    #[serde(default)]
+    postures: Option<HarnessPostureConfigV1>,
 }
 
 pub(crate) fn is_command(command: &str) -> bool {
@@ -118,8 +124,23 @@ fn resolve(request: &Request) -> Result<Value, &'static str> {
                 "config": overlay(config, request.payload.as_ref(), request.managed.as_ref()),
             }))
         }
+        "harness_postures" => {
+            let facts = request.postures.as_ref().ok_or(INVALID)?;
+            Ok(harness_postures(facts))
+        }
         _ => Err(INVALID),
     }
+}
+
+/// The posture governing every registered harness, the baseline it is
+/// measured against, and the configuration fields each override implies.
+fn harness_postures(facts: &HarnessPostureConfigV1) -> Value {
+    let baseline = harness::global_effective(&facts.protection_posture, &facts.mode);
+    json!({
+        "baseline": baseline,
+        "effective": harness::effective_map(baseline, &facts.harness_postures),
+        "views": harness::posture_views(baseline, &facts.harness_postures, &facts.security_level),
+    })
 }
 
 /// The action every risk class resolves to for `harness`. A class nothing

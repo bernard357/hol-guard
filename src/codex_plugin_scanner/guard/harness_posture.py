@@ -7,6 +7,10 @@ without one inherits the baseline. Overrides live in ``config.toml`` under
 for the 24h auto-revert. Writes go through ``update_guard_settings`` so the
 approval gate and managed-policy locks apply exactly as they do to the global
 posture.
+
+Which posture an override actually resolves to is decided by the native
+runtime: this module loads and stores the overrides and renders them, but it
+never ranks two postures or derives a mode from one.
 """
 
 from __future__ import annotations
@@ -14,19 +18,20 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple, TypeGuard, cast
 
 from .adapters.contracts import HARNESS_CONTRACTS, contract_for
+from .config_file_io import ConfigFileTrustError
+from .native_guard_config import resolve_native_guard_config
 from .protection_posture import (
     VALID_PROTECTION_POSTURES,
     coerce_protection_posture,
-    dual_write_from_posture,
     normalize_protection_posture,
-    protection_is_off,
 )
 
 if TYPE_CHECKING:
     from .config import GuardConfig
+    from .models import GuardMode
 
 HARNESS_POSTURES_KEY = "harness_postures"
 HARNESS_WATCH_ENTERED_AT_KEY = "harness_watch_entered_at"
@@ -34,7 +39,8 @@ HARNESS_POSTURE_INHERIT = "inherit"
 # A managed lock on any of these also locks per-harness overrides, because a
 # per-harness Watch would otherwise route around the locked baseline.
 HARNESS_POSTURE_LOCK_KEYS = frozenset({"protection_posture", "mode", "security_level", HARNESS_POSTURES_KEY})
-_POSTURE_STRENGTH = {"watch": 0, "protected": 1, "extra_careful": 2}
+# The fields `config_for_harness` reads off one harness's resolved posture.
+_VIEW_FIELDS = ("posture", "mode", "security_level")
 _MAX_HARNESS_POSTURES = len(HARNESS_CONTRACTS) * 2
 
 
@@ -124,26 +130,80 @@ def harness_posture_override(config: GuardConfig, harness: object) -> str | None
     return value if isinstance(value, str) else None
 
 
-def global_effective_posture(config: GuardConfig) -> str:
-    if protection_is_off(posture=config.protection_posture, mode=config.mode):
-        return "watch"
-    return config.protection_posture
+class _Postures(NamedTuple):
+    """One native posture resolution: the baseline and what it resolves to."""
+
+    baseline: str
+    effective: Mapping[str, str]
+    views: Mapping[str, Mapping[str, str]]
+
+
+def _resolved_postures(config: GuardConfig) -> _Postures:
+    """The native per-harness posture resolution for ``config``.
+
+    The runtime ranks each override against the baseline and derives the mode
+    and security level an override implies. Nothing here compares two postures
+    or turns one into a mode, so a harness view and the verdicts taken under it
+    come from the same evaluator. Resolutions are memoized per request, so the
+    repeated lookups on the hot path cost one native call.
+    """
+
+    result = resolve_native_guard_config(
+        "harness_postures",
+        {
+            "postures": {
+                "protection_posture": config.protection_posture,
+                "mode": config.mode,
+                "security_level": config.security_level,
+                # Only well-formed entries are sent; a malformed one overrides
+                # nothing, exactly as ``harness_posture_override`` reads it.
+                "harness_postures": {
+                    harness: posture
+                    for harness, posture in (config.harness_postures or {}).items()
+                    if isinstance(harness, str) and isinstance(posture, str)
+                },
+            }
+        },
+    )
+    baseline = result.get("baseline")
+    effective = result.get("effective")
+    views = result.get("views")
+    if (
+        not isinstance(baseline, str)
+        or baseline not in VALID_PROTECTION_POSTURES
+        or not _is_posture_map(effective)
+        # A missing harness would silently read as the baseline, which is the
+        # one answer an override exists to change.
+        or not set(effective).issuperset(known_harness_ids())
+        or not _is_view_map(views)
+    ):
+        raise ConfigFileTrustError("native_guard_config_invalid")
+    return _Postures(baseline=baseline, effective=effective, views=views)
+
+
+def _is_posture_map(value: object) -> TypeGuard[Mapping[str, str]]:
+    return isinstance(value, Mapping) and all(
+        isinstance(harness, str) and isinstance(posture, str) for harness, posture in value.items()
+    )
+
+
+def _is_view_map(value: object) -> TypeGuard[Mapping[str, Mapping[str, str]]]:
+    return isinstance(value, Mapping) and all(
+        isinstance(harness, str)
+        and isinstance(view, Mapping)
+        and all(isinstance(view.get(field), str) for field in _VIEW_FIELDS)
+        for harness, view in value.items()
+    )
 
 
 def effective_harness_posture(config: GuardConfig, harness: object) -> str:
-    """Posture that actually governs one harness.
+    """Posture that actually governs one harness."""
 
-    Watch is always honored. A non-Watch override can turn protection back on
-    under a global Watch, but never weakens a stricter global baseline.
-    """
-
-    baseline = global_effective_posture(config)
-    override = harness_posture_override(config, harness)
-    if override is None:
-        return baseline
-    if override == "watch" or baseline == "watch":
-        return override
-    return max(baseline, override, key=lambda posture: _POSTURE_STRENGTH.get(posture, 1))
+    resolved = _resolved_postures(config)
+    key = runtime_harness_key(harness)
+    if key is None:
+        return resolved.baseline
+    return resolved.effective.get(key, resolved.baseline)
 
 
 def config_for_harness(config: GuardConfig, harness: object) -> GuardConfig:
@@ -153,21 +213,24 @@ def config_for_harness(config: GuardConfig, harness: object) -> GuardConfig:
     hot path and every un-overridden harness are byte-for-byte unaffected.
     """
 
-    if harness_posture_override(config, harness) is None:
+    key = runtime_harness_key(harness)
+    if key is None:
         return config
-    posture = effective_harness_posture(config, harness)
-    mode, security_level = dual_write_from_posture(posture, current_security_level=config.security_level)
+    view = _resolved_postures(config).views.get(key)
+    if view is None:
+        return config
     return replace(
         config,
-        protection_posture=posture,
+        protection_posture=view["posture"],
         protection_posture_explicit=True,
-        mode=mode,
-        security_level=security_level or config.security_level,
+        mode=cast("GuardMode", view["mode"]),
+        security_level=view["security_level"] or config.security_level,
     )
 
 
 def effective_harness_postures(config: GuardConfig) -> dict[str, str]:
-    return {harness: effective_harness_posture(config, harness) for harness in known_harness_ids()}
+    effective = _resolved_postures(config).effective
+    return {harness: effective[harness] for harness in known_harness_ids()}
 
 
 def harness_watch_auto_revert_due(
@@ -251,7 +314,6 @@ __all__ = [
     "config_for_harness",
     "effective_harness_posture",
     "effective_harness_postures",
-    "global_effective_posture",
     "harness_posture_line",
     "harness_posture_override",
     "harness_posture_status",

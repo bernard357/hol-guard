@@ -113,6 +113,19 @@ def test_config_for_harness_applies_override_and_noops_without_one(tmp_path: Pat
     assert config_for_harness(config, "claude-code") is config
 
 
+def test_config_for_harness_derives_the_mode_and_level_its_posture_implies(tmp_path: Path) -> None:
+    guard_home = tmp_path / ".hol-guard"
+    config = update_guard_settings(
+        guard_home, {"protection_posture": "protected", "harness_postures": {"codex": "extra_careful"}}
+    )
+    scoped = config_for_harness(config, "codex")
+    assert (scoped.protection_posture, scoped.mode, scoped.security_level) == ("extra_careful", "enforce", "strict")
+    assert scoped.protection_posture_explicit is True
+    # Watch keeps the level it found rather than loosening it.
+    watching = config_for_harness(update_guard_settings(guard_home, {"harness_postures": {"codex": "watch"}}), "codex")
+    assert (watching.mode, watching.security_level) == ("observe", config.security_level)
+
+
 def test_managed_lock_rejects_local_watch_write(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     guard_home = tmp_path / ".hol-guard"
     state = _managed({"protection_posture": "protected"}, {"protection_posture"})

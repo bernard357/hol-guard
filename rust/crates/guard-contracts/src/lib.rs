@@ -148,6 +148,8 @@ mod browser_mcp_intent;
 pub use browser_mcp_intent::*;
 mod risk_action_config;
 pub use risk_action_config::*;
+mod harness_posture_config;
+pub use harness_posture_config::*;
 mod runtime_detector_run;
 pub use runtime_detector_run::*;
 mod runner_authority;
