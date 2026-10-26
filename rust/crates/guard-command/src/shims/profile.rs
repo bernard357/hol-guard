@@ -192,7 +192,10 @@ pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<S
         };
         // A directory ahead of the shim that still names a variable, such as
         // $VOLTA_HOME/bin, could hold the real binary once the shell expands it.
-        if replayed[..shim_index].iter().any(|entry| names_unexpanded_variable(entry)) {
+        if replayed[..shim_index]
+            .iter()
+            .any(|entry| names_unexpanded_variable(entry))
+        {
             return Ok(None);
         }
         if path == &primary_path {
