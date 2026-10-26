@@ -258,7 +258,7 @@ fn word(token: &Token) -> &str {
 }
 
 fn operator(token: &Token) -> Option<&str> {
-    token.1.then(|| token.0.as_str())
+    token.1.then_some(token.0.as_str())
 }
 
 /// The repository holding `directory`, as native authority finds it. An
