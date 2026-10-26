@@ -29652,6 +29652,38 @@
       "expect": "allow"
     },
     {
+      "id": "read-repo-workflow-named-for-a-tool",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.github/workflows/docker.yml"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "read-repo-well-known-agent-document",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.well-known/agent.json"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
       "id": "neg-read-repo-git-hook-body",
       "fix_area": "negative",
       "harnesses": [

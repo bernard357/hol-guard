@@ -594,6 +594,44 @@ const TOOL_LOGIN_WORDS: &[&str] = &[
     "windsurf",
 ];
 
+/// The entries of [`TOOL_LOGIN_WORDS`] that are a login file's whole name
+/// rather than a vendor's. The rest of that list -- `docker`, `claude`,
+/// `aws`, `agent` -- names a tool, and a repository names its own documents
+/// after the tools it uses: `.github/workflows/docker.yml` and
+/// `.well-known/agent.json` are the checkout's content, not a login. A caller
+/// that already knows the name is a plain file inside the work tree reads it
+/// against this half.
+const TOOL_LOGIN_FILE_WORDS: &[&str] = &[
+    "dockercfg",
+    "hgrc",
+    "htpasswd",
+    "keychain",
+    "keyring",
+    "keystore",
+    "kubeconfig",
+    "mcp",
+    "netrc",
+    "npmrc",
+    "pgpass",
+    "pypirc",
+];
+
+/// Whether `name` is the whole name of a tool's login file: `.netrc`,
+/// `mcp.json`, `.npmrc`. This is [`tool_login_name`] narrowed to
+/// [`TOOL_LOGIN_FILE_WORDS`], for a caller holding a file rather than a path
+/// component that may be a tool's own directory.
+pub fn tool_login_file_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let bare = name.trim_start_matches('.');
+    let stem = Path::new(bare)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    [bare, stem]
+        .iter()
+        .any(|part| TOOL_LOGIN_FILE_WORDS.contains(part))
+}
+
 /// Whether `name` is exactly the name a tool keeps its own tree or login
 /// under: `.cursor`, `.vscode`, `.mcp.json`, `.npmrc`.
 ///

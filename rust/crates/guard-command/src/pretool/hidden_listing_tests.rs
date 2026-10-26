@@ -262,6 +262,13 @@ fn a_repositorys_own_documents_read_from_hidden_directories() {
         ".claude-plugin/plugin.json",
         ".well-known/agent-card.json",
         ".github/workflows/ci.yml",
+        // A workflow is the repository's own document about a tool it uses,
+        // and a published card names the agent it describes. Reading the
+        // vendor's name in either as a login is the false positive this rule
+        // exists to lift.
+        ".github/workflows/docker.yml",
+        ".github/workflows/claude.yml",
+        ".well-known/agent.json",
         "tests/fixtures/good-plugin/.codex-plugin/plugin.json",
         ".next/standalone/server.mjs",
     ] {
@@ -298,6 +305,9 @@ fn the_administrative_tree_and_guarded_names_keep_their_review() {
         // repository does own.
         ".cursor/mcp.json",
         ".next/mcp.json",
+        // A hidden leaf is that tool's own file wherever it sits, so the whole
+        // login screen still applies to it.
+        ".next/.claude.json",
         ".github/id_ed25519.json",
         // A directory spelled like an ordinary project config file opens no
         // hidden tree; the name is benign as the final component only.

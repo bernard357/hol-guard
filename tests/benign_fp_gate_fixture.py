@@ -383,6 +383,10 @@ def build_fixture(root: Path) -> BenignFixture:
         # a harness is installed from and the card a web client publishes.
         _write(repository / ".codex-plugin" / "plugin.json", f'{{"name": "{name}"}}\n')
         _write(repository / ".well-known" / "agent-card.json", f'{{"name": "{name}"}}\n')
+        # A workflow named after a tool, and a published agent card whose name
+        # is the vendor word on its own.
+        _write(repository / ".github" / "workflows" / "docker.yml", "name: docker\n")
+        _write(repository / ".well-known" / "agent.json", f'{{"name": "{name}"}}\n')
         # Targets for the negatives beside them: the repository's own
         # administrative tree, a credential store name and a compiled blob.
         _write(repository / ".git" / "hooks" / "pre-commit.sh", "#!/bin/sh\nexit 0\n")

@@ -169,19 +169,33 @@ fn repository_hidden_below(
 /// A directory spelled like an ordinary config file opens no tree, which is
 /// the rule `BENIGN_PROJECT_DOTFILES` already states; a directory spelled
 /// exactly as a tool's name is that tool's own tree rather than the
-/// repository's content; and the leaf keeps the login and secret screens a
-/// hidden file is read under anywhere else. `credential_named_path` stands
+/// repository's content; and the leaf keeps the secret screen, plus as much
+/// of the login screen as a file in the checkout's own content can carry. `credential_named_path` stands
 /// aside for source-code extensions, so the directory half of that screen is
 /// applied here in its own right.
 fn content_names_allowed(canonical: &Path, leaf: &str, parents: &[String]) -> bool {
     !parents.iter().any(|parent| {
         guard_secure_fs::project_config_file_name(parent)
             || guard_secure_fs::tool_login_name(parent)
-    }) && !guard_secure_fs::tool_login_name(leaf)
+    }) && !leaf_names_a_tools_login(leaf)
         && !guard_secure_fs::credential_store_names::secret_bearing_file_name(
             leaf.trim_start_matches('.'),
         )
         && !guard_secure_fs::credential_directory_path(canonical)
+}
+
+/// A hidden leaf keeps the whole tool-login screen: `.config/.claude.json`
+/// is that tool's own file wherever it sits. A plain leaf keeps the login-file
+/// half only, because a repository names its own documents after the tools it
+/// uses -- `.github/workflows/docker.yml`, `.well-known/agent.json` -- and
+/// reading a vendor's name in those as a login puts back the very reviews this
+/// screen exists to lift. The login names that are a file's whole name, `mcp`
+/// and `npmrc` among them, still reject `.next/mcp.json`.
+fn leaf_names_a_tools_login(leaf: &str) -> bool {
+    if leaf.starts_with('.') {
+        return guard_secure_fs::tool_login_name(leaf);
+    }
+    guard_secure_fs::tool_login_file_name(leaf)
 }
 
 fn enclosing_work_tree<'a>(path: &'a Path, home_dir: Option<&str>) -> Option<&'a Path> {
