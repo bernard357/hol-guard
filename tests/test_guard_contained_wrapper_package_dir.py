@@ -82,6 +82,10 @@ def test_package_directory_outside_a_repository_is_not_peeled(tmp_path: Path, co
         "bun run --cwd ~/org/service-api build",
         "pnpm -C{sibling} run test",
         "bun run build",
+        # A directory that is not there projects nothing, as on the native
+        # side; the manager is the one that reports it.
+        "bun run --cwd missing build",
+        "pnpm -C missing lint",
     ],
 )
 def test_other_package_directory_spellings_stay_unwrapped(tmp_path: Path, command: str) -> None:

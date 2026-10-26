@@ -330,7 +330,10 @@ def _package_directory(tokens: list[tuple[str, bool]], base: Path) -> tuple[list
     `pnpm build` is read in `<dir>` the way `pnpm run build` already was. The
     directory is joined to the physical working directory and normalized
     lexically, as the package manager's `path.resolve` does, then resolved on
-    disk. Other spellings return None and keep the unwrapped path.
+    disk. Other spellings return None and keep the unwrapped path, as does a
+    flag naming a directory that is not there: native authority reads that
+    text unprojected too, and the manager is the one that reports the missing
+    directory.
     """
     flags = _DIRECTORY_FLAGS.get(tokens[0][0]) if tokens and not tokens[0][1] else None
     if flags is None:
@@ -353,7 +356,7 @@ def _package_directory(tokens: list[tuple[str, bool]], base: Path) -> tuple[list
         return None
     directory = Path(os.path.realpath(os.path.normpath(os.path.join(os.path.realpath(base), value))))
     if not directory.is_dir():
-        raise ValueError("package directory is not a directory")
+        return None
     return [tokens[0], *((word, False) for word in rest), *tokens[end:]], directory
 
 
