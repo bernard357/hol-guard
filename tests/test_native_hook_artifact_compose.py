@@ -226,6 +226,27 @@ def test_the_kinds_the_op_shipped_with_require_the_op_feature(monkeypatch: pytes
     assert required == [compose.HOOK_ARTIFACT_COMPOSE_FEATURE]
 
 
+def test_the_signal_composition_kind_requires_its_own_feature(monkeypatch: pytest.MonkeyPatch) -> None:
+    required = _feature_recorder(
+        monkeypatch,
+        payload={
+            "action": "block",
+            "reason": "bypass signal 'det' forces block",
+            "downgraded": False,
+            "upgraded": True,
+            "normalization_reason_code": None,
+            "original_action": None,
+        },
+    )
+    composed = compose.native_hook_compose(
+        "signal_composition",
+        {"signals": [], "base_action": "allow"},
+        guard_home=None,
+    )
+    assert composed["action"] == "block"
+    assert required == [compose.HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE]
+
+
 def test_the_policy_lookup_selection_requires_its_own_feature(monkeypatch: pytest.MonkeyPatch) -> None:
     required = _feature_recorder(monkeypatch)
     with pytest.raises(compose.NativeHookComposeError):
