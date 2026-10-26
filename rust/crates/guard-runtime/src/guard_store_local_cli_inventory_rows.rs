@@ -9,8 +9,9 @@
 use std::mem::take;
 
 use guard_contracts::{
-    McpClassificationItemV1, McpClassificationRequestV1, SuggestionToolV1,
-    MCP_CLASSIFICATION_MAX_BYTES, MCP_CLASSIFICATION_MAX_ITEMS, MCP_CLASSIFICATION_REQUEST_SCHEMA,
+    write_canonical_json_with_limit, McpClassificationItemV1, McpClassificationRequestV1,
+    SuggestionToolV1, MCP_CLASSIFICATION_MAX_BYTES, MCP_CLASSIFICATION_MAX_ITEMS,
+    MCP_CLASSIFICATION_REQUEST_SCHEMA,
 };
 use serde_json::{Map, Value};
 
@@ -220,8 +221,11 @@ fn observed_count(value: Option<&Value>) -> i64 {
     count.clamp(-COUNT_LIMIT, COUNT_LIMIT)
 }
 
-/// `json` writes one byte between array elements.
+/// Canonical JSON writes one byte between array elements.
 const ARRAY_SEPARATOR_BYTES: usize = 1;
+
+/// The op's own refusal, used here only to end a measurement early.
+const OVERSIZE: &str = "native_mcp_classification_invalid";
 
 /// One packed classifier page: the declarations it carries and the request
 /// positions they came from.
@@ -231,27 +235,48 @@ pub(crate) struct Page {
     pub(crate) items: Vec<McpClassificationItemV1>,
 }
 
-/// Serialized size of a request carrying no items. Python measures the whole
-/// envelope for every page because the page travels as one frame; the two
-/// parts around the items never change, so measuring them once is the same
-/// budget.
+/// Bytes the op counts for `value`.
+///
+/// `MCP_CLASSIFICATION_MAX_BYTES` is applied to the canonical serialization,
+/// not to `serde_json`'s compact output, and the two part company on any
+/// non-ASCII text: canonical JSON escapes a character to six bytes, twelve
+/// above the BMP, where UTF-8 spends at most four. Measuring the compact form
+/// would read a page of non-ASCII declarations as half its size and build one
+/// the op refuses. `None` is a declaration too large to measure at all.
+fn canonical_bytes(value: &Value) -> Option<usize> {
+    let mut bytes = Vec::new();
+    write_canonical_json_with_limit(value, &mut bytes, MCP_CLASSIFICATION_MAX_BYTES, OVERSIZE)
+        .ok()?;
+    Some(bytes.len())
+}
+
+/// Size of a request carrying no items. The parts around the items never
+/// change, and the request this measures carries the same empty `request_id`
+/// the sent one does, so measuring them once is the whole fixed cost.
+///
+/// Python measured its resident envelope instead, because there the page
+/// travelled as one frame; that envelope is never smaller than the request
+/// alone, so a page accepted here is one Python would also have sent.
 fn envelope_bytes() -> usize {
     let request = McpClassificationRequestV1 {
         schema: MCP_CLASSIFICATION_REQUEST_SCHEMA.to_owned(),
         request_id: String::new(),
         items: Vec::new(),
     };
-    serde_json::to_vec(&request).map_or(usize::MAX, |bytes| bytes.len())
+    serde_json::to_value(&request)
+        .ok()
+        .and_then(|value| canonical_bytes(&value))
+        .unwrap_or(usize::MAX)
 }
 
-/// Serialized size of one declaration inside the items array.
+/// Size of one declaration inside the items array.
 fn item_bytes(item: &McpClassificationItemV1) -> Option<usize> {
-    serde_json::to_vec(item).ok().map(|bytes| bytes.len())
+    canonical_bytes(&serde_json::to_value(item).ok()?)
 }
 
 /// Pack the declarations the classifier's parser would accept into pages that
-/// stay under both the item cap and the byte budget, the way Python's
-/// `_chunks` packs them.
+/// stay under both the item cap and the byte budget the op applies, the way
+/// Python's `_chunks` packs them.
 ///
 /// A declaration too large to travel even on its own is left out of every
 /// page: the caller hears nothing about it rather than losing the rest of the
