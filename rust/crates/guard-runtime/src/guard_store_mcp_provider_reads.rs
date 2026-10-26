@@ -6,6 +6,7 @@
 //! connection's observation row, so a corrupt or absent row ends the read with
 //! the same `ValueError` the Python store raised rather than a partial page.
 
+use guard_contracts::MAX_NATIVE_RESPONSE_BYTES;
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -17,7 +18,17 @@ use crate::guard_store_observed_mcp::{is_local_cli_id, marker_source, require_cu
 
 /// The parser's own page ceiling; a wider page would outgrow the response cap.
 const MAX_ACTION_LIMIT: i64 = 100;
+/// A page stops here so one connection's large schemas cannot build a reply
+/// the resident has to refuse, which the caller only ever sees as the store
+/// being unavailable. The slack covers the envelope the reply is framed in,
+/// and the actions a page drops come back on its next offset.
+const PAGE_BUDGET_BYTES: usize = MAX_NATIVE_RESPONSE_BYTES - 128 * 1024;
 const MAX_SEARCH_CHARS: usize = 128;
+
+/// Bytes `value` adds to the reply the resident encodes.
+fn encoded_bytes(value: &Value) -> usize {
+    serde_json::to_vec(value).map_or(0, |encoded| encoded.len())
+}
 
 fn cell(row: &Row, name: &str) -> Value {
     row.get(name).cloned().unwrap_or(Value::Null)
@@ -203,37 +214,42 @@ pub(crate) fn provider_actions(connection: &Connection, args: &Args<'_>) -> Stor
     let page = &rows[..rows.len().min(limit as usize)];
 
     let mut declarations = Vec::with_capacity(page.len());
+    let mut actions: Vec<Value> = Vec::with_capacity(page.len());
+    let mut bytes = 0;
     for row in page {
         let Ok(schema) = serde_json::from_str::<Value>(text(row, "input_schema_json")) else {
             return value_error("invalid provider catalog page");
         };
-        declarations.push(json!({
+        let declaration = json!({
             "name": cell(row, "tool_slug"),
             "schema": schema,
             "provider": "composio",
             "full_schema": truthy(row, "full_schema"),
-        }));
+        });
+        let action = json!({
+            "tool_slug": cell(row, "tool_slug"),
+            "toolkit": cell(row, "toolkit"),
+            "description": cell(row, "description"),
+            "full_schema": truthy(row, "full_schema"),
+            "revision": cell(row, "revision"),
+            "updated_at": cell(row, "updated_at"),
+            "permission_state": cell(row, "state"),
+            // Reading the catalog never grants; the user decides per action.
+            "allow_supported": false,
+            "account_binding": "unverified",
+            "source": "observed-provider-result",
+        });
+        bytes += encoded_bytes(&declaration) + encoded_bytes(&action);
+        // One action over the budget still comes back, so the next page always
+        // starts past it rather than stalling on an action it cannot skip.
+        if !actions.is_empty() && bytes > PAGE_BUDGET_BYTES {
+            break;
+        }
+        declarations.push(declaration);
+        actions.push(action);
     }
-    let actions: Vec<Value> = page
-        .iter()
-        .map(|row| {
-            json!({
-                "tool_slug": cell(row, "tool_slug"),
-                "toolkit": cell(row, "toolkit"),
-                "description": cell(row, "description"),
-                "full_schema": truthy(row, "full_schema"),
-                "revision": cell(row, "revision"),
-                "updated_at": cell(row, "updated_at"),
-                "permission_state": cell(row, "state"),
-                // Reading the catalog never grants; the user decides per action.
-                "allow_supported": false,
-                "account_binding": "unverified",
-                "source": "observed-provider-result",
-            })
-        })
-        .collect();
-    let next_offset = if rows.len() > page.len() {
-        Value::from(offset + limit)
+    let next_offset = if rows.len() > actions.len() {
+        Value::from(offset + actions.len() as i64)
     } else {
         Value::Null
     };

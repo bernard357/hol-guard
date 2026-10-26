@@ -32,7 +32,20 @@ class StoreLocalMcpMixin:
             self, method: str, args: Mapping[str, object], *, busy_timeout_seconds: float | None = None
         ) -> Any: ...
 
+    def _migrate_for_read(self) -> None:
+        """Bring an older store up to the schema the resident will read.
+
+        The resident refuses a store below its minimum read version rather
+        than migrating one, so the migration the Python reads used to run
+        before touching these tables still has to happen here. A store that
+        is already current takes no writer lock.
+        """
+
+        with self._connect() as connection:
+            ensure_local_cli_schema(connection, for_read=True)
+
     def _native_mcp_read(self, method: str, args: Mapping[str, object], reason: str) -> dict[str, object]:
+        self._migrate_for_read()
         page = self._native_store_call(method, args)
         if not isinstance(page, dict):
             raise sqlite3.DatabaseError(reason)
