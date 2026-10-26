@@ -17,13 +17,20 @@ from codex_plugin_scanner.guard.store import GuardStore
 
 
 def _patch_worker_popen(monkeypatch: pytest.MonkeyPatch, replacement: Callable[..., object]) -> None:
-    """Replace worker spawns while the native Guard-config loader still runs."""
+    """Replace worker spawns while every native runtime call still runs.
+
+    A recovery worker is always launched through a Python interpreter and every
+    native call runs the Guard runtime binary, so ``argv[0]`` tells the two
+    apart without naming one native subcommand.
+    """
 
     real_popen = subprocess.Popen
 
     def popen(command: object, *args: object, **kwargs: object) -> object:
-        if isinstance(command, (list, tuple)) and "guard-config-load" in command:
-            return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
+        if isinstance(command, (list, tuple)) and command:
+            launcher = Path(str(command[0])).name.lower()
+            if not launcher.startswith("python") and launcher != Path(sys.executable).name.lower():
+                return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
         return replacement(command, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", popen)
