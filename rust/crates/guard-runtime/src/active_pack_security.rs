@@ -473,3 +473,5 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
 mod tests;
 #[cfg(test)]
 pub(crate) use tests::fixture as fixture_record;
+#[cfg(test)]
+pub(crate) use tests::floor_fixture as fixture_floor_record;
