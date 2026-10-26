@@ -72,6 +72,7 @@ use crate::guard_store_sessions as sessions;
 use crate::guard_store_silent_review::add_silent_native_review_approval_request;
 use crate::guard_store_state_ops as state_ops;
 use crate::guard_store_storage_maintenance as storage_maintenance;
+use crate::guard_store_temporary_mcp::apply_temporary_mcp_grant;
 use crate::guard_store_tool_call_evidence as tool_call_evidence;
 use crate::guard_store_wfcap_wire as wfcap;
 
@@ -365,6 +366,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "resolve_approval_request"
         | "resolve_one_request_only"
         | "resolve_harness_native_approval_request"
+        | "apply_temporary_mcp_grant_resolution"
         | "resolve_request_with_queue_result"
         | "resolve_native_workspace_review_request"
         | "resolve_matching_duplicate_requests"
@@ -649,6 +651,9 @@ fn dispatch(
         "resolve_one_request_only" => resolve_approval_request(connection, guard_home, args, true),
         "resolve_harness_native_approval_request" => {
             resolve_harness_native_approval_request(connection, guard_home, args)
+        }
+        "apply_temporary_mcp_grant_resolution" => {
+            apply_temporary_mcp_grant(connection, guard_home, args, owner)
         }
         "resolve_request_with_queue_result" => {
             queue_result::resolve_request_with_queue_result(connection, guard_home, args, owner)

@@ -307,28 +307,33 @@ class StorePolicyMixin:
             now=now,
         )
         _validate_scoped_policy_artifact_target(decision.scope, decision.artifact_id)
-        remote = is_remote_policy_source(decision.source)
-        secret_material = (None, None) if remote else self._policy_integrity_secret_material(create=True)
-        # The refresh reads the local rows and writes only the integrity status
-        # row, so it commits on its own connection before the resident takes
-        # the write lock for the decision itself. The generation lock spans both,
-        # because the control state no longer rides that one transaction.
+        # The refresh the write args run reads the local rows and writes only
+        # the integrity status row, so it commits on its own connection before
+        # the resident takes the write lock for the decision itself. The
+        # generation lock spans both, because the control state no longer rides
+        # that one transaction.
         with self.hold_policy_integrity_generation_lock():
-            self._upsert_policy_native(
-                decision,
-                now=now,
-                remote=remote,
-                secret_material=secret_material,
-            )
+            fields, integrity = self._policy_write_args(decision, now)
+            payload = self._native_store_call("upsert_policy", {**fields, "now": now, **integrity})
+            if not isinstance(payload, dict):
+                raise RuntimeError("Guard policy decision was not written.")
+            self._finalize_native_control_state(payload.get("next_control_state"))
 
-    def _upsert_policy_native(
+    def _policy_write_args(
         self,
         decision: PolicyDecision,
-        *,
         now: str,
-        remote: bool,
-        secret_material: tuple[bytes | None, str | None],
-    ) -> None:
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """The row one decision writes, and the material the resident signs it with.
+
+        The two are kept apart because the resident owns the signing: an
+        operation that writes a decision inside a larger transaction supplies
+        the integrity material itself rather than letting the caller spell it
+        on the decision.
+        """
+
+        remote = is_remote_policy_source(decision.source)
+        secret_material = (None, None) if remote else self._policy_integrity_secret_material(create=True)
         with self._connect() as connection:
             state = self._refresh_policy_integrity_state(
                 connection,
@@ -338,7 +343,7 @@ class StorePolicyMixin:
                 allow_cutover_resign=False,
             )
         artifact_id, artifact_hash, workspace, publisher = self._normalized_policy_keys(decision)
-        args: dict[str, object] = {
+        fields: dict[str, object] = {
             "harness": decision.harness,
             "scope": decision.scope,
             "artifact_id": artifact_id,
@@ -350,102 +355,27 @@ class StorePolicyMixin:
             "owner": decision.owner,
             "source": decision.source,
             "expires_at": _canonical_utc_timestamp(decision.expires_at) if decision.expires_at is not None else None,
-            "now": now,
         }
+        integrity: dict[str, object] = {}
         key, key_id = secret_material
         if not remote and state.get("mode") == "protected" and key is not None and key_id is not None:
             trusted_state = self._load_policy_integrity_control_state(create=True)
             if trusted_state is not None:
                 # The resident signs the rows; the control state around them
                 # stays here, where the secret store lives.
-                args["current_generation"] = self._begin_policy_integrity_generation(trusted_state)
-                args["integrity_key_b64"] = encode_key(key)
-                args["integrity_key_id"] = key_id
-        payload = self._native_store_call("upsert_policy", args)
-        if not isinstance(payload, dict):
-            raise RuntimeError("Guard policy decision was not written.")
-        next_control_state = payload.get("next_control_state")
-        if next_control_state is not None:
-            if not isinstance(next_control_state, dict):
-                raise RuntimeError("Guard policy integrity control state is invalid.")
-            self._finalize_policy_integrity_control_state(next_control_state)
+                integrity["current_generation"] = self._begin_policy_integrity_generation(trusted_state)
+                integrity["integrity_key_b64"] = encode_key(key)
+                integrity["integrity_key_id"] = key_id
+        return fields, integrity
 
-    def _upsert_policy_locked(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        decision: PolicyDecision,
-        now: str,
-        secret_material: tuple[bytes | None, str | None],
-    ) -> dict[str, object] | None:
-        expires_at = _canonical_utc_timestamp(decision.expires_at) if decision.expires_at is not None else None
-        artifact_id, artifact_hash, workspace, publisher = self._normalized_policy_keys(decision)
-        state = self._refresh_policy_integrity_state(
-            connection,
-            now=now,
-            create_key=not is_remote_policy_source(decision.source),
-            secret_material=secret_material,
-            allow_cutover_resign=False,
-        )
-        connection.execute(
-            """
-            delete from policy_decisions
-            where harness = ? and scope = ? and coalesce(artifact_id, '') = coalesce(?, '')
-              and coalesce(artifact_hash, '') = coalesce(?, '')
-              and coalesce(workspace, '') = coalesce(?, '')
-              and coalesce(publisher, '') = coalesce(?, '')
-            """,
-            (decision.harness, decision.scope, artifact_id, artifact_hash, workspace, publisher),
-        )
-        cursor = connection.execute(
-            """
-            insert into policy_decisions (
-              harness, scope, artifact_id, artifact_hash, workspace, publisher, action, reason, owner, source,
-              expires_at, updated_at, integrity_version, integrity_generation, payload_hash, payload_mac,
-              integrity_key_id, signed_at
-            )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                decision.harness,
-                decision.scope,
-                artifact_id,
-                artifact_hash,
-                workspace,
-                publisher,
-                decision.action,
-                decision.reason,
-                decision.owner,
-                decision.source,
-                expires_at,
-                now,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-        )
-        if is_remote_policy_source(decision.source) or state.get("mode") != "protected":
-            return None
-        key, key_id = secret_material
-        if key is None or key_id is None:
-            return None
-        trusted_state = self._load_policy_integrity_control_state(create=True)
-        if trusted_state is None:
-            return None
-        lastrowid = cursor.lastrowid
-        if lastrowid is None:
-            raise RuntimeError("Guard policy decision row was not inserted.")
-        return self._advance_policy_integrity_generation(
-            connection,
-            now=now,
-            key=key,
-            key_id=key_id,
-            trusted_state=trusted_state,
-            force_sign_decision_ids={lastrowid},
-        )
+    def _finalize_native_control_state(self, next_control_state: object) -> None:
+        """Adopt the integrity generation the resident advanced to."""
+
+        if next_control_state is None:
+            return
+        if not isinstance(next_control_state, dict):
+            raise RuntimeError("Guard policy integrity control state is invalid.")
+        self._finalize_policy_integrity_control_state(next_control_state)
 
     def replace_remote_policies(
         self,
