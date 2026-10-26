@@ -365,6 +365,36 @@ impl Ctx<'_> {
             if !interrupted {
                 return Err(tampered("extension control authority rollback detected"));
             }
+            // The commit sealed the anchor and then died before the row said
+            // so. Nothing here is left for a person to decide: `resume_plan`
+            // re-verifies the prepared row's transition record and sealed
+            // snapshot under the authority key, pins every field of both, and
+            // the anchor authenticates the same digest independently, so the
+            // revision that was already authorised is finished rather than
+            // held. Only a shape that proof cannot settle still reports
+            // `recovery-required`, which is what the explicit recovery verb is
+            // for. Without this the authority stays unhealthy for good: the
+            // abandoned-row rollback needs the anchor to still sit on the
+            // committed head, and this anchor has moved past it, so every
+            // later command is blocked until a person runs that verb.
+            //
+            // A commit retrying its own request is the one caller this is not
+            // for: it settles that row under the single-use proof it still
+            // holds, and finishing the row out from under it would leave that
+            // proof reserved against a committed transition, which reads as a
+            // replay. It is the only caller that asks for a read with
+            // `rollback_attempted` already set, which is how it says the
+            // prepared row is its own; a read that set the flag by rolling a
+            // row back cannot be here, since that shape leaves the anchor on
+            // the committed head and this one has moved past it.
+            if !self.request.rollback_attempted && !self.request.resume_attempted {
+                return Ok(Read::Action(json!({
+                    "action": "resume_pending",
+                    "revision": revision + 1,
+                    "current_revision": revision,
+                    "stored_catalog_digest": &stored_catalog_digest,
+                })));
+            }
             return recovery();
         }
         if self.pending_transition(revision + 1)?.is_some() {
