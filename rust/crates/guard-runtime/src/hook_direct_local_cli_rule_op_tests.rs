@@ -1,4 +1,6 @@
-use super::{allowed_verdict, evaluate_hook_local_cli_rule_request, review_verdict, RuleVerdict};
+use super::{
+    allowed_verdict, evaluate_hook_local_cli_rule_request, launch_env, review_verdict, RuleVerdict,
+};
 use crate::context_digest_package_scripts::package_json_scripts;
 use guard_contracts::{HookLocalCliRuleRequestV1, HOOK_LOCAL_CLI_RULE_REQUEST_SCHEMA};
 use serde_json::{json, Map, Value};
@@ -105,6 +107,8 @@ impl Case {
             native_result: object(native_result),
             workspace: Some(self.workspace.clone()),
             home_dir: self.workspace.clone(),
+            user_home: None,
+            env: None,
         }
     }
 }
@@ -227,5 +231,32 @@ fn the_reply_names_the_verdict_and_refuses_an_unknown_mode() {
     assert_eq!(
         error,
         Err("native_hook_local_cli_rule_mode_invalid".to_owned())
+    );
+}
+
+#[test]
+fn the_launch_resolves_against_the_daemon_environment_it_was_sent() {
+    let case = Case::new("launch-env", Some("blocked"));
+    let mut request = case.request("allowed", "npm run build", allowed());
+    // Without the daemon's environment the resident resolves against its own.
+    assert!(launch_env(&request).is_none());
+    request.user_home = Some("/daemon/home".to_owned());
+    assert!(launch_env(&request).is_none());
+    request.env = Some(
+        [("PATH".to_owned(), "/daemon/bin".to_owned())]
+            .into_iter()
+            .collect(),
+    );
+    let sent = launch_env(&request).unwrap();
+    assert_eq!(sent.user_home, "/daemon/home");
+    assert_eq!(
+        sent.env.get("PATH").map(String::as_str),
+        Some("/daemon/bin")
+    );
+    // A package script launch reads the workspace, not `PATH`, so the
+    // daemon's environment still finds its grant.
+    assert_eq!(
+        allowed_verdict(&request),
+        RuleVerdict::Blocked(case.name.clone())
     );
 }

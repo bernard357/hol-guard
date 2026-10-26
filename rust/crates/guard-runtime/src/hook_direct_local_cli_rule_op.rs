@@ -16,7 +16,7 @@ use guard_contracts::{
 use serde_json::Value;
 
 use super::block::{ReviewVerdict, Verdict};
-use super::RuleCheck;
+use super::{LaunchEnv, RuleCheck};
 
 /// The one review a custom allow lifts: Rust did not recognise the program.
 const GRANT_LIFTABLE_REASON: &str = "native_command_review_required";
@@ -66,7 +66,16 @@ fn check(request: &HookLocalCliRuleRequestV1) -> RuleCheck<'_> {
         home_dir: &request.home_dir,
         guard_home: &request.guard_home,
         recording_only: false,
+        launch_env: launch_env(request),
     }
+}
+
+/// The daemon's home and environment, when it sent both.
+fn launch_env(request: &HookLocalCliRuleRequestV1) -> Option<LaunchEnv<'_>> {
+    Some(LaunchEnv {
+        user_home: request.user_home.as_deref()?,
+        env: request.env.as_ref()?,
+    })
 }
 
 /// `native_local_cli_block_response`. The identity steps run only while some
@@ -86,7 +95,12 @@ pub(crate) fn allowed_verdict(request: &HookLocalCliRuleRequestV1) -> RuleVerdic
         return RuleVerdict::None;
     }
     let check = check(request);
-    let launched = match super::launch_for(&request.payload, check.workspace, check.home_dir) {
+    let launched = match super::launch_for(
+        &request.payload,
+        check.workspace,
+        check.home_dir,
+        check.launch_env,
+    ) {
         Ok(Some(launched)) => launched,
         Ok(None) => return RuleVerdict::None,
         Err(()) => return RuleVerdict::Unverified,

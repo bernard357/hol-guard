@@ -7,6 +7,7 @@ decides (``hook_local_cli_rule``); this module asks it and renders the verdict.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Mapping
@@ -142,6 +143,9 @@ def _rule_verdict(
         "native_result": dict(native_result),
         "workspace": None if workspace is None else str(workspace),
         "home_dir": str(home_dir),
+        # The launch resolves against the daemon's environment, not the resident's.
+        "user_home": str(Path.home()),
+        "env": dict(os.environ),
     }
     try:
         if not ensure_resident_prerequisite(guard_home):

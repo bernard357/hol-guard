@@ -136,6 +136,12 @@ pub struct HookLocalCliRuleRequestV1 {
     #[serde(default)]
     pub workspace: Option<String>,
     pub home_dir: String,
+    /// The daemon's own home, which the launch resolves `~` against.
+    #[serde(default)]
+    pub user_home: Option<String>,
+    /// The daemon's environment, which the launch resolves `PATH` against.
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

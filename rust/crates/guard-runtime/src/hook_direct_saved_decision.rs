@@ -232,6 +232,7 @@ fn custom_grant(context: &Context<'_>, result: &Object) -> Option<ReviewVerdict>
         guard_home: context.guard_home,
         // The daemon pauses no review in Watch, so this lane never records.
         recording_only: false,
+        launch_env: None,
     })
 }
 
