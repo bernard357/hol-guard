@@ -13,6 +13,7 @@ The Kit runs inside the HOL Guard native runtime. It reads only the folder you n
 | `hol-guard plugin check [path] --spec agent-plugins-1.0` | Checks the folder against the Agent Plugins 1.0.0 spec instead of runtime loaders. Each finding names the spec section and whether a client would reject the whole plugin or only one component. | 0 conforms, 1 does not, 2 could not run |
 | `hol-guard plugin convert [path] --to RUNTIME [--out DIR] [--force]` | Writes one runtime's package, such as `agent-plugins`, `codex` or `gemini-cli`. An `agent-plugins` package is checked against the spec after it is written. | 0 converted, 1 check failed, 2 could not run |
 | `hol-guard plugin links [path]` | Prints the install command for each runtime the repository already supports, and what is left to list it everywhere. | 0, or 2 could not run |
+| `hol-guard plugin card [path] [--slug OWNER/NAME]` | Prints a draft plugin card as JSON: what the manifests declare the plugin can do, the programs it starts, the hosts it connects to and the environment variables it reads by name. | 0, or 2 could not run |
 | `hol-guard plugin init [path] [--name NAME]` | In a plugin repository, writes `hol.json`. In a new folder (empty, or holding only a README, a LICENSE or dotfiles) with `--name`, scaffolds a minimal Claude Code plugin with one skill. Never overwrites a file. | 0, or 2 could not run |
 | `hol-guard plugin stats <owner/plugin>` | For a HOL listing you own, prints its views, unique visitors and install clicks for the last 28 days and last week's attested installs by runtime. Reads a stats key from `HOL_API_KEY`; create one under Stats in your terminal in the HOL plugin workspace. The key can only read listings its account owns, and HOL withholds any install count under its minimum. | 0, or 2 could not run |
 
@@ -87,6 +88,12 @@ exclude_paths = ["distributions/*"]
 HOL links carry `utm_source=hol-guard` campaign parameters, so HOL can count visits that came from the Kit. The Kit itself sends nothing.
 
 After the first successful `check` or `package` in text mode, the Kit prints a one-line tip showing how to turn on Guard for the agents you test with. It prints once per Guard home and never in `--json` output, and it only prints a command.
+
+## Publish a plugin card
+
+`hol-guard plugin card` prints a JSON card with the draft schema `hol.plugin-card.v0-draft`. Commit it at `.well-known/hol-plugin-card.json` so directories and runtimes can read what the plugin declares without loading it. The card lists skills, MCP servers and their transports, the programs local servers start, the hosts remote servers connect to and the environment variables the plugin reads. Variable values never appear in it.
+
+The card describes what the repository claims, so `identity.verified` is always `false`. The HOL listing serves the same card at `links.holCard` with the verified owner and release attestations added. The schema id changes whenever the shape changes, until a `.well-known` card format is standardized.
 
 ## Runtime compatibility
 

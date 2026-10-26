@@ -1,4 +1,4 @@
-"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|install|uninstall|stats``.
+"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|card|install|uninstall|stats``.
 
 Detection, checks, packaging and file writes run in the native runtime's
 ``plugin-kit`` command. This module parses arguments, sends one request and
@@ -92,6 +92,7 @@ _ERRORS = {
     "plugin_kit_ledger_unwritable": "Guard could not update its install record in the Guard home.",
     "plugin_kit_guard_home_invalid": "The Guard home must be an absolute path.",
     "plugin_kit_links_slug_invalid": "Use a HOL listing slug such as owner/plugin.",
+    "plugin_kit_card_slug_invalid": "Use a HOL listing slug such as owner/plugin.",
 }
 
 
@@ -223,6 +224,11 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         help="Print only the README install block: hol-guard plugin install plus each runtime's commands.",
     )
     links.add_argument("--slug", help="HOL listing the block names (default: the GitHub repository).")
+    card = add(
+        "card",
+        "Print a draft .well-known card for the plugin: what it declares, where it is listed.",
+    )
+    card.add_argument("--slug", help="HOL listing the card links to (default: the GitHub repository).")
     for name, help_text in (
         ("install", "Install a HOL listing with each runtime's own CLI. Prints the plan unless --apply."),
         ("uninstall", "Remove a listing that plugin install added. Prints the plan unless --apply."),
@@ -270,6 +276,8 @@ def _request(args: argparse.Namespace) -> dict[str, object]:
         request["block"] = True
         if args.slug:
             request["slug"] = args.slug
+    if args.command == "card" and args.slug:
+        request["slug"] = args.slug
     if args.command in {"check", "package"}:
         request["strict"] = bool(args.strict)
     if args.command == "package":
@@ -440,6 +448,14 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
         return 2
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "card":
+        # The card is the output, so stdout stays pure JSON for redirection.
+        print(json.dumps(result, indent=2, sort_keys=True))
+        print(
+            "Publish it at .well-known/hol-plugin-card.json. The HOL listing serves it "
+            "with the verified owner and release attestations added.",
+            file=sys.stderr,
+        )
     elif args.command == "check" and args.spec:
         write_conformance(result)
     elif args.command == "check":

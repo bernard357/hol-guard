@@ -570,3 +570,21 @@ fn init_scaffolds_only_a_new_folder_and_never_overwrites() {
     );
     assert!(!busy.join(".claude-plugin").exists());
 }
+
+#[test]
+fn card_declares_without_claiming_verification_or_echoing_secrets() {
+    let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/needs-fixes/input");
+    let body = json!({"command": "card", "root": input.to_string_lossy()});
+    let response = guard_plugin_kit::run_request(body.to_string().as_bytes());
+    assert_eq!(response["ok"], json!(true), "{response}");
+    let card = &response["result"];
+    assert_eq!(card["schema"], json!("hol.plugin-card.v0-draft"));
+    assert_eq!(card["identity"]["verified"], json!(false));
+    let rendered = card.to_string();
+    assert!(rendered.contains("SERVICE_API_KEY"));
+    assert!(!rendered.contains("replace-me-123"));
+
+    let refused = json!({"command": "card", "root": input.to_string_lossy(), "slug": "a b"});
+    let response = guard_plugin_kit::run_request(refused.to_string().as_bytes());
+    assert_eq!(response["error"], json!("plugin_kit_card_slug_invalid"));
+}

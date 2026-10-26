@@ -8,6 +8,7 @@
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
 
 mod agent_plugins;
+mod card;
 mod check;
 mod config;
 mod detect;
@@ -64,6 +65,12 @@ enum Request {
         root: String,
         #[serde(default)]
         block: bool,
+        #[serde(default)]
+        slug: Option<String>,
+    },
+    /// A draft `.well-known` card; see `card.rs`.
+    Card {
+        root: String,
         #[serde(default)]
         slug: Option<String>,
     },
@@ -135,6 +142,12 @@ fn handle(request: Request) -> Result<Value, String> {
             let root = resolve_root(&root)?;
             let detection = detect::detect(&root)?;
             serde_json::to_value(links::links(&detection, block, slug.as_deref())?)
+                .map_err(|_| "plugin_kit_encode_failed".to_owned())
+        }
+        Request::Card { root, slug } => {
+            let root = resolve_root(&root)?;
+            let detection = detect::detect(&root)?;
+            serde_json::to_value(card::card(&detection, slug.as_deref())?)
                 .map_err(|_| "plugin_kit_encode_failed".to_owned())
         }
         Request::Init { root, name } => {

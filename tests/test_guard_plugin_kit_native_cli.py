@@ -252,3 +252,21 @@ def test_convert_rejects_an_unknown_target(tmp_path: Path) -> None:
     exit_code, _output, error = _run(["plugin", "convert", str(tmp_path), "--to", "zed"])
     assert exit_code == 2
     assert "agent-plugins" in error
+
+
+def test_card_prints_only_json_on_stdout_and_links_the_listing(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, output, error = _run(["plugin", "card", str(tmp_path)])
+    assert exit_code == 0
+    card = json.loads(output)
+    assert card["schema"] == "hol.plugin-card.v0-draft"
+    assert card["identity"] == {"repository": "acme/notes-kit", "verified": False}
+    assert card["permissions"]["startsPrograms"] == ["npx"]
+    assert card["links"]["listing"] == "https://hol.org/registry/plugins/acme%2Fnotes-kit"
+    assert ".well-known/hol-plugin-card.json" in error
+
+    _exit_code, output, _error = _run(["plugin", "card", str(tmp_path), "--slug", "acme/notes"])
+    assert json.loads(output)["links"]["listing"] == "https://hol.org/registry/plugins/acme%2Fnotes"
+    exit_code, _output, error = _run(["plugin", "card", str(tmp_path), "--slug", "../notes"])
+    assert exit_code == 2
+    assert "Use a HOL listing slug" in error

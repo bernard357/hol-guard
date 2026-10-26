@@ -172,6 +172,7 @@ hol-guard plugin check            # what marketplaces and runtime loaders would 
 hol-guard plugin package          # writes dist/hol-plugin/<runtime>/ for each runtime
 hol-guard plugin convert --to agent-plugins   # Agent Plugins 1.0 package, checked against the spec
 hol-guard plugin links            # install commands per runtime, plus listing links
+hol-guard plugin card             # draft .well-known plugin card as JSON
 hol-guard plugin init --name my-plugin   # scaffold a new plugin in an empty folder
 ```
 
