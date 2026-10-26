@@ -153,7 +153,7 @@ def test_init_scaffolds_then_links_print_install_commands(tmp_path: Path) -> Non
     _write_plugin(tmp_path / "published")
     exit_code, output, _error = _run(["plugin", "links", str(tmp_path / "published")])
     assert exit_code == 0
-    assert "npx skills add acme/notes-kit" in output
+    assert "npx skills@1.7.4 add acme/notes-kit" in output
     assert "https://hol.org/plugins/connect?repo=acme/notes-kit&utm_source=hol-guard" in output
 
 
@@ -165,7 +165,45 @@ def test_plugin_fails_closed_without_native_runtime(
     monkeypatch.setattr(native_runtime, "native_runtime_status", lambda **_kwargs: unavailable)
     exit_code, output, error = _run(["plugin", "check", str(tmp_path)])
     assert (exit_code, output) == (2, "")
-    assert "requires the Guard native runtime" in error
+    assert "The Plugin Kit needs HOL Guard's native runtime" in error or "pre-release" in error
+    assert "pip install -U" not in error
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            {"version": "3.58.0", "system": "Linux", "machine": "aarch64"},
+            "The Plugin Kit needs HOL Guard's native runtime, and this install has none for Linux aarch64. "
+            "Reinstall to get it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+        ),
+        (
+            {"version": "3.58.0", "system": "Darwin", "machine": "x86_64"},
+            "The Plugin Kit needs HOL Guard's native runtime, and this install has none for macOS x86_64. "
+            "Reinstall to get it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+        ),
+        (
+            {"version": "3.58.0a6", "system": "Darwin", "machine": "arm64"},
+            "HOL Guard 3.58.0a6 is a pre-release, and pre-releases on PyPI do not include the native runtime "
+            "the Plugin Kit needs. Install the latest release: pipx install --force hol-guard "
+            "(or uv tool install --force hol-guard)",
+        ),
+        (
+            {"version": "3.58.0", "system": "FreeBSD", "machine": "amd64"},
+            "The Plugin Kit needs HOL Guard's native runtime, which is not built for FreeBSD amd64. "
+            "It is built for macOS, Linux and Windows on x86_64 and arm64.",
+        ),
+        (
+            {"outdated": True},
+            "This HOL Guard's native runtime is too old for the Plugin Kit. "
+            "Update it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+        ),
+    ],
+)
+def test_the_native_unavailable_message_names_the_platform_and_the_fix(
+    kwargs: dict[str, object], expected: str
+) -> None:
+    assert plugin_kit_cli.native_unavailable_message(**kwargs) == expected  # type: ignore[arg-type]
 
 
 def test_unknown_native_errors_are_printed_as_codes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,7 +241,7 @@ def test_links_block_prints_only_the_readme_block(tmp_path: Path) -> None:
     )
     exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--block"])
     assert exit_code == 0
-    assert output.startswith("<!-- hol-install-block:v1 slug=acme/notes-kit -->\n")
+    assert output.startswith("<!-- hol-install-block:v2 slug=acme/notes-kit -->\n")
     assert "hol-guard plugin install acme/notes-kit --apply" in output
     assert "Claim the HOL listing" not in output
 

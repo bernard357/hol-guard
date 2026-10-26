@@ -10,12 +10,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
+import re
 import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
+from ...version import __version__
 from .output import write_check, write_conformance, write_links
 
 PLUGIN_KIT_COMMAND = "plugin-kit"
@@ -23,7 +26,17 @@ PLUGIN_KIT_FEATURE = "plugin-kit-v1"
 AGENT_PLUGINS_SPEC = "agent-plugins-1.0"
 _TIMEOUT_SECONDS = 120.0
 _OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
-_NATIVE_UNAVAILABLE = "The HOL Guard Plugin Kit requires the Guard native runtime. Run: pip install -U hol-guard"
+_REINSTALL = "pipx install --force hol-guard (or uv tool install --force hol-guard)"
+# Stable releases on PyPI carry a native wheel for each of these.
+_NATIVE_PLATFORMS = {
+    ("Darwin", "x86_64"),
+    ("Darwin", "arm64"),
+    ("Linux", "x86_64"),
+    ("Linux", "aarch64"),
+    ("Windows", "AMD64"),
+    ("Windows", "ARM64"),
+}
+_SYSTEM_NAMES = {"Darwin": "macOS"}
 _NATIVE_FAILED = "The HOL Guard Plugin Kit did not complete."
 INSTALL_DOCUMENT = "hol-guard.plugin-install/1"
 
@@ -122,6 +135,37 @@ class PluginKitNativeError(RuntimeError):
         self.code = code
 
 
+def native_unavailable_message(
+    *,
+    outdated: bool = False,
+    version: str | None = None,
+    system: str | None = None,
+    machine: str | None = None,
+) -> str:
+    """Why the Plugin Kit cannot run here, and the one command that fixes it."""
+
+    version = version or __version__
+    system = system or platform.system()
+    machine = machine or platform.machine()
+    where = f"{_SYSTEM_NAMES.get(system, system)} {machine}"
+    if outdated:
+        return f"This HOL Guard's native runtime is too old for the Plugin Kit. Update it: {_REINSTALL}"
+    if re.search(r"(a|b|rc|dev)\d*$", version):
+        return (
+            f"HOL Guard {version} is a pre-release, and pre-releases on PyPI do not include the native "
+            f"runtime the Plugin Kit needs. Install the latest release: {_REINSTALL}"
+        )
+    if (system, machine) not in _NATIVE_PLATFORMS:
+        return (
+            f"The Plugin Kit needs HOL Guard's native runtime, which is not built for {where}. "
+            "It is built for macOS, Linux and Windows on x86_64 and arm64."
+        )
+    return (
+        f"The Plugin Kit needs HOL Guard's native runtime, and this install has none for {where}. "
+        f"Reinstall to get it: {_REINSTALL}"
+    )
+
+
 def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     """Run one ``plugin-kit`` request and return its ``{ok, result|error}`` reply."""
 
@@ -129,14 +173,10 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     from ..native_runtime import native_runtime_status
 
     status = native_runtime_status()
-    if (
-        not status.available
-        or not status.compatible
-        or status.identity is None
-        or status.capabilities is None
-        or PLUGIN_KIT_FEATURE not in status.capabilities.features
-    ):
-        raise PluginKitNativeError(_NATIVE_UNAVAILABLE)
+    if not status.available or not status.compatible or status.identity is None or status.capabilities is None:
+        raise PluginKitNativeError(native_unavailable_message())
+    if PLUGIN_KIT_FEATURE not in status.capabilities.features:
+        raise PluginKitNativeError(native_unavailable_message(outdated=True))
     runtime = status.identity.path
     completed = run_isolated_hook_process(
         (str(runtime), PLUGIN_KIT_COMMAND, "--stdin"),
