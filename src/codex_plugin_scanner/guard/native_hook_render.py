@@ -84,12 +84,11 @@ def native_render_cli(
     (``document``, ``silent`` or ``fallback``) and the document for ``document``.
     """
 
-    payload = _render_payload(
-        {"kind": kind, "harness": harness, "cli": dict(params)},
-        guard_home,
-        deadline,
-        max_request_bytes=_CLI_HOOK_EMIT_MAX_REQUEST_BYTES if kind == "cli_hook_emit" else _MAX_REQUEST_BYTES,
-    )
+    wire: dict[str, object] = {"kind": kind, "harness": harness, "cli": dict(params)}
+    if kind == "cli_hook_emit":
+        payload = _render_payload(wire, guard_home, deadline, max_request_bytes=_CLI_HOOK_EMIT_MAX_REQUEST_BYTES)
+    else:
+        payload = _render_payload(wire, guard_home, deadline, max_request_bytes=_MAX_REQUEST_BYTES)
     outcome = payload.get("outcome") if payload is not None else None
     if payload is None or outcome not in {"document", "silent", "fallback"}:
         return None
