@@ -2145,6 +2145,42 @@ def test_exchange_guard_device_code_stops_when_cloud_stays_unanswered_past_deadl
         )
 
 
+def test_exchange_guard_device_code_does_not_poll_after_backoff_crosses_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [1000.0]
+    attempts: list[float] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: int):
+        del request, timeout
+        attempts.append(clock[0])
+        raise TimeoutError("timed out")
+
+    def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(connect_flow.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="Guard Cloud did not answer while HOL Guard waited for approval"):
+        connect_flow.exchange_guard_device_code(
+            token_endpoint="https://hol.org/api/guard/oauth/token",
+            client_id="guard-local-daemon",
+            device_code="device-code-123",
+            dpop_key_material=generate_dpop_key_pair(),
+            interval_seconds=5,
+            expires_in_seconds=600,
+            wait_timeout_seconds=7,
+            urlopen=fake_urlopen,
+            sleep=fake_sleep,
+            now=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+
+    assert attempts == [1000.0]
+    assert sleeps == [7.0]
+
+
 def test_exchange_guard_device_code_does_not_retry_non_transient_url_errors() -> None:
     attempts: list[int] = []
 

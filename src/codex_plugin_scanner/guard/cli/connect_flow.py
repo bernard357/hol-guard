@@ -716,6 +716,13 @@ def _is_transient_device_poll_error(error: OSError) -> bool:
     return isinstance(error, (TimeoutError, ConnectionError))
 
 
+def _unanswered_device_poll_error() -> RuntimeError:
+    return RuntimeError(
+        "Guard Cloud did not answer while HOL Guard waited for approval. "
+        "Retry `hol-guard connect --headless` to request a new code."
+    )
+
+
 def exchange_guard_device_code(
     *,
     token_endpoint: str,
@@ -789,13 +796,15 @@ def exchange_guard_device_code(
                 raise
             # The device code stays valid while one poll goes unanswered, so a
             # slow or briefly unreachable Guard Cloud must not end the wait.
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    "Guard Cloud did not answer while HOL Guard waited for approval. "
-                    "Retry `hol-guard connect --headless` to request a new code."
-                ) from error
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                raise _unanswered_device_poll_error() from error
             current_interval = min(current_interval * 2, DEVICE_CODE_TRANSIENT_MAX_INTERVAL_SECONDS)
-            sleep(float(current_interval))
+            sleep(float(min(current_interval, remaining_seconds)))
+            # Never start a poll after the wait window closes, even when the
+            # backoff sleep ran up to the deadline.
+            if time.monotonic() >= deadline:
+                raise _unanswered_device_poll_error() from error
             continue
         if not isinstance(payload, dict):
             raise RuntimeError("Guard OAuth token exchange failed: invalid response.")
