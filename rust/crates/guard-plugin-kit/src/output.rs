@@ -73,6 +73,44 @@ pub fn reject_source_overlap(root: &Path, out: &Path, plugin: &Plugin) -> Result
     Ok(())
 }
 
+/// Refuses an output folder that is the plugin folder, a folder holding it,
+/// the home folder or a filesystem root, with or without `--force`. Writing
+/// there would mix generated files with the user's own.
+pub fn reject_unsafe_out(root: &Path, out: &Path) -> Result<(), String> {
+    let out = settled(out);
+    let home = ["HOME", "USERPROFILE"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .filter(|value| !value.is_empty())
+        .map(|value| settled(Path::new(&value)));
+    if out.parent().is_none() || root.starts_with(&out) || home.into_iter().any(|home| home == out)
+    {
+        return Err("plugin_kit_output_unsafe".to_owned());
+    }
+    Ok(())
+}
+
+/// `path` with its longest existing ancestor resolved, so a symlinked home or
+/// temp folder compares equal to its target.
+fn settled(path: &Path) -> PathBuf {
+    let mut existing = path.to_path_buf();
+    let mut rest = Vec::new();
+    while existing.canonicalize().is_err() {
+        let Some(name) = existing.file_name().map(ToOwned::to_owned) else {
+            return path.to_path_buf();
+        };
+        rest.push(name);
+        if !existing.pop() {
+            return path.to_path_buf();
+        }
+    }
+    let mut resolved = existing.canonicalize().unwrap_or(existing);
+    for name in rest.iter().rev() {
+        resolved.push(name);
+    }
+    resolved
+}
+
 pub fn require_empty(out: &Path) -> Result<(), String> {
     if let Ok(mut entries) = fs::read_dir(out) {
         if entries.next().is_some() {
@@ -84,29 +122,17 @@ pub fn require_empty(out: &Path) -> Result<(), String> {
 
 /// Removes the files an earlier package recorded in its provenance, so a
 /// forced rebuild does not keep runtimes or assets the new plan dropped.
-/// Files the Kit did not write are left alone.
-pub fn clear_previous(out: &Path) -> Result<(), String> {
-    let Some(text) = walk::read_text(&out.join(PROVENANCE_FILE)) else {
-        return Ok(());
-    };
-    let Ok(provenance) = serde_json::from_str::<Value>(&text) else {
-        return Ok(());
-    };
-    if provenance.get("schema").and_then(Value::as_str) != Some(PROVENANCE_SCHEMA) {
-        return Ok(());
-    }
-    let files = provenance
-        .get("files")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut paths: Vec<PathBuf> = files
-        .iter()
-        .filter_map(|file| file.get("path").and_then(Value::as_str))
-        .map(PathBuf::from)
-        .filter(|path| plain(path))
-        .collect();
+/// Files the Kit did not write are left alone, and if the new plan would
+/// replace one of them nothing is removed.
+pub fn clear_previous(out: &Path, outputs: &[Output]) -> Result<(), String> {
+    let mut paths = recorded(out);
     paths.push(PathBuf::from(PROVENANCE_FILE));
+    for output in outputs {
+        let relative = PathBuf::from(&output.path);
+        if fs::symlink_metadata(out.join(&relative)).is_ok() && !paths.contains(&relative) {
+            return Err("plugin_kit_output_not_generated".to_owned());
+        }
+    }
     for path in &paths {
         let target = out.join(path);
         if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.is_file()) {
@@ -128,6 +154,28 @@ pub fn clear_previous(out: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The files an earlier package recorded in its provenance, if any.
+fn recorded(out: &Path) -> Vec<PathBuf> {
+    let Some(text) = walk::read_text(&out.join(PROVENANCE_FILE)) else {
+        return Vec::new();
+    };
+    let Ok(provenance) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    if provenance.get("schema").and_then(Value::as_str) != Some(PROVENANCE_SCHEMA) {
+        return Vec::new();
+    }
+    provenance
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|file| file.get("path").and_then(Value::as_str))
+        .map(PathBuf::from)
+        .filter(|path| plain(path))
+        .collect()
 }
 
 /// Writes `outputs` under `out`. Every path is checked before the first

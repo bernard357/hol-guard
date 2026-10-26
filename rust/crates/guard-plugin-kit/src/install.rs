@@ -156,6 +156,32 @@ pub struct Step {
     /// this one after the install and rolls back a mismatch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_commit: Option<String>,
+    /// Uninstall only: removes the marketplace Guard added for this listing.
+    /// The CLI runs it only when no other plugin from it is installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remove_marketplace: Option<Vec<String>>,
+}
+
+/// On an uninstall plan, offer to remove each marketplace Guard added
+/// (`owned` names those runtimes) instead of leaving it registered.
+pub fn offer_marketplace_removal(plan: &mut Plan, owned: &[String]) {
+    for step in &mut plan.steps {
+        let Some(name) = step.marketplace.as_deref() else {
+            continue;
+        };
+        if owned.iter().any(|runtime| runtime == step.runtime) {
+            step.remove_marketplace = Some(argv(&[
+                step.program,
+                "plugin",
+                "marketplace",
+                "remove",
+                name,
+            ]));
+            step.note = Some(
+                "Guard added this marketplace, so it removes it too unless another plugin uses it.",
+            );
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -698,6 +724,7 @@ fn step(
                 Action::Install => market.commit.clone(),
                 Action::Uninstall => None,
             },
+            remove_marketplace: None,
         }
     };
     match target.runtime.as_str() {
@@ -735,6 +762,7 @@ fn step(
                 plugin_id: None,
                 marketplace: None,
                 expected_commit: None,
+                remove_marketplace: None,
             }
         }
     }

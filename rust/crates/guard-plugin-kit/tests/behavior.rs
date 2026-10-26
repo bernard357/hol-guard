@@ -191,6 +191,63 @@ fn forced_package_removes_files_the_new_plan_dropped() {
 }
 
 #[test]
+fn output_at_the_source_a_parent_or_root_is_refused_even_with_force() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let parent = root.parent().expect("parent").to_path_buf();
+    for out in [root.clone(), parent.clone(), PathBuf::from("/")] {
+        for force in [false, true] {
+            let code = error(json!({
+                "command": "package", "root": root_str(&root),
+                "out_dir": root_str(&out), "force": force,
+            }));
+            assert_eq!(code, "plugin_kit_output_unsafe", "{out:?} force={force}");
+        }
+    }
+    assert!(!root.join("claude-code").exists());
+    assert!(!parent.join("claude-code").exists());
+}
+
+#[test]
+fn output_at_the_home_folder_is_refused() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
+        return;
+    };
+    // Without --force, so a regression stops at the non-empty check instead
+    // of writing into the real home folder.
+    let code = error(json!({
+        "command": "package", "root": root_str(&root),
+        "out_dir": PathBuf::from(home).to_string_lossy(),
+    }));
+    assert_eq!(code, "plugin_kit_output_unsafe");
+}
+
+#[test]
+fn force_never_replaces_a_file_the_kit_did_not_write() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let out = root.parent().expect("parent").join("handmade");
+    let mine = out.join("claude-code/.claude-plugin/plugin.json");
+    fs::create_dir_all(mine.parent().expect("dir")).expect("dirs");
+    fs::write(&mine, "mine").expect("user file");
+    let code = error(json!({
+        "command": "package", "root": root_str(&root),
+        "out_dir": root_str(&out), "force": true,
+    }));
+    assert_eq!(code, "plugin_kit_output_not_generated");
+    assert_eq!(fs::read_to_string(&mine).expect("kept"), "mine");
+    assert!(!out.join("hol.provenance.json").exists());
+}
+
+#[test]
 fn a_blocked_path_stops_package_before_any_write() {
     let root = repo(&[
         (".claude-plugin/plugin.json", MANIFEST),

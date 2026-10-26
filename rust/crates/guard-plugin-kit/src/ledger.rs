@@ -141,8 +141,21 @@ fn stored_target(target: &Value) -> Value {
     Value::Object(stored)
 }
 
+/// Runtimes of an entry whose marketplace Guard added, so `uninstall` may
+/// remove it again.
+fn added_marketplaces(entry: Option<&Value>) -> Vec<String> {
+    entry
+        .and_then(|entry| entry["addedMarketplaces"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|runtime| runtime.as_str().map(str::to_owned))
+        .collect()
+}
+
 /// Add (`installed`) or drop one runtime of a listing. Adding needs the spec
-/// the install ran from; dropping needs only the slug.
+/// the install ran from; dropping needs only the slug. `marketplace_added`
+/// says Guard registered the marketplace for this install (it was not there
+/// before); a reinstall that found it keeps whatever was recorded earlier.
 pub fn record(
     guard_home: &str,
     slug: &str,
@@ -150,6 +163,7 @@ pub fn record(
     installed: bool,
     spec: Option<Value>,
     origin: &str,
+    marketplace_added: bool,
 ) -> Result<Value, String> {
     let added = match (installed, spec) {
         (true, Some(spec)) => {
@@ -176,6 +190,13 @@ pub fn record(
             .cloned()
             .unwrap_or_default();
         targets.retain(|target| target["runtime"] != runtime);
+        let mut owned = added_marketplaces(installs.get(slug));
+        let owned_before = owned.iter().any(|r| r == runtime);
+        owned.retain(|r| r != runtime);
+        if added.is_some() && (marketplace_added || owned_before) {
+            owned.push(runtime.to_owned());
+            owned.sort();
+        }
         let entry = match added {
             Some((spec, target)) => {
                 targets.push(target);
@@ -184,11 +205,13 @@ pub fn record(
                     "version": spec["version"],
                     "listingUrl": spec["listingUrl"],
                     "targets": targets,
+                    "addedMarketplaces": owned,
                 }))
             }
             None if targets.is_empty() => None,
             None => installs.get(slug).cloned().map(|mut entry| {
                 entry["targets"] = Value::Array(targets);
+                entry["addedMarketplaces"] = json!(owned);
                 entry
             }),
         };
@@ -241,6 +264,12 @@ pub fn installs(guard_home: &str, recover: bool) -> Result<Value, String> {
             Ok(json!({"installs": {}, "recovered": name}))
         }
     })
+}
+
+/// Runtimes whose marketplace Guard added for this listing.
+pub fn marketplaces_added(guard_home: &str, slug: &str) -> Result<Vec<String>, String> {
+    let installs = read(&directory(guard_home)?)?;
+    Ok(added_marketplaces(installs.get(slug)))
 }
 
 /// The install spec Guard recorded for a listing, rebuilt for `uninstall`.

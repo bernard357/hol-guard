@@ -1,6 +1,7 @@
 """Find and start the runtime CLIs an install plan names.
 
-Programs come only from absolute PATH entries, never the current directory.
+Programs come only from absolute PATH entries, never the current directory,
+then from the folders each runtime's installer is known to use.
 On POSIX a folder or program every user can write to is skipped, since anyone
 could have planted it. On Windows an ``.exe`` wins over a ``.cmd`` or ``.bat``
 shim in the same folder, and every argument bound for a shim must stay clear
@@ -33,6 +34,8 @@ class Program:
     name: str
     #: Absolute path; the plan shows it and the confirmation covers it.
     path: str
+    #: False when it was found in a known install folder that is not on PATH.
+    on_path: bool = True
 
     @property
     def batch(self) -> bool:
@@ -83,9 +86,14 @@ def _candidate(folder: str, name: str, *, windows: bool) -> str | None:
 
 
 def find_programs(
-    names: Iterable[str], environ: Mapping[str, str] | None = None, *, windows: bool | None = None
+    names: Iterable[str],
+    environ: Mapping[str, str] | None = None,
+    *,
+    windows: bool | None = None,
+    known: Sequence[str] = (),
 ) -> Lookup:
-    """Resolve each name to an absolute path Guard is willing to start."""
+    """Resolve each name to an absolute path Guard is willing to start: PATH
+    first, then the ``known`` install folders, with the same checks."""
 
     environ = os.environ if environ is None else environ
     windows = os.name == "nt" if windows is None else windows
@@ -117,8 +125,19 @@ def find_programs(
             planted = _candidate(os.path.abspath(entry), name, windows=windows)
             if planted:
                 lookup.ignored.append(f"Guard ignored {planted}: it is in {reason}.")
+    extra: list[str] = []
+    for entry in known:
+        if entry in seen or not os.path.isabs(entry):
+            continue
+        seen.add(entry)
+        try:
+            info = os.stat(entry)
+        except OSError:
+            continue
+        if stat.S_ISDIR(info.st_mode) and (windows or not _world_writable(info.st_mode)):
+            extra.append(entry)
     for name in names:
-        for folder in folders:
+        for folder in [*folders, *extra]:
             found = _candidate(folder, name, windows=windows)
             if found is None:
                 continue
@@ -134,7 +153,7 @@ def find_programs(
                 if folder_open is not None:
                     lookup.ignored.append(f"Guard ignored {found}: every user can change {folder_open}.")
                     continue
-            lookup.programs[name] = Program(name, found)
+            lookup.programs[name] = Program(name, found, on_path=folder in folders)
             break
     return lookup
 
