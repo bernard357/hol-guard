@@ -408,7 +408,6 @@
     "src/codex_plugin_scanner/guard/native_mcp_classification.py",
     "src/codex_plugin_scanner/guard/native_mcp_relay_server_report.py",
     "src/codex_plugin_scanner/guard/native_daemon_lifecycle.py",
-    "src/codex_plugin_scanner/guard/native_mcp_sensitive_read.py",
     "src/codex_plugin_scanner/guard/native_extension_control_authority.py",
     "src/codex_plugin_scanner/guard/native_extension_control_authority_memo.py",
     "src/codex_plugin_scanner/guard/native_mcp_runtime_evidence.py",

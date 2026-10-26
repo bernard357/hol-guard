@@ -1,4 +1,7 @@
-"""Transport for the native sensitive-file-read decision owner.
+"""Test client for the native sensitive-file-read decision owner.
+
+No runtime module calls this transport any more; tests use it to drive the
+resident directly.
 
 The stdio proxy used to compose the sensitive-read verdict in Python. The
 resident now owns every verdict, token and message: the current action, the
@@ -16,12 +19,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .artifact_native_fields import artifact_native_fields as _artifact_fields
-from .config import GuardConfig, risk_action_config_facts
-from .harness_posture import config_for_harness, harness_posture_override
-from .models import GuardArtifact
-from .native_context import _resolve_digest_home
-from .native_mcp_proxy_decision import (
+from codex_plugin_scanner.guard.artifact_native_fields import artifact_native_fields as _artifact_fields
+from codex_plugin_scanner.guard.config import GuardConfig, risk_action_config_facts
+from codex_plugin_scanner.guard.harness_posture import config_for_harness, harness_posture_override
+from codex_plugin_scanner.guard.models import GuardArtifact
+from codex_plugin_scanner.guard.native_context import _resolve_digest_home
+from codex_plugin_scanner.guard.native_mcp_proxy_decision import (
     MCP_SENSITIVE_READ_ARTIFACT_FEATURE,
     NativeMcpProxyDecisionError,
     native_mcp_proxy_decide,
@@ -70,7 +73,7 @@ def context_query(
 ) -> dict[str, object]:
     """The facts the resident needs to derive one read's action and approval token."""
 
-    from .runtime.extension_control_runtime import current_extension_control_binding_digest
+    from codex_plugin_scanner.guard.runtime.extension_control_runtime import current_extension_control_binding_digest
 
     return {
         "check": "sensitive_read_context",
@@ -128,21 +131,6 @@ def sensitive_read_context(
         required_feature=MCP_SENSITIVE_READ_ARTIFACT_FEATURE,
     )
     return _text(payload, "current_action"), _text(payload, "artifact_hash")
-
-
-def lookup_facts(policy_lookup: Mapping[str, Any] | None, diagnosed_reason: str | None) -> dict[str, object] | None:
-    """The policy-store lookup for one context hash; ``None`` without a store."""
-
-    if policy_lookup is None:
-        return None
-    decision = policy_lookup["decision"]
-    return {
-        "decision_present": decision is not None,
-        "decision_action": decision.get("action") if decision is not None else None,
-        "decision_artifact_hash": decision.get("artifact_hash") if decision is not None else None,
-        "ignored_integrity": policy_lookup["ignored_local_integrity"] is not None,
-        "diagnosed_reason": diagnosed_reason,
-    }
 
 
 def sensitive_read_reuse(
