@@ -74,6 +74,7 @@ const finding: WorkspaceFinding = {
   mcp: null,
   hook: null,
   workflow: null,
+  carried: false,
 };
 
 function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {

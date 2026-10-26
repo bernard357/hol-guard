@@ -15,6 +15,7 @@ import {
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
 import {
+  CarriedNote,
   Cell,
   HookFindingsTable,
   McpFindingsTable,
@@ -391,6 +392,7 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
               <Cell label="Fixed in"><Mono value={finding.fixVersion} fallback="No fix yet" /></Cell>
               <Cell label="Decision">
                 <Tag tone={decisionTone(finding.decision)}>{DECISION_LABELS[finding.decision] ?? finding.decision}</Tag>
+                <CarriedNote finding={finding} />
               </Cell>
               <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
               <Cell label="Advisories" wide>
