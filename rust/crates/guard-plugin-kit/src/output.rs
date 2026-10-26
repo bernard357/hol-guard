@@ -123,15 +123,17 @@ pub fn require_empty(out: &Path) -> Result<(), String> {
 /// Removes the files an earlier package recorded in its provenance, so a
 /// forced rebuild does not keep runtimes or assets the new plan dropped.
 /// Files the Kit did not write are left alone, and if the new plan would
-/// replace one of them nothing is removed.
+/// replace one of them, or a provenance file the Kit cannot read claims
+/// them, nothing is removed.
 pub fn clear_previous(out: &Path, outputs: &[Output]) -> Result<(), String> {
-    let mut paths = recorded(out);
-    paths.push(PathBuf::from(PROVENANCE_FILE));
-    for output in outputs {
-        let relative = PathBuf::from(&output.path);
-        if fs::symlink_metadata(out.join(&relative)).is_ok() && !paths.contains(&relative) {
-            return Err("plugin_kit_output_not_generated".to_owned());
+    let paths = recorded(out)?;
+    for path in &paths {
+        if !real_folders(out, path)? {
+            return Err("plugin_kit_output_path_blocked".to_owned());
         }
+    }
+    for output in outputs {
+        planned_path_free(out, Path::new(&output.path), &paths)?;
     }
     for path in &paths {
         let target = out.join(path);
@@ -156,26 +158,71 @@ pub fn clear_previous(out: &Path, outputs: &[Output]) -> Result<(), String> {
     Ok(())
 }
 
-/// The files an earlier package recorded in its provenance, if any.
-fn recorded(out: &Path) -> Vec<PathBuf> {
-    let Some(text) = walk::read_text(&out.join(PROVENANCE_FILE)) else {
-        return Vec::new();
-    };
-    let Ok(provenance) = serde_json::from_str::<Value>(&text) else {
-        return Vec::new();
-    };
-    if provenance.get("schema").and_then(Value::as_str) != Some(PROVENANCE_SCHEMA) {
-        return Vec::new();
+/// True when every folder between `out` and `path` that exists is a real
+/// folder, so removing `path` cannot follow a symlink out of `out`.
+fn real_folders(out: &Path, path: &Path) -> Result<bool, String> {
+    let mut current = out.to_path_buf();
+    let components: Vec<_> = path.components().collect();
+    for component in &components[..components.len().saturating_sub(1)] {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+            Err(_) => return Err("plugin_kit_output_unwritable".to_owned()),
+        }
     }
-    provenance
+    Ok(true)
+}
+
+/// Refuses a planned output when anything on its path, other than a file the
+/// earlier package recorded, is in the way.
+fn planned_path_free(out: &Path, relative: &Path, recorded: &[PathBuf]) -> Result<(), String> {
+    let mut current = out.to_path_buf();
+    let mut prefix = PathBuf::new();
+    let components: Vec<_> = relative.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component);
+        prefix.push(component);
+        let last = index + 1 == components.len();
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if !last && metadata.is_dir() => {}
+            Ok(_) if recorded.contains(&prefix) => return Ok(()),
+            Ok(_) if !last => return Err("plugin_kit_output_path_blocked".to_owned()),
+            Ok(_) => return Err("plugin_kit_output_not_generated".to_owned()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("plugin_kit_output_unwritable".to_owned()),
+        }
+    }
+    Ok(())
+}
+
+/// The files an earlier package recorded in its provenance. No provenance
+/// file means none; one the Kit cannot read proves nothing, so it stops the
+/// rebuild rather than counting as empty.
+fn recorded(out: &Path) -> Result<Vec<PathBuf>, String> {
+    let location = out.join(PROVENANCE_FILE);
+    match fs::symlink_metadata(&location) {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Ok(metadata) if metadata.is_file() => {}
+        _ => return Err("plugin_kit_output_not_generated".to_owned()),
+    }
+    let provenance = walk::read_text(&location)
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .filter(|value| value.get("schema").and_then(Value::as_str) == Some(PROVENANCE_SCHEMA))
+        .ok_or_else(|| "plugin_kit_output_not_generated".to_owned())?;
+    let files = provenance
         .get("files")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
+        .ok_or_else(|| "plugin_kit_output_not_generated".to_owned())?;
+    let mut paths: Vec<PathBuf> = files
+        .iter()
         .filter_map(|file| file.get("path").and_then(Value::as_str))
         .map(PathBuf::from)
         .filter(|path| plain(path))
-        .collect()
+        .collect();
+    paths.push(PathBuf::from(PROVENANCE_FILE));
+    Ok(paths)
 }
 
 /// Writes `outputs` under `out`. Every path is checked before the first
