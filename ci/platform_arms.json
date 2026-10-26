@@ -852,7 +852,7 @@
   },
   {
    "verdict": "windows-equivalent",
-   "note": "`st_gid` is `0` in CPython's Windows `os.stat`, matching `file_uid` above. The group-write escape hatch that asks whether the owner is the group's only member has no Windows reading either way, so the group check never softens a verdict there.",
+   "note": "`st_gid` is `0` in CPython's Windows `os.stat`, the same as the `file_uid` arm in this file. The group-write escape hatch that asks whether the owner is the group's only member has no Windows reading either way, so the group check never softens a verdict there.",
    "file": "rust/crates/guard-runtime/src/codex_hook_file_identity_op.rs",
    "item": "fn file_gid(_metadata: &fs::Metadata) -> u32",
    "cfg": "not(unix)",

@@ -46,8 +46,6 @@ struct FileFacts {
     uid: u32,
     gid: u32,
     size: u64,
-    is_symlink: bool,
-    is_regular: bool,
 }
 
 pub(crate) fn evaluate_codex_hook_file_identity_request(
@@ -79,6 +77,14 @@ fn refusal(request: &CodexHookFileIdentityRequestV1) -> Option<&'static str> {
     if request.questions.len() > CODEX_HOOK_FILE_IDENTITY_MAX_QUESTIONS {
         return Some("native_codex_hook_file_identity_too_many_questions");
     }
+    // Where files carry POSIX ownership, the asking process has a uid:
+    // `verify_regular_file_identity` reads it with `os.getuid`, which exists on
+    // every host that reports `posix`. A request that claims POSIX and states
+    // no uid is a shape the caller cannot produce, and answering it would skip
+    // the owner check rather than fail it, so it is refused instead.
+    if request.posix && request.current_uid.is_none() {
+        return Some("native_codex_hook_file_identity_current_uid_missing");
+    }
     None
 }
 
@@ -99,9 +105,11 @@ fn answer(
     question: &CodexHookFileIdentityQuestionV1,
 ) -> Value {
     let Some(identity) = question.identity.as_object() else {
-        // A manifest that does not hold an identity at all is refused under
-        // its own reason, not one named for a role it never stated.
-        return json!({ "outcome": "failed", "kind": "manifest_identity_invalid" });
+        // An identity that is not an object states no role, so it is refused
+        // under the role `verify_regular_file_identity` falls back to. That
+        // keeps one reason for a manifest that holds no identity and one that
+        // holds an unreadable one, as the verifier this answers for does.
+        return failed("file", "identity_invalid", None);
     };
     let role = role_of(identity);
     let Some(expected) = Expected::read(identity) else {
@@ -110,12 +118,22 @@ fn answer(
     let path = Path::new(&expected.path);
     let executable_required = identity.get("executable_required") == Some(&Value::Bool(true));
 
-    let Some(facts) = file_facts(path) else {
+    // The name is looked up first only to tell a path that names nothing from
+    // one that names something other than a regular file. Everything the
+    // answer turns on is then read through a single open handle.
+    let Ok(named) = fs::symlink_metadata(path) else {
         return failed(&role, "missing", None);
     };
-    if facts.is_symlink || !facts.is_regular {
+    if named.file_type().is_symlink() || !named.file_type().is_file() {
         return failed(&role, "not_regular", None);
     }
+    let Some((facts, file)) = open_regular(path) else {
+        // The name said a regular file and the open disagreed, so the path was
+        // replaced between the two or cannot be read at all. Either way the
+        // content is what cannot be confirmed, and that is the reason Python
+        // leaves a caller with when its own read of the file fails.
+        return failed(&role, "hash_mismatch", None);
+    };
     let mode = facts.mode & 0o7777;
     let mut private_group_question = None;
     if request.posix {
@@ -157,7 +175,7 @@ fn answer(
     // length is a different file, and hashing it would say so at the cost of
     // reading all of it.
     if i64::try_from(facts.size).ok() != Some(expected.size)
-        || !digest_matches(path, &expected.sha256)
+        || !digest_matches(file, facts.size, &expected.sha256)
     {
         return failed(&role, "hash_mismatch", private_group_question);
     }
@@ -289,18 +307,46 @@ fn failed(role: &str, kind: &str, private_group_question: Option<Value>) -> Valu
     Value::Object(answer)
 }
 
-/// The file's own facts, read without following a symlink so a link standing
-/// where a regular file belongs is seen as the link it is.
-fn file_facts(path: &Path) -> Option<FileFacts> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    Some(FileFacts {
-        mode: file_mode(path, &metadata),
-        uid: file_uid(&metadata),
-        gid: file_gid(&metadata),
-        size: metadata.len(),
-        is_symlink: metadata.file_type().is_symlink(),
-        is_regular: metadata.file_type().is_file(),
-    })
+/// The file's own facts, read through a handle opened on the very file they
+/// describe.
+///
+/// The facts come from that handle and the content below is hashed from it
+/// too, so a path replaced between the two cannot have its type, owner and
+/// permissions read from one file and its bytes read from another. The open
+/// itself refuses to resolve a link standing where a regular file belongs, and
+/// does not block on a pipe or device standing there, so neither can be
+/// swapped in after the name was checked.
+fn open_regular(path: &Path) -> Option<(FileFacts, fs::File)> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // `FILE_FLAG_OPEN_REPARSE_POINT`, spelled as its value so this file
+        // needs no Windows API crate: it opens a symlink or junction as the
+        // reparse point it is rather than following it, which is what makes
+        // the `is_file` check below refuse one.
+        options.custom_flags(0x0020_0000);
+    }
+    let file = options.open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    Some((
+        FileFacts {
+            mode: file_mode(path, &metadata),
+            uid: file_uid(&metadata),
+            gid: file_gid(&metadata),
+            size: metadata.len(),
+        },
+        file,
+    ))
 }
 
 #[cfg(unix)]
@@ -356,20 +402,29 @@ fn file_gid(_metadata: &fs::Metadata) -> u32 {
 ///
 /// The comparison is length-constant the way `hmac.compare_digest` is, so a
 /// digest that differs late tells an observer no more than one that differs
-/// early. A file that cannot be read between the metadata call above and this
-/// one is not the file the manifest describes either, so it answers the same
-/// way rather than carrying the read error out of the comparison.
-fn digest_matches(path: &Path, expected: &str) -> bool {
-    let Some(actual) = sha256_file(path) else {
+/// early. A file that cannot be read after the checks above is not the file
+/// the manifest describes either, so it answers the same way rather than
+/// carrying the read error out of the comparison.
+fn digest_matches(file: fs::File, size: u64, expected: &str) -> bool {
+    let Some(actual) = sha256_file(file, size) else {
         return false;
     };
     constant_time_equals(actual.as_bytes(), expected.as_bytes())
 }
 
-fn sha256_file(path: &Path) -> Option<String> {
-    let mut file = fs::File::open(path).ok()?;
+/// Hashes at most `size` bytes - the length this handle reported, which the
+/// caller has already compared against the length the manifest recorded. A
+/// writer extending the file underneath the read cannot hold the worker past
+/// the length that was measured, and one truncating it hashes short, which the
+/// comparison answers as the mismatch it is.
+fn sha256_file(file: fs::File, size: u64) -> Option<String> {
+    let mut file = file.take(size);
     let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
+    // A manifest names hook scripts far more often than interpreters, so the
+    // read buffer follows the file rather than reserving a megabyte for every
+    // question in a batch.
+    let capacity = usize::try_from(size.clamp(1, 1024 * 1024)).unwrap_or(1024 * 1024);
+    let mut buffer = vec![0_u8; capacity];
     loop {
         let read = file.read(&mut buffer).ok()?;
         if read == 0 {

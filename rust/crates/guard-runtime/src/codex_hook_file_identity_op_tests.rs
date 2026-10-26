@@ -38,7 +38,7 @@ impl Fixture {
         json!({
             "role": "config_target",
             "path": self.path.to_str().expect("a printable fixture path"),
-            "sha256": sha256_file(&self.path).expect("the fixture hashes"),
+            "sha256": hash_of(&self.path).expect("the fixture hashes"),
             "mode": self.mode(),
             "size": CONTENT.len(),
             "owner_uid": self.uid(),
@@ -65,6 +65,15 @@ fn set_mode(path: &Path, mode: u32) {
 
 #[cfg(not(unix))]
 fn set_mode(_path: &Path, _mode: u32) {}
+
+/// The digest of a whole file. The operation hashes an open handle up to the
+/// length it read from that same handle; a fixture has neither to hand, so it
+/// opens the path and names its length.
+fn hash_of(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    sha256_file(file, size)
+}
 
 fn request(identity: Value, canonical: Option<&str>) -> CodexHookFileIdentityRequestV1 {
     CodexHookFileIdentityRequestV1 {
@@ -114,7 +123,7 @@ fn the_fixture_hashes_to_the_digest_the_tests_name() {
     let fixture = Fixture::new(0o644);
 
     assert_eq!(
-        sha256_file(&fixture.path).as_deref(),
+        hash_of(&fixture.path).as_deref(),
         Some(CONTENT_SHA256),
         "the recorded digest no longer describes the fixture content"
     );
@@ -132,12 +141,14 @@ fn an_untouched_file_matches_its_own_identity() {
 }
 
 #[test]
-fn an_identity_that_is_not_an_object_is_refused_under_the_manifests_own_reason() {
+fn an_identity_that_is_not_an_object_is_refused_under_the_fallback_role() {
     let answer = answer_to(&request(json!("not an identity"), Some("/absent")));
 
     assert_eq!(answer["outcome"], json!("failed"));
-    assert_eq!(answer["kind"], json!("manifest_identity_invalid"));
-    assert_eq!(answer.get("role"), None);
+    assert_eq!(answer["kind"], json!("identity_invalid"));
+    // `verify_regular_file_identity` names the same role for an identity that
+    // is not an object as for one that states none.
+    assert_eq!(answer["role"], json!("file"));
 }
 
 #[test]
@@ -273,169 +284,6 @@ fn a_directory_standing_where_a_file_belongs_is_not_regular() {
     );
 }
 
-#[cfg(unix)]
-mod posix {
-    use super::*;
-
-    #[test]
-    fn a_world_writable_file_is_refused_without_asking_about_its_group() {
-        let fixture = Fixture::new(0o666);
-
-        let answer = answer_to(&request(fixture.identity(), None));
-
-        assert_eq!(answer["kind"], json!("permissions_unsafe"));
-        assert_eq!(answer.get("private_group_question"), None);
-    }
-
-    #[test]
-    fn a_group_writable_config_target_carries_the_private_group_question() {
-        let fixture = Fixture::new(0o664);
-
-        let answer = answer_to(&request(fixture.identity(), None));
-
-        // The file is otherwise exactly what the manifest describes, so the
-        // only thing left between it and a verified answer is whether its
-        // group is private to its owner - which the caller answers.
-        assert_eq!(answer["outcome"], json!("verified"));
-        assert_eq!(
-            answer["private_group_question"]["owner_uid"],
-            json!(fixture.uid())
-        );
-    }
-
-    #[test]
-    fn a_group_writable_file_of_another_role_is_refused_outright() {
-        let fixture = Fixture::new(0o664);
-        let mut identity = fixture.identity();
-        identity["role"] = json!("hook");
-
-        let answer = answer_to(&request(identity, None));
-
-        assert_eq!(answer["kind"], json!("permissions_unsafe"));
-        assert_eq!(answer.get("private_group_question"), None);
-    }
-
-    #[test]
-    fn a_group_writable_interpreter_the_asker_owns_needs_no_question() {
-        let fixture = Fixture::new(0o775);
-        let mut identity = fixture.identity();
-        identity["role"] = json!("interpreter");
-
-        let answer = answer_to(&request(identity, None));
-
-        assert_eq!(answer["outcome"], json!("verified"));
-        assert_eq!(answer.get("private_group_question"), None);
-    }
-
-    #[test]
-    fn a_group_writable_package_file_carries_the_question_the_caller_asked_for() {
-        let fixture = Fixture::new(0o664);
-        let mut identity = fixture.identity();
-        identity["role"] = json!("hook");
-        let mut request = request(identity, None);
-        request.questions[0].installed_python_package_file = true;
-
-        let answer = answer_to(&request);
-
-        assert_eq!(answer["outcome"], json!("verified"));
-        assert!(answer["private_group_question"].is_object());
-    }
-
-    #[test]
-    fn a_question_still_rides_along_with_a_later_failure() {
-        let fixture = Fixture::new(0o664);
-        let mut identity = fixture.identity();
-        identity["sha256"] = json!("0".repeat(64));
-
-        let answer = answer_to(&request(identity, None));
-
-        // The caller refuses the file either way, but it refuses it for the
-        // reason Python reached first, which is the unproven group.
-        assert_eq!(answer["kind"], json!("hash_mismatch"));
-        assert!(answer["private_group_question"].is_object());
-    }
-
-    #[test]
-    fn a_file_owned_by_nobody_the_asker_trusts_is_untrusted() {
-        let fixture = Fixture::new(0o644);
-        let mut request = request(fixture.identity(), None);
-        // A uid that is neither the fixture's owner nor root, so the file
-        // belongs to someone this process has no reason to trust.
-        request.current_uid = Some(fixture.uid() + 7);
-
-        let answer = answer_to(&request);
-        // Running as root the file is root's, and root is trusted whoever
-        // asks, so there is no untrusted owner to find.
-        let expected = if fixture.uid() == 0 {
-            json!("verified")
-        } else {
-            json!("failed")
-        };
-
-        assert_eq!(answer["outcome"], expected);
-        if fixture.uid() != 0 {
-            assert_eq!(answer["kind"], json!("owner_untrusted"));
-        }
-    }
-
-    #[test]
-    fn a_file_the_manifest_says_another_user_owns_is_an_owner_mismatch() {
-        let fixture = Fixture::new(0o644);
-        let mut identity = fixture.identity();
-        identity["owner_uid"] = json!(fixture.uid().wrapping_add(7));
-
-        assert_eq!(
-            answer_to(&request(identity, None))["kind"],
-            json!("owner_mismatch")
-        );
-    }
-
-    #[test]
-    fn a_boolean_owner_compares_against_uid_one() {
-        let fixture = Fixture::new(0o644);
-        let mut identity = fixture.identity();
-        // `isinstance(True, int)` is true in Python, so a manifest holding a
-        // boolean here compares the live uid against 1 rather than skipping
-        // the check. The port keeps that reading.
-        identity["owner_uid"] = json!(true);
-
-        let answer = answer_to(&request(identity, None));
-        let expected = if fixture.uid() == 1 {
-            json!("verified")
-        } else {
-            json!("failed")
-        };
-
-        assert_eq!(answer["outcome"], expected);
-    }
-
-    #[test]
-    fn a_file_without_an_execute_bit_is_not_executable_when_one_is_required() {
-        let fixture = Fixture::new(0o644);
-        let mut identity = fixture.identity();
-        identity["executable_required"] = json!(true);
-
-        assert_eq!(
-            answer_to(&request(identity, None))["kind"],
-            json!("not_executable")
-        );
-    }
-
-    #[test]
-    fn a_symlink_standing_where_a_file_belongs_is_not_regular() {
-        let fixture = Fixture::new(0o644);
-        let link = fixture.path.with_file_name("link.py");
-        std::os::unix::fs::symlink(&fixture.path, &link).expect("the fixture symlink");
-        let mut identity = fixture.identity();
-        identity["path"] = json!(link.to_str().expect("a printable fixture path"));
-
-        assert_eq!(
-            answer_to(&request(identity, None))["kind"],
-            json!("not_regular")
-        );
-    }
-}
-
 /// The platform rules are carried in the request, so the Windows reading is
 /// reachable from a POSIX host too - which is where CI runs most of the time.
 #[test]
@@ -495,6 +343,46 @@ fn a_request_above_the_batch_limit_is_refused() {
 }
 
 #[test]
+fn a_posix_request_that_states_no_uid_is_refused() {
+    let fixture = Fixture::new(0o644);
+    let mut request = request(fixture.identity(), None);
+    request.posix = true;
+    request.current_uid = None;
+
+    let encoded = evaluate_codex_hook_file_identity_request(&request).expect("a response");
+    let response: Value = serde_json::from_slice(&encoded).expect("a JSON response");
+
+    // Answering it would have skipped the owner check rather than failed it,
+    // so a file another user owns could have verified.
+    assert_eq!(response["status"], json!("error"));
+    assert_eq!(
+        response["code"],
+        json!("native_codex_hook_file_identity_current_uid_missing")
+    );
+    assert_eq!(response["payload"], Value::Null);
+}
+
+#[test]
+fn the_digest_reads_no_further_than_the_length_it_was_given() {
+    let fixture = Fixture::new(0o644);
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&fixture.path)
+        .expect("the fixture is appendable");
+    file.write_all(b"print('appended by another writer')\n")
+        .expect("the extra content");
+    drop(file);
+    let handle = fs::File::open(&fixture.path).expect("the fixture opens");
+
+    let digest = sha256_file(handle, CONTENT.len() as u64).expect("the fixture hashes");
+
+    // A writer extending the file underneath the read cannot lengthen the work
+    // the comparison does, and the digest still describes the length that was
+    // measured rather than whatever the file has grown to.
+    assert_eq!(digest, CONTENT_SHA256);
+}
+
+#[test]
 fn a_batch_answers_in_the_order_it_was_asked() {
     let present = Fixture::new(0o644);
     let absent = Fixture::new(0o644);
@@ -543,3 +431,7 @@ fn feature_is_advertised() {
     assert!(crate::resident_op_features::RESIDENT_OP_FEATURES
         .contains(&guard_contracts::CODEX_HOOK_FILE_IDENTITY_FEATURE));
 }
+
+#[cfg(unix)]
+#[path = "codex_hook_file_identity_op_posix_tests.rs"]
+mod posix;
