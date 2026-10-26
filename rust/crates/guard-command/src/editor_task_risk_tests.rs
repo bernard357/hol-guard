@@ -120,11 +120,25 @@ fn an_unparsed_dev_container_is_matched_by_text() {
     );
     assert_eq!(check.rules, vec![DEVCONTAINER_INITIALIZE]);
     assert!(!check.parsed);
-    let empty = detect_editor_task_risk(
-        EditorConfig::DevContainer,
+    for empty in [
         r#"{"initializeCommand": "" "image": "x"}"#,
-    );
-    assert!(empty.rules.is_empty());
+        r#"{"initializeCommand": "   " "image": "x"}"#,
+    ] {
+        let check = detect_editor_task_risk(EditorConfig::DevContainer, empty);
+        assert!(check.rules.is_empty(), "{empty}");
+        assert!(!check.parsed);
+    }
+}
+
+#[test]
+fn a_file_saved_with_a_byte_order_mark_parses() {
+    let tasks = format!("\u{feff}{FOLDER_OPEN}");
+    let check = detect_editor_task_risk(EditorConfig::Tasks, &tasks);
+    assert_eq!(check.rules, vec![FOLDER_OPEN_TASK]);
+    assert!(check.parsed);
+    let quiet = detect_editor_task_risk(EditorConfig::DevContainer, "\u{feff}{\"image\": \"x\"}");
+    assert!(quiet.rules.is_empty());
+    assert!(quiet.parsed);
 }
 
 #[test]

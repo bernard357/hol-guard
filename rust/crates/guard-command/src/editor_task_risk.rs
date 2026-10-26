@@ -76,14 +76,17 @@ pub struct EditorTaskCheck {
 static RUN_ON_FOLDER_OPEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#""runOn"\s*:\s*"(?i:folderopen)""#).expect("valid runOn pattern")
 });
-/// A key with a value that is not `null`, an empty string, list or object.
+/// A key with a value that is not `null`, a blank string or an empty list or
+/// object.
 static INITIALIZE_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#""initializeCommand"\s*:\s*(?:"[^"]|\[\s*[^\s\]]|\{\s*[^\s}])"#)
+    Regex::new(r#""initializeCommand"\s*:\s*(?:"\s*[^"\s]|\[\s*[^\s\]]|\{\s*[^\s}])"#)
         .expect("valid initializeCommand pattern")
 });
 
 /// The rules the configuration `text` of kind `config` matches.
 pub fn detect_editor_task_risk(config: EditorConfig, text: &str) -> EditorTaskCheck {
+    // Editors accept a file saved with a byte order mark; JSON parsers do not.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let stripped = strip_trailing_commas(&strip_comments(text));
     let parsed: Option<Value> = serde_json::from_str(&stripped).ok();
     let found = match (config, parsed.as_ref()) {

@@ -75,10 +75,19 @@ impl EditorTaskScan {
         self.unread += 1;
     }
 
-    /// The snapshot did not follow the symlink or special file at `relative`.
-    /// The scan cannot say it saw every configuration when one could sit
-    /// there or below it.
-    pub(super) fn left_unfollowed(&mut self, relative: &str) {
+    /// The snapshot did not follow the special file at `relative`. Only one
+    /// where a configuration belongs hides it; a pipe or socket is never a
+    /// folder.
+    pub(super) fn left_special(&mut self, relative: &str) {
+        if config_kind(relative).is_some() {
+            self.linked += 1;
+        }
+    }
+
+    /// The snapshot did not follow the symlink at `relative`. The scan cannot
+    /// say it saw every configuration when one could sit there or, for a link
+    /// to a folder, below it; an unfollowed link could be either.
+    pub(super) fn left_link(&mut self, relative: &str) {
         if config_kind(relative).is_some() || hides_config(relative) {
             self.linked += 1;
         }

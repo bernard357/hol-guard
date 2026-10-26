@@ -240,6 +240,33 @@ fn a_linked_configuration_leaves_the_scan_incomplete() {
     assert_eq!(scan(root.path())["status"], "complete");
 }
 
+#[cfg(unix)]
+#[test]
+fn only_a_special_file_where_a_configuration_belongs_leaves_the_scan_incomplete() {
+    fn pipe(root: &Path, relative: &str) {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("mkfifo runs");
+        assert!(status.success(), "the fixture pipe");
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), ".devcontainer/devcontainer.json", INITIALIZE);
+    pipe(root.path(), ".devcontainer/agent.sock");
+    let tasks = scan(root.path());
+    assert_eq!(tasks["status"], "complete");
+    assert_eq!(tasks["skipped"]["linked"], 0);
+
+    let root = tempfile::tempdir().unwrap();
+    pipe(root.path(), ".devcontainer/devcontainer.json");
+    let tasks = scan(root.path());
+    assert_eq!(tasks["status"], "incomplete");
+    assert_eq!(tasks["truncation_reasons"], json!(["editor_task_linked"]));
+}
+
 #[test]
 fn findings_are_stable_and_one_per_rule_and_file() {
     let root = tempfile::tempdir().unwrap();

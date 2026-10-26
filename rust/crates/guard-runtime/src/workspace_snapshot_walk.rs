@@ -168,7 +168,7 @@ impl Walk {
             workflows.left_unfollowed(relative);
         }
         if let Some(editor_tasks) = self.editor_tasks.as_mut() {
-            editor_tasks.left_unfollowed(relative);
+            editor_tasks.left_special(relative);
         }
     }
 
@@ -189,7 +189,7 @@ impl Walk {
             workflows.left_unfollowed(relative);
         }
         if let Some(editor_tasks) = self.editor_tasks.as_mut() {
-            editor_tasks.left_unfollowed(relative);
+            editor_tasks.left_link(relative);
         }
     }
 
