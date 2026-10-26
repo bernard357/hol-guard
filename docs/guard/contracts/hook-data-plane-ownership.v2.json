@@ -357,7 +357,6 @@
     "src/codex_plugin_scanner/guard/native_approval_gate.py",
     "src/codex_plugin_scanner/guard/native_approval_reuse.py",
     "src/codex_plugin_scanner/guard/native_runtime_detectors.py",
-    "src/codex_plugin_scanner/guard/native_runtime_artifact_identity.py",
     "src/codex_plugin_scanner/guard/native_verified_read_decision.py",
     "src/codex_plugin_scanner/guard/native_verified_read_plan.py",
     "src/codex_plugin_scanner/guard/native_aibom_summaries.py",
