@@ -155,18 +155,9 @@ impl PostFailure {
 }
 
 /// The daemon's `200` body for a hook posted to `path`, as UTF-8 text
-/// without a BOM, or why there is none.
-pub(crate) fn post_hook_reply(
-    target: &DaemonTarget,
-    path: &str,
-    data: &str,
-    deadline: Instant,
-) -> Result<String, PostFailure> {
-    post_hook_reply_missed(target, path, data, deadline, None)
-}
-
-/// [`post_hook_reply`], naming why the resident did not answer the hook.
-fn post_hook_reply_missed(
+/// without a BOM, or why there is none. `miss`, when set, names why the
+/// resident did not answer the hook.
+pub(crate) fn post_hook_reply_missed(
     target: &DaemonTarget,
     path: &str,
     data: &str,

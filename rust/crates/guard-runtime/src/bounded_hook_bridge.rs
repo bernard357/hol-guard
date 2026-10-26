@@ -48,7 +48,7 @@ pub(crate) use input::read_hook_input;
 mod daemon;
 use daemon::post_hook;
 pub(crate) use daemon::{
-    daemon_target, post_hook_reply, transport_deadline, DaemonTarget, PostFailure,
+    daemon_target, post_hook_reply_missed, transport_deadline, DaemonTarget, PostFailure,
 };
 
 pub(crate) const BRIDGE_COMMAND: &str = "bounded-hook-bridge";

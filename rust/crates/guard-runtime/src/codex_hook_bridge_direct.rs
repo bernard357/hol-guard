@@ -387,13 +387,30 @@ pub(crate) fn direct_answer(
     data: &str,
     rpc_deadline: Instant,
 ) -> Option<String> {
-    if !harness_event(&harness, event_name) || !direct_enabled(harness.switch) {
-        return None;
+    direct_answer_reporting(harness, guard_home, query, event_name, data, rpc_deadline).ok()
+}
+
+/// [`direct_answer`], naming why the hook takes the daemon path.
+pub(crate) fn direct_answer_reporting(
+    harness: DirectHarness,
+    guard_home: &Path,
+    query: &str,
+    event_name: &str,
+    data: &str,
+    rpc_deadline: Instant,
+) -> Result<String, DirectMiss> {
+    if !direct_enabled(harness.switch) {
+        return Err(DirectMiss::Disabled);
+    }
+    if !harness_event(&harness, event_name) {
+        return Err(DirectMiss::Event);
     }
     let deadline = Instant::now() + remaining(rpc_deadline).min(DIRECT_TIMEOUT);
-    let request = direct_request(harness, guard_home, query, data, remaining(deadline))?;
-    let output = send_to_live_resident(&guard_home.join(STATE_DIRECTORY), &request, deadline)?;
-    answered_response(&output)
+    let request = direct_request(harness, guard_home, query, data, remaining(deadline))
+        .ok_or(DirectMiss::Request)?;
+    let output =
+        send_to_live_resident_reporting(&guard_home.join(STATE_DIRECTORY), &request, deadline)?;
+    answered_response_reporting(&output)
 }
 
 /// The harness response a live resident answered for a bounded bridge hook,
