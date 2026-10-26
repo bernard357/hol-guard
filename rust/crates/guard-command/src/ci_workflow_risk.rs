@@ -73,7 +73,7 @@ static WRITE_ALL: LazyLock<Regex> = LazyLock::new(|| {
 /// An action step's `with:` key. Keys indented under it are the action's
 /// inputs, not the workflow's or job's own settings.
 static WITH_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^(\s*(?:-\s*)?)["']?with["']?\s*:\s*$"#).expect("valid with pattern")
+    Regex::new(r#"^(\s*(?:-\s*)?)["']?with["']?\s*:\s*(?:#.*)?$"#).expect("valid with pattern")
 });
 /// The trigger in any of its forms (`workflow_run:`, `on: workflow_run`,
 /// `on: [workflow_run]`), but not the `github.event.workflow_run` context.

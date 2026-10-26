@@ -128,6 +128,7 @@ fn narrow_or_read_all_permissions_are_quiet() {
         "on: push\n# permissions: write-all\n",
         "on: push\njobs:\n  b:\n    steps:\n      - uses: ./local-action\n        with:\n          permissions: write-all\n",
         "on: push\njobs:\n  b:\n    steps:\n      - with:\n\n          permissions: write-all\n        uses: ./local-action\n",
+        "on: push\njobs:\n  b:\n    steps:\n      - uses: ./local-action\n        with: # inputs\n          permissions: write-all\n",
     ] {
         assert!(ids(text).is_empty(), "{text}");
     }
