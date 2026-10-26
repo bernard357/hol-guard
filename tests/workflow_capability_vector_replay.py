@@ -98,7 +98,18 @@ def _transition_hash(path: Path, sequence: int) -> str:
 def _invoke(store: GuardStore, step: Mapping[str, Any]) -> Any:
     op = step["op"]
     if op == "issue":
-        return store.issue_workflow_capability(step["signed"], approval_provenance_id=step["approval_provenance_id"])
+        # The recorded vectors carry pre-signed envelopes, including ones signed
+        # with the wrong key that the resident must reject, so they travel the
+        # resident's recorded `signed_json` route rather than the live claim
+        # route, which would have the resident sign them validly.
+        return store._run_workflow_capability(
+            "issue",
+            WORKFLOW_CAPABILITY_STORE_CLOCK.now(),
+            {
+                "signed_json": store_workflow_capabilities._canonical_json(step["signed"].to_dict()),
+                "approval_provenance_id": step["approval_provenance_id"],
+            },
+        )
     if op == "claim":
         return store.claim_workflow_capability(
             step["capability_id"],

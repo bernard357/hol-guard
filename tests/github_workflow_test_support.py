@@ -12,6 +12,8 @@ import hashlib
 from dataclasses import replace
 from pathlib import Path
 
+from workflow_capability_frame_support import canonical_framed_payload
+
 from codex_plugin_scanner.guard.runtime.command_model import parse_shell_command
 from codex_plugin_scanner.guard.runtime.github_workflow_approval_record import (
     GITHUB_WORKFLOW_APPROVAL_RECORD_SCHEMA,
@@ -20,7 +22,6 @@ from codex_plugin_scanner.guard.runtime.github_workflow_approval_record import (
 from codex_plugin_scanner.guard.workflow_capabilities import (
     WorkflowCapabilityBinding,
     WorkflowCapabilityRuleBinding,
-    canonical_framed_payload,
 )
 
 REPOSITORY = "example/repo"

@@ -10,9 +10,10 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Final, cast
 
+from workflow_capability_frame_support import canonical_framed_payload
+
 from codex_plugin_scanner.guard.workflow_capabilities import (
     WorkflowCapabilityError,
-    canonical_framed_payload,
     parse_utc_timestamp,
     validate_workflow_capability_identifier,
 )
