@@ -7,17 +7,18 @@ import sqlite3
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast
+from typing import cast, get_args
 
 from .approval_gate import ApprovalGateGrant, public_config, require_settings_write
 from .approval_wait_limits import MAX_APPROVAL_WAIT_TIMEOUT_SECONDS  # noqa: F401 - re-exported
 from .config_constants import (
     VALID_GUARD_ACTIONS,
     VALID_RISK_ACTION_KEYS,
-    VALID_SECURITY_LEVELS,  # noqa: F401 - re-exported
+    VALID_SECURITY_LEVELS,
 )
 from .config_file_io import ConfigFileTrustError
 from .config_mutation import notify_native_policy_mutation, record_posture_change_if_needed
@@ -42,6 +43,7 @@ from .protection_events import record_harness_posture_changes_if_needed
 from .protection_posture import (
     DEFAULT_PROTECTION_POSTURE,
     DEFAULT_WATCH_AUTO_REVERT_HOURS,
+    VALID_PROTECTION_POSTURES,
 )
 
 DEFAULT_GUARD_DIRNAME = ".hol-guard"
@@ -453,12 +455,21 @@ def _resolved_risk_actions(config: GuardConfig, harness: str | None) -> dict[str
         {"facts": risk_action_config_facts(config), "harness": harness},
     )
     resolved = result.get("risk_actions")
-    if not isinstance(resolved, dict) or not all(
-        isinstance(key, str) and key in VALID_RISK_ACTION_KEYS and value in VALID_GUARD_ACTIONS
-        for key, value in resolved.items()
-    ):
+    # Every risk class must come back with an action: a missing class would
+    # read as "no configured action" and skip its floor.
+    if not _is_risk_action_map(resolved) or set(resolved) != VALID_RISK_ACTION_KEYS:
         raise ConfigFileTrustError("native_guard_config_invalid")
     return cast("dict[str, GuardAction]", resolved)
+
+
+def _is_risk_action_map(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(key, str)
+        and key in VALID_RISK_ACTION_KEYS
+        and isinstance(action, str)
+        and action in VALID_GUARD_ACTIONS
+        for key, action in value.items()
+    )
 
 
 def _effective_risk_actions(config: GuardConfig) -> dict[str, GuardAction]:
@@ -541,9 +552,49 @@ def _overlay(config: GuardConfig, payload: dict[str, object] | None) -> GuardCon
         {"config": loaded, "payload": payload, "managed": _native_managed_input(config.managed_policy)},
     )
     overlaid = result.get("config")
-    if not isinstance(overlaid, dict) or not set(_OVERLAID_FIELDS) <= set(overlaid):
+    if not isinstance(overlaid, dict) or not all(
+        name in overlaid and _OVERLAID_FIELD_VALID[name](overlaid[name]) for name in _OVERLAID_FIELDS
+    ):
         raise ConfigFileTrustError("native_guard_config_invalid")
     return replace(config, **{name: overlaid[name] for name in _OVERLAID_FIELDS})
+
+
+def _is_action(value: object) -> bool:
+    return isinstance(value, str) and value in VALID_GUARD_ACTIONS
+
+
+def _is_one_of(allowed: frozenset[str] | set[str]) -> Callable[[object], bool]:
+    return lambda value: isinstance(value, str) and value in allowed
+
+
+def _is_bool(value: object) -> bool:
+    return isinstance(value, bool)
+
+
+def _is_harness_risk_action_maps(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(name, str) and _is_risk_action_map(actions) for name, actions in value.items()
+    )
+
+
+# What the loaded config holds in each overlaid field; a native answer that
+# does not fit is refused rather than stored.
+_OVERLAID_FIELD_VALID = {
+    "mode": _is_one_of(frozenset(get_args(GuardMode))),
+    "security_level": _is_one_of(VALID_SECURITY_LEVELS),
+    "protection_posture": _is_one_of(VALID_PROTECTION_POSTURES),
+    "protection_posture_explicit": _is_bool,
+    "default_action": _is_action,
+    "unknown_publisher_action": _is_action,
+    "changed_hash_action": _is_action,
+    "new_network_domain_action": _is_action,
+    "subprocess_action": _is_action,
+    "risk_actions": _is_risk_action_map,
+    "harness_risk_actions": _is_harness_risk_action_maps,
+    "telemetry": _is_bool,
+    "sync": _is_bool,
+    "receipt_redaction_level": _is_one_of(VALID_RECEIPT_REDACTION_LEVELS),
+}
 
 
 def _existing_legacy_guard_home(user_home: Path) -> Path | None:

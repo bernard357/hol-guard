@@ -241,22 +241,47 @@ def resolve_native_guard_config(op: str, fields: Mapping[str, object]) -> dict[s
     )
     deadline = time.monotonic() + GUARD_CONFIG_LOAD_TIMEOUT_SECONDS
     path, runtime_sha = _runtime_identity(deadline, GUARD_CONFIG_RESOLVE_FEATURE)
-    key = f"{runtime_sha}\0{path}\0{request_text}"
+    # Prefixed so a resolution can never share a flight with a load.
+    key = f"resolve\0{runtime_sha}\0{path}\0{request_text}"
     with _MEMO_LOCK:
         cached = _RESOLVE_MEMO.get(key)
         if cached is not None:
             _RESOLVE_MEMO.move_to_end(key)
             return cast("dict[str, Any]", json.loads(json.dumps(cached)))
+        flight = _FLIGHTS.get(key)
+        leader = flight is None
+        if flight is None:
+            flight = _Flight()
+            _FLIGHTS[key] = flight
+    if not leader:
+        # Identical resolutions arriving together share one process; a waiter
+        # whose leader failed or outlived its deadline resolves for itself.
+        flight.done.wait(max(0.0, deadline - time.monotonic()))
+        shared = flight.config
+        if shared is not None:
+            return cast("dict[str, Any]", json.loads(json.dumps(shared)))
+        return _spawn_resolve(request_text, path, deadline)
+    try:
+        result = _spawn_resolve(request_text, path, deadline)
+        flight.config = cast("dict[str, Any]", json.loads(json.dumps(result)))
+        with _MEMO_LOCK:
+            _RESOLVE_MEMO[key] = json.loads(json.dumps(result))
+            while len(_RESOLVE_MEMO) > _MEMO_LIMIT:
+                _RESOLVE_MEMO.popitem(last=False)
+        return result
+    finally:
+        with _MEMO_LOCK:
+            _FLIGHTS.pop(key, None)
+        flight.done.set()
+
+
+def _spawn_resolve(request_text: str, path: Path, deadline: float) -> dict[str, Any]:
     response = _run(GUARD_CONFIG_RESOLVE_COMMAND, request_text, path, deadline)
     if response.get("ok") is not True:
         _raise_failure(response)
     result = response.get("result")
     if not isinstance(result, dict):
         raise ConfigFileTrustError("native_guard_config_invalid")
-    with _MEMO_LOCK:
-        _RESOLVE_MEMO[key] = json.loads(json.dumps(result))
-        while len(_RESOLVE_MEMO) > _MEMO_LIMIT:
-            _RESOLVE_MEMO.popitem(last=False)
     return cast("dict[str, Any]", result)
 
 
