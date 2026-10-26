@@ -185,6 +185,11 @@ fn parse(spec: Value) -> Result<Spec, String> {
     Ok(spec)
 }
 
+/// Check a spec with the same rules as a plan, without building one.
+pub(crate) fn validate(spec: &Value) -> Result<(), String> {
+    parse(spec.clone()).map(|_| ())
+}
+
 fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| (*part).to_owned()).collect()
 }

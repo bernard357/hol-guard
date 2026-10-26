@@ -133,11 +133,15 @@ fn base_links(detection: &Detection) -> Links {
     let mut install = Vec::new();
     if let Some(repository) = &repository {
         // Each runtime installs from its own marketplace, which can have a
-        // different name from the other.
+        // different name from the other. Names that `plugin install` would
+        // refuse get no commands, so none can break out of a README cell or a
+        // pasted command line.
         let listing = |kind: SourceKind| {
             let marketplace = plugin.marketplace(kind)?.name.clone()?;
             let name = plugin.name.clone().filter(|_| plugin.listed_in(kind))?;
-            Some((marketplace, name))
+            (crate::install::valid_identifier(&marketplace)
+                && crate::install::valid_identifier(&name))
+            .then_some((marketplace, name))
         };
         if let Some((marketplace, name)) = listing(SourceKind::ClaudeMarketplace) {
             install.push(Install {

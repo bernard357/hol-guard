@@ -538,6 +538,22 @@ fn links_block_is_null_without_a_marketplace_guard_can_install_from() {
 }
 
 #[test]
+fn links_skip_marketplace_names_that_could_break_a_readme_cell() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        (
+            ".claude-plugin/marketplace.json",
+            r#"{"name":"acme` | [x](https://evil.example)","plugins":[{"name":"pdf-tools","source":"./"}]}"#,
+        ),
+    ]);
+    let links = ok(json!({"command": "links", "root": root_str(&root), "block": true}));
+    assert_eq!(links["block"], Value::Null, "{links}");
+    let commands = links["install"].to_string();
+    assert!(!commands.contains("evil.example"), "{commands}");
+}
+
+#[test]
 fn init_scaffolds_only_a_new_folder_and_never_overwrites() {
     let root = repo(&[("README.md", "# New"), (".gitignore", "dist/")]);
     let result = ok(json!({"command": "init", "root": root_str(&root), "name": "my-plugin"}));

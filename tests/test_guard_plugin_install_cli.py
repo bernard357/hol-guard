@@ -1,9 +1,9 @@
-"""``hol-guard plugin install|uninstall``: plan rendering, apply, and the install ledger.
+"""``hol-guard plugin install|uninstall``: plan rendering, apply, and the install record.
 
-The argv for each runtime and every refused spec are pinned by the Rust tests
-in ``rust/crates/guard-plugin-kit/tests/install.rs``; these cover the Python
-shim: dry-run by default, confirmation per runtime, no shell, the ledger that
-``uninstall`` and opt-in telemetry read.
+The argv for each runtime, every refused spec and the install record's rules
+are pinned by the Rust tests in ``rust/crates/guard-plugin-kit/tests/install.rs``;
+these cover the Python shim: dry-run by default, confirmation per runtime, no
+shell, and the record that ``uninstall`` plans from and opt-in telemetry reads.
 """
 
 from __future__ import annotations
@@ -119,24 +119,22 @@ def test_apply_confirms_each_runtime_and_never_runs_manual_steps(
     ]
     assert programs[0][0].endswith("/claude")
     assert "codex: skipped." in output
-    assert install.read_ledger(guard_home) == {"acme/toolgate": ["claude-code"]}
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
 
 
 def test_yes_installs_every_available_runtime_then_uninstall_reverses_it(
     spec_file: Path, programs: list[list[str]], guard_home: Path
 ) -> None:
     _run(["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes"])
-    assert install.read_ledger(guard_home) == {"acme/toolgate": ["claude-code", "codex"]}
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code", "codex"]}
     programs.clear()
-    exit_code, _output, _error = _run(
-        ["plugin", "uninstall", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes"]
-    )
+    exit_code, _output, _error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
     assert exit_code == 0
     assert [argv[1:] for argv in programs] == [
         ["plugin", "uninstall", "toolgate@acme"],
         ["plugin", "remove", "toolgate@acme"],
     ]
-    assert install.read_ledger(guard_home) == {}
+    assert install.recorded_installs(guard_home) == {}
 
 
 def test_a_failed_command_stops_that_runtime_and_is_not_recorded(
@@ -148,7 +146,7 @@ def test_a_failed_command_stops_that_runtime_and_is_not_recorded(
     )
     assert exit_code == 1
     assert "exited with 3" in error
-    assert install.read_ledger(guard_home) == {}
+    assert install.recorded_installs(guard_home) == {}
 
 
 def test_a_spec_with_command_text_is_refused_before_anything_runs(tmp_path: Path, programs: list[list[str]]) -> None:
@@ -166,7 +164,56 @@ def test_a_spec_with_command_text_is_refused_before_anything_runs(tmp_path: Path
 def test_a_pinned_version_must_match_the_listing(spec_file: Path) -> None:
     exit_code, _output, error = _run(["plugin", "install", "acme/toolgate@9.9.9", "--spec-file", str(spec_file)])
     assert exit_code == 2
-    assert "HOL lists acme/toolgate at 1.2.0" in error
+    assert "HOL does not list that version" in error
+
+
+def test_a_spec_for_another_listing_is_refused(spec_file: Path, programs: list[list[str]]) -> None:
+    exit_code, _output, error = _run(
+        ["plugin", "install", "acme/other", "--spec-file", str(spec_file), "--apply", "--yes"]
+    )
+    assert (exit_code, programs) == (2, [])
+    assert "different listing" in error
+
+
+def test_uninstall_only_removes_what_guard_installed(
+    spec_file: Path, programs: list[list[str]], guard_home: Path
+) -> None:
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert (exit_code, programs) == (2, [])
+    assert "no record of installing" in error
+
+    _run(
+        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
+    )
+    programs.clear()
+    # The listing has since left HOL: uninstall never asks HOL, so it still works.
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--runtime", "claude-code"])
+    assert exit_code == 2
+    assert "no record of installing" in error
+    exit_code, _output, _error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0
+    assert [argv[1:] for argv in programs] == [["plugin", "remove", "toolgate@acme"]]
+    assert install.recorded_installs(guard_home) == {}
+
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate@1.2.0"])
+    assert exit_code == 2
+    assert "without a version" in error
+    with pytest.raises(SystemExit):
+        _run(["plugin", "uninstall", "acme/toolgate", "--spec-file", str(spec_file)])
+
+
+def test_a_record_that_cannot_be_written_fails_the_install(
+    spec_file: Path, programs: list[list[str]], guard_home: Path
+) -> None:
+    (guard_home / "plugin-kit").mkdir()
+    (guard_home / "plugin-kit" / "installs.json").write_text("{not json", encoding="utf-8")
+    exit_code, output, error = _run(
+        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
+    )
+    assert exit_code == 1
+    assert "codex: installed" in output
+    assert "could not be read" in error
+    assert (guard_home / "plugin-kit" / "installs.json").read_text(encoding="utf-8") == "{not json"
 
 
 def test_only_allowed_programs_can_run(monkeypatch: pytest.MonkeyPatch, guard_home: Path) -> None:
@@ -179,11 +226,11 @@ def test_only_allowed_programs_can_run(monkeypatch: pytest.MonkeyPatch, guard_ho
     }
     monkeypatch.setattr(install.subprocess, "run", pytest.fail)
     with pytest.raises(install.PluginInstallError):
-        install.apply_plan(plan, guard_home, assume_yes=True, which=lambda name: f"/bin/{name}")
+        install.apply_plan(plan, assume_yes=True, record=pytest.fail, which=lambda name: f"/bin/{name}")
 
 
 def test_telemetry_marks_only_listings_guard_installed(guard_home: Path) -> None:
-    install.record(guard_home, "acme/toolgate", "codex", installed=True)
+    install.record(guard_home, "acme/toolgate", "codex", installed=True, spec=SPEC)
     report = {
         "entries": [
             {"slug": "acme/toolgate", "runtime": "codex", "version": None, "key": "a" * 64},

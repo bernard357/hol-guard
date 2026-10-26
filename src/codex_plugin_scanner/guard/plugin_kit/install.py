@@ -10,7 +10,6 @@ fixed programs, and this module prints that plan. Nothing runs unless
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -28,7 +27,6 @@ SPEC_URL = "https://hol.org/api/guard/plugins/install-spec"
 VIA_GUARD = "hol-guard"
 #: The only programs a plan may start. Each is the runtime's own CLI.
 PROGRAMS = ("claude", "codex", "npx")
-_LEDGER_PARTS = ("plugin-kit", "installs.json")
 _SPEC_LIMIT_BYTES = 64 * 1024
 _SPEC_TIMEOUT_SECONDS = 20.0
 _COMMAND_TIMEOUT_SECONDS = 600.0
@@ -90,53 +88,51 @@ def available_programs(which: Callable[[str], str | None] | None = None) -> list
     return [program for program in PROGRAMS if which(program)]
 
 
-def _ledger_path(guard_home: Path) -> Path:
-    return guard_home.joinpath(*_LEDGER_PARTS)
+def recorded_installs(guard_home: Path) -> dict[str, list[str]]:
+    """Listings ``plugin install --apply`` installed, as ``{slug: [runtime, ...]}``.
 
+    The record lives in the native Kit; without it nothing is marked.
+    """
 
-def read_ledger(guard_home: Path) -> dict[str, list[str]]:
-    """Listings Guard installed, as ``{slug: [runtime, ...]}``."""
+    from .cli import PluginKitNativeError, kit_request
 
     try:
-        payload = json.loads(_ledger_path(guard_home).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(payload, dict):
+        result = kit_request({"command": "installs", "guard_home": str(guard_home)})
+    except PluginKitNativeError:
         return {}
     return {
-        slug: sorted({runtime for runtime in runtimes if isinstance(runtime, str)})
-        for slug, runtimes in payload.items()
-        if isinstance(slug, str) and isinstance(runtimes, list)
+        slug: [runtime for runtime in runtimes if isinstance(runtime, str)]
+        for slug, runtimes in result.items()
+        if isinstance(runtimes, list)
     }
 
 
-def _write_ledger(guard_home: Path, ledger: Mapping[str, Sequence[str]]) -> None:
-    path = _ledger_path(guard_home)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    cleaned = {slug: sorted(set(runtimes)) for slug, runtimes in sorted(ledger.items()) if runtimes}
-    temporary.write_text(json.dumps(cleaned, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+def record(
+    guard_home: Path, slug: str, runtime: str, *, installed: bool, spec: Mapping[str, Any] | None = None
+) -> None:
+    """Add a runtime to Guard's install record (``spec`` is the one installed) or drop it."""
 
+    from .cli import PluginKitNativeError, kit_request
 
-def record(guard_home: Path, slug: str, runtime: str, *, installed: bool) -> None:
-    ledger = read_ledger(guard_home)
-    runtimes = set(ledger.get(slug, []))
+    request: dict[str, object] = {
+        "command": "record",
+        "guard_home": str(guard_home),
+        "slug": slug,
+        "runtime": runtime,
+        "installed": installed,
+    }
     if installed:
-        runtimes.add(runtime)
-    else:
-        runtimes.discard(runtime)
-    ledger[slug] = sorted(runtimes)
+        request["spec"] = dict(spec or {})
     try:
-        _write_ledger(guard_home, ledger)
-    except OSError:
-        return
+        kit_request(request)
+    except PluginKitNativeError as error:
+        raise PluginInstallError(str(error)) from error
 
 
 def mark_guard_installs(report: Mapping[str, Any], guard_home: Path) -> dict[str, Any]:
     """Tag report entries for listings ``plugin install --apply`` installed."""
 
-    ledger = read_ledger(guard_home)
+    ledger = recorded_installs(guard_home)
     marked = dict(report)
     entries = report.get("entries")
     if isinstance(entries, list):
@@ -200,17 +196,16 @@ def _run(argv: Sequence[str], which: Callable[[str], str | None]) -> int:
 
 def apply_plan(
     plan: Mapping[str, Any],
-    guard_home: Path,
     *,
     assume_yes: bool,
+    record: Callable[[str], None],
     confirm: Callable[[str, str], bool] = _confirm,
     which: Callable[[str], str | None] | None = None,
 ) -> int:
-    """Run each automatic step the user confirms. Returns the exit code."""
+    """Run each automatic step the user confirms, then ``record`` its runtime. Returns the exit code."""
 
     which = which or shutil.which
     action = str(plan.get("action"))
-    slug = str(plan.get("slug"))
     failed = False
     for step in plan.get("steps") or []:
         runtime = str(step.get("runtime"))
@@ -232,9 +227,13 @@ def apply_plan(
                 failed = True
                 break
         else:
-            record(guard_home, slug, runtime, installed=action == "install")
             verify = step.get("verify")
             done = "installed; start a new session to load it" if action == "install" else "removed"
             check = f" Check with: {_shown(verify)}" if verify else ""
             print(f"{runtime}: {done}.{check}")
+            try:
+                record(runtime)
+            except PluginInstallError as error:
+                print(f"{runtime}: {error} Guard's record of this listing may be out of date.", file=sys.stderr)
+                failed = True
     return 1 if failed else 0

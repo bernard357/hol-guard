@@ -851,6 +851,7 @@ dependencies = [
 name = "guard-plugin-kit"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "hex",
  "serde",
  "serde_json",
