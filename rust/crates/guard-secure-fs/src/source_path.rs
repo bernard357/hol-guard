@@ -572,6 +572,7 @@ const TOOL_LOGIN_WORDS: &[&str] = &[
     "docker",
     "dockercfg",
     "gcloud",
+    "gemini",
     "gnupg",
     "gpg",
     "hgrc",
@@ -589,8 +590,37 @@ const TOOL_LOGIN_WORDS: &[&str] = &[
     "pypirc",
     "ssh",
     "vault",
+    "vscode",
     "windsurf",
 ];
+
+/// Whether `name` is exactly the name a tool keeps its own tree or login
+/// under: `.cursor`, `.vscode`, `.mcp.json`, `.npmrc`.
+///
+/// This is the whole-name reading of [`TOOL_LOGIN_WORDS`], for a caller that
+/// walks a path and has to tell a tool's own directory from a project's.
+/// `.codex-plugin` and `.claude-plugin` hold a repository's published
+/// manifest, not a login, so only the exact spelling counts: splitting the
+/// name into words would read every such manifest as the tool's own.
+pub fn tool_login_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let bare = name.trim_start_matches('.');
+    let stem = Path::new(bare)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    [bare, stem]
+        .iter()
+        .any(|part| TOOL_LOGIN_WORDS.contains(part))
+}
+
+/// Whether `name` is one of the ordinary project config files
+/// [`BENIGN_PROJECT_DOTFILES`] holds. A caller that walks a path uses it to
+/// keep the list's own rule: these names are benign as a file, so a directory
+/// spelled `.gitignore/` opens no hidden tree.
+pub fn project_config_file_name(name: &str) -> bool {
+    BENIGN_PROJECT_DOTFILES.contains(&name.to_ascii_lowercase().as_str())
+}
 
 /// A hidden file at the leaf of a git work tree that a project keeps its own
 /// configuration or prose in: `.tsconfig-lb-check.json`, `.release-notes.md`,

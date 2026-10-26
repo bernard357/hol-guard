@@ -88,55 +88,104 @@ pub(in crate::pretool) fn repository_hidden_source_document(
         && repository_hidden_below(canonical, home_dir, cwd, true)
 }
 
-/// The screens shared by the hidden listing and the hidden content read:
-/// the path sits below a hidden component inside a repository work tree, and
-/// no component below that repository names agent state, a credential store,
-/// a harness home or an environment file. `content_read` additionally keeps
-/// the repository's own administrative tree out.
+/// The screens shared by the hidden listing and the hidden content read: the
+/// path sits below a hidden component inside a repository work tree, and no
+/// component below that repository names agent state, a credential store, a
+/// harness home or an environment file.
+///
+/// `content_read` adds what naming a file rather than a directory needs: the
+/// repository's own administrative tree stays out, the hidden component has to
+/// be a directory above the file, and the names a tool keeps its logins under
+/// keep their review.
 fn repository_hidden_below(
     canonical: &Path,
     home_dir: Option<&str>,
     cwd: Option<&str>,
     content_read: bool,
 ) -> bool {
-    // Ancestors run from the deepest path up, so the last hidden one found is
-    // the outermost; the work tree that must carry `.git` holds it.
-    let Some(repository) = canonical
-        .ancestors()
-        .filter(|ancestor| {
-            ancestor
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
-        })
-        .last()
-        .and_then(|outermost| enclosing_work_tree(outermost, home_dir))
-    else {
+    // The work tree is searched from the path itself rather than from the
+    // outermost hidden component above it: a checkout may sit below a hidden
+    // directory of its own, as `~/.workspace/app` does, and the repository is
+    // then the one nearest the path, never whatever encloses `.workspace`.
+    let Some(repository) = enclosing_work_tree(canonical, home_dir) else {
         return false;
     };
+    // A repository at or above the home directory is a dotfiles checkout, and
+    // reading it as "the repository's own content" would hand over every
+    // dotfile in the home directory. The rule is about a checkout an agent
+    // works in, which always sits below home.
+    let Some(home) = home_dir.and_then(|value| std::fs::canonicalize(value).ok()) else {
+        return false;
+    };
+    if home.starts_with(repository) {
+        return false;
+    }
     let Ok(below) = canonical.strip_prefix(repository) else {
         return false;
     };
-    below.components().all(|component| {
+    let mut names = Vec::new();
+    for component in below.components() {
         let Component::Normal(name) = component else {
             return false;
         };
-        let name = name.to_string_lossy().to_ascii_lowercase();
-        let administrative = content_read && name == ".git";
-        !(guarded_hidden_name(&name) || name.starts_with(".env") || administrative)
-    }) && std::fs::symlink_metadata(repository.join(".git")).is_ok()
-        && guard_secure_fs::sensitive_path_family(canonical).is_none()
+        names.push(name.to_string_lossy().to_ascii_lowercase());
+    }
+    let Some((leaf, parents)) = names.split_last() else {
+        return false;
+    };
+    if names.iter().any(|name| {
+        guarded_hidden_name(name)
+            || name.starts_with(".env")
+            || (content_read && name.as_str() == ".git")
+    }) {
+        return false;
+    }
+    // A listing names the entries of a directory, so the hidden component may
+    // be the entry itself. A content read is the repository's own document
+    // *under* a hidden directory: a hidden file at the leaf of a work tree is
+    // `hidden_project_document`'s territory, which applies the full screens
+    // over its name, so `.mcp.json` and `.yarnrc.yml` keep their review here.
+    let hidden_parent = parents.iter().any(|name| name.starts_with('.'));
+    let hidden_component = hidden_parent || leaf.starts_with('.');
+    let hidden_below = if content_read {
+        hidden_parent
+    } else {
+        hidden_component
+    };
+    if !hidden_below {
+        return false;
+    }
+    if content_read && !content_names_allowed(canonical, leaf, parents) {
+        return false;
+    }
+    guard_secure_fs::sensitive_path_family(canonical).is_none()
         && !guard_secure_fs::credential_named_path(canonical)
         && super::resolved_path_allowed(repository, home_dir, cwd)
 }
 
-/// The work tree holding the outermost hidden component: its parent when that
-/// carries `.git`, as for `app/.deploy.lock.d`, or else the nearest
-/// non-hidden ancestor strictly below home that does, as for an installed
-/// tool shim directory such as `app/node_modules/.bin`. The search never
-/// reaches home itself or leaves it, so a hidden directory in a plain folder
-/// stays guarded.
-fn enclosing_work_tree<'a>(outermost: &'a Path, home_dir: Option<&str>) -> Option<&'a Path> {
-    let parent = outermost.parent()?;
+/// The name screens a content read adds over the components below the
+/// repository.
+///
+/// A directory spelled like an ordinary config file opens no tree, which is
+/// the rule `BENIGN_PROJECT_DOTFILES` already states; a directory spelled
+/// exactly as a tool's name is that tool's own tree rather than the
+/// repository's content; and the leaf keeps the login and secret screens a
+/// hidden file is read under anywhere else. `credential_named_path` stands
+/// aside for source-code extensions, so the directory half of that screen is
+/// applied here in its own right.
+fn content_names_allowed(canonical: &Path, leaf: &str, parents: &[String]) -> bool {
+    !parents.iter().any(|parent| {
+        guard_secure_fs::project_config_file_name(parent)
+            || guard_secure_fs::tool_login_name(parent)
+    }) && !guard_secure_fs::tool_login_name(leaf)
+        && !guard_secure_fs::credential_store_names::secret_bearing_file_name(
+            leaf.trim_start_matches('.'),
+        )
+        && !guard_secure_fs::credential_directory_path(canonical)
+}
+
+fn enclosing_work_tree<'a>(path: &'a Path, home_dir: Option<&str>) -> Option<&'a Path> {
+    let parent = path.parent()?;
     if work_tree_marker(parent) {
         return Some(parent);
     }

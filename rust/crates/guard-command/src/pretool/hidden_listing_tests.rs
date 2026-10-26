@@ -285,13 +285,33 @@ fn the_administrative_tree_and_guarded_names_keep_their_review() {
         // An environment file is never a document, whatever it is named.
         ".config/.env.production.json",
         ".envrc/settings.json",
-        // Agent state, a credential store and a harness home stay guarded.
-        ".agents/skills/deploy/SKILL.md",
+        // A credential store and a harness home stay guarded.
         ".ssh/config.toml",
         ".aws/config.json",
+        // A directory classified as a credential store keeps its review even
+        // when the file in it is named as source: `credential_named_path`
+        // stands aside for a source extension, so the directory half of the
+        // screen has to be applied in its own right.
+        ".secrets/read.py",
+        // A tool's own tree is not the repository's content, however the file
+        // in it is spelled, and neither is a login file under a directory the
+        // repository does own.
+        ".cursor/mcp.json",
+        ".next/mcp.json",
+        ".github/id_ed25519.json",
+        // A directory spelled like an ordinary project config file opens no
+        // hidden tree; the name is benign as the final component only.
+        ".dockerignore/notes.md",
         // A name without a document extension is bytes of some other kind.
         ".codex-plugin/runtime.bin",
     ] {
+        plant(&repo.join(document), "x\n");
+        assert!(!read(&repo.join(document), &home, &repo), "{document}");
+    }
+    // A hidden file at the leaf of the work tree is not a document below a
+    // hidden directory. It is read under `hidden_project_document`, which
+    // screens the name for a tool's login; this rule must not reach past it.
+    for document in [".mcp.json", ".yarnrc.yml", ".shell-aliases.toml"] {
         plant(&repo.join(document), "x\n");
         assert!(!read(&repo.join(document), &home, &repo), "{document}");
     }
@@ -323,5 +343,33 @@ fn a_link_does_not_borrow_the_proof_for_the_administrative_tree() {
     // The rule reads the resolved path, so a document name in a hidden
     // directory the repository owns cannot stand in for the `.git` tree.
     assert!(!read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_checkout_below_a_hidden_directory_reads_its_own_documents() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join(".workspace/app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    // The work tree is the one nearest the file. A checkout kept under a
+    // hidden directory of the developer's own is still a checkout.
+    plant(&repo.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_repository_at_the_home_directory_opens_no_dotfiles() {
+    let root = fixture_root();
+    let home = root.join("home");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    let cwd = home.join("app");
+    std::fs::create_dir_all(&cwd).unwrap();
+    // A dotfiles checkout at the home directory would make every hidden
+    // directory in it "the repository's own content".
+    plant(&home.join(".notes/plan.md"), "x\n");
+    assert!(!read(&home.join(".notes/plan.md"), &home, &cwd));
+    assert!(!listed(&home.join(".notes"), &home, &cwd));
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -388,6 +388,11 @@ def build_fixture(root: Path) -> BenignFixture:
         _write(repository / ".git" / "hooks" / "pre-commit.sh", "#!/bin/sh\nexit 0\n")
         _write(repository / ".codex-plugin" / "credentials.json", "{}\n")
         _write(repository / ".codex-plugin" / "runtime.node", "\x00binary\n")
+        # A tool's own tree, a config file spelled as a directory and a
+        # credential store holding a file named as source.
+        _write(repository / ".cursor" / "mcp.json", '{"mcpServers": {}}\n')
+        _write(repository / ".dockerignore" / "notes.md", "# fixture\n")
+        _write(repository / ".secrets" / "read.py", "TOKEN = 'fixture'\n")
         _write(repository / "src" / "index.ts", f"export const name = '{name}';\n")
         _write(repository / "README.md", f"# {name}\n")
         _write(repository / "src" / "lib.rs", 'pub fn name() -> &\'static str {\n    "fixture"\n}\n')
