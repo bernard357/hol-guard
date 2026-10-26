@@ -584,15 +584,16 @@ class StoreConnectionSchemaMixin:
         saved decisions signed above the generation the store trusts.
 
         Take it before opening the store connection. Every holder acquires it in
-        that order, so it never waits on a connection that is waiting on it.
+        that order, so it never waits on a connection that is waiting on it. An
+        open connection scope shares a connection without sharing a transaction,
+        so it serializes nothing here; a route that advanced the generation
+        under one would race the routes that take this lock, and taking the lock
+        under it would invert the order every other holder uses. Both are
+        refused rather than silently allowed.
         """
 
         if store_connection_scope.owns_scope(cast("GuardStore", self)):
-            # An open connection scope already serializes the advance on the
-            # store connection, and taking a file lock under it would invert the
-            # order every other holder uses.
-            yield
-            return
+            raise RuntimeError("Guard policy integrity generation cannot advance inside an open connection scope.")
         with suppress(OSError):
             self.guard_home.mkdir(mode=_GUARD_STORE_PRIVATE_DIR_MODE, parents=True, exist_ok=True)
         lock_path = self.guard_home / "policy-integrity-generation.lock"

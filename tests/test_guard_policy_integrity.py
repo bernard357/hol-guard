@@ -4100,3 +4100,22 @@ def test_policy_integrity_generation_lock_serializes_two_threads(tmp_path: Path)
             future.result(timeout=30)
 
     assert not overlapped
+
+
+def test_policy_integrity_generation_cannot_advance_inside_a_connection_scope(tmp_path: Path) -> None:
+    """A connection scope shares a connection, not a transaction.
+
+    Nothing serializes an advance taken under one, and taking the file lock
+    there would invert the order every other holder uses, so the route refuses
+    instead of racing.
+    """
+
+    store = GuardStore(tmp_path / "home")
+    store.guard_home.mkdir(parents=True, exist_ok=True)
+
+    with (
+        store.connection_scope(),
+        pytest.raises(RuntimeError, match="connection scope"),
+        store.hold_policy_integrity_generation_lock(),
+    ):
+        pass
