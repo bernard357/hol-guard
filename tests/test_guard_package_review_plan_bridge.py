@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from codex_plugin_scanner.guard import native_package_review_plan as bridge
+from codex_plugin_scanner.guard.daemon.hook_request_parsing import MAX_HOOK_PAYLOAD_REFERENCE_BYTES
 
 ARTIFACT_WIRE = {
     "artifact_id": "codex:project:package-request:npm:abc",
@@ -71,6 +72,7 @@ def test_a_plan_returns_the_artifact_and_whether_it_may_allow(monkeypatch: pytes
     assert artifact.metadata == ARTIFACT_WIRE["metadata"]
     assert sent[0]["operation"] == "package_review_plan"
     assert sent[0]["required_features"] == (bridge._PACKAGE_REVIEW_PLAN_FEATURE,)
+    assert sent[0]["max_request_bytes"] > MAX_HOOK_PAYLOAD_REFERENCE_BYTES
     request = sent[0]["request"]
     assert request["schema"] == bridge._REQUEST_SCHEMA
     assert request["payload"] == PAYLOAD
@@ -147,6 +149,8 @@ def test_an_unserializable_payload_plans_nothing(monkeypatch: pytest.MonkeyPatch
     [
         ({"tool_input": {"command": "npx create-vite@5.1.0"}}, "execute"),
         ({"toolName": "bash", "toolArgs": '{"command": "npm install minimist@1.2.8"}'}, "install"),
+        # A large unrelated field must not push the plan past its request bound.
+        ({"tool_input": {"command": "npm install minimist@1.2.8"}, "padding": "x" * (512 * 1024)}, "install"),
     ],
 )
 def test_the_resident_plans_exec_flows_and_copilot_tool_args(

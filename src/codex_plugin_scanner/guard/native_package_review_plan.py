@@ -20,6 +20,7 @@ from pathlib import Path
 from .models import GuardArtifact
 from .native_context import _canonical_request_sha256, ensure_resident_prerequisite
 from .native_package_authority import (
+    _EXTRACT_MAX_REQUEST_BYTES,
     _REQUEST_SCHEMA,
     _RESULT_SCHEMA,
     NativePackageArtifactUnavailableError,
@@ -30,6 +31,10 @@ from .native_package_authority import (
 
 _PACKAGE_REVIEW_PLAN_FEATURE = "package-review-plan-v1"
 _TIMEOUT_SECONDS = 2.0
+# The hook payload rides in the request whole, so it takes the bound of the
+# other op that carries a whole tool call. A payload the default bound refused
+# would leave a blocked package's review approvable.
+_MAX_REQUEST_BYTES = _EXTRACT_MAX_REQUEST_BYTES
 
 
 class NativePackageReviewPlanError(RuntimeError):
@@ -74,6 +79,7 @@ def package_review_plan(
         timeout_seconds=_TIMEOUT_SECONDS,
         deadline_monotonic=deadline,
         required_features=(_PACKAGE_REVIEW_PLAN_FEATURE,),
+        max_request_bytes=_MAX_REQUEST_BYTES,
     )
     if (
         not isinstance(response, dict)
