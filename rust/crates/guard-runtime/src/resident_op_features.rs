@@ -130,6 +130,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::MCP_PROXY_INLINE_APPROVAL_REPLY_FEATURE,
     guard_contracts::MCP_PROXY_ARCHIVE_BINDING_REQUIRED_FEATURE,
     guard_contracts::MCP_SENSITIVE_READ_ARTIFACT_FEATURE,
+    guard_contracts::MCP_PROXY_PACKAGE_ANSWER_FEATURE,
     guard_contracts::CISCO_PREFLIGHT_FEATURE,
     guard_contracts::DAEMON_LIFECYCLE_FEATURE,
     guard_contracts::CONTRIBUTED_MCP_DECISION_FEATURE,

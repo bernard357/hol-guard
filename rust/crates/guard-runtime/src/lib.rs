@@ -552,6 +552,7 @@ mod mcp_proxy_decision_tests;
 mod mcp_proxy_decision_vectors_tests;
 mod mcp_proxy_inline_approval;
 mod mcp_proxy_package;
+mod mcp_proxy_package_answer;
 mod mcp_proxy_postclaim;
 mod mcp_proxy_projection;
 #[cfg(test)]

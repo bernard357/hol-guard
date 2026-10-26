@@ -708,14 +708,11 @@ fn settle(
             (None, "forward", source, policy_action)
         }
         Routed::Terminal { policy_action } => {
-            let message = if policy_action == "block" {
-                format!("HOL Guard blocked tool call {tool} from {server}.")
-            } else {
-                format!(
-                    "HOL Guard requires an enforceable sandbox for tool call {tool} from \
-                     {server}; this runtime cannot provide one."
-                )
-            };
+            let message = crate::mcp_proxy_package_answer::terminal_tool_message(
+                tool,
+                server,
+                &policy_action,
+            );
             let data = json!({"approvalRequests": [], "guardPolicyAction": policy_action});
             (
                 Some(Answer::Block { message, data }),
@@ -726,17 +723,11 @@ fn settle(
         }
         Routed::StoredBlock { package_request } => (
             Some(Answer::Block {
-                message: {
-                    let kind = if package_request {
-                        "package tool call"
-                    } else {
-                        "tool call"
-                    };
-                    format!(
-                        "HOL Guard blocked {kind} {tool} from {server}. This exact request is \
-                         already blocked by authenticated saved policy."
-                    )
-                },
+                message: crate::mcp_proxy_package_answer::stored_tool_block_message(
+                    tool,
+                    server,
+                    package_request,
+                ),
                 data: json!({"approvalRequests": [], "guardPolicyAction": "block"}),
             }),
             "block",
