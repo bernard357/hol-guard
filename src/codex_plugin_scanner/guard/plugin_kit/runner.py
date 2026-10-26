@@ -185,6 +185,10 @@ class Completed:
 # holding it all in memory.
 OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024
 
+# How long to wait for the output reader once the command has exited. A
+# background process the command started can keep the pipe open after that.
+READER_GRACE_SECONDS = 5.0
+
 
 def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subprocess.CompletedProcess[str]:
     """Run ``argv`` with stdout piped, keeping at most OUTPUT_LIMIT_BYTES."""
@@ -197,13 +201,14 @@ def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subpr
 
     def read() -> None:
         size = 0
-        for chunk in iter(lambda: stream.read(65536), b""):
-            size += len(chunk)
-            if size > OUTPUT_LIMIT_BYTES:
-                too_large.set()
-                process.kill()
-                return
-            chunks.append(chunk)
+        with stream:
+            for chunk in iter(lambda: stream.read1(65536), b""):
+                size += len(chunk)
+                if size > OUTPUT_LIMIT_BYTES:
+                    too_large.set()
+                    process.kill()
+                    return
+                chunks.append(chunk)
 
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
@@ -214,12 +219,16 @@ def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subpr
         process.wait()
         raise
     finally:
-        reader.join(timeout=5)
-        stream.close()
+        reader.join(timeout=READER_GRACE_SECONDS)
+        # A reader still blocked in read() holds the stream's lock, so close()
+        # would wait for whatever process still has the pipe open. Leave the
+        # stream to the daemon reader then; it closes the stream at EOF.
+        if not reader.is_alive():
+            stream.close()
     if too_large.is_set():
         name = os.path.basename(argv[0])
         raise RunnerError(f"{name} printed more than {OUTPUT_LIMIT_BYTES // (1024 * 1024)} MiB, so Guard stopped it.")
-    text = b"".join(chunks).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    text = b"".join(list(chunks)).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
     return subprocess.CompletedProcess(list(argv), returncode, text)
 
 

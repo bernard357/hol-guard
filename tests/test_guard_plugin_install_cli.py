@@ -1065,6 +1065,18 @@ def test_a_runtime_that_reports_success_but_does_not_list_the_plugin_fails(
     assert install.recorded_installs(guard_home) == {}
 
 
+def test_a_plugin_list_guard_cannot_read_after_install_keeps_the_marketplace(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes.exit_codes[("codex", "plugin", "list")] = 1
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 1
+    assert "Guard could not read its plugin list to check toolgate@acme." in error
+    assert "Guard kept the marketplace it added, because the plugin may be installed." in error
+    assert ["codex", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
+    assert runtimes.ran[-1] == ["codex", "plugin", "list", "--json"]
+
+
 def test_a_plugin_list_guard_cannot_read_is_never_taken_as_empty(
     spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
 ) -> None:
@@ -1139,6 +1151,27 @@ def test_runtime_output_past_the_limit_is_cut_off(monkeypatch: pytest.MonkeyPatc
     assert loud.stdout == "x" * 512 + "\n"
     with pytest.raises(runner.RunnerError, match="printed more than"):
         runner.run(program, ["-c", "import sys; sys.stdout.write('x' * 4096)"], capture=True)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="relies on a POSIX child inheriting the stdout pipe")
+def test_a_background_process_holding_the_pipe_does_not_hold_up_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "READER_GRACE_SECONDS", 0.5)
+    program = runner.Program("python", sys.executable)
+    script = (
+        "import subprocess, sys;"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']);"
+        "print(child.pid, flush=True)"
+    )
+    started = time.monotonic()
+    completed = runner.run(program, ["-c", script], capture=True)
+    elapsed = time.monotonic() - started
+    held = int(completed.stdout.split()[0])
+    with contextlib.suppress(OSError):
+        os.kill(held, 9)
+    assert completed.returncode == 0
+    assert elapsed < 10
 
 
 def _http_error(code: int, retry_after: str | None = None) -> urllib.error.HTTPError:

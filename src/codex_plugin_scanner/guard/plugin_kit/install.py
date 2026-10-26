@@ -1110,6 +1110,11 @@ def apply_plan(
             except _StoppedError as stop:
                 if not added:
                     raise
+                if listed is None:
+                    # The plugin may be installed; taking its marketplace away
+                    # would leave it with no source and no record.
+                    kept = " Guard kept the marketplace it added, because the plugin may be installed."
+                    raise _StoppedError(stop.status, f"{stop}{kept}", stop.exit_code) from None
                 # Take back the marketplace Guard just added, so a retry adds
                 # it again and records that Guard owns it.
                 remove = [name, "plugin", "marketplace", "remove", str(step.get("marketplace"))]
