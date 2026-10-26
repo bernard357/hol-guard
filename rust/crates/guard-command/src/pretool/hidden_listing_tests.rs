@@ -402,3 +402,60 @@ fn a_repository_at_the_home_directory_opens_no_dotfiles() {
     assert!(!listed(&home.join(".notes"), &home, &cwd));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_submodule_in_the_checkout_the_session_opened_reads_its_own_documents() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    // A submodule carries its own `.git`, so the work tree nearest the file is
+    // the submodule, not the checkout the session opened. The document is
+    // still inside that checkout, and holding it would refuse a vendored
+    // workflow an agent reads while working one directory up.
+    let submodule = repo.join("vendor/lib");
+    std::fs::create_dir_all(&submodule).unwrap();
+    std::fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/lib\n").unwrap();
+    plant(&submodule.join(".github/workflows/ci.yml"), "on: push\n");
+    assert!(read(
+        &submodule.join(".github/workflows/ci.yml"),
+        &home,
+        &repo
+    ));
+    assert!(read(
+        &submodule.join(".github/workflows/ci.yml"),
+        &home,
+        &submodule
+    ));
+    // A checkout beside the session's own still keeps its review.
+    let sibling = home.join("app-fix");
+    std::fs::create_dir_all(sibling.join(".git")).unwrap();
+    assert!(!read(
+        &submodule.join(".github/workflows/ci.yml"),
+        &home,
+        &sibling
+    ));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_nested_checkout_does_not_open_the_repository_around_it() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    // Working inside a checkout that sits under another one does not make the
+    // outer repository the session's own tree: its hidden documents are the
+    // sibling content this screen holds, and containment alone would hand them
+    // over.
+    let nested = repo.join("tools/kit");
+    std::fs::create_dir_all(nested.join(".git")).unwrap();
+    plant(&repo.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(!read(
+        &repo.join(".codex-plugin/plugin.json"),
+        &home,
+        &nested
+    ));
+    assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}

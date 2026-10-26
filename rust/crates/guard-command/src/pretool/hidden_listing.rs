@@ -121,7 +121,7 @@ fn repository_hidden_below(
     if home.starts_with(repository) {
         return false;
     }
-    if content_read && !working_in(repository, cwd) {
+    if content_read && !working_in(repository, &home, home_dir, cwd) {
         return false;
     }
     let Ok(below) = canonical.strip_prefix(repository) else {
@@ -173,9 +173,29 @@ fn repository_hidden_below(
 /// code exactly as a published manifest does, and nothing in the path tells
 /// the two apart. A listing is not held to this — it prints names, and reading
 /// the entries of a sibling's `node_modules/.bin` is ordinary work.
-fn working_in(repository: &Path, cwd: Option<&str>) -> bool {
-    cwd.and_then(|value| std::fs::canonicalize(value).ok())
-        .is_some_and(|cwd| cwd.starts_with(repository))
+///
+/// The test is the checkout the working directory itself belongs to, not mere
+/// containment. Containment answers the wrong question at both ends: a
+/// submodule or a vendored checkout inside the session's own tree would be
+/// refused, although the document sits in the tree the session opened, and a
+/// session working in a nested checkout would reach the enclosing repository's
+/// hidden notes — exactly the sibling content this screen holds back. So the
+/// work tree nearest the working directory has to be the file's repository, or
+/// an ancestor of it.
+fn working_in(repository: &Path, home: &Path, home_dir: Option<&str>, cwd: Option<&str>) -> bool {
+    let Some(cwd) = cwd.and_then(|value| std::fs::canonicalize(value).ok()) else {
+        return false;
+    };
+    let Some(tree) = work_tree_from(&cwd, home_dir) else {
+        return false;
+    };
+    // A dotfiles checkout at or above the home directory is not a checkout an
+    // agent works in. Reading it as one would make every repository below home
+    // the session's own tree.
+    if home.starts_with(tree) {
+        return false;
+    }
+    repository.starts_with(tree)
 }
 
 /// What the repository's own path has to clear.
@@ -243,12 +263,16 @@ fn leaf_names_a_tools_login(leaf: &str) -> bool {
 }
 
 fn enclosing_work_tree<'a>(path: &'a Path, home_dir: Option<&str>) -> Option<&'a Path> {
-    let parent = path.parent()?;
-    if work_tree_marker(parent) {
-        return Some(parent);
+    work_tree_from(path.parent()?, home_dir)
+}
+
+/// The work tree nearest `directory`, `directory` itself included.
+fn work_tree_from<'a>(directory: &'a Path, home_dir: Option<&str>) -> Option<&'a Path> {
+    if work_tree_marker(directory) {
+        return Some(directory);
     }
     let home = std::fs::canonicalize(home_dir?).ok()?;
-    parent
+    directory
         .ancestors()
         .skip(1)
         .take_while(|ancestor| ancestor.starts_with(&home) && *ancestor != home.as_path())
