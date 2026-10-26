@@ -151,7 +151,9 @@ def _finding(item: object) -> dict[str, object] | None:
         or server is None
         or not isinstance(category, str)
         or not _CATEGORY.fullmatch(category)
+        or not isinstance(severity, str)
         or severity not in _SEVERITIES
+        or not isinstance(confidence, str)
         or confidence not in _CONFIDENCES
         or title is None
         or reason is None

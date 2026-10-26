@@ -228,6 +228,8 @@ def test_an_unreadable_hook_result_is_an_error(payload: dict[str, object]) -> No
         {"category": "Execution!"},
         {"severity": "unknown"},
         {"confidence": "high"},
+        {"severity": ["critical"]},
+        {"confidence": {"level": "strong"}},
         {"title": ""},
         {"title": "line one\nline two"},
         {"reason": "r" * 2000},
