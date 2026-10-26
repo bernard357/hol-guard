@@ -202,7 +202,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/pack_mcpb.py "$BUNDLE_DIR" "$ARTIFACT"
-          sha256sum "$ARTIFACT" > "${ARTIFACT}.sha256"
+          # Name the file by basename so `sha256sum -c` works next to the downloaded asset.
+          (cd "$(dirname "$ARTIFACT")" && sha256sum "$(basename "$ARTIFACT")") > "${ARTIFACT}.sha256"
 
       - name: Attach bundle and checksum to canonical release
         env:
