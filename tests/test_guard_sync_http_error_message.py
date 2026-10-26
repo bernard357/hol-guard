@@ -1,3 +1,4 @@
+import errno
 import io
 import json
 import socket
@@ -242,6 +243,8 @@ def test_fetch_supply_chain_bundle_payload_raises_retryable_unavailable_on_guard
         ConnectionRefusedError(61, "Connection refused"),
         ConnectionResetError(54, "Connection reset by peer"),
         socket.gaierror(8, "nodename nor servname provided, or not known"),
+        OSError(errno.EHOSTUNREACH, "No route to host"),
+        OSError(errno.ENETUNREACH, "Network is unreachable"),
         TimeoutError("timed out"),
     ],
 )
