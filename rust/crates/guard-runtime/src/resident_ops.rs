@@ -622,6 +622,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::PackageEvaluationView(request) => {
                 crate::package_evaluation_view_op::evaluate_package_evaluation_view(&request)
             }
+            ResidentOperationV1::PackageWorkspaceScope(request) => {
+                crate::package_workspace_scope_op::evaluate_package_workspace_scope_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::PackagePosture(request) => {
                 crate::package_posture_op::evaluate_package_posture(&request)
             }

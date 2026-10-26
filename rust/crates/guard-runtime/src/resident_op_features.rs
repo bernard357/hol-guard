@@ -46,6 +46,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::PACKAGE_REVIEW_PLAN_FEATURE,
     guard_contracts::PACKAGE_POLICY_RESOLVE_FEATURE,
     guard_contracts::PACKAGE_EVALUATION_VIEW_FEATURE,
+    guard_contracts::PACKAGE_WORKSPACE_SCOPE_FEATURE,
     guard_contracts::PACKAGE_PROTECT_FINALIZE_FEATURE,
     guard_contracts::PACKAGE_POSTURE_FEATURE,
     guard_contracts::PACKAGE_AUDIT_PROJECTION_FEATURE,

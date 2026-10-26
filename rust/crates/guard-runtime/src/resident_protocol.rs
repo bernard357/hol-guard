@@ -272,6 +272,7 @@ pub(crate) enum ResidentOperationV1 {
     PackagePolicyResolve(PackagePolicyResolveRequestV1),
     PackageProtectFinalize(PackageProtectFinalizeRequestV1),
     PackageEvaluationView(Box<PackageEvaluationViewRequestV1>),
+    PackageWorkspaceScope(guard_contracts::PackageWorkspaceScopeRequestV1),
     PackagePosture(PackagePostureRequestV1),
     PackageAuditProjection(PackageAuditProjectionRequestV1),
     WorkspaceInventory(WorkspaceInventoryRequestV1),

@@ -98,7 +98,10 @@ def test_action_lattice_import_guard_is_false_for_consistent_declarations() -> N
 
 
 @pytest.mark.parametrize("artifact_hash", [None, "", "  ", "unknown", "a" * 64])
-def test_optional_package_hash_guard_rejects_only_invalid_hashes(artifact_hash: str | None) -> None:
+def test_optional_package_hash_guard_rejects_only_invalid_hashes(
+    artifact_hash: str | None,
+    package_workspace_scope_native: Path,
+) -> None:
     scope = package_request_portable_workspace_scope(
         artifact_id="guard-cli:project:package-request:fixture",
         artifact_type="package_request",

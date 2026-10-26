@@ -530,6 +530,7 @@ def apply_approval_resolution(
         artifact_hash=request_artifact_hash,
         artifact_type=_string_or_none(request.get("artifact_type")),
         execution_context=package_execution_context_from_scanner_evidence(request.get("scanner_evidence")),
+        guard_home=store.guard_home,
     )
     if scope == "workspace" and portable_package_workspace is not None:
         resolved_workspace = portable_package_workspace

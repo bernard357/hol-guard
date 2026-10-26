@@ -114,7 +114,10 @@ def _component_digest(context, name: str) -> str:
     return next(component.digest for component in context.components if component.name == name)
 
 
-def test_portable_context_matches_across_linked_git_worktrees(tmp_path: Path) -> None:
+def test_portable_context_matches_across_linked_git_worktrees(
+    tmp_path: Path,
+    package_workspace_scope_native: Path,
+) -> None:
     primary = tmp_path / "primary"
     linked = tmp_path / "linked"
     common = _write_repository(primary)
@@ -421,7 +424,10 @@ def test_unbound_nested_node_preload_in_shebang_disables_package_approval_reuse(
     assert first.digest != second.digest
 
 
-def test_oversized_or_dynamic_configuration_is_not_portable(tmp_path: Path) -> None:
+def test_oversized_or_dynamic_configuration_is_not_portable(
+    tmp_path: Path,
+    package_workspace_scope_native: Path,
+) -> None:
     workspace = tmp_path / "workspace"
     _write_repository(workspace)
     _write_package_files(workspace)

@@ -249,6 +249,8 @@ mod package_protect_finalize;
 pub use package_protect_finalize::*;
 mod package_evaluation_view;
 pub use package_evaluation_view::*;
+mod package_workspace_scope;
+pub use package_workspace_scope::*;
 mod supply_chain_egress;
 pub use supply_chain_egress::*;
 

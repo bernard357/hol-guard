@@ -5408,8 +5408,7 @@ pub fn package_request_runtime_workspace_scope(
 }
 
 /// `approval_scope_support.package_request_portable_workspace_scope`.
-#[allow(dead_code)]
-fn package_request_portable_workspace_scope(
+pub fn package_request_portable_workspace_scope(
     artifact_id: Option<&str>,
     artifact_hash: Option<&str>,
     artifact_type: Option<&str>,

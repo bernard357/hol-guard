@@ -3730,7 +3730,9 @@ class TestGuardApprovals:
         assert store.get_approval_request("req-primary")["status"] == "resolved"
         assert store.get_approval_request("req-sibling")["status"] == "pending"
 
-    def test_guard_workspace_package_resolution_stays_bound_to_same_request(self, tmp_path):
+    def test_guard_workspace_package_resolution_stays_bound_to_same_request(
+        self, tmp_path, package_workspace_scope_native
+    ):
         store = GuardStore(tmp_path / "guard-home")
         workspace_dir = tmp_path / "workspace"
         workspace_dir.mkdir()
