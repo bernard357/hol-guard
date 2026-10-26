@@ -100,6 +100,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "native-guard-config-load-v1".into(),
         "native-guard-config-update-v1".into(),
         "native-policy-effective-v1".into(),
+        "native-policy-verifier-key-provision-v1".into(),
         "native-business-source-codec-v1".into(),
         "native-business-source-anchor-codec-v1".into(),
         "native-business-source-current-fence-v2".into(),
