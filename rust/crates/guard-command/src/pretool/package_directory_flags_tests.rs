@@ -94,8 +94,27 @@ fn other_shapes_keep_the_unprojected_text() {
         "pnpm -C missing build",
         "pnpm -C web -C other build",
         "cargo -C web build",
-        "pnpm -C ../outside build",
     ] {
         assert_eq!(projection(raw, cwd), None, "{raw}");
     }
+}
+
+/// A directory the flag reaches by climbing out of the run's own is projected
+/// like any other that exists. The peel compares nothing with the workspace:
+/// it only rewrites the call into the `cd` form, and whether that directory
+/// may be entered at all is the containment check's answer, read from the
+/// projected text. Pinning this keeps the two apart, so a later change that
+/// quietly refused such a path here would show up as a failure rather than as
+/// a bound nobody wrote down.
+#[test]
+fn a_directory_above_the_run_projects_and_leaves_the_bound_to_containment() {
+    let root = fixture("above");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let cwd = root.join("web");
+    let expected = format!("cd {} && pnpm build", outside.to_str().unwrap());
+    assert_eq!(
+        projection("pnpm -C ../outside build", cwd.to_str().unwrap()).as_deref(),
+        Some(&*expected)
+    );
 }
