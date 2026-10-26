@@ -38,7 +38,23 @@ class StoreLocalMcpMixin:
             raise sqlite3.DatabaseError(reason)
         return cast(dict[str, object], page)
 
+    def _provider_rows_absent(self, probe: str) -> bool:
+        """Answer an empty provider store without a resident round trip.
+
+        The snapshot publisher reads both provider facts on every policy
+        observation, and an install that has never seen a provider has no row
+        for the resident to compile. Probing here keeps those compiles off the
+        hook's round-trip budget, the way the observed-tool read already does.
+        """
+
+        # The resident reads only the current schema; migrate an older store first.
+        with self._connect() as connection:
+            ensure_local_cli_schema(connection, for_read=True)
+            return connection.execute(probe).fetchone() is None
+
     def read_mcp_provider_choices(self) -> dict[str, str]:
+        if self._provider_rows_absent("select 1 from local_mcp_provider_grant limit 1"):
+            return {}
         choices = self._native_store_call("read_mcp_provider_choices", {})
         if not isinstance(choices, dict) or any(
             not isinstance(selector, str) or not isinstance(state, str)
@@ -92,6 +108,8 @@ class StoreLocalMcpMixin:
         return cast(dict[str, str], actions)
 
     def read_mcp_provider_authority_hash(self) -> str | None:
+        if self._provider_rows_absent("select 1 from local_mcp_provider_authority limit 1"):
+            return None
         digest = self._native_store_call("read_mcp_provider_authority_hash", {})
         if digest is not None and not isinstance(digest, str):
             raise sqlite3.DatabaseError("native_mcp_provider_authority_invalid")

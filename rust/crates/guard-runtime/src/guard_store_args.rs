@@ -29,13 +29,6 @@ impl<'a> Args<'a> {
         self.raw(key).and_then(Value::as_i64).ok_or(INVALID)
     }
 
-    pub(crate) fn opt_int(&self, key: &str) -> StoreResult<Option<i64>> {
-        match self.raw(key) {
-            None => Ok(None),
-            Some(value) => value.as_i64().map(Some).ok_or(INVALID),
-        }
-    }
-
     pub(crate) fn flag(&self, key: &str) -> StoreResult<bool> {
         match self.raw(key) {
             None => Ok(false),

@@ -63,18 +63,29 @@ fn parse_proposal(row: &Row) -> StoreResult<Proposal> {
     })
 }
 
+/// A page cursor as Python read it. Its page checks were written
+/// `type(offset) is not int`, so a boolean or a fractional cursor named a page
+/// that cannot exist rather than a broken call, and only an omitted cursor
+/// broke the method contract.
+fn cursor(args: &Args<'_>, key: &str) -> StoreResult<Option<i64>> {
+    Ok(args
+        .raw(key)
+        .ok_or(StoreError::Invalid("native_guard_store_args_invalid"))?
+        .as_i64())
+}
+
 /// One page of connection-bound proposed provider dependencies. Nothing here
 /// is activated or granted: each requirement reports what the user has already
 /// decided, or that the action was never observed at all.
 pub(crate) fn workflow_proposals(connection: &Connection, args: &Args<'_>) -> StoreResult<Value> {
     let cli_id = args.str("cli_id")?;
-    let offset = args.int("offset")?;
+    let offset = cursor(args, "offset")?;
     if !is_local_cli_id(cli_id) {
         return value_error("invalid provider connection");
     }
-    if !(0..=MAX_WORKFLOW_OFFSET).contains(&offset) {
+    let Some(offset) = offset.filter(|offset| (0..=MAX_WORKFLOW_OFFSET).contains(offset)) else {
         return value_error("invalid_provider_workflow_page");
-    }
+    };
     if !require_current_schema(connection)? {
         return value_error("provider_connection_unavailable");
     }
@@ -211,18 +222,21 @@ fn sort_key(entry: &Value) -> (String, String) {
 /// skill is not activating it, so the page says so explicitly.
 pub(crate) fn mcp_skill_page(connection: &Connection, args: &Args<'_>) -> StoreResult<Value> {
     let cli_id = args.str("cli_id")?;
-    let offset = args.int("offset")?;
+    let offset = cursor(args, "offset")?;
     let search = args.opt_str("search")?.unwrap_or_default();
-    let expected_revision = args.opt_int("expected_revision")?;
+    let requested_revision = args.raw("expected_revision");
+    let expected_revision = requested_revision.and_then(Value::as_i64);
     if !is_local_cli_id(cli_id) || !require_current_schema(connection)? {
         return value_error("mcp_skills_unavailable");
     }
     let Some(identity_hash) = mcp_observation_identity(connection, cli_id)? else {
         return value_error("mcp_skills_unavailable");
     };
-    if !(0..=MAX_SKILL_OFFSET).contains(&offset)
-        || search.chars().count() > MAX_SEARCH_CHARS
-        || expected_revision.is_some_and(|revision| revision < 1)
+    let Some(offset) = offset.filter(|offset| (0..=MAX_SKILL_OFFSET).contains(offset)) else {
+        return value_error("invalid_mcp_skill_page");
+    };
+    if search.chars().count() > MAX_SEARCH_CHARS
+        || (requested_revision.is_some() && expected_revision.is_none_or(|revision| revision < 1))
     {
         return value_error("invalid_mcp_skill_page");
     }
@@ -272,7 +286,7 @@ pub(crate) fn mcp_skill_page(connection: &Connection, args: &Args<'_>) -> StoreR
             caseless::default_case_fold_str(&haystack).contains(&needle)
         })
         .collect();
-    selected.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
+    selected.sort_by_key(sort_key);
     let start = (offset as usize).min(selected.len());
     let end = start.saturating_add(SKILL_PAGE).min(selected.len());
     let next_offset = if end < selected.len() {
