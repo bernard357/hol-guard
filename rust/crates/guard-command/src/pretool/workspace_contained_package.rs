@@ -451,23 +451,27 @@ pub(super) fn local_package_work(
             .take_while(|argument| *argument != "--")
             .collect();
         // A bare `yarn` (or `yarn --frozen-lockfile`) installs, so the verb must
-        // come first; `npm init <name>` runs a fetched initializer. A leading
-        // option such as `--cwd dir` hides the verb and keeps the command out.
-        let version_probe = arguments
+        // come first; `npm init <name>` runs a fetched initializer. The verb
+        // is read behind the words [`options::skip_inert_options`] knows; any
+        // other leading option, `--cwd dir` among them, still hides it.
+        let behind = &arguments[options::skip_inert_options(&name, &arguments)..];
+        let version_probe = behind
             .iter()
             .all(|argument| matches!(*argument, "-v" | "--version" | "-h" | "--help"));
-        let leading_verb = arguments
+        let leading_verb = behind
             .first()
             .is_some_and(|argument| !argument.starts_with('-'));
-        let positional_init = arguments
+        let positional_init = behind
             .iter()
             .position(|argument| *argument == "init")
             .is_some_and(|index| {
-                arguments[index + 1..]
+                behind[index + 1..]
                     .iter()
                     .any(|argument| !argument.starts_with('-'))
             });
-        !arguments.is_empty()
+        // The registry scan stays on the whole list, so a selector spelled
+        // like a registry verb keeps the command out rather than passing.
+        !behind.is_empty()
             && (leading_verb || version_probe)
             && !positional_init
             && !arguments
@@ -475,6 +479,9 @@ pub(super) fn local_package_work(
                 .any(|argument| REGISTRY_VERBS.contains(&argument.to_ascii_lowercase().as_str()))
     })
 }
+
+#[path = "workspace_contained_package_options.rs"]
+mod options;
 
 #[cfg(test)]
 #[path = "workspace_contained_cargo_tests.rs"]
