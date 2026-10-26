@@ -194,16 +194,10 @@ pub(crate) fn validate_claim_row(
 }
 
 fn issue(ctx: &mut Ctx<'_>, args: &Args<'_>) -> WfResult<Value> {
-    let presigned = args.opt_str("signed_json")?.is_some();
-    let signed = if presigned {
+    let signed = if args.opt_str("signed_json")?.is_some() {
         signed_claim(args)?
     } else {
         sign_claim(&issue_claim(args)?, &ctx.key, &ctx.key_id)?
-    };
-    let issued = if presigned {
-        Value::Null
-    } else {
-        signed.clone()
     };
     let provenance = args.str("approval_provenance_id")?;
     let claim = &signed["claim"];
@@ -270,7 +264,7 @@ fn issue(ctx: &mut Ctx<'_>, args: &Args<'_>) -> WfResult<Value> {
     let pending = prepare_transition(ctx, &control, &transition)?;
     append_transition(ctx.conn, &transition)?;
     finalize_transition(ctx, &pending)?;
-    Ok(issued)
+    Ok(signed)
 }
 
 fn revoke(ctx: &mut Ctx<'_>, args: &Args<'_>) -> WfResult<Value> {

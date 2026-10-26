@@ -130,7 +130,12 @@ def _invoke(store: GuardStore, step: Mapping[str, Any]) -> Any:
 def _encode(op: str, result: object) -> object:
     if op == "revoke":
         return result
-    return None if result is None else canonical(result.to_dict())  # type: ignore[attr-defined]
+    if result is None:
+        return None
+    # `issue` travels the resident's recorded route, which answers with the
+    # envelope itself; the other ops answer with a typed value.
+    payload = result if isinstance(result, Mapping) else result.to_dict()  # type: ignore[attr-defined]
+    return canonical(payload)
 
 
 @contextmanager
