@@ -151,6 +151,73 @@ fn profile_already_references_path(content: &str, shim_dir: &str) -> bool {
         })
 }
 
+/// Whether the last PATH assignment in `content` puts `shim_dir` ahead of the
+/// inherited PATH. An appended assignment still names the directory, but a new
+/// shell resolves the real binary first.
+fn profile_prepends_shim(content: &str, shim_dir: &str) -> bool {
+    let mut prepends = None;
+    for line in py_splitlines(content) {
+        if let Some(effect) = line_prepends_shim(&line, shim_dir) {
+            prepends = Some(effect);
+        }
+    }
+    prepends == Some(true)
+}
+
+fn line_prepends_shim(line: &str, shim_dir: &str) -> Option<bool> {
+    if line.trim_start_matches(py_is_space).starts_with('#') {
+        return None;
+    }
+    let stripped = py_strip(line);
+    if stripped == posix_path_export(shim_dir) || stripped == fish_path_prepend(shim_dir) {
+        return Some(true);
+    }
+    if stripped.contains("fish_add_path") && stripped.contains(shim_dir) {
+        let appends = stripped
+            .split_whitespace()
+            .any(|token| token == "-a" || token == "--append");
+        return Some(!appends);
+    }
+    if !line.contains(shim_dir) || !line.contains("PATH") {
+        return None;
+    }
+    let shim_at = line.find(shim_dir)?;
+    let variable_at = ["$PATH", "${PATH}", "%PATH%"]
+        .into_iter()
+        .filter_map(|token| line.find(token))
+        .min();
+    Some(variable_at.is_some_and(|variable_at| shim_at < variable_at))
+}
+
+/// Every profile target prepends the shim directory. A mention that only
+/// appends it does not.
+pub(crate) fn shell_profile_prepends_shim(context: &ShimContext) -> ShimResult<bool> {
+    let Some(home) = &context.home_dir else {
+        return Ok(false);
+    };
+    let facts = &context.facts;
+    let shim_dir = context.shim_dir();
+    let targets = profile_targets(facts, home, &shim_dir);
+    if targets.is_empty() {
+        return Ok(false);
+    }
+    for (path, _) in &targets {
+        let existing = if facts.exists(path) {
+            match facts.read_text(path) {
+                Ok(text) => text,
+                Err(ReadError::Io(_)) => String::new(),
+                Err(error) => return Err(error.message(path)),
+            }
+        } else {
+            String::new()
+        };
+        if !profile_prepends_shim(&existing, &shim_dir) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// `_package_shim_profile_status`.
 pub(crate) fn profile_status(context: &ShimContext) -> ShimResult<Map<String, Value>> {
     let facts = &context.facts;

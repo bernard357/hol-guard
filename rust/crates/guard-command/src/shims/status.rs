@@ -466,10 +466,11 @@ pub fn package_shim_cloud_coverage(
     let mut status = package_shim_status(context, None)?;
     // A sync launched outside a login shell (a background service, the desktop
     // app, a hook) does not inherit the shim directory the shell profile
-    // prepends. Judge PATH order the way a new shell will see it, so a machine
-    // whose shells are protected is not reported as bypassed.
+    // prepends. Judge PATH order the way a new shell will see it only when
+    // the profile actually prepends that directory. An appended PATH still
+    // configures the profile, and a new shell still finds the real binary first.
     if status.get("path_status").and_then(Value::as_str) == Some("restart_required")
-        && flag(&status, "shell_profile_configured")
+        && super::profile::shell_profile_prepends_shim(context)?
     {
         let login_path = format!(
             "{}{}{}",

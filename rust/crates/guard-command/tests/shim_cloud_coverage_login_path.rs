@@ -103,3 +103,37 @@ fn a_shim_without_a_profile_entry_is_still_reported_as_bypassed() {
     assert_eq!(coverage["pathActive"], false);
     assert_eq!(coverage["bypasses"][0]["reason"], "path_inactive");
 }
+
+#[test]
+fn an_appended_profile_stays_bypassed() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let root = fs::canonicalize(scratch.path()).expect("canonical scratch");
+    let home = root.join("home");
+    let real_bin = root.join("real-bin");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&real_bin).expect("real bin");
+    write_executable(&real_bin.join("npm"));
+    let home = home.to_string_lossy().into_owned();
+    let guard_home = format!("{home}/.hol-guard");
+    let process_path = format!("{}:/usr/bin:/bin", real_bin.display());
+    let context = ShimContext::new(&guard_home, Some(&home), None, facts(&home, &process_path));
+
+    shims::install_package_shims(&context, Some(&["npm".to_owned()]), Some(&process_path))
+        .expect("install");
+    shims::ensure_package_shim_path_in_shell_profile(&context).expect("profile");
+    let staged = shims::package_shim_status(&context, None).expect("status");
+    assert_eq!(staged["path_status"], "restart_required");
+    let shim_dir = staged["shim_dir"].as_str().expect("shim dir");
+    let profiles = staged["shell_profile_paths"].as_array().expect("profiles");
+    assert!(!profiles.is_empty());
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(path, format!("export PATH=\"$PATH:{shim_dir}\"\n")).expect("append");
+    }
+
+    let coverage = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert!(names(&coverage, "protectedManagers").is_empty());
+    assert_eq!(coverage["pathActive"], false);
+    assert_eq!(coverage["bypasses"][0]["manager"], "npm");
+    assert_eq!(coverage["bypasses"][0]["reason"], "path_inactive");
+}
