@@ -3404,14 +3404,21 @@ def _is_guard_cloud_unreachable_error(error: OSError) -> bool:
         return True
     if getattr(error, "reason", None) != _MANAGED_PROXY_REQUEST_FAILED:
         return False
-    # A managed proxy keeps the transport failure only in the exception chain.
+    # A managed proxy keeps the transport failure only in the urllib3 error it
+    # wraps, which nests it under reason, original_error or either chain link.
+    pending: list[BaseException] = [error]
     seen: set[int] = set()
-    cause = error.__cause__ or error.__context__
-    while cause is not None and id(cause) not in seen:
-        seen.add(id(cause))
-        if isinstance(cause, OSError) and _is_network_outage_error(cause):
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current is not error and isinstance(current, OSError) and _is_network_outage_error(current):
             return True
-        cause = cause.__cause__ or cause.__context__
+        for attribute in ("reason", "original_error", "__cause__", "__context__"):
+            nested = getattr(current, attribute, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
     return False
 
 
