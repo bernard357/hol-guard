@@ -288,9 +288,7 @@ def test_project_flag_names_the_measured_project_and_rejects_a_bad_name(
     )
 
     assert (
-        pypi_project_storage.main(
-            ["--payload", str(payload), "--project", "plugin-scanner", "--limit-bytes", "1000"]
-        )
+        pypi_project_storage.main(["--payload", str(payload), "--project", "plugin-scanner", "--limit-bytes", "1000"])
         == 0
     )
     report = json.loads(capsys.readouterr().out)
