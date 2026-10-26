@@ -3,7 +3,8 @@
 Guard downloads the public HOL listing index, and the native
 ``plugin-telemetry`` command matches the plugins installed under each agent
 runtime's home against it on the device. Only listed plugins are reported:
-slug, runtime, plugin version and a weekly counting key.
+slug, runtime, plugin version and a weekly counting key, plus a ``via`` marker
+when ``hol-guard plugin install --apply`` installed the listing.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any
 
 from ...version import __version__
 from ..mdm.network import ManagedNetworkError, managed_urlopen
+from ..plugin_kit.install import mark_guard_installs
 from .state import TelemetryState, TelemetryStateBusyError, claim_week, read_secret, read_state, release_week
 
 PLUGIN_TELEMETRY_COMMAND = "plugin-telemetry"
@@ -201,7 +203,10 @@ def dry_run(guard_home: Path) -> dict[str, Any]:
     """
 
     secret = read_secret(guard_home) or os.urandom(32).hex()
-    return build_report(secret, week=current_week())
+    built = build_report(secret, week=current_week())
+    if isinstance(built.get("report"), dict):
+        built["report"] = mark_guard_installs(built["report"], guard_home)
+    return built
 
 
 def _send(guard_home: Path, week: str, previous: TelemetryState) -> dict[str, Any]:
@@ -210,7 +215,7 @@ def _send(guard_home: Path, week: str, previous: TelemetryState) -> dict[str, An
         if secret is None:
             raise PluginTelemetryError(_OFF_MESSAGE)
         built = build_report(secret, week=week)
-        report = built["report"]
+        report = mark_guard_installs(built["report"], guard_home)
         entries = report.get("entries") if isinstance(report, dict) else None
         # Counts can be turned off while the index downloads and the report builds.
         if not read_state(guard_home).enabled:

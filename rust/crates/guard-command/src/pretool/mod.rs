@@ -38,6 +38,11 @@ pub struct PathContext<'a> {
 
 mod brace_group;
 mod contained_wrapper;
+mod contained_wrapper_plan;
+pub use contained_wrapper_plan::{
+    contained_wrapper_plan, ContainedOutput, ContainedWrapperCore, ContainedWrapperPlan,
+    CONTAINED_WRAPPER_PLAN_UNSUPPORTED,
+};
 pub(crate) mod curl_reads;
 pub use curl_reads::bound_curl_read_destinations;
 #[cfg(unix)]
@@ -145,7 +150,7 @@ mod apply_patch_writes;
 mod data_heredocs;
 mod lockfile_install;
 mod omp_hashline_writes;
-mod pipe_attacks;
+pub(crate) mod pipe_attacks;
 mod pure_expression;
 mod read_paths;
 mod source_reads;
@@ -172,6 +177,7 @@ mod secret_aliases;
 pub(crate) mod sed_edits;
 mod segment_proof;
 mod shell_script;
+mod sink_peel;
 mod stderr_merge;
 mod stdin_filters;
 mod symlink_writes;
@@ -207,7 +213,7 @@ pub use safe_scalar::PsqlEnvironment;
 #[cfg_attr(not(unix), allow(unused_imports))]
 pub(crate) use script_content::launch_loopback_ports;
 pub(crate) use script_content::{
-    activation_script_text, backgrounded_launch, prefixed_launch, sequential_jobs,
+    activation_script_text, backgrounded_launch, models_exactly, prefixed_launch, sequential_jobs,
     sole_program_sources, sourced_program_sources, sourcing_bounded_sources,
 };
 pub(crate) use segment_proof::{benign_command_segments, without_stderr_merge};

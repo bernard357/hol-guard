@@ -6,6 +6,7 @@ use std::path::Path;
 use guard_command::local_supply_chain::is_audit_sensitive_basename;
 use sha2::{Digest, Sha256};
 
+use super::hooks::HookScan;
 use super::secrets::SecretScan;
 use super::skills::SkillScan;
 use super::{Limits, SnapshotMode, SKIP_DIRS};
@@ -90,6 +91,8 @@ pub(super) struct Walk {
     pub(super) secrets: Option<SecretScan>,
     /// Present when the caller asked for skill-content detection.
     pub(super) skills: Option<SkillScan>,
+    /// Present when the caller asked for the project hook check.
+    pub(super) hooks: Option<HookScan>,
 }
 
 #[derive(Default)]
@@ -109,28 +112,39 @@ impl Walk {
     }
 
     /// Record that the walk left `relative` unread, which matters only when it
-    /// is a skill the skill scan had to read.
+    /// is a skill or hook configuration a scan had to read.
     fn left_unread(&mut self, relative: &str) {
         if let Some(skills) = self.skills.as_mut() {
             if skills.admits(relative) {
                 skills.left_unread();
             }
         }
+        if let Some(hooks) = self.hooks.as_mut() {
+            if hooks.admits(relative) {
+                hooks.left_unread();
+            }
+        }
     }
 
-    /// Record a special file the walk did not follow, which the skill scan
-    /// counts when a skill could be there.
+    /// Record a special file the walk did not follow, which the skill and
+    /// hook scans count when their input could be there.
     fn left_special(&mut self, relative: &str) {
         if let Some(skills) = self.skills.as_mut() {
             skills.left_special(relative);
         }
+        if let Some(hooks) = self.hooks.as_mut() {
+            hooks.left_unfollowed(relative);
+        }
     }
 
-    /// Record a symlink the walk did not follow, which the skill scan counts
-    /// when a skill could be behind it.
+    /// Record a symlink the walk did not follow, which the skill and hook
+    /// scans count when their input could be behind it.
     fn left_link(&mut self, relative: &str, target: Option<&Path>) {
         if let Some(skills) = self.skills.as_mut() {
             skills.left_link(relative, target);
+        }
+        if let Some(hooks) = self.hooks.as_mut() {
+            hooks.left_unfollowed(relative);
         }
     }
 
@@ -300,7 +314,8 @@ fn admit_file(
         .skills
         .as_mut()
         .is_some_and(|skills| skills.admits(child));
-    let capture = (scan_content || scan_skill).then_some(&mut captured);
+    let scan_hooks = walk.hooks.as_mut().is_some_and(|hooks| hooks.admits(child));
+    let capture = (scan_content || scan_skill || scan_hooks).then_some(&mut captured);
     match hash_stable(file, node, limits.file_bytes, capture) {
         Ok((digest, read)) => {
             walk.hashed_bytes += read;
@@ -313,6 +328,11 @@ fn admit_file(
             if scan_skill {
                 if let Some(skills) = walk.skills.as_mut() {
                     skills.observe(child, &captured);
+                }
+            }
+            if scan_hooks {
+                if let Some(hooks) = walk.hooks.as_mut() {
+                    hooks.observe(child, &captured);
                 }
             }
         }
