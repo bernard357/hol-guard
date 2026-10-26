@@ -557,15 +557,31 @@ function isStaleProtectionDataError(error) {
 function isRetryableProtectionChangeError(error) {
   return error instanceof ExtensionControlApiError && error.code === "pack_preparation_unavailable" && RETRYABLE_PREPARATION_CAUSES.has(error.cause ?? "");
 }
-function protectionChangeErrorMessage(error, recoveryCommand, recoveryShell, options = {}) {
-  const recovery = {
+function recoveryFor(recoveryCommand, recoveryShell, reloaded) {
+  return {
     command: recoveryCommand ?? "hol-guard command controls recover-authority",
     terminal: recoveryShell === "powershell" ? "PowerShell" : "your terminal",
-    reloaded: options.reloaded === true
+    reloaded
   };
+}
+function knownSentence(error, recovery) {
+  if (error.code === "pack_preparation_unavailable") return preparationSentence(error.cause, recovery);
+  return error.code ? codeSentence(error.code, recovery) : void 0;
+}
+const AUTHORITY_UNREADABLE_CODES = /* @__PURE__ */ new Set(["authority_unavailable", "authority_unread", "authority_history_unavailable"]);
+function knownProtectionChangeMessage(error, recoveryCommand, recoveryShell) {
+  if (!(error instanceof ExtensionControlApiError)) return void 0;
+  return knownSentence(error, recoveryFor(recoveryCommand, recoveryShell, false));
+}
+function authorityRecoverySentence(error, recoveryCommand, recoveryShell) {
+  if (!(error instanceof ExtensionControlApiError) || !AUTHORITY_UNREADABLE_CODES.has(error.code ?? "")) return void 0;
+  const recovery = recoveryFor(recoveryCommand, recoveryShell, false);
+  return `Guard could not open its local protection authority. Run \`${recovery.command}\` in ${recovery.terminal}, then try again.`;
+}
+function protectionChangeErrorMessage(error, recoveryCommand, recoveryShell, options = {}) {
+  const recovery = recoveryFor(recoveryCommand, recoveryShell, options.reloaded === true);
   if (error instanceof ExtensionControlApiError) {
-    if (error.code === "pack_preparation_unavailable") return preparationSentence(error.cause, recovery);
-    const sentence = error.code ? codeSentence(error.code, recovery) : void 0;
+    const sentence = knownSentence(error, recovery);
     if (sentence) return sentence;
     return `${UNCERTAIN} If it is not there, try again; the Guard daemon log records the exact cause.`;
   }
@@ -679,15 +695,24 @@ function useExtensionPolicyDraft(props) {
     }
     return extensionPolicyRepairBase(base, latest);
   }, []);
-  const handleApiError = reactExports.useCallback((caught, fallback) => {
+  const terminalCommands = props.effective.terminal_commands;
+  const handleApiError = reactExports.useCallback((caught, fallback, phase) => {
     if (isExtensionPolicyConflict(caught)) {
       setStale(true);
       setError("The authoritative extension policy changed while this draft was open. Rebase the draft before applying; Guard will not silently overwrite security policy.");
       return;
     }
-    const commands = baseEffective.terminal_commands;
-    setError(caught instanceof Error ? protectionChangeErrorMessage(caught, commands?.recover_authority, commands?.shell) : fallback);
-  }, [baseEffective]);
+    const command = terminalCommands?.recover_authority;
+    const shell = terminalCommands?.shell;
+    if (phase === "apply") {
+      setError(caught instanceof Error ? protectionChangeErrorMessage(caught, command, shell) : fallback);
+      return;
+    }
+    const known = phase === "preview" ? knownProtectionChangeMessage(caught, command, shell) : authorityRecoverySentence(caught, command, shell);
+    if (known) setError(phase === "rebase" ? `${fallback} ${known}` : known);
+    else if (caught instanceof ExtensionControlApiError && caught.code) setError(fallback);
+    else setError(caught instanceof Error && caught.message ? caught.message : fallback);
+  }, [terminalCommands]);
   const runPreview = reactExports.useCallback(async () => {
     if (!dirty) return;
     const generation = draftGeneration.current;
@@ -710,7 +735,7 @@ function useExtensionPolicyDraft(props) {
       setPreview(next);
       setReviewOpen(true);
     } catch (caught) {
-      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not preview this draft.");
+      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not preview this draft.", "preview");
     } finally {
       setPreviewBusy(false);
     }
@@ -770,7 +795,7 @@ function useExtensionPolicyDraft(props) {
         setError("The policy was applied, but Guard could not refresh the latest state. Refresh this page to confirm the committed policy.");
       }
     } catch (caught) {
-      handleApiError(caught, "Guard could not apply this draft.");
+      handleApiError(caught, "Guard could not apply this draft.", "apply");
     } finally {
       setApplyBusy(false);
     }
@@ -833,7 +858,7 @@ function useExtensionPolicyDraft(props) {
         setError(null);
       }
     } catch (caught) {
-      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not rebase this draft.");
+      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not rebase this draft.", "rebase");
     } finally {
       setPreviewBusy(false);
     }
