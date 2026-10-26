@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -605,10 +606,10 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     if not args.yes and not interactive:
         raise _InstallStopError(2, "no_terminal", _NO_TERMINAL)
     if gate == "confirm" and not getattr(args, "accept_risk", False):
-        if args.json:
+        if getattr(args, "json", False):
             for reason in (plan.get("security") or {}).get("reasons") or []:
                 print(f"  {reason}", file=sys.stderr)
-        if args.yes:
+        if getattr(args, "yes", False):
             raise _InstallStopError(
                 4,
                 "risk_not_accepted",
@@ -660,8 +661,19 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     failed = [outcome.runtime for outcome in outcomes if outcome.status == "failed"]
     if failed:
         retry = [*args.program_name.split(), args.command, args.target, "--apply", "--runtime", ",".join(failed)]
+        # Keep the choices this run was given, so the retry stops where it did not.
+        if getattr(args, "spec_file", None):
+            retry += ["--spec-file", args.spec_file]
+        if getattr(args, "accept_command", None):
+            retry += ["--accept-command", args.accept_command]
+        if getattr(args, "accept_risk", False):
+            retry.append("--accept-risk")
+        if getattr(args, "yes", False):
+            retry.append("--yes")
+        if getattr(args, "json", False):
+            retry.append("--json")
         document["retry"] = retry
-        print(f"Retry {', '.join(failed)} with: {' '.join(retry)}", file=sys.stderr)
+        print(f"Retry {', '.join(failed)} with: {shlex.join(retry)}", file=sys.stderr)
     installed = [outcome.runtime for outcome in outcomes if outcome.status == "installed"]
     if first_install and installed and not args.json and _stdout_is_terminal():
         print(f"\nTip: {_first_install_tip(args, slug, installed, guard_home)}")

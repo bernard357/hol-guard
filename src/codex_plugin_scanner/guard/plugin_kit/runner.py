@@ -15,9 +15,10 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TextIO
+from typing import Any, TextIO
 
 COMMAND_TIMEOUT_SECONDS = 600.0
 _WINDOWS_EXTENSIONS = (".exe", ".cmd", ".bat")
@@ -179,6 +180,49 @@ class Completed:
     stdout: str
 
 
+# A runtime's reply is a short JSON document or a few lines of text; more
+# than this means something is wrong, and Guard stops reading rather than
+# holding it all in memory.
+OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024
+
+
+def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subprocess.CompletedProcess[str]:
+    """Run ``argv`` with stdout piped, keeping at most OUTPUT_LIMIT_BYTES."""
+
+    process = subprocess.Popen(list(argv), stdout=subprocess.PIPE, **options)
+    stream = process.stdout
+    assert stream is not None
+    chunks: list[bytes] = []
+    too_large = threading.Event()
+
+    def read() -> None:
+        size = 0
+        for chunk in iter(lambda: stream.read(65536), b""):
+            size += len(chunk)
+            if size > OUTPUT_LIMIT_BYTES:
+                too_large.set()
+                process.kill()
+                return
+            chunks.append(chunk)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        reader.join(timeout=5)
+        stream.close()
+    if too_large.is_set():
+        name = os.path.basename(argv[0])
+        raise RunnerError(f"{name} printed more than {OUTPUT_LIMIT_BYTES // (1024 * 1024)} MiB, so Guard stopped it.")
+    text = b"".join(chunks).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return subprocess.CompletedProcess(list(argv), returncode, text)
+
+
 def run(
     program: Program,
     arguments: Sequence[str],
@@ -196,16 +240,12 @@ def run(
     check_arguments(program, arguments)
     piped = capture or echo is not None
     try:
-        completed = subprocess.run(
-            [program.path, *arguments],
-            shell=False,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if piped else None,
-            text=True if piped else None,
-            errors="replace" if piped else None,
-            timeout=timeout,
-        )
+        if piped:
+            completed = _run_capped([program.path, *arguments], shell=False, stdin=subprocess.DEVNULL, timeout=timeout)
+        else:
+            completed = subprocess.run(
+                [program.path, *arguments], shell=False, check=False, stdin=subprocess.DEVNULL, timeout=timeout
+            )
     except subprocess.TimeoutExpired as error:
         raise RunnerError(f"{program.name} did not finish within {timeout:.0f} seconds.") from error
     except OSError as error:

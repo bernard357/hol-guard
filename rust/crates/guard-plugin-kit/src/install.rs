@@ -160,6 +160,10 @@ pub struct Step {
     /// The CLI runs it only when no other plugin from it is installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remove_marketplace: Option<Vec<String>>,
+    /// Uninstall only: the repository the recorded marketplace came from, so
+    /// the CLI leaves one the user has since pointed somewhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marketplace_repository: Option<String>,
 }
 
 /// On an uninstall plan, offer to remove each marketplace Guard added
@@ -725,6 +729,7 @@ fn step(
                 Action::Uninstall => None,
             },
             remove_marketplace: None,
+            marketplace_repository: (action == Action::Uninstall).then(|| market.repository.clone()),
         }
     };
     match target.runtime.as_str() {
@@ -763,6 +768,7 @@ fn step(
                 marketplace: None,
                 expected_commit: None,
                 remove_marketplace: None,
+                marketplace_repository: None,
             }
         }
     }

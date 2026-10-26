@@ -18,10 +18,12 @@ import http.server
 import io
 import json
 import os
+import shlex
 import socket
 import sqlite3
 import ssl
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -52,7 +54,7 @@ def _spec(**changes: Any) -> dict[str, Any]:
         "installable": True,
         "security": {
             "verdict": "pass",
-            "scannedAt": f"{datetime.datetime.now(datetime.UTC).date().isoformat()}T08:00:00Z",
+            "scannedAt": f"{datetime.datetime.now(datetime.timezone.utc).date().isoformat()}T08:00:00Z",
             "scannedRef": SCANNED,
             "findings": {"critical": 0, "high": 0, "medium": 0, "low": 1},
             "reasons": [],
@@ -195,6 +197,7 @@ def runtimes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeRuntimes:
     monkeypatch.setenv("PATH", str(fake.bin))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake.claude_home))
     monkeypatch.setattr(runner.subprocess, "run", fake)
+    monkeypatch.setattr(runner, "_run_capped", lambda argv, **kwargs: fake(argv, stdout=subprocess.PIPE, **kwargs))
     monkeypatch.setattr(runner, "stdin_is_terminal", lambda: False)
     # Keep the developer's own claude and codex installs out of the lookup.
     monkeypatch.setattr(install, "known_locations", lambda environ=None: [])
@@ -1057,7 +1060,85 @@ def test_a_runtime_that_reports_success_but_does_not_list_the_plugin_fails(
     exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
     assert exit_code == 1
     assert "codex finished, but it does not list toolgate@acme. Check with: codex plugin list" in error
+    assert "Guard removed the marketplace it added." in error
+    assert runtimes.ran[-1] == ["codex", "plugin", "marketplace", "remove", "acme"]
     assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_plugin_list_guard_cannot_read_is_never_taken_as_empty(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    record = runtimes.claude_home / "plugins" / "installed_plugins.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("{not json", encoding="utf-8")
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert (exit_code, runtimes.ran) == (1, [])
+    assert "Guard could not read Claude Code's plugin record" in error
+
+    # Installed while the record was readable, then it broke: uninstall still
+    # runs Claude Code's own removal instead of assuming it is gone.
+    record.unlink()
+    assert _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")[0] == 0
+    record.write_text("{not json", encoding="utf-8")
+    runtimes.ran.clear()
+    runtimes.exit_codes[("claude", "plugin", "uninstall")] = 0
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 1
+    assert runtimes.ran == [["claude", "plugin", "uninstall", "toolgate@acme"]]
+    assert "could not read its plugin list" in error
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
+
+
+def test_uninstall_keeps_a_marketplace_a_project_plugin_uses_or_that_points_elsewhere(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    assert _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")[0] == 0
+    installed = runtimes._state("installed_plugins.json")
+    installed["plugins"]["other@acme"] = [{"scope": "project", "projectPath": "/work/app"}]
+    runtimes._save("installed_plugins.json", installed)
+    exit_code, output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0, error
+    assert "other plugins still use it: other@acme." in output
+    assert ["claude", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
+
+    runtimes._save("installed_plugins.json", {"version": 2, "plugins": {}})
+    runtimes._save("known_marketplaces.json", {})
+    assert _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")[0] == 0
+    # The user pointed the marketplace name at another repository since.
+    runtimes._save("known_marketplaces.json", {"acme": {"source": {"source": "github", "repo": "mallory/acme"}}})
+    runtimes.ran.clear()
+    exit_code, output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0, error
+    assert "Kept the acme marketplace: it now comes from mallory/acme" in output
+    assert ["claude", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
+
+
+def test_a_marketplace_guard_could_not_remove_stays_in_its_record(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    assert _install(spec_file, "--apply", "--yes", "--runtime", "codex")[0] == 0
+    runtimes.exit_codes[("codex", "plugin", "marketplace", "remove")] = 1
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 1
+    assert "Guard could not remove the acme marketplace it added." in error
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["codex"]}
+
+    # The next uninstall finds the plugin gone and retries the marketplace.
+    del runtimes.exit_codes[("codex", "plugin", "marketplace", "remove")]
+    runtimes.ran.clear()
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0, error
+    assert runtimes.ran[-1] == ["codex", "plugin", "marketplace", "remove", "acme"]
+    assert install.recorded_installs(guard_home) == {}
+
+
+def test_runtime_output_past_the_limit_is_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "OUTPUT_LIMIT_BYTES", 1024)
+    program = runner.Program("python", sys.executable)
+    loud = runner.run(program, ["-c", "print('x' * 512)"], capture=True)
+    assert loud.stdout == "x" * 512 + "\n"
+    with pytest.raises(runner.RunnerError, match="printed more than"):
+        runner.run(program, ["-c", "import sys; sys.stdout.write('x' * 4096)"], capture=True)
 
 
 def _http_error(code: int, retry_after: str | None = None) -> urllib.error.HTTPError:
@@ -1188,10 +1269,14 @@ def test_a_partial_failure_names_the_retry_command(spec_file: Path, runtimes: Fa
     exit_code, output, error = _install(spec_file, "--apply", "--yes")
     assert exit_code == 1
     assert "claude-code: installed" in output
-    assert "Retry codex with: hol-guard plugin install acme/toolgate --apply --runtime codex" in error
+    retry = ["hol-guard", "plugin", "install", "acme/toolgate", "--apply", "--runtime", "codex"]
+    retry += ["--spec-file", str(spec_file), "--yes"]
+    assert f"Retry codex with: {shlex.join(retry)}" in error
+    # Codex added the marketplace for this install, so Guard takes it back.
+    assert runtimes.ran[-1] == ["codex", "plugin", "marketplace", "remove", "acme"]
     assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
     exit_code, output, _error = _install(spec_file, "--apply", "--yes", "--json")
-    assert json.loads(output)["retry"][-2:] == ["--runtime", "codex"]
+    assert json.loads(output)["retry"] == [*retry, "--json"]
 
 
 def test_one_tip_after_the_first_install_only_on_a_terminal(

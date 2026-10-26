@@ -675,12 +675,34 @@ def _claude_marketplace_source(home: Path, name: str) -> str | None:
     return match.group(1).lower() if match else ""
 
 
-def _claude_install(home: Path, plugin_id: str) -> tuple[bool, str | None]:
-    """Whether Claude Code has the plugin for the user, and the commit it installed."""
+def _claude_record(home: Path) -> dict[str, Any] | None:
+    """Claude Code's installed plugins by id: empty when it has no record yet,
+    None when the record exists but cannot be read, so callers never mistake
+    an unreadable record for "nothing installed"."""
 
-    data = _read_json(home / "plugins" / "installed_plugins.json")
-    plugins = data.get("plugins") if isinstance(data, dict) else None
-    entries = plugins.get(plugin_id) if isinstance(plugins, dict) else None
+    path = home / "plugins" / "installed_plugins.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    plugins = data.get("plugins", {}) if isinstance(data, dict) else None
+    return plugins if isinstance(plugins, dict) else None
+
+
+def _claude_unreadable(home: Path) -> str:
+    return f"Guard could not read Claude Code's plugin record ({home / 'plugins' / 'installed_plugins.json'})"
+
+
+def _claude_install(home: Path, plugin_id: str) -> tuple[bool, str | None] | None:
+    """Whether Claude Code has the plugin for the user and the commit it
+    installed, or None when its record cannot be read."""
+
+    plugins = _claude_record(home)
+    if plugins is None:
+        return None
+    entries = plugins.get(plugin_id)
     for entry in entries if isinstance(entries, list) else []:
         if isinstance(entry, dict) and entry.get("scope") == "user":
             commit = entry.get("gitCommitSha")
@@ -688,17 +710,18 @@ def _claude_install(home: Path, plugin_id: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def _claude_plugins(home: Path) -> set[str]:
-    """Plugin ids Claude Code has installed for the user. No record means none."""
+def _claude_plugins(home: Path, *, any_scope: bool = False) -> set[str] | None:
+    """Plugin ids Claude Code has installed for the user (with ``any_scope``,
+    for a project or folder too), or None when its record cannot be read."""
 
-    data = _read_json(home / "plugins" / "installed_plugins.json")
-    plugins = data.get("plugins") if isinstance(data, dict) else None
-    if not isinstance(plugins, dict):
-        return set()
+    plugins = _claude_record(home)
+    if plugins is None:
+        return None
     return {
         plugin_id
         for plugin_id, entries in plugins.items()
-        if isinstance(entries, list) and any(isinstance(e, dict) and e.get("scope") == "user" for e in entries)
+        if isinstance(entries, list)
+        and any(isinstance(e, dict) and (any_scope or e.get("scope") == "user") for e in entries)
     }
 
 
@@ -731,13 +754,18 @@ def _check_runtime_lists(step: Mapping[str, Any], plugins: set[str] | None, cont
     """Stop when the runtime reported success but its own list disagrees (REM D10)."""
 
     plugin_id = step.get("plugin_id")
-    if not isinstance(plugin_id, str) or plugins is None:
-        return
-    installing = context.action == "install"
-    if (plugin_id in plugins) == installing:
+    if not isinstance(plugin_id, str):
         return
     verify = step.get("verify")
     check = f" Check with: {_shown(verify)}" if verify else ""
+    if plugins is None:
+        raise _StoppedError(
+            "failed",
+            f"{step.get('program')} finished, but Guard could not read its plugin list to check {plugin_id}.{check}",
+        )
+    installing = context.action == "install"
+    if (plugin_id in plugins) == installing:
+        return
     said = "does not list" if installing else "still lists"
     raise _StoppedError("failed", f"{step.get('program')} finished, but it {said} {plugin_id}.{check}")
 
@@ -754,16 +782,28 @@ def _removed_by_hand(step: Mapping[str, Any], runtime: str, program: runner.Prog
 
 
 def _drop_marketplace(
-    step: Mapping[str, Any], program: runner.Program, plugins: set[str] | None, context: _Context
+    step: Mapping[str, Any], runtime: str, program: runner.Program, listed: set[str] | None, context: _Context
 ) -> str:
-    """After an uninstall, remove the marketplace Guard added when no other
-    installed plugin comes from it. Returns what to tell the user."""
+    """After an uninstall, remove the marketplace Guard added when it still
+    comes from the same repository and no other installed plugin uses it.
+    Returns what to tell the user; stops when the removal fails, so Guard's
+    record keeps the marketplace and running uninstall again retries."""
 
     remove = step.get("remove_marketplace")
     marketplace = str(step.get("marketplace"))
     if not isinstance(remove, list) or remove[:4] != [step.get("program"), "plugin", "marketplace", "remove"]:
         return ""
     argv = [str(part) for part in remove]
+    recorded = step.get("marketplace_repository")
+    if runtime == "claude-code" and isinstance(recorded, str):
+        current = _claude_marketplace_source(context.home, marketplace)
+        if current is None:
+            return ""
+        if current != recorded.lower():
+            where = current or "another source"
+            return f" Kept the {marketplace} marketplace: it now comes from {where}, not the repository Guard added."
+    # Claude Code also counts plugins installed for a project or folder.
+    plugins = _claude_plugins(context.home, any_scope=True) if runtime == "claude-code" else listed
     if plugins is None:
         return (
             f" Guard could not tell whether other plugins use the {marketplace} marketplace, so it kept it."
@@ -775,7 +815,11 @@ def _drop_marketplace(
     print(f"$ {_shown(argv)}", file=context.out)
     undone = _undo(program, argv, context)
     if undone:
-        return f" Guard could not remove the {marketplace} marketplace it added.{undone}"
+        raise _StoppedError(
+            "failed",
+            f"removed the plugin, but Guard could not remove the {marketplace} marketplace it added.{undone}"
+            " Run uninstall again to retry.",
+        )
     return f" Removed the {marketplace} marketplace Guard added."
 
 
@@ -863,7 +907,10 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
             f"Claude Code already has a marketplace named {marketplace} from another source, "
             "so Guard did not install from it.",
         )
-    had_plugin, prior = _claude_install(context.home, plugin_id)
+    found = _claude_install(context.home, plugin_id)
+    if found is None:
+        raise _StoppedError("failed", f"{_claude_unreadable(context.home)}, so it changed nothing.")
+    had_plugin, prior = found
     if had_plugin and expected and prior != expected:
         raise _StoppedError(
             "blocked",
@@ -890,7 +937,7 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
             return runner.run(program, arguments, capture=True)
         except runner.RunnerError as error:
             undone = ""
-            if _claude_install(context.home, plugin_id)[0]:
+            if (_claude_install(context.home, plugin_id) or (True, None))[0]:
                 undone = _undo(program, ["claude", "plugin", "uninstall", plugin_id], context)
             undone += undo_marketplace()
             raise runner.RunnerError(
@@ -924,7 +971,14 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
         raise _StoppedError(stop.status, f"{stop}{undo_marketplace()}", stop.exit_code) from None
     if not expected:
         return added
-    _, commit = _claude_install(context.home, plugin_id)
+    found = _claude_install(context.home, plugin_id)
+    if found is None:
+        raise _StoppedError(
+            "failed",
+            f"Claude Code finished, but {_claude_unreadable(context.home)} to check which commit it installed. "
+            f"Check with: claude plugin list",
+        )
+    commit = found[1]
     if commit == expected:
         return added
     undone = _undo(program, ["claude", "plugin", "uninstall", plugin_id], context) + undo_marketplace()
@@ -947,9 +1001,9 @@ def _install_codex(step: Mapping[str, Any], program: runner.Program, context: _C
     _ran(completed, add, reply)
     root, already = reply.get("installedRoot"), reply.get("alreadyAdded")
     head = git_head(Path(root)) if isinstance(root, str) and os.path.isabs(root) else None
+    marketplace = str(step.get("marketplace"))
+    remove = ["codex", "plugin", "marketplace", "remove", marketplace]
     if expected and head != expected:
-        marketplace = str(step.get("marketplace"))
-        remove = ["codex", "plugin", "marketplace", "remove", marketplace]
         # Only take back a marketplace Codex says it just added; one the
         # user added before, or one Codex did not say, stays.
         if already is False:
@@ -969,7 +1023,15 @@ def _install_codex(step: Mapping[str, Any], program: runner.Program, context: _C
     plugin_id = step.get("plugin_id")
     if already and isinstance(plugin_id, str) and plugin_id in (_codex_plugins(program) or set()):
         raise _AlreadyDoneError(f"already installed at commit {_short(head)}" if head else "already installed")
-    _run_step(program, plugin_add, context)
+    try:
+        _run_step(program, plugin_add, context)
+    except (_StoppedError, runner.RunnerError) as error:
+        if already is not False:
+            raise
+        undone = _undo(program, remove, context) or " Guard removed the marketplace it added."
+        if isinstance(error, _StoppedError):
+            raise _StoppedError(error.status, f"{error}{undone}", error.exit_code) from None
+        raise runner.RunnerError(f"{error}{undone}") from None
     # Only a Codex that says it added the marketplace now counts; an older one
     # that does not say leaves the marketplace in place on uninstall.
     return reply.get("alreadyAdded") is False
@@ -1032,7 +1094,8 @@ def apply_plan(
         check = f" Check with: {_shown(verify)}" if verify else ""
         try:
             if action == "uninstall" and _removed_by_hand(step, runtime, program, context):
-                cleanup = _drop_marketplace(step, program, _installed_plugins(runtime, program, context), context)
+                listed = _installed_plugins(runtime, program, context)
+                cleanup = _drop_marketplace(step, runtime, program, listed, context)
                 raise _AlreadyDoneError(f"already removed; Guard updated its record.{cleanup}")
             if action == "install" and runtime == "claude-code" and len(commands) == 2:
                 added = _install_claude(step, program, context)
@@ -1041,10 +1104,19 @@ def apply_plan(
             else:
                 for argv in commands:
                     _run_step(program, [str(part) for part in argv], context)
-            plugins = _installed_plugins(runtime, program, context)
-            _check_runtime_lists(step, plugins, context)
+            listed = _installed_plugins(runtime, program, context)
+            try:
+                _check_runtime_lists(step, listed, context)
+            except _StoppedError as stop:
+                if not added:
+                    raise
+                # Take back the marketplace Guard just added, so a retry adds
+                # it again and records that Guard owns it.
+                remove = [name, "plugin", "marketplace", "remove", str(step.get("marketplace"))]
+                undone = _undo(program, remove, context) or " Guard removed the marketplace it added."
+                raise _StoppedError(stop.status, f"{stop}{undone}", stop.exit_code) from None
             if action == "uninstall":
-                cleanup = _drop_marketplace(step, program, plugins, context)
+                cleanup = _drop_marketplace(step, runtime, program, listed, context)
         except _AlreadyDoneError as done:
             print(f"{runtime}: {done}{'' if str(done).endswith('.') else '.'}{check}", file=context.out)
         except _StoppedError as stop:

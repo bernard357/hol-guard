@@ -141,6 +141,12 @@ fn stored_target(target: &Value) -> Value {
     Value::Object(stored)
 }
 
+/// Whether two recorded marketplaces have the same name and repository.
+fn same_marketplace(a: &Value, b: &Value) -> bool {
+    let key = |m: &Value, k: &str| m.get(k).and_then(Value::as_str).map(str::to_ascii_lowercase);
+    a.is_object() && key(a, "name") == key(b, "name") && key(a, "repository") == key(b, "repository")
+}
+
 /// Runtimes of an entry whose marketplace Guard added, so `uninstall` may
 /// remove it again.
 fn added_marketplaces(entry: Option<&Value>) -> Vec<String> {
@@ -189,9 +195,19 @@ pub fn record(
             .and_then(|entry| entry["targets"].as_array())
             .cloned()
             .unwrap_or_default();
+        let previous = targets
+            .iter()
+            .find(|target| target["runtime"] == runtime)
+            .map(|target| target["marketplace"].clone());
         targets.retain(|target| target["runtime"] != runtime);
         let mut owned = added_marketplaces(installs.get(slug));
-        let owned_before = owned.iter().any(|r| r == runtime);
+        // Ownership carries over a reinstall only when it targets the same
+        // marketplace; Guard never added one a newer spec moved to.
+        let same_marketplace = match (&added, &previous) {
+            (Some((_, target)), Some(before)) => same_marketplace(&target["marketplace"], before),
+            _ => false,
+        };
+        let owned_before = same_marketplace && owned.iter().any(|r| r == runtime);
         owned.retain(|r| r != runtime);
         if added.is_some() && (marketplace_added || owned_before) {
             owned.push(runtime.to_owned());
