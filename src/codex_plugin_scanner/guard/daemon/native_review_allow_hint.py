@@ -222,13 +222,12 @@ def native_review_hint(
     if connector is None and not isinstance(native_result.get("command_extensions"), Mapping):
         return None
     budget = _DEFAULT_BUDGET_SECONDS if deadline is None else deadline - time.monotonic() - _SAFETY_MARGIN_SECONDS
-    if budget < _MIN_BUDGET_SECONDS:
-        if connector is None:
-            return None
-        # The connector hint is what resolves the row once setup finishes, and
-        # the resident builds it from a catalog lookup, not a second review, so
-        # a spent review budget does not cost the row its hint.
-        budget = _MIN_BUDGET_SECONDS
+    # The connector hint is what resolves the row once setup finishes, and the
+    # resident builds it from a catalog lookup, not a second review, so it asks
+    # with whatever time is left below the usual minimum. It never asks into
+    # the margin kept for persisting the review and answering the hook.
+    if budget < _MIN_BUDGET_SECONDS and (connector is None or budget <= 0):
+        return None
     return _ask_review_hint(
         payload,
         guard_home=guard_home,

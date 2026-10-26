@@ -184,8 +184,24 @@ def test_queue_time_hints_leave_the_hook_time_to_persist_the_review(monkeypatch,
     assert len(asked) == 1
 
 
-def test_a_spent_review_budget_still_asks_for_the_connector_setup_hint(monkeypatch, tmp_path: Path) -> None:
-    # The stored connector hint is what resolves the row once setup finishes.
+def test_a_short_review_budget_still_asks_for_the_connector_setup_hint(monkeypatch, tmp_path: Path) -> None:
+    # The stored connector hint is what resolves the row once setup finishes,
+    # so it asks with the time left even below the usual minimum budget.
+    asked = _record_asks(monkeypatch)
+    monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
+    store = SimpleNamespace(guard_home=tmp_path)
+    connector = SetupConnector(
+        cli_id="local-cli.lanectl", identity_hash="a" * 64, name="lanectl", surface="cli", queue_group_id="group"
+    )
+    deadline = 100.0 + module._SAFETY_MARGIN_SECONDS + 0.05
+
+    module.native_review_hint(store, {}, {"decision": "review"}, None, None, deadline, connector)
+
+    assert asked[0]["connector"] == connector
+    assert 0 < asked[0]["budget_seconds"] < module._MIN_BUDGET_SECONDS
+
+
+def test_the_connector_ask_never_eats_the_persist_margin(monkeypatch, tmp_path: Path) -> None:
     asked = _record_asks(monkeypatch)
     monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
     store = SimpleNamespace(guard_home=tmp_path)
@@ -193,10 +209,10 @@ def test_a_spent_review_budget_still_asks_for_the_connector_setup_hint(monkeypat
         cli_id="local-cli.lanectl", identity_hash="a" * 64, name="lanectl", surface="cli", queue_group_id="group"
     )
 
-    module.native_review_hint(store, {}, {"decision": "review"}, None, None, 100.0, connector)
+    for deadline in (99.0, 100.0, 100.0 + module._SAFETY_MARGIN_SECONDS / 2):
+        assert module.native_review_hint(store, {}, {"decision": "review"}, None, None, deadline, connector) is None
 
-    assert asked[0]["connector"] == connector
-    assert asked[0]["budget_seconds"] == module._MIN_BUDGET_SECONDS
+    assert asked == []
 
 
 def test_queue_time_hints_need_extension_evidence_to_ask(monkeypatch, tmp_path: Path) -> None:
