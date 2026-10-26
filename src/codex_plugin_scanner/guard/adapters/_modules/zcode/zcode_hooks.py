@@ -20,6 +20,7 @@ stdout JSON for successful hook processes.
 
 from __future__ import annotations
 
+import os
 import shlex
 from collections.abc import Mapping
 from pathlib import Path
@@ -67,7 +68,30 @@ def _event_name_for_response(payload: Mapping[str, object]) -> str:
     return _canonical_zcode_event_name(raw_event) if raw_event else "PreToolUse"
 
 
-def _authority_block_remediation(guard_home: Path | None) -> str:
+def _quote_home(home: str, windows: bool) -> str:
+    """``home`` written the way the shell it is pasted into reads it.
+
+    POSIX quoting puts ``C:\\guards\\ci`` inside single quotes, which
+    ``cmd.exe`` hands on as part of the path, so a Windows person pastes a
+    command that repairs nothing. Both ``cmd.exe`` and PowerShell read a
+    double-quoted path literally, backslashes included, so that is the form a
+    Windows block offers; a path that needs no quoting is left bare, because
+    quotes a path does not need only invite editing. A Windows path cannot
+    hold a ``"``, so nothing inside has to be escaped. ``windows`` is passed
+    rather than read from ``os.name``, so both renderings are reachable from a
+    test on either platform.
+    """
+
+    if not windows:
+        return shlex.quote(home)
+    plain = home != "" and all(
+        character.isascii() and (character.isalnum() or character in "_-.:\\/")
+        for character in home
+    )
+    return home if plain else f'"{home}"'
+
+
+def _authority_block_remediation(guard_home: Path | None, windows: bool) -> str:
     """Return the remediation sentence, naming ``guard_home`` when it needs it.
 
     The block names the home the hook read its authority from. Someone who
@@ -97,7 +121,7 @@ def _authority_block_remediation(guard_home: Path | None) -> str:
         return _AUTHORITY_BLOCK_REMEDIATION
     return _AUTHORITY_BLOCK_REMEDIATION.replace(
         "command controls recover-authority",
-        f"command --guard-home {shlex.quote(str(guard_home))} controls recover-authority",
+        f"command --guard-home {_quote_home(str(guard_home), windows)} controls recover-authority",
     )
 
 
@@ -112,7 +136,7 @@ def zcode_authority_block_reason(reason: str, guard_home: Path | None = None) ->
 
     text = reason if isinstance(reason, str) else ""
     if _AUTHORITY_BLOCK_REASON_MARKER in text and "hol-guard command controls" not in text:
-        return text + _authority_block_remediation(guard_home)
+        return text + _authority_block_remediation(guard_home, os.name == "nt")
     return text
 
 

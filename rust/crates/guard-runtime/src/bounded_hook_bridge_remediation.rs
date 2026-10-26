@@ -48,6 +48,7 @@ fn authority_block_remediation(guard_home: Option<&Path>) -> String {
     remediation_for_home(
         guard_home,
         crate::claude_hook_bridge::home_directory().as_deref(),
+        cfg!(windows),
     )
 }
 
@@ -60,18 +61,48 @@ fn authority_block_remediation(guard_home: Option<&Path>) -> String {
 /// installer resolves the home it bakes in, so a person whose home is reached
 /// through a symlink may be told the path of the install they are already
 /// pointing at, which is longer than it needs to be but still the right one.
-fn remediation_for_home(guard_home: Option<&Path>, home_dir: Option<&Path>) -> String {
+fn remediation_for_home(
+    guard_home: Option<&Path>,
+    home_dir: Option<&Path>,
+    windows: bool,
+) -> String {
     let Some(guard_home) = guard_home else {
         return AUTHORITY_BLOCK_REMEDIATION.to_owned();
     };
     if home_dir.is_none_or(|home| home.join(".hol-guard") == guard_home) {
         return AUTHORITY_BLOCK_REMEDIATION.to_owned();
     }
-    let quoted = crate::mcp_proxy_shlex::quote(&guard_home.to_string_lossy());
+    let quoted = quote_home(&guard_home.to_string_lossy(), windows);
     AUTHORITY_BLOCK_REMEDIATION.replace(
         "command controls recover-authority",
         &format!("command --guard-home {quoted} controls recover-authority"),
     )
+}
+
+/// `home` written the way the shell this block is pasted into reads it.
+///
+/// POSIX quoting puts `C:\guards\ci` inside single quotes, which `cmd.exe`
+/// hands on as part of the path, so a Windows person pastes a command that
+/// repairs nothing. Both `cmd.exe` and PowerShell read a double-quoted path
+/// literally, backslashes included, so that is the form a Windows block
+/// offers; a path that needs no quoting is left bare, because quotes a path
+/// does not need only invite editing. A Windows path cannot hold a `"`, so
+/// nothing inside has to be escaped. `windows` is passed rather than read from
+/// `cfg!`, so both renderings are compiled and tested on every platform.
+pub(crate) fn quote_home(home: &str, windows: bool) -> String {
+    if !windows {
+        return crate::mcp_proxy_shlex::quote(home);
+    }
+    let plain = !home.is_empty()
+        && home.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '_' | '-' | '.' | ':' | '\\' | '/')
+        });
+    if plain {
+        home.to_owned()
+    } else {
+        format!("\"{home}\"")
+    }
 }
 
 #[cfg(test)]
