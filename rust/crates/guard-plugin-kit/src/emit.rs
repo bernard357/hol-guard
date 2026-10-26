@@ -16,12 +16,13 @@ use sha2::{Digest, Sha256};
 
 mod servers;
 
+use crate::agent_plugins;
 use crate::check::is_kebab;
 use crate::config::Excludes;
 use crate::model::Plugin;
 use crate::walk;
 
-use servers::{gemini_settings, registry_document, servers, Syntax};
+use servers::{agent_plugins_servers, gemini_settings, registry_document, servers, Syntax};
 
 /// The largest single file a package copies.
 const MAX_COPY_BYTES: u64 = 5 * 1024 * 1024;
@@ -40,10 +41,11 @@ pub enum Runtime {
     Opencode,
     McpRegistry,
     AgentSkills,
+    AgentPlugins,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 8] = [
+    pub const ALL: [Runtime; 9] = [
         Runtime::ClaudeCode,
         Runtime::Codex,
         Runtime::GeminiCli,
@@ -52,6 +54,7 @@ impl Runtime {
         Runtime::Opencode,
         Runtime::McpRegistry,
         Runtime::AgentSkills,
+        Runtime::AgentPlugins,
     ];
 
     pub fn id(self) -> &'static str {
@@ -64,6 +67,7 @@ impl Runtime {
             Runtime::Opencode => "opencode",
             Runtime::McpRegistry => "mcp-registry",
             Runtime::AgentSkills => "agent-skills",
+            Runtime::AgentPlugins => "agent-plugins",
         }
     }
 
@@ -99,7 +103,20 @@ pub fn supports(runtime: Runtime, plugin: &Plugin) -> bool {
             .skills
             .iter()
             .any(|skill| skill_slug(skill).is_some()),
+        Runtime::AgentPlugins => {
+            plugin
+                .name
+                .as_deref()
+                .is_some_and(agent_plugins::valid_plugin_name)
+                && (plugin.skills.iter().any(agent_plugins_skill)
+                    || !agent_plugins_servers(plugin).0.is_empty())
+        }
     }
+}
+
+/// A skill an Agent Plugins package carries: its folder must match its name.
+fn agent_plugins_skill(skill: &crate::model::Skill) -> bool {
+    agent_plugins::portable_skill(skill.name.as_deref(), skill.description.as_deref())
 }
 
 fn has_claude_only(plugin: &Plugin) -> bool {
@@ -124,12 +141,36 @@ pub fn dropped(runtime: Runtime, plugin: &Plugin) -> Vec<&'static str> {
             &["mcp_servers"]
         }
         Runtime::AgentSkills => &["skills"],
+        Runtime::AgentPlugins => &["skills", "mcp_servers"],
     };
-    present
+    let mut dropped: Vec<&'static str> = present
         .into_iter()
         .filter(|(name, has)| *has && !kept.contains(name))
         .map(|(name, _)| name)
-        .collect()
+        .collect();
+    if runtime == Runtime::AgentPlugins {
+        // Agent Plugins has no user-variable references, so environment
+        // variables and headers stay behind; so do skills whose folder
+        // cannot match their name and servers with no portable command.
+        let (_, loss) = agent_plugins_servers(plugin);
+        for (name, lost) in [
+            (
+                "skills_not_portable",
+                plugin
+                    .skills
+                    .iter()
+                    .any(|skill| !agent_plugins_skill(skill)),
+            ),
+            ("mcp_servers_not_portable", loss.servers),
+            ("mcp_env", loss.env),
+            ("mcp_headers", loss.headers),
+        ] {
+            if lost {
+                dropped.push(name);
+            }
+        }
+    }
+    dropped
 }
 
 /// The files to write for each runtime, under `<runtime>/`, in path order.
@@ -225,6 +266,18 @@ pub(crate) fn plan(
                 }
             }
             Runtime::AgentSkills => {}
+            Runtime::AgentPlugins => {
+                let mut extra = Map::new();
+                extra.insert("$schema".into(), json!(agent_plugins::PLUGIN_SCHEMA));
+                put_json("plugin.json", manifest(plugin, Some(extra)));
+                let (entries, _) = agent_plugins_servers(plugin);
+                if !entries.is_empty() {
+                    put_json(
+                        "mcp.json",
+                        json!({"$schema": agent_plugins::MCP_SCHEMA, "mcpServers": entries}),
+                    );
+                }
+            }
         }
         let copies = copies(runtime, root, plugin, excludes, &mut budget, sources)?;
         for (path, content) in copies {
@@ -256,13 +309,16 @@ fn copies(
     let mut found = Vec::new();
     let with_skills = matches!(
         runtime,
-        Runtime::ClaudeCode | Runtime::Codex | Runtime::AgentSkills
+        Runtime::ClaudeCode | Runtime::Codex | Runtime::AgentSkills | Runtime::AgentPlugins
     );
     if with_skills {
         for skill in &plugin.skills {
             let Some(slug) = skill_slug(skill) else {
                 continue;
             };
+            if runtime == Runtime::AgentPlugins && !agent_plugins_skill(skill) {
+                continue;
+            }
             let dir = root.join(&skill.dir);
             if skill.dir.is_empty() {
                 // A SKILL.md at the repository root travels alone.

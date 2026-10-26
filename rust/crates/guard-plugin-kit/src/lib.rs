@@ -7,6 +7,7 @@
 //! to `hol-guard-runtime plugin-kit --stdin` and gets one response back:
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
 
+mod agent_plugins;
 mod check;
 mod config;
 mod detect;
@@ -38,6 +39,13 @@ pub const PROVENANCE_SCHEMA: &str = "hol.plugin-kit.provenance.v1";
 enum Request {
     Check {
         root: String,
+        #[serde(default)]
+        strict: bool,
+    },
+    /// Conformance to a published plugin format; see `agent_plugins.rs`.
+    Conformance {
+        root: String,
+        spec: String,
         #[serde(default)]
         strict: bool,
     },
@@ -115,6 +123,13 @@ fn handle(request: Request) -> Result<Value, String> {
         Request::Check { root, strict } => {
             let root = resolve_root(&root)?;
             check_report(&root, strict)
+        }
+        Request::Conformance { root, spec, strict } => {
+            let root = resolve_root(&root)?;
+            match spec.as_str() {
+                agent_plugins::SPEC => Ok(agent_plugins::check(&root, strict)),
+                _ => Err("plugin_kit_spec_unsupported".to_owned()),
+            }
         }
         Request::Links { root, block, slug } => {
             let root = resolve_root(&root)?;

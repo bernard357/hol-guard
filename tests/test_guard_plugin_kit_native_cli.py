@@ -212,3 +212,42 @@ def test_links_block_prints_only_the_readme_block(tmp_path: Path) -> None:
     exit_code, _output, error = _run(["plugin", "links", str(tmp_path), "--block", "--slug", "../notes"])
     assert exit_code == 2
     assert "Use a HOL listing slug" in error
+
+
+def test_convert_to_agent_plugins_writes_a_conforming_package(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_plugin(source)
+    out = tmp_path / "out"
+    exit_code, output, error = _run(["plugin", "convert", str(source), "--to", "agent-plugins", "--out", str(out)])
+    assert (exit_code, error) == (0, ""), output
+    package = out / "agent-plugins"
+    manifest = json.loads((package / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["$schema"].startswith("https://agent-plugins.org/schemas/1.0.0/")
+    assert json.loads((package / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {
+        "notes": {"type": "stdio", "command": "npx", "args": ["-y", "@acme/notes-mcp"]}
+    }
+    assert (package / "skills" / "notes" / "SKILL.md").is_file()
+    assert "conforms to agent-plugins-1.0: 0 errors, 0 warnings" in output
+
+    exit_code, output, error = _run(["plugin", "check", str(package), "--spec", "agent-plugins-1.0", "--json"])
+    assert (exit_code, error) == (0, ""), output
+    assert json.loads(output)["passed"] is True
+
+
+def test_check_spec_names_the_section_a_plugin_breaks(tmp_path: Path) -> None:
+    (tmp_path / "plugin.json").write_text(
+        json.dumps({"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", "name": "Bad Name"}),
+        encoding="utf-8",
+    )
+    exit_code, output, _error = _run(["plugin", "check", str(tmp_path), "--spec", "agent-plugins-1.0"])
+    assert exit_code == 1
+    assert "name_invalid" in output
+    assert "(section " in output
+    assert "does not conform to agent-plugins-1.0" in output
+
+
+def test_convert_rejects_an_unknown_target(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, _output, error = _run(["plugin", "convert", str(tmp_path), "--to", "zed"])
+    assert exit_code == 2
+    assert "agent-plugins" in error

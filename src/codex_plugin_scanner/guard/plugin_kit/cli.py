@@ -1,4 +1,4 @@
-"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|links|install|uninstall``.
+"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|install|uninstall``.
 
 Detection, checks, packaging and file writes run in the native runtime's
 ``plugin-kit`` command. This module parses arguments, sends one request and
@@ -17,6 +17,7 @@ from typing import Any
 
 PLUGIN_KIT_COMMAND = "plugin-kit"
 PLUGIN_KIT_FEATURE = "plugin-kit-v1"
+AGENT_PLUGINS_SPEC = "agent-plugins-1.0"
 _TIMEOUT_SECONDS = 120.0
 _OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 _NATIVE_UNAVAILABLE = "The HOL Guard Plugin Kit requires the Guard native runtime. Run: pip install -U hol-guard"
@@ -38,8 +39,10 @@ _ERRORS = {
             "opencode",
             "mcp-registry",
             "agent-skills",
+            "agent-plugins",
         )
     ),
+    "plugin_kit_spec_unsupported": "Unknown spec. Supported: agent-plugins-1.0",
     "plugin_kit_runtime_unsupported": (
         "A requested runtime cannot load this plugin. Run check to see what each runtime takes."
     ),
@@ -183,6 +186,20 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
     init.add_argument("--name", help="Kebab-case name for a new plugin in an empty folder.")
     check = add("check", "Report what marketplaces and runtime loaders would reject.")
     check.add_argument("--strict", action="store_true", help="Fail on warnings too.")
+    check.add_argument(
+        "--spec",
+        choices=(AGENT_PLUGINS_SPEC,),
+        help="Check conformance to a published plugin format instead, such as the Agent Plugins spec.",
+    )
+    convert = add("convert", "Write a ready-to-load copy of the plugin for one runtime or format.")
+    convert.add_argument(
+        "--to",
+        required=True,
+        metavar="RUNTIME",
+        help="Runtime or format to convert to, such as agent-plugins, codex or gemini-cli.",
+    )
+    convert.add_argument("--out", help="Output folder (default: hol.json's out, else dist/hol-plugin).")
+    convert.add_argument("--force", action="store_true", help="Replace the files a previous convert wrote.")
     package = add("package", "Write a ready-to-load copy of the plugin for each runtime.")
     package.add_argument("--out", help="Output folder (default: hol.json's out, else dist/hol-plugin).")
     package.add_argument(
@@ -231,6 +248,9 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
 
 def _request(args: argparse.Namespace) -> dict[str, object]:
     request: dict[str, object] = {"command": args.command, "root": str(Path(args.path).resolve())}
+    if args.command == "check" and args.spec:
+        request["command"] = "conformance"
+        request["spec"] = args.spec
     if args.command == "init" and args.name:
         request["name"] = args.name
     if args.command == "links" and args.block:
@@ -285,6 +305,77 @@ def _write_check(result: Mapping[str, Any]) -> None:
     warnings = int(summary.get("warnings", 0))
     verdict = "passed" if result.get("passed") else "failed"
     print(f"Check {verdict}: {errors} errors, {warnings} warnings.")
+
+
+def _write_conformance(result: Mapping[str, Any]) -> None:
+    plugin = result.get("plugin") or {}
+    name = plugin.get("name") or "(unnamed)"
+    version = plugin.get("version")
+    print(f"{name}{' ' + version if version else ''}")
+    components = result.get("components") or {}
+    skills = len(components.get("skills") or [])
+    servers = len(components.get("mcp_servers") or [])
+    print(f"  Agent Plugins {result.get('version')}: {skills} skills, {servers} MCP servers")
+    diagnostics = result.get("diagnostics") or []
+    if diagnostics:
+        print()
+    for item in diagnostics:
+        location = f" {item.get('path')}" if item.get("path") else ""
+        section = f" (section {item.get('section')})" if item.get("section") else ""
+        print(f"  {item.get('level', 'error')}: {item.get('code')}{location}{section}")
+        print(f"    {item.get('message')}")
+    print()
+    summary = result.get("summary") or {}
+    verdict = "conforms" if result.get("passed") else "does not conform"
+    print(
+        f"The plugin {verdict} to {result.get('spec')}: "
+        f"{int(summary.get('errors', 0))} errors, {int(summary.get('warnings', 0))} warnings."
+    )
+
+
+def _convert(args: argparse.Namespace) -> int:
+    """``package`` for one runtime; an Agent Plugins result is then checked against the spec."""
+
+    request: dict[str, object] = {
+        "command": "package",
+        "root": str(Path(args.path).resolve()),
+        "runtimes": [args.to],
+        "force": bool(args.force),
+    }
+    if args.out:
+        request["out_dir"] = str(Path(args.out).resolve())
+    result = _call(request)
+    if result is None:
+        return 2
+    output = Path(str(result.get("out_dir") or "")) / args.to
+    conformance = None
+    if result.get("packaged") and args.to == "agent-plugins":
+        conformance = _call({"command": "conformance", "root": str(output), "spec": AGENT_PLUGINS_SPEC})
+        if conformance is None:
+            return 2
+    if args.json:
+        print(json.dumps({"package": result, "conformance": conformance}, indent=2, sort_keys=True))
+    elif not result.get("packaged"):
+        _write_check(result.get("check") or {})
+        print("\nNothing was written. Fix the errors above and run convert again.")
+    else:
+        print(f"Converted into {output}")
+        dropped = next(
+            (
+                runtime.get("dropped") or []
+                for runtime in result.get("runtimes") or []
+                if runtime.get("runtime") == args.to
+            ),
+            [],
+        )
+        if dropped:
+            print(f"  Left out: {', '.join(dropped)}")
+        if conformance is not None:
+            print()
+            _write_conformance(conformance)
+    if not result.get("packaged") or (conformance is not None and not conformance.get("passed")):
+        return 1
+    return 0
 
 
 def _write_links(result: Mapping[str, Any]) -> None:
@@ -400,11 +491,15 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
     args = build_parser(program_name=program_name).parse_args(argv)
     if args.command in {"install", "uninstall"}:
         return _install(args)
+    if args.command == "convert":
+        return _convert(args)
     result = _call(_request(args))
     if result is None:
         return 2
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "check" and args.spec:
+        _write_conformance(result)
     elif args.command == "check":
         _write_check(result)
     elif args.command == "links" and args.block:
@@ -426,7 +521,8 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
                 if runtime.get("supported"):
                     print(f"  {runtime.get('runtime')}/")
     if not args.json and (
-        (args.command == "check" and result.get("passed")) or (args.command == "package" and result.get("packaged"))
+        (args.command == "check" and not args.spec and result.get("passed"))
+        or (args.command == "package" and result.get("packaged"))
     ):
         _offer_guard_once()
     if args.command == "check" and not result.get("passed"):

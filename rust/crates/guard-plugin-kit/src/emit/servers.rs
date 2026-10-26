@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 
+use crate::agent_plugins;
 use crate::check::is_kebab;
 use crate::model::{McpServer, Plugin};
 use crate::reference;
@@ -173,9 +174,108 @@ pub(super) fn gemini_settings(plugin: &Plugin) -> Vec<Value> {
         .collect()
 }
 
+/// The plugin-root placeholders other runtimes use. Agent Plugins expands
+/// only `${PLUGIN_ROOT}`, and a `command` must be a bare name or `./` path.
+const ROOT_PLACEHOLDERS: [&str; 3] = [
+    "${CLAUDE_PLUGIN_ROOT}",
+    "${PLUGIN_ROOT}",
+    "${extensionPath}",
+];
+
+/// What an Agent Plugins `mcp.json` could not carry.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AgentPluginsLoss {
+    /// A server left out: its command or URL has no Agent Plugins form.
+    pub servers: bool,
+    /// Environment variables left out. Agent Plugins has no user-variable
+    /// references, and literal values are never carried.
+    pub env: bool,
+    /// Remote headers left out, for the same reason.
+    pub headers: bool,
+}
+
+/// Servers in Agent Plugins `mcp.json` syntax, and what was left out.
+pub(super) fn agent_plugins_servers(plugin: &Plugin) -> (Map<String, Value>, AgentPluginsLoss) {
+    let mut entries = Map::new();
+    let mut loss = AgentPluginsLoss::default();
+    for (name, server) in &plugin.mcp_servers {
+        let mut entry = Map::new();
+        if let Some(command) = &server.command {
+            let Some(command) = portable_command(command) else {
+                loss.servers = true;
+                continue;
+            };
+            entry.insert("type".into(), json!("stdio"));
+            entry.insert("command".into(), json!(command));
+            if !server.args.is_empty() {
+                let args: Vec<String> = server.args.iter().map(|arg| portable_arg(arg)).collect();
+                entry.insert("args".into(), json!(args));
+            }
+        } else {
+            let Some(url) = server
+                .url
+                .as_deref()
+                .filter(|url| !url.contains('$') && agent_plugins::url_problem(url).is_none())
+            else {
+                loss.servers = true;
+                continue;
+            };
+            let sse = server.transport.as_deref() == Some("sse");
+            entry.insert(
+                "type".into(),
+                json!(if sse { "sse" } else { "streamable-http" }),
+            );
+            entry.insert("url".into(), json!(url));
+        }
+        loss.env |= !server.env.is_empty();
+        loss.headers |= !server.headers.is_empty() || !server.literal_headers.is_empty();
+        entries.insert(name.clone(), Value::Object(entry));
+    }
+    (entries, loss)
+}
+
+/// A stdio command as one token: a bare executable name, or a `./` path
+/// inside the plugin, translated from a plugin-root placeholder.
+fn portable_command(command: &str) -> Option<String> {
+    let command = match ROOT_PLACEHOLDERS
+        .iter()
+        .find_map(|placeholder| command.strip_prefix(placeholder))
+    {
+        Some(rest) => {
+            let rest = rest
+                .strip_prefix("${/}")
+                .or_else(|| rest.strip_prefix('/'))?;
+            format!("./{}", rest.replace("${/}", "/"))
+        }
+        None => command.to_owned(),
+    };
+    if command.is_empty()
+        || command.chars().any(char::is_whitespace)
+        || command.contains(['$', '\\', ':'])
+    {
+        return None;
+    }
+    match command.strip_prefix("./") {
+        Some(relative) => relative
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+            .then_some(command),
+        None => (!command.contains('/')).then_some(command),
+    }
+}
+
+/// An argument with each plugin-root placeholder written as `${PLUGIN_ROOT}`.
+fn portable_arg(arg: &str) -> String {
+    let mut arg = arg.replace("${/}", "/");
+    for placeholder in ROOT_PLACEHOLDERS {
+        arg = arg.replace(placeholder, "${PLUGIN_ROOT}");
+    }
+    arg
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{env_reference, Syntax};
+    use super::{env_reference, portable_arg, portable_command, Syntax};
 
     #[test]
     fn env_references_use_each_runtime_syntax() {
@@ -183,5 +283,38 @@ mod tests {
         assert_eq!(env_reference(Syntax::Gemini, "API_KEY"), "$API_KEY");
         assert_eq!(env_reference(Syntax::Vscode, "API_KEY"), "${env:API_KEY}");
         assert_eq!(env_reference(Syntax::Opencode, "API_KEY"), "{env:API_KEY}");
+    }
+
+    #[test]
+    fn agent_plugins_commands_are_one_token_inside_the_plugin() {
+        assert_eq!(portable_command("node").as_deref(), Some("node"));
+        assert_eq!(
+            portable_command("${CLAUDE_PLUGIN_ROOT}/bin/server").as_deref(),
+            Some("./bin/server")
+        );
+        assert_eq!(
+            portable_command("${extensionPath}${/}dist${/}server.js").as_deref(),
+            Some("./dist/server.js")
+        );
+        assert_eq!(portable_command("./run.sh").as_deref(), Some("./run.sh"));
+        for rejected in [
+            "/usr/bin/node",
+            "bin/server",
+            "./../server",
+            "${CLAUDE_PLUGIN_ROOT}/../server",
+            "npx -y server",
+            "${HOME}/server",
+            "C:\\server.exe",
+        ] {
+            assert_eq!(portable_command(rejected), None, "{rejected}");
+        }
+        assert_eq!(
+            portable_arg("${CLAUDE_PLUGIN_ROOT}/dist/index.js"),
+            "${PLUGIN_ROOT}/dist/index.js"
+        );
+        assert_eq!(
+            portable_arg("${extensionPath}${/}index.js"),
+            "${PLUGIN_ROOT}/index.js"
+        );
     }
 }

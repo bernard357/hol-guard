@@ -12,9 +12,13 @@ pub enum SourceKind {
     CodexPlugin,
     GeminiExtension,
     McpServer,
+    /// An Agent Plugins `plugin.json` (its `$schema` names agent-plugins.org).
+    AgentPlugin,
     ClaudeMarketplace,
     CodexMarketplace,
     McpConfig,
+    /// An Agent Plugins `mcp.json`.
+    AgentPluginMcp,
     AgentSkill,
 }
 
@@ -23,7 +27,11 @@ impl SourceKind {
     pub(crate) fn is_plugin_root(self) -> bool {
         matches!(
             self,
-            Self::ClaudePlugin | Self::CodexPlugin | Self::GeminiExtension | Self::McpServer
+            Self::ClaudePlugin
+                | Self::CodexPlugin
+                | Self::GeminiExtension
+                | Self::McpServer
+                | Self::AgentPlugin
         )
     }
 }
