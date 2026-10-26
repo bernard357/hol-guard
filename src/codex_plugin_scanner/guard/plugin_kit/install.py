@@ -57,18 +57,19 @@ def spec_endpoint(environ: Mapping[str, str] | None = None) -> tuple[str, str | 
     value = (os.environ if environ is None else environ).get(SPEC_URL_ENV, "").strip()
     if not value:
         return SPEC_URL, None
+    problem = PluginInstallError(
+        f"{SPEC_URL_ENV} must be an https URL, or http on localhost or host.docker.internal, "
+        "with no credentials, query or fragment."
+    )
     try:
         parts = urllib.parse.urlsplit(value)
         host = (parts.hostname or "").lower()
         parts.port  # noqa: B018 - raises on a malformed port
     except ValueError:
-        host = ""
+        raise problem from None
     allowed = parts.scheme == "https" or (parts.scheme == "http" and host in _HTTP_HOSTS)
     if not host or not allowed or parts.username or parts.password or parts.query or parts.fragment:
-        raise PluginInstallError(
-            f"{SPEC_URL_ENV} must be an https URL, or http on localhost or host.docker.internal, "
-            "with no credentials, query or fragment."
-        )
+        raise problem
     return value, f"{parts.scheme}://{parts.netloc.lower()}/"
 
 

@@ -335,6 +335,7 @@ def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
         "https://registry.example/spec?slug=other",
         "https://registry.example/spec#x",
         "http://127.0.0.1:99999/spec",
+        "http://[bad/spec",
         "not a url",
     ],
 )
