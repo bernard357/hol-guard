@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast, get_args
+from typing import TypeGuard, cast, get_args
 
 from .approval_gate import ApprovalGateGrant, public_config, require_settings_write
 from .approval_wait_limits import MAX_APPROVAL_WAIT_TIMEOUT_SECONDS  # noqa: F401 - re-exported
@@ -459,10 +459,10 @@ def _resolved_risk_actions(config: GuardConfig, harness: str | None) -> dict[str
     # read as "no configured action" and skip its floor.
     if not _is_risk_action_map(resolved) or set(resolved) != VALID_RISK_ACTION_KEYS:
         raise ConfigFileTrustError("native_guard_config_invalid")
-    return cast("dict[str, GuardAction]", resolved)
+    return resolved
 
 
-def _is_risk_action_map(value: object) -> bool:
+def _is_risk_action_map(value: object) -> TypeGuard[dict[str, GuardAction]]:
     return isinstance(value, dict) and all(
         isinstance(key, str)
         and key in VALID_RISK_ACTION_KEYS
