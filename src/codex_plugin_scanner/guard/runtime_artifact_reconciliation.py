@@ -19,11 +19,16 @@ from .shim_refresh import refresh_stale_harness_shims
 from .shims import package_shim_dashboard_status, package_shim_status, repair_package_shims
 from .store import GuardStore
 
-# A hook command names the frozen build's runtime by its content-addressed
-# durable copy, ``native-runtime/<sha256>/``; JSON configs may escape the separator.
-_PINNED_RUNTIME = re.compile(r"native-runtime[/\\]+([0-9a-f]{64})[/\\]")
+# A hook command launches the frozen build's runtime from its content-addressed
+# durable copy, ``native-runtime/<sha256>/hol-guard-runtime[.exe]``; JSON
+# configs may escape the separator. Requiring the executable name keeps a
+# preserved user field that only names the directory from counting as a pin.
+_PINNED_RUNTIME = re.compile(r"native-runtime[/\\]+([0-9a-f]{64})[/\\]+hol-guard-runtime(?:\.exe)?(?![\w.-])")
 _PINNED_SCAN_CHUNK_BYTES = 1024 * 1024
-_PINNED_COMMAND_WINDOW = 256
+# Guard writes hook artifacts of a few kilobytes. A manifest path that names a
+# far larger file is not one of them; stop there rather than read it to EOF.
+_PINNED_SCAN_MAX_BYTES = 16 * _PINNED_SCAN_CHUNK_BYTES
+_PINNED_SCAN_CARRY = 256
 _MANIFEST_SCAN_MAX_PATHS = 16
 _MANIFEST_SCAN_MAX_NODES = 512
 
@@ -135,25 +140,17 @@ def _manifest_file_paths(manifest: object) -> tuple[Path, ...]:
 def _names_stale_runtime(path: Path, current_digest: str) -> bool:
     """Whether one Guard-owned artifact still launches an older runtime copy."""
 
-    # Stream the whole file: a pin past any fixed read limit must still count.
-    # Each chunk keeps the previous tail so a match and its window can span
-    # the boundary.
-    carry = 2 * _PINNED_COMMAND_WINDOW + 128
+    # Each chunk keeps the previous tail so a pin can span the boundary.
     pinned: set[str] = set()
     tail = ""
+    scanned = 0
     try:
         with path.open("rb") as handle:
-            while chunk := handle.read(_PINNED_SCAN_CHUNK_BYTES):
+            while scanned < _PINNED_SCAN_MAX_BYTES and (chunk := handle.read(_PINNED_SCAN_CHUNK_BYTES)):
+                scanned += len(chunk)
                 text = tail + chunk.decode("utf-8", errors="replace")
-                for match in _PINNED_RUNTIME.finditer(text):
-                    window = text[max(0, match.start() - _PINNED_COMMAND_WINDOW) : match.end() + _PINNED_COMMAND_WINDOW]
-                    # Only a Guard hook command counts. A preserved user field that
-                    # happens to name a durable runtime path would otherwise request
-                    # a reinstall on every pass and then fail the readiness check
-                    # that follows it.
-                    if "hol-guard" in window:
-                        pinned.add(match.group(1))
-                tail = text[-carry:]
+                pinned.update(match.group(1) for match in _PINNED_RUNTIME.finditer(text))
+                tail = text[-_PINNED_SCAN_CARRY:]
     except (OSError, ValueError):
         return False
     return bool(pinned) and pinned != {current_digest}
