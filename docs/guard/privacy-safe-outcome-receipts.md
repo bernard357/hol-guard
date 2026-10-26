@@ -21,7 +21,7 @@ A receipt contains only:
 - optional bounded proof kind; and
 - `sensitive_content_included: false`.
 
-It must not contain prompts, source code, findings, file paths, commands, secrets, tokens, usernames, hostnames, or report bodies. The helper accepts a precomputed evidence digest so callers do not need to pass sensitive evidence into a transport object.
+It must not contain prompts, source code, findings, file paths, commands, secrets, tokens, usernames, hostnames, or report bodies. Any future emitter must accept a precomputed evidence digest, so callers never pass sensitive evidence into a transport object.
 
 ## Verification boundary
 
