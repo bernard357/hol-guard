@@ -53,8 +53,8 @@ pub struct ContainedWrapperPlanResultV1 {
     pub status: String,
     /// `ok`, or one of the `native_contained_wrapper_plan_*` codes.
     pub code: String,
-    /// `{"plan": ..., "refusal": ..., "directory_sibling_root": ...,
-    /// "anchored_sibling_root": ..., "project_root": ...}`; see
+    /// `{"plan": ..., "refusal": ..., "anchored_sibling_root": ...,
+    /// "project_root": ...}`; see
     /// `contained_wrapper_plan`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,

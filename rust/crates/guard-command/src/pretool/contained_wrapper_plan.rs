@@ -44,9 +44,6 @@ pub struct ContainedWrapperPlan {
     pub plan: Option<ContainedWrapperCore>,
     /// Set when the shape is wrapped but unsupported.
     pub refusal: Option<&'static str>,
-    /// The sibling repository holding `plan.directory`, when that directory
-    /// lies outside the sink's workspace.
-    pub directory_sibling_root: Option<PathBuf>,
     /// The sibling repository an absolute script runs from, when no wrapper
     /// was peeled.
     pub anchored_sibling_root: Option<PathBuf>,
@@ -97,14 +94,10 @@ fn wrapper_plan(
     peels_relative_inside: bool,
 ) -> ContainedWrapperPlan {
     match super::sink_peel::peel(command, workspace, cwd, home_dir, peels_relative_inside) {
-        Ok(Some(core)) => {
-            let directory_sibling_root = outside_root(&core.directory, workspace, home_dir);
-            ContainedWrapperPlan {
-                plan: Some(core),
-                directory_sibling_root,
-                ..ContainedWrapperPlan::default()
-            }
-        }
+        Ok(Some(core)) => ContainedWrapperPlan {
+            plan: Some(core),
+            ..ContainedWrapperPlan::default()
+        },
         Ok(None) => ContainedWrapperPlan {
             anchored_sibling_root: anchored_root(command, workspace, cwd, home_dir),
             ..ContainedWrapperPlan::default()
@@ -143,20 +136,6 @@ fn anchored_root(
         (root, None) => Some(root),
         (_, Some(_)) => None,
     }
-}
-
-/// The sibling repository holding `directory`, when it lies outside the
-/// workspace. The sink rebases its approved root there.
-fn outside_root(
-    directory: &std::path::Path,
-    workspace: &str,
-    home_dir: Option<&str>,
-) -> Option<PathBuf> {
-    let root = std::fs::canonicalize(workspace).ok()?;
-    if directory.starts_with(&root) {
-        return None;
-    }
-    contained_wrapper::sibling_project_root(directory, home_dir?)
 }
 
 #[cfg(test)]

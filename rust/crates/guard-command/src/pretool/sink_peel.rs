@@ -25,6 +25,13 @@ const OPERATOR: &str = "();<>|&\n";
 /// exact reading of the text, so any of them makes the lex inexact.
 const UNQUOTED_EXPANSION: &str = "$`*?[{";
 const DOUBLE_QUOTED_ESCAPES: &str = "$`\"\\";
+
+/// Whether an unquoted `\` is a path separator rather than an escape, as the
+/// classifier reads it (`preserve_unquoted_backslash`). The sink peels only
+/// posix-dialect shell strings, so the host decides this alone. Reading it the
+/// other way on Windows would peel a different command from the one the
+/// classifier admitted: `cd C:\\repo && cargo test` would name `C:repo`.
+const PRESERVE_UNQUOTED_BACKSLASH: bool = cfg!(windows);
 /// Characters a surviving word may not contain: the core is handed to a
 /// sandbox, not to a shell, so a redirection or list operator inside a word
 /// would be passed through as text rather than obeyed.
@@ -338,9 +345,16 @@ fn lex(command: &str) -> Result<(Vec<Token>, bool), &'static str> {
             if matches!(characters.get(index + 1), None | Some(&'\n')) {
                 return Err("unsupported escape");
             }
-            word.get_or_insert_with(String::new)
-                .push(characters[index + 1]);
-            index += 2;
+            if PRESERVE_UNQUOTED_BACKSLASH
+                && !crate::command_tokens::backslash_escapes_operator(characters, index)
+            {
+                word.get_or_insert_with(String::new).push(character);
+                index += 1;
+            } else {
+                word.get_or_insert_with(String::new)
+                    .push(characters[index + 1]);
+                index += 2;
+            }
         } else {
             if (character as u32) < 32
                 || UNQUOTED_EXPANSION.contains(character)

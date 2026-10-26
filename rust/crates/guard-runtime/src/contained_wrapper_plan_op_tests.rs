@@ -126,6 +126,24 @@ fn a_request_without_a_workspace_is_refused() {
 }
 
 #[test]
+fn an_unquoted_backslash_is_read_the_way_the_classifier_reads_it() {
+    // The peel and the classifier have to name the same command. The host
+    // decides whether an unquoted `\` separates a path or escapes the next
+    // character, so the core text follows that same reading.
+    let root = workspace();
+    let answer = evaluate(&request(
+        r"cargo test --manifest-path C:\repo\Cargo.toml | head -n 5",
+        root.path(),
+    ));
+    let expected = if cfg!(windows) {
+        r"cargo test --manifest-path 'C:\repo\Cargo.toml'"
+    } else {
+        "cargo test --manifest-path C:repoCargo.toml"
+    };
+    assert_eq!(answer["plan"]["core"], Value::from(expected));
+}
+
+#[test]
 fn the_result_binds_to_its_request() {
     let root = workspace();
     let req = request("pytest -q | head -n 5", root.path());
@@ -155,15 +173,27 @@ fn a_directory_question_is_answered_beside_the_peel() {
     req.project_root_query = Some(checkout.to_string_lossy().into_owned());
     let answer = evaluate(&req);
     assert_eq!(answer["plan"], Value::Null);
+    // The answer comes back in the caller's spelling, because the sink compares
+    // it with the run root it asked about.
     assert_eq!(
         answer["project_root"],
-        Value::from(
-            std::fs::canonicalize(&checkout)
-                .expect("checkout")
-                .to_string_lossy()
-                .into_owned()
-        )
+        Value::from(checkout.to_string_lossy().into_owned())
     );
+}
+
+#[test]
+fn the_walk_stops_before_the_base_it_climbs_from() {
+    // Home itself holding a `.git` is not a sibling repository, so a directory
+    // under it whose own tree carries no checkout has no root at all.
+    let home = workspace();
+    std::fs::create_dir_all(home.path().join(".git")).expect("home checkout");
+    let plain = home.path().join("notes");
+    std::fs::create_dir_all(&plain).expect("directory");
+    let root = workspace();
+    let mut req = request("pytest -q", root.path());
+    req.home_dir = Some(home.path().to_string_lossy().into_owned());
+    req.project_root_query = Some(plain.to_string_lossy().into_owned());
+    assert_eq!(evaluate(&req)["project_root"], Value::Null);
 }
 
 #[test]

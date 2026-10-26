@@ -71,10 +71,6 @@ fn encode(plan: &ContainedWrapperPlan) -> Value {
             "output": core.output.as_ref().map(encode_output),
         })),
         "refusal": plan.refusal,
-        "directory_sibling_root": plan
-            .directory_sibling_root
-            .as_ref()
-            .map(|root| root.to_string_lossy()),
         "anchored_sibling_root": plan
             .anchored_sibling_root
             .as_ref()
