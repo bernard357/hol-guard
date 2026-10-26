@@ -318,7 +318,10 @@ def test_gate_executes_only_trusted_default_branch_verification_code() -> None:
     job = workflow["jobs"]["verify"]
     assert workflow["permissions"] == {}
     assert job["permissions"] == {"actions": "read", "contents": "read"}
-    assert job["if"] == "github.event_name == 'workflow_run'"
+    assert " ".join(job["if"].split()) == (
+        "github.event_name == 'workflow_run' || "
+        "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')"
+    )
     checkout = job["steps"][0]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
     assert job["steps"][1]["run"] == "python3 -I -S scripts/ci/verify_release_workflow_run.py"
