@@ -6,6 +6,13 @@
 //! one signed loopback link instead. The person opens that page and presses
 //! Repair protection; this tool call stays denied.
 //!
+//! There is a link only while the approval center is running, since the
+//! locator the page is addressed from names a live process. Without one the
+//! reason keeps the `recover-authority` command the floor appended: a page
+//! served by a daemon that is not there cannot be opened, so the terminal is
+//! the only route left, and naming the page alone would leave the person with
+//! nothing that works.
+//!
 //! The repair runs after the receipt is built, so the receipt keeps the
 //! unrepaired reason, exactly as it did while the daemon worker composed this.
 
@@ -23,9 +30,11 @@ const APPROVAL_REASON_PREFIX: &str = concat!(
     "HOL Guard blocked this action because trusted protection settings need repair. ",
     "Open this local page and press Repair protection: ",
 );
+/// Without a page to open, the command that needs no daemon comes first.
 const APPROVAL_REASON_WITHOUT_URL: &str = concat!(
     "HOL Guard blocked this action because trusted protection settings need repair. ",
-    "Open HOL Guard Extensions and press Repair protection.",
+    "Run `hol-guard command controls recover-authority` in a terminal to restore protection, ",
+    "or open HOL Guard Extensions and press Repair protection.",
 );
 
 /// Rewrite a repairable command-control authority block in place.

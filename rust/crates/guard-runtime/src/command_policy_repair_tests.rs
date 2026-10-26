@@ -64,6 +64,22 @@ fn a_tampered_authority_block_asks_for_a_repair() {
 }
 
 #[test]
+fn a_block_with_no_repair_page_keeps_the_terminal_command() {
+    // The link is absent exactly when the approval center is not running, so
+    // the page it would address cannot be opened. Naming only that page would
+    // leave the person holding a blocked command and nothing that works.
+    for health in ["tampered", "recovery-required"] {
+        let result = without_locator(health);
+        let reason = result["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("hol-guard command controls recover-authority"),
+            "{health}: {reason}"
+        );
+        assert!(result.get("repair_url").is_none(), "{health}");
+    }
+}
+
+#[test]
 fn a_degraded_authority_block_keeps_the_recover_authority_hint() {
     for health in [
         "degraded-unacknowledged",
