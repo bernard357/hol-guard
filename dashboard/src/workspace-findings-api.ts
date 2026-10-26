@@ -22,13 +22,16 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime" | "skill" | "mcp";
+export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime" | "skill" | "mcp" | "hook";
 
 /** The fixed wording of the skill content rule that matched; never text from the skill. */
 export type WorkspaceSkillCheck = { title: string; reason: string; confidence: string; falsePositiveHint: string | null };
 
 /** The MCP launch rule that matched and the server it names; never the server's command or URL. */
 export type WorkspaceMcpCheck = WorkspaceSkillCheck & { server: string };
+
+/** The hook rule that matched and the event the hook runs on; never the hook's command. */
+export type WorkspaceHookCheck = WorkspaceSkillCheck & { event: string };
 
 /** An executable a configured tool would launch that matches a runtime advisory. */
 export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
@@ -60,6 +63,8 @@ export type WorkspaceFinding = {
   skill: WorkspaceSkillCheck | null;
   /** Set only for an MCP server configuration finding, a warning with no fix. */
   mcp: WorkspaceMcpCheck | null;
+  /** Set only for a project hook configuration finding, a warning with no fix. */
+  hook: WorkspaceHookCheck | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -179,6 +184,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
       runtime: null,
       skill: null,
       mcp: null,
+      hook: null,
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
@@ -204,6 +210,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         falsePositiveHint: text(item.false_positive_hint),
       },
       mcp: null,
+      hook: null,
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
@@ -226,6 +233,35 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
       skill: null,
       mcp: {
         server,
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
+      hook: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "hook_config_v1") {
+    const path = text(item.path);
+    const event = text(item.event);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || event === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "hook",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: {
+        event,
         title,
         reason,
         confidence: text(item.confidence) ?? "likely",
@@ -255,6 +291,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
       },
       skill: null,
       mcp: null,
+      hook: null,
     };
   }
   const packageName = text(item.package_name);
@@ -272,6 +309,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     runtime: null,
     skill: null,
     mcp: null,
+    hook: null,
   };
 }
 

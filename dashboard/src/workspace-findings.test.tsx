@@ -364,6 +364,61 @@ assert.ok(mcpMarkup.includes("admin-tools") && mcpMarkup.includes(".mcp.json"));
 assert.ok(mcpMarkup.includes("MCP server launches with elevated privileges"));
 assert.ok(mcpMarkup.includes("Expected only for a server that manages the machine itself."));
 assert.ok(!mcpMarkup.includes("No dependency or secret findings"), "a run with only MCP findings is not shown as clean");
+const hookState = normalizeWorkspaceFindingsState(
+  { worktrees: [], runs: [] },
+  {
+    worktrees: [],
+    assessments: [
+      {
+        ...ids,
+        run_id: "run-hook",
+        state: "completed",
+        coverage: { status: "complete", reasons: [], detectors: { supply_chain: "complete", hook_config_v1: "complete" } },
+        findings: [
+          {
+            finding_id: "hook-1",
+            source_kind: "workspace_source",
+            detector: "hook_config_v1",
+            severity: "critical",
+            decision: "warn",
+            rule_ids: ["hook.config.remote-code"],
+            path: ".claude/settings.json",
+            event: "SessionStart",
+            confidence: "strong",
+            title: "Project hook runs downloaded code",
+            reason: "A hook the project configures pipes a download into a shell.",
+          },
+          { finding_id: "hook-no-event", source_kind: "workspace_source", detector: "hook_config_v1", rule_ids: ["hook.config.remote-code"], path: ".cursor/hooks.json", title: "t", reason: "r" },
+          { finding_id: "hook-no-path", source_kind: "workspace_source", detector: "hook_config_v1", rule_ids: ["hook.config.remote-code"], event: "stop", title: "t", reason: "r" },
+        ],
+      },
+    ],
+  },
+).assessments[0];
+assert.equal(hookState.findings.length, 1, "a hook finding without its event or path is dropped");
+const [hookFinding] = hookState.findings;
+assert.deepEqual(
+  [hookFinding.kind, hookFinding.path, hookFinding.hook?.event, hookFinding.mcp, hookFinding.packageName],
+  ["hook", ".claude/settings.json", "SessionStart", null, null],
+);
+const hookMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, { worktree, newestRun: partialRun, assessment: hookState, busyKey: null, onAction: () => {} }),
+);
+assert.ok(hookMarkup.includes("Project hooks with risky commands"), "hook findings get their own table");
+assert.ok(hookMarkup.includes("SessionStart") && hookMarkup.includes(".claude/settings.json"));
+assert.ok(hookMarkup.includes("Project hook runs downloaded code"));
+assert.ok(!hookMarkup.includes("No dependency or secret findings"), "a run with only hook findings is not shown as clean");
+const hookGapMarkup = renderToStaticMarkup(
+  createElement(WorktreeRow, {
+    worktree,
+    newestRun: partialRun,
+    assessment: { ...secretsRan, partial: true, reasons: ["hook_config_incomplete"], notRun: ["hook_config_v1"] },
+    busyKey: null,
+    onAction: () => {},
+  }),
+);
+assert.ok(hookGapMarkup.includes("Some agent hook settings could not be read"), "an incomplete hook scan is named");
+assert.ok(hookGapMarkup.includes("Project hook checking is not part of this check yet."));
 const skillGapMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
     worktree,

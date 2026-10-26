@@ -139,6 +139,23 @@ export function McpFindingsTable({ findings }: { findings: WorkspaceFinding[] })
   );
 }
 
+export function HookFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+  return (
+    <RuleFindingsTable
+      findings={findings}
+      caption="Project hooks with risky commands"
+      subjectLabel="Hook"
+      subject={(finding) => (
+        <>
+          <span className="block break-all font-semibold text-slate-800">{finding.hook?.event}</span>
+          <span className="block break-all font-mono text-xs text-slate-500">{finding.path}</span>
+        </>
+      )}
+      check={(finding) => finding.hook}
+    />
+  );
+}
+
 const RUNTIME_VERDICTS: Record<string, { label: string; tone: TagTone }> = {
   affected: { label: "Affected version", tone: "attention" },
   restart_required: { label: "Restart needed", tone: "amber" },
