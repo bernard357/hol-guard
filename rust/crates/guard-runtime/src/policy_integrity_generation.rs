@@ -27,7 +27,7 @@ use crate::policy_integrity_resolver::normalize_policy_integrity_control_state;
 
 const POLICY_INTEGRITY_VERSION: i64 = 2;
 const CONTROL_STATE_VERSION: i64 = 1;
-const ROW_COLUMNS: [&str; 19] = [
+pub(crate) const ROW_COLUMNS: [&str; 19] = [
     "decision_id",
     "harness",
     "scope",

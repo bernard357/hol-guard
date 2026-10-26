@@ -307,18 +307,50 @@ class StorePolicyMixin:
             now=now,
         )
         _validate_scoped_policy_artifact_target(decision.scope, decision.artifact_id)
-        next_control_state: dict[str, object] | None = None
+        remote = is_remote_policy_source(decision.source)
+        secret_material = (None, None) if remote else self._policy_integrity_secret_material(create=True)
+        # The refresh reads the local rows and writes only the integrity status
+        # row, so it commits on its own connection before the resident takes
+        # the write lock for the decision itself.
         with self._connect() as connection:
-            secret_material = (None, None)
-            if not is_remote_policy_source(decision.source):
-                secret_material = self._policy_integrity_secret_material(create=True)
-            next_control_state = self._upsert_policy_locked(
+            state = self._refresh_policy_integrity_state(
                 connection,
-                decision=decision,
                 now=now,
+                create_key=not remote,
                 secret_material=secret_material,
+                allow_cutover_resign=False,
             )
+        artifact_id, artifact_hash, workspace, publisher = self._normalized_policy_keys(decision)
+        args: dict[str, object] = {
+            "harness": decision.harness,
+            "scope": decision.scope,
+            "artifact_id": artifact_id,
+            "artifact_hash": artifact_hash,
+            "workspace": workspace,
+            "publisher": publisher,
+            "action": decision.action,
+            "reason": decision.reason,
+            "owner": decision.owner,
+            "source": decision.source,
+            "expires_at": _canonical_utc_timestamp(decision.expires_at) if decision.expires_at is not None else None,
+            "now": now,
+        }
+        key, key_id = secret_material
+        if not remote and state.get("mode") == "protected" and key is not None and key_id is not None:
+            trusted_state = self._load_policy_integrity_control_state(create=True)
+            if trusted_state is not None:
+                # The resident signs the rows; the control state around them
+                # stays here, where the secret store lives.
+                args["current_generation"] = self._begin_policy_integrity_generation(trusted_state)
+                args["integrity_key_b64"] = encode_key(key)
+                args["integrity_key_id"] = key_id
+        payload = self._native_store_call("upsert_policy", args)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Guard policy decision was not written.")
+        next_control_state = payload.get("next_control_state")
         if next_control_state is not None:
+            if not isinstance(next_control_state, dict):
+                raise RuntimeError("Guard policy integrity control state is invalid.")
             self._finalize_policy_integrity_control_state(next_control_state)
 
     def _upsert_policy_locked(
