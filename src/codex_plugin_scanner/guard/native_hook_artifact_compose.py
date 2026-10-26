@@ -31,6 +31,10 @@ HOOK_ARTIFACT_COMPOSE_POLICY_LOOKUP_FEATURE = "hook-artifact-compose-policy-look
 HOOK_ARTIFACT_COMPOSE_PROMPT_REASON_FEATURE = "hook-artifact-compose-prompt-reason-v1"
 HOOK_ARTIFACT_COMPOSE_REMEMBERED_RULE_FEATURE = "hook-artifact-compose-remembered-rule-v1"
 HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE = "hook-artifact-compose-signal-composition-v1"
+# The precheck and the settle are two halves of one live-allow decision, with
+# the fresh review running between them, so a runtime that serves one serves
+# both and they share a feature.
+HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE = "hook-artifact-compose-codex-live-allow-v1"
 # The policy stack answers whether local tool-grant evidence is required, the
 # artifact facts answer whether the native floor is skipped, and the settled
 # verdict's composition and approval source are a query kind of their own.
@@ -165,6 +169,21 @@ _FIELDS: dict[str, frozenset[str]] = {
     ),
     "decision_build_copy": frozenset({"copy", "reason", "signals"}),
     "policy_lookup_select": frozenset({"lookups"}),
+    "codex_live_allow_precheck": frozenset(
+        {
+            "resolution_action",
+            "artifact_hash",
+            "row_request_id",
+            "stored_envelope",
+            "previous_resolution_action",
+            "previous_status",
+            "request_id",
+            "authority_resolved",
+            "hook_event_name",
+            "fresh_envelope",
+        }
+    ),
+    "codex_live_allow_settle": frozenset({"fresh_review"}),
     "package_reuse_settle": frozenset(
         {
             "reasons",
@@ -204,6 +223,8 @@ _FIELDS: dict[str, frozenset[str]] = {
 # The feature a kind needs beyond the op itself. A runtime that predates the
 # kind rejects it as an unknown kind, so the gate is per kind, not per op.
 _KIND_FEATURES: dict[str, str] = {
+    "codex_live_allow_precheck": HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE,
+    "codex_live_allow_settle": HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE,
     "package_firewall_access": HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE,
     "package_firewall_entitlement": HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE,
     "package_reuse_settle": HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE,
@@ -263,6 +284,12 @@ _ANSWERS: dict[str, dict[str, str]] = {
     },
     "decision_copy": {"decision_overrides": "d", "risk_headline": "S"},
     "decision_build_copy": {"decision_v2": "d", "risk_headline": "S"},
+    "codex_live_allow_precheck": {
+        "review_required": "b",
+        "claimed_saved_allow_hash": "S",
+        "claimed_approval_request_id": "S",
+    },
+    "codex_live_allow_settle": {"fresh_allow_authorized": "b"},
     "policy_lookup_select": {
         "authority_revision": "i",
         "decision": "D",
@@ -395,6 +422,7 @@ def native_hook_compose(kind: str, fields: Mapping[str, object], *, guard_home: 
 
 
 __all__ = [
+    "HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE",
