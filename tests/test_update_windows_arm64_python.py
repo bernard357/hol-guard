@@ -120,6 +120,10 @@ def test_native_windows_arm64_python_reads_the_interpreter_platform(
             True,
         ),
         ("Failed to build installable wheels for some pyproject.toml based projects (pyyaml, rfc3161_client)\n", True),
+        (
+            "Collecting rfc3161-client>=1\n  Preparing metadata (pyproject.toml): finished with status 'error'\n",
+            True,
+        ),
         ("ERROR: Failed building wheel for pyyaml\n", False),
         ("Requirement already satisfied: cryptography>=50\nERROR: Failed building wheel for pyyaml\n", False),
         (

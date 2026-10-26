@@ -31,6 +31,8 @@ _FAILED_BUILD_RECORD = re.compile(
 # pip: "Failed to build installable wheels for some pyproject.toml based projects (X, Y)".
 _FAILED_BUILD_SUMMARY = re.compile(r"failed to build installable wheels[^(]*\(([^)]*)\)")
 _COLLECTING_RECORD = re.compile(r"^collecting ([a-z0-9][a-z0-9._-]*)")
+# pip prints "... error" on a terminal and ": finished with status 'error'" when piped.
+_METADATA_FAILED = re.compile(r"^preparing metadata\b.*(?:\.\.\. error|status 'error')$")
 _PROBE_TIMEOUT_SECONDS = 10
 _PLATFORM_PROBE = "import sysconfig; print(sysconfig.get_platform())"
 
@@ -68,7 +70,7 @@ def failed_build_packages(installer_output: str) -> set[str]:
         collected = _COLLECTING_RECORD.match(line)
         if collected:
             collecting = _normalized_package(collected.group(1))
-        elif collecting and line.startswith("preparing metadata") and line.endswith("error"):
+        elif collecting and _METADATA_FAILED.match(line):
             # A source build without a Rust toolchain fails while preparing metadata; pip names the
             # package only in the preceding "Collecting" line.
             failed.add(collecting)
