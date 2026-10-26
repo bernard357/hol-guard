@@ -452,7 +452,8 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           await continueAuditAfterRecovery();
           return;
         }
-        setAuditRecoveryPhase("ready");
+        // Nothing follows a standalone sync, so close the modal and let the panel show the result.
+        closeAuditRecovery();
       } catch (err) {
         if (isSupplyChainSyncConnectError(err)) {
           const connectGate = resolveSupplyChainSyncConnectRecoveryGate(err);
@@ -491,6 +492,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
     },
     [
       auditRecoveryGate,
+      closeAuditRecovery,
       continueAuditAfterRecovery,
       onStateChanged,
       openSyncApprovalRecovery,
