@@ -71,6 +71,8 @@ def _settle(monkeypatch: pytest.MonkeyPatch, reply: object, payload: dict) -> tu
         {"outcome": "none"},
         {"outcome": "allow"},
         {"outcome": "unseen", "extra": 1},
+        {"outcome": []},
+        {"outcome": {}},
         {**_SAVE, "artifact_id": ""},
         {**_SAVE, "reason": None},
         {key: value for key, value in _SAVE.items() if key != "source"},

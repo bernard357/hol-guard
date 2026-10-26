@@ -76,6 +76,8 @@ def settle_claude_guard_question(
     if reply is None:
         return None
     outcome = reply.get("outcome")
+    if not isinstance(outcome, str):
+        return None
     if outcome in _BARE_OUTCOMES and set(reply) == {"outcome"}:
         return None if outcome == "none" else {"outcome": outcome}
     if outcome != "save" or set(reply) != _SAVE_FIELDS:
