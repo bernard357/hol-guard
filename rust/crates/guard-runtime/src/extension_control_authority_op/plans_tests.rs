@@ -452,12 +452,16 @@ fn a_recorded_proof_for_a_committed_transition_is_a_replay() {
     let home = Home::new();
     home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
     let head = home.commit(2, &catalog('a'), &[local(&catalog('a'))], "committed");
+    // The grant names this request's own mutation and was spent on the
+    // revision that is now committed, so asking again is a second use of a
+    // commit that already returned.
+    let granted = commit(2, 1);
     home.db
         .execute(
             "insert into extension_control_authority_proof values (?, ?, 2, ?, ?)",
             params![
                 private_hash("proof-2", &KEY, "proof"),
-                "m".repeat(64),
+                &granted.mutation_digest,
                 AT,
                 AT
             ],
