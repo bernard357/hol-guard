@@ -62,7 +62,9 @@ pub(crate) fn launches_outside_exec_roots<'a>(
 /// no directory of that shape either way. `local_mcp_stdio` reads the same
 /// shape to keep a shim from answering a server launch.
 fn is_package_shim_dir(entry: &Path) -> bool {
-    let name = |path: &Path| path.file_name().and_then(OsStr::to_str);
+    fn name(path: &Path) -> Option<&str> {
+        path.file_name().and_then(OsStr::to_str)
+    }
     name(entry) == Some("bin") && entry.parent().and_then(name) == Some("package-shims")
 }
 
