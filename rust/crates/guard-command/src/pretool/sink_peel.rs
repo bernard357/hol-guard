@@ -445,9 +445,7 @@ fn bounded_count(values: &[String]) -> Option<u32> {
 /// lexically, as the package manager's `path.resolve` does, then resolved on
 /// disk. Other spellings return `None` and keep the unwrapped path.
 fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathBuf)> {
-    let Some(manager) = tokens.first().map(word) else {
-        return None;
-    };
+    let manager = tokens.first().map(word)?;
     let flags = directory_flags(manager);
     if flags.is_empty() {
         return None;
@@ -494,13 +492,10 @@ fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathB
     // A flag naming a directory that is not there keeps the unwrapped path:
     // native authority reads that text unprojected too, and the package
     // manager is the one that reports the missing directory.
-    let Some(resolved) = std::fs::canonicalize(base)
+    let resolved = std::fs::canonicalize(base)
         .ok()
         .and_then(|root| std::fs::canonicalize(lexical(&root.join(value))).ok())
-        .filter(|directory| directory.is_dir())
-    else {
-        return None;
-    };
+        .filter(|directory| directory.is_dir())?;
     let mut rewritten = vec![tokens[0].clone()];
     rewritten.extend(rest.iter().map(|value| ((*value).to_owned(), false)));
     rewritten.extend_from_slice(&tokens[end..]);
