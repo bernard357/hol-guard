@@ -86,7 +86,7 @@ def test_stats_prints_each_number_with_its_window(requests: list[Any], monkeypat
         "  claude-code      30",
     ]
     request = requests[0]
-    assert request.full_url == "https://hol.org/api/v1/plugins/acme%2Ftoolgate/stats"
+    assert request.full_url == "https://hol.org/api/v1/guard/plugins/acme%2Ftoolgate/stats"
     assert request.get_header("Authorization") == "Bearer holp_abc.secret"
 
 

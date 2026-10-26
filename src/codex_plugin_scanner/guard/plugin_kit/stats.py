@@ -20,7 +20,7 @@ from typing import Any
 from ...version import __version__
 from ..mdm.network import ManagedNetworkError, managed_urlopen
 
-STATS_URL = "https://hol.org/api/v1/plugins/{slug}/stats"
+STATS_URL = "https://hol.org/api/v1/guard/plugins/{slug}/stats"
 KEY_ENV = "HOL_API_KEY"
 _STATS_LIMIT_BYTES = 64 * 1024
 _STATS_TIMEOUT_SECONDS = 20.0
