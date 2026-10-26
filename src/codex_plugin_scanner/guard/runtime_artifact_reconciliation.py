@@ -22,7 +22,10 @@ from .store import GuardStore
 # A hook command names the frozen build's runtime by its content-addressed
 # durable copy, ``native-runtime/<sha256>/``; JSON configs may escape the separator.
 _PINNED_RUNTIME = re.compile(r"native-runtime[/\\]+([0-9a-f]{64})[/\\]")
-_PINNED_CONFIG_MAX_BYTES = 4 * 1024 * 1024
+_PINNED_SCAN_CHUNK_BYTES = 1024 * 1024
+_PINNED_COMMAND_WINDOW = 256
+_MANIFEST_SCAN_MAX_PATHS = 16
+_MANIFEST_SCAN_MAX_NODES = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +94,73 @@ def _current_durable_runtime_digest() -> str | None:
     return status.identity.sha256
 
 
+def _manifest_file_paths(manifest: object) -> tuple[Path, ...]:
+    """Every existing file an install manifest names, bounded.
+
+    Harnesses record their artifacts under their own keys: Cursor keeps a list
+    of written files, OpenCode names ``managed_config_path`` and Hermes points
+    ``config_path`` at its YAML while its hook lives in ``pretool_hook_path``.
+    Reading every string the manifest holds covers all of them without a
+    per-harness table that would silently miss the next adapter.
+    """
+
+    found: list[Path] = []
+    seen: set[str] = set()
+    pending: list[object] = [manifest]
+    nodes = 0
+    while pending and len(found) < _MANIFEST_SCAN_MAX_PATHS and nodes < _MANIFEST_SCAN_MAX_NODES:
+        node = pending.pop()
+        nodes += 1
+        if isinstance(node, Mapping):
+            pending.extend(node.values())
+            continue
+        if isinstance(node, (list, tuple)):
+            pending.extend(node)
+            continue
+        if not isinstance(node, str) or not node or node in seen:
+            continue
+        seen.add(node)
+        try:
+            candidate = Path(node)
+            if not candidate.is_absolute() or not candidate.is_file():
+                continue
+        except (OSError, ValueError):
+            # A persisted path can hold an embedded NUL or an unreadable
+            # mount; that is this harness's problem, not the whole pass's.
+            continue
+        found.append(candidate)
+    return tuple(found)
+
+
+def _names_stale_runtime(path: Path, current_digest: str) -> bool:
+    """Whether one Guard-owned artifact still launches an older runtime copy."""
+
+    # Stream the whole file: a pin past any fixed read limit must still count.
+    # Each chunk keeps the previous tail so a match and its window can span
+    # the boundary.
+    carry = 2 * _PINNED_COMMAND_WINDOW + 128
+    pinned: set[str] = set()
+    tail = ""
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(_PINNED_SCAN_CHUNK_BYTES):
+                text = tail + chunk.decode("utf-8", errors="replace")
+                for match in _PINNED_RUNTIME.finditer(text):
+                    window = text[max(0, match.start() - _PINNED_COMMAND_WINDOW) : match.end() + _PINNED_COMMAND_WINDOW]
+                    # Only a Guard hook command counts. A preserved user field that
+                    # happens to name a durable runtime path would otherwise request
+                    # a reinstall on every pass and then fail the readiness check
+                    # that follows it.
+                    if "hol-guard" in window:
+                        pinned.add(match.group(1))
+                tail = text[-carry:]
+    except (OSError, ValueError):
+        return False
+    return bool(pinned) and pinned != {current_digest}
+
+
 def _pins_stale_native_runtime(install: Mapping[str, object], current_digest: str | None) -> bool:
-    """Whether the install's harness config still launches an older runtime.
+    """Whether the install's harness artifacts still launch an older runtime.
 
     The resident refuses a hook bridge whose runtime digest differs from its
     own, so a stale pin silently sends every hook to the slower Python path.
@@ -101,16 +169,9 @@ def _pins_stale_native_runtime(install: Mapping[str, object], current_digest: st
     if current_digest is None:
         return False
     manifest = install.get("manifest")
-    config_path = manifest.get("config_path") if isinstance(manifest, Mapping) else None
-    if not isinstance(config_path, str) or not config_path:
+    if not isinstance(manifest, Mapping):
         return False
-    try:
-        with Path(config_path).open("rb") as handle:
-            text = handle.read(_PINNED_CONFIG_MAX_BYTES).decode("utf-8", errors="replace")
-    except OSError:
-        return False
-    pinned = set(_PINNED_RUNTIME.findall(text))
-    return bool(pinned) and pinned != {current_digest}
+    return any(_names_stale_runtime(path, current_digest) for path in _manifest_file_paths(manifest))
 
 
 def _managed_install_needs_artifact_repair(
