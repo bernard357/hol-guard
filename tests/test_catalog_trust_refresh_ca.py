@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -51,3 +52,29 @@ def test_keeps_an_explicit_trust_source(monkeypatch: pytest.MonkeyPatch, name: s
         assert os.environ[name] == "/corporate/roots"
         assert name == "SSL_CERT_FILE" or "SSL_CERT_FILE" not in os.environ
     assert os.environ[name] == "/corporate/roots"
+
+
+@pytest.mark.usefixtures("no_trust_override")
+def test_an_overlapping_refresh_waits_instead_of_borrowing_the_temporary_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without a platform default, a second refresh that started while the first
+    # had lent the roots used to read them as a standing source, skip the lock
+    # and lose them when the first call finished.
+    monkeypatch.setattr(authority.ssl, "get_default_verify_paths", lambda: _verify_paths(None, None))
+    entered = threading.Event()
+    seen: list[str | None] = []
+
+    def second() -> None:
+        with authority._trust_refresh_ca():
+            entered.set()
+            seen.append(os.environ.get("SSL_CERT_FILE"))
+
+    with authority._trust_refresh_ca():
+        worker = threading.Thread(target=second)
+        worker.start()
+        assert not entered.wait(0.2)
+    worker.join(5)
+
+    assert seen == [requests.certs.where()]
+    assert "SSL_CERT_FILE" not in os.environ

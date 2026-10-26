@@ -192,23 +192,25 @@ def _trust_refresh_ca():
     public roots for this call only, and only when nothing names a trust source.
     """
 
-    defaults = ssl.get_default_verify_paths()
-    if (
-        defaults.cafile is not None
-        or defaults.capath is not None
-        or os.environ.get("SSL_CERT_FILE")
-        or os.environ.get("SSL_CERT_DIR")
-    ):
-        yield
-        return
-    import requests.certs as requests_certs
-
-    where = getattr(requests_certs, "where", None)
-    bundle = where() if callable(where) else None
-    if not isinstance(bundle, str) or not bundle:
-        yield
-        return
+    # Hold the lock for the decision as well as the change: another call's
+    # temporary SSL_CERT_FILE must not read as a standing trust source.
     with _TRUST_ENVIRONMENT_LOCK:
+        defaults = ssl.get_default_verify_paths()
+        if (
+            defaults.cafile is not None
+            or defaults.capath is not None
+            or os.environ.get("SSL_CERT_FILE")
+            or os.environ.get("SSL_CERT_DIR")
+        ):
+            yield
+            return
+        import requests.certs as requests_certs
+
+        where = getattr(requests_certs, "where", None)
+        bundle = where() if callable(where) else None
+        if not isinstance(bundle, str) or not bundle:
+            yield
+            return
         os.environ["SSL_CERT_FILE"] = bundle
         try:
             yield
