@@ -208,6 +208,18 @@ fn later_profile_lines_keep_their_search_order() {
     let replaced = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
     assert!(names(&replaced, "protectedManagers").is_empty());
     assert_eq!(replaced["pathActive"], false);
+
+    for path in profiles {
+        let path = path.as_str().expect("profile path");
+        fs::write(
+            path,
+            format!("export PATH={shim_dir}:$PATH\nexport PATH=\"$VOLTA_HOME/bin:$PATH\"\n"),
+        )
+        .expect("unexpanded variable");
+    }
+    let unexpanded = shims::package_shim_cloud_coverage(&context, None).expect("coverage");
+    assert!(names(&unexpanded, "protectedManagers").is_empty());
+    assert_eq!(unexpanded["pathActive"], false);
 }
 
 #[test]

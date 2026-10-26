@@ -187,7 +187,12 @@ pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<S
             String::new()
         };
         let replayed = replay_profile(&existing, &base);
-        if !replayed.iter().any(|entry| entry == &shim_dir) {
+        let Some(shim_index) = replayed.iter().position(|entry| entry == &shim_dir) else {
+            return Ok(None);
+        };
+        // A directory ahead of the shim that still names a variable, such as
+        // $VOLTA_HOME/bin, could hold the real binary once the shell expands it.
+        if replayed[..shim_index].iter().any(|entry| names_unexpanded_variable(entry)) {
             return Ok(None);
         }
         if path == &primary_path {
@@ -196,6 +201,10 @@ pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<S
     }
     let separator = context.pathsep().to_string();
     Ok(primary.map(|entries| entries.join(&separator)))
+}
+
+fn names_unexpanded_variable(entry: &str) -> bool {
+    entry.contains('$') || entry.matches('%').count() >= 2
 }
 
 fn replay_profile(content: &str, base: &[String]) -> Vec<String> {
