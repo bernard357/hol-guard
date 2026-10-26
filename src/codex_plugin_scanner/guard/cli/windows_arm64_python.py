@@ -13,6 +13,7 @@ that path relies on the install documentation instead of this module.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import sysconfig
@@ -22,13 +23,14 @@ WINDOWS_ARM64_PLATFORM = "win-arm64"
 WINDOWS_X64_PLATFORM = "win-amd64"
 REASON_CODE = "update_windows_arm64_x64_python_required"
 
-_SOURCE_BUILD_MARKERS = (
-    "failed to build",
-    "failed building wheel",
-    "failed-wheel-build-for-install",
-    "error: metadata-generation-failed",
+_WHEEL_LESS_PACKAGES = frozenset({"cryptography", "rfc3161-client"})
+# pip: "Failed building wheel for X", "Failed to build X"; uv: "Failed to build `X==1.0`".
+_FAILED_BUILD_RECORD = re.compile(
+    r"failed (?:building wheel for|to build|to download and build) `?([a-z0-9][a-z0-9._-]*)"
 )
-_WHEEL_LESS_PACKAGES = ("cryptography", "rfc3161-client", "rfc3161_client")
+# pip: "Failed to build installable wheels for some pyproject.toml based projects (X, Y)".
+_FAILED_BUILD_SUMMARY = re.compile(r"failed to build installable wheels[^(]*\(([^)]*)\)")
+_COLLECTING_RECORD = re.compile(r"^collecting ([a-z0-9][a-z0-9._-]*)")
 _PROBE_TIMEOUT_SECONDS = 10
 _PLATFORM_PROBE = "import sysconfig; print(sysconfig.get_platform())"
 
@@ -44,12 +46,38 @@ def native_windows_arm64_python(*, os_platform: str | None = None, python_platfo
     return current == WINDOWS_ARM64_PLATFORM
 
 
+def _normalized_package(name: str) -> str:
+    bare = re.split(r"[=<>!~;\[ ]", name.strip("`'\" "), maxsplit=1)[0]
+    return bare.replace("_", "-").replace(".", "-")
+
+
+def failed_build_packages(installer_output: str) -> set[str]:
+    """Return the packages that installer output reports as failing to build or prepare metadata."""
+    failed: set[str] = set()
+    collecting: str | None = None
+    for raw_line in installer_output.lower().splitlines():
+        line = raw_line.strip()
+        summary = _FAILED_BUILD_SUMMARY.search(line)
+        if summary:
+            failed.update(_normalized_package(name) for name in summary.group(1).split(","))
+            continue
+        record = _FAILED_BUILD_RECORD.search(line)
+        if record:
+            failed.add(_normalized_package(record.group(1)))
+            continue
+        collected = _COLLECTING_RECORD.match(line)
+        if collected:
+            collecting = _normalized_package(collected.group(1))
+        elif collecting and line.startswith("preparing metadata") and line.endswith("error"):
+            # A source build without a Rust toolchain fails while preparing metadata; pip names the
+            # package only in the preceding "Collecting" line.
+            failed.add(collecting)
+    return failed
+
+
 def wheel_less_dependency_build_failed(installer_output: str) -> bool:
-    """Return True when pip failed while building a dependency that has no ARM64 wheel."""
-    lowered = installer_output.lower()
-    if not any(marker in lowered for marker in _SOURCE_BUILD_MARKERS):
-        return False
-    return any(package in lowered for package in _WHEEL_LESS_PACKAGES)
+    """Return True when a dependency that has no Windows ARM64 wheel failed to build."""
+    return not _WHEEL_LESS_PACKAGES.isdisjoint(failed_build_packages(installer_output))
 
 
 def parse_py_launcher_paths(output: str) -> list[tuple[str, str]]:
@@ -116,7 +144,7 @@ def _reinstall_command(installer: str, python_path: str) -> str:
     if installer == "uv":
         return f"uv tool install --force --python {quoted} hol-guard"
     if installer == "pip":
-        return f"{quoted} -m pip install hol-guard"
+        return f"{quoted} -m pip install --upgrade hol-guard"
     return f"pipx install --force --python {quoted} hol-guard"
 
 
@@ -130,6 +158,11 @@ def x64_python_route_message(installer: str, candidates: Sequence[str]) -> str:
         f"  {_reinstall_command(installer, python_path)}",
         f'Confirm the interpreter reports {WINDOWS_X64_PLATFORM} with: "{python_path}" -c "{_PLATFORM_PROBE}"',
     ]
+    if installer == "pip":
+        lines.append(
+            "That installs a separate HOL Guard for the x64 interpreter; the ARM64 environment is not converted. "
+            "Run hol-guard from the x64 interpreter's Scripts directory."
+        )
     if candidates:
         lines.append("x64 Python found on this machine: " + ", ".join(candidates))
     else:

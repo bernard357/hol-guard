@@ -114,8 +114,19 @@ def test_native_windows_arm64_python_reads_the_interpreter_platform(
     (
         (CRYPTOGRAPHY_BUILD_FAILURE, True),
         ("  x Failed to build `rfc3161-client==1.0.9`\n", True),
-        ("error: metadata-generation-failed\n  -> cryptography\n", True),
+        (
+            "Collecting cryptography>=50\n  Preparing metadata (pyproject.toml) ... error\n"
+            "error: metadata-generation-failed\n",
+            True,
+        ),
+        ("Failed to build installable wheels for some pyproject.toml based projects (pyyaml, rfc3161_client)\n", True),
         ("ERROR: Failed building wheel for pyyaml\n", False),
+        ("Requirement already satisfied: cryptography>=50\nERROR: Failed building wheel for pyyaml\n", False),
+        (
+            "Collecting cryptography>=50\n  Using cached cryptography-50.0.2-cp311-abi3-win_amd64.whl\n"
+            "Collecting pyyaml\n  Preparing metadata (pyproject.toml) ... error\n",
+            False,
+        ),
         ("ERROR: Could not find a version that satisfies cryptography>=50\n", False),
     ),
 )
@@ -154,3 +165,10 @@ def test_route_message_without_x64_python_points_at_the_64_bit_installer() -> No
 
     assert 'uv tool install --force --python "<path-to-x64-python.exe>" hol-guard' in message
     assert "Windows installer (64-bit)" in message
+
+
+def test_route_message_for_pip_upgrades_an_existing_x64_install() -> None:
+    message = arm64.x64_python_route_message("pip", [X64_PYTHON])
+
+    assert f'"{X64_PYTHON}" -m pip install --upgrade hol-guard' in message
+    assert "the ARM64 environment is not converted" in message
