@@ -25,16 +25,21 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
 /// project lookup would read from `directory`: that directory first, then
 /// each parent up to the workspace root and no further. `npx`, `cargo`, `go`
 /// and `uv` all resolve the project they act on by ascending from where they
-/// run, so a run that stands in a subdirectory of the workspace reaches the
-/// manifest, the installed tool or the project the workspace root holds.
+/// run, so a command that enters a subdirectory of the workspace — `cd app &&
+/// cargo test` — still reaches the manifest, the installed tool or the
+/// project the workspace root holds, which is where a monorepo keeps them.
 /// Bounding the walk at that root is what keeps the proof inside the sandbox:
 /// nothing above the workspace is ever read, so the admission still rests on
-/// what the workspace itself holds.
+/// what the workspace itself holds, and every path the run then writes is one
+/// the sandbox already bounds.
 ///
 /// `directory` is checked wherever it points, which is what the single-
 /// directory checks did. The walk only starts when it stays below the
 /// workspace with no parent step in it, so a path that already climbed out
-/// cannot carry the ascent further out.
+/// cannot carry the ascent further out. A run whose own directory is the
+/// workspace has nowhere to climb, so a session rooted in the subdirectory
+/// itself is unchanged: its sandbox is that subdirectory, and a project above
+/// it would write outside what the sandbox bounds.
 pub(super) fn first_from(
     directory: &Path,
     workspace: &Path,
