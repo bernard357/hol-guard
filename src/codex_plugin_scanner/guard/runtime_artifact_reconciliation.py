@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +18,11 @@ from .cursor_hook_rebind import rebind_stale_cursor_hooks
 from .shim_refresh import refresh_stale_harness_shims
 from .shims import package_shim_dashboard_status, package_shim_status, repair_package_shims
 from .store import GuardStore
+
+# A hook command names the frozen build's runtime by its content-addressed
+# durable copy, ``native-runtime/<sha256>/``; JSON configs may escape the separator.
+_PINNED_RUNTIME = re.compile(r"native-runtime[/\\]+([0-9a-f]{64})[/\\]")
+_PINNED_CONFIG_MAX_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,12 +74,55 @@ def _package_shim_reconciliation_status(context: HarnessContext) -> dict[str, ob
     return status
 
 
+def _current_durable_runtime_digest() -> str | None:
+    """The digest a frozen build's hook commands should pin, or None.
+
+    Only a frozen build writes ``native-runtime/<sha256>`` into hook commands,
+    so a source install never repins them.
+    """
+
+    if not getattr(sys, "frozen", False):
+        return None
+    from .native_runtime import native_runtime_status
+
+    status = native_runtime_status()
+    if not status.available or not status.compatible or status.identity is None:
+        return None
+    return status.identity.sha256
+
+
+def _pins_stale_native_runtime(install: Mapping[str, object], current_digest: str | None) -> bool:
+    """Whether the install's harness config still launches an older runtime.
+
+    The resident refuses a hook bridge whose runtime digest differs from its
+    own, so a stale pin silently sends every hook to the slower Python path.
+    """
+
+    if current_digest is None:
+        return False
+    manifest = install.get("manifest")
+    config_path = manifest.get("config_path") if isinstance(manifest, Mapping) else None
+    if not isinstance(config_path, str) or not config_path:
+        return False
+    try:
+        with Path(config_path).open("rb") as handle:
+            text = handle.read(_PINNED_CONFIG_MAX_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    pinned = set(_PINNED_RUNTIME.findall(text))
+    return bool(pinned) and pinned != {current_digest}
+
+
 def _managed_install_needs_artifact_repair(
     harness: str,
     *,
     context: HarnessContext,
     verified: Mapping[str, bool],
+    install: Mapping[str, object],
+    current_digest: str | None,
 ) -> bool:
+    if _pins_stale_native_runtime(install, current_digest):
+        return True
     if harness == "grok":
         from .cli.install_commands import grok_hooks_protection_ready
 
@@ -86,7 +136,10 @@ def _managed_install_artifacts_ready(
     context: HarnessContext,
     install: Mapping[str, object],
     store: GuardStore,
+    current_digest: str | None,
 ) -> bool:
+    if _pins_stale_native_runtime(install, current_digest):
+        return False
     if harness == "grok":
         from .cli.install_commands import grok_hooks_protection_ready
 
@@ -103,6 +156,7 @@ def repair_failing_managed_harness_hooks(
 
     installs: list[Mapping[str, object]] = list(store.list_managed_installs())
     verified = _live_hook_verification(installs, store)
+    current_digest = _current_durable_runtime_digest()
     repaired: list[str] = []
     failed: list[str] = []
     for install in installs:
@@ -116,7 +170,13 @@ def repair_failing_managed_harness_hooks(
             home_dir=home_dir,
             workspace_dir=Path(workspace).expanduser() if workspace is not None else None,
         )
-        if not _managed_install_needs_artifact_repair(harness, context=context, verified=verified):
+        if not _managed_install_needs_artifact_repair(
+            harness,
+            context=context,
+            verified=verified,
+            install=install,
+            current_digest=current_digest,
+        ):
             continue
         try:
             apply_managed_install(
@@ -137,6 +197,7 @@ def repair_failing_managed_harness_hooks(
             context=context,
             install=refreshed,
             store=store,
+            current_digest=current_digest,
         ):
             failed.append(harness)
             continue
