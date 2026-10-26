@@ -10,6 +10,7 @@ returns ``None``; nothing is ever rendered in Python.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -104,6 +105,32 @@ def native_hermes_bridge(
     if not isinstance(document, dict) or not isinstance(exit_code, int) or isinstance(exit_code, bool):
         return None
     return dict(document), exit_code
+
+
+def native_cli_hook_emit(
+    harness: str, response: Mapping[str, object], *, event_name: str, guard_home: Path | None = None
+) -> dict[str, object] | None:
+    """Read a daemon answer the way ``hol-guard hook`` prints it.
+
+    ``harness`` is canonical. A bridge-rendered harness gets ``stdout``,
+    ``stderr`` and ``exit_code``; any other gets the ``policy_action`` its
+    exit status follows. ``None`` when the resident cannot answer, so the
+    caller fails closed rather than reading the answer here. The answer
+    travels as compact JSON so the resident reads the exact text Python would
+    have printed, lone surrogates included.
+    """
+
+    try:
+        response_json = json.dumps(dict(response), ensure_ascii=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return None
+    rendered = native_render_cli(
+        "cli_hook_emit",
+        harness,
+        {"event_name": event_name, "response_json": response_json},
+        guard_home=guard_home,
+    )
+    return rendered[1] if rendered is not None else None
 
 
 # The payload fields ``claude_approval_copy`` reads to name the tool.
@@ -239,6 +266,7 @@ def native_render_recording_only_pre_tool(
 __all__ = [
     "HOOK_RENDER_FEATURE",
     "native_claude_approval_copy",
+    "native_cli_hook_emit",
     "native_evaluation_has_terminal_policy_action",
     "native_render_cli",
     "native_render_pre_tool",

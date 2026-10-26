@@ -347,3 +347,26 @@ fn hermes_bridge_rejects_a_request_with_no_response() {
     assert_eq!(result.status, "error");
     assert_eq!(result.code, "native_hook_render_invalid");
 }
+
+#[test]
+fn cli_hook_emit_reads_the_answer_or_reports_why_not() {
+    let mut req = request("cli_hook_emit");
+    req.harness = "devin".to_owned();
+    req.cli = Some(json!({
+        "event_name": "PreToolUse",
+        "response_json": r#"{"policy_action":"block","reason":"denied"}"#,
+    }));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.status, "ok");
+    let payload = result.payload.expect("payload");
+    assert_eq!(payload["outcome"], "document");
+    assert_eq!(payload["response"]["exit_code"], 2);
+    assert_eq!(payload["response"]["stderr"], "denied");
+
+    req.cli = Some(json!({"event_name": "PreToolUse", "response_json": "[]"}));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.code, "native_hook_render_unrenderable");
+    req.cli = Some(json!({"event_name": "PreToolUse"}));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.code, "native_hook_render_invalid");
+}
