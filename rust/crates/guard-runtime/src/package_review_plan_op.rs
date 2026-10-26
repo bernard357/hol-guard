@@ -20,7 +20,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use guard_command::package_intent_common::build_package_request_artifact;
-use guard_command::package_intent_parser::parse_package_intent;
+use guard_command::package_intent_parser::{parse_package_intent, runner_packages};
 use guard_command::verified_npm;
 use guard_contracts::{
     python_strip, PackageReviewPlanRequestV1, SupplyChainEvalResultV1,
@@ -86,8 +86,14 @@ pub(crate) fn planned_shape(
     review_reason: Option<&str>,
 ) -> Option<ReviewShape> {
     let shape = review_shape(payload)?;
+    let launcher = LAUNCHERS.contains(&shape.tokens[0].as_str());
+    // The evaluator judges one package, so a launch that fetches several, or
+    // none it can name, is left to its review.
+    if launcher && runner_packages(&shape.tokens).len() != 1 {
+        return None;
+    }
     let launch_only = review_reason == Some(LAUNCH_REVIEW_REASON);
-    (!launch_only || LAUNCHERS.contains(&shape.tokens[0].as_str())).then_some(shape)
+    (!launch_only || launcher).then_some(shape)
 }
 
 /// The shape of the command a package review would settle, or `None` when

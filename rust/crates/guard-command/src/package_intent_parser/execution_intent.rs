@@ -255,22 +255,60 @@ pub(super) fn exec_package_spec(tokens: &[String]) -> Option<String> {
     None
 }
 
-/// The package an `npx` or `bunx` launch fetches: the value of `--package`
-/// or `-p`, else the executable. Only the options before the executable
-/// belong to the runner, so `npx tsc -p tsconfig.json` fetches `tsc`, and
-/// `--bun` takes no value.
+/// The package an `npx` or `bunx` launch fetches; the first of
+/// [`runner_packages`].
 fn runner_package_spec(tokens: &[String]) -> Option<String> {
+    runner_packages(tokens).into_iter().next()
+}
+
+/// Runner options whose value names a place to fetch from or install into,
+/// never the package itself. `-c` and `--call` on `npx` hand it a command,
+/// which is read as before.
+fn runner_value_options(command: &str) -> &'static [&'static str] {
+    match command {
+        "npx" => &[
+            "--registry",
+            "--cache",
+            "--userconfig",
+            "--prefix",
+            "-w",
+            "--workspace",
+        ],
+        "bunx" => &["-c", "--config", "--cwd", "--registry", "--cache-dir"],
+        _ => &[],
+    }
+}
+
+/// Every package an `npx` or `bunx` launch fetches: each `--package` or `-p`
+/// value, else the executable. Only the options before the executable belong
+/// to the runner, so `npx tsc -p tsconfig.json` fetches `tsc`, `--bun` takes
+/// no value, and a value such as `--registry`'s is never read as a package.
+/// A selector or option left without its value fetches nothing.
+pub fn runner_packages(tokens: &[String]) -> Vec<String> {
+    let Some(first) = tokens.first() else {
+        return Vec::new();
+    };
+    let value_options = runner_value_options(&command_name(first));
+    let mut packages = Vec::new();
     let mut rest = tokens.iter().skip(1);
     while let Some(token) = rest.next() {
         if matches!(token.as_str(), "--package" | "-p") {
-            return rest.next().cloned();
-        }
-        if let Some(spec) = token.strip_prefix("--package=") {
-            return Some(spec.to_owned());
-        }
-        if !token.starts_with('-') {
-            return Some(token.clone());
+            let Some(spec) = rest.next() else {
+                return Vec::new();
+            };
+            packages.push(spec.clone());
+        } else if let Some(spec) = token.strip_prefix("--package=") {
+            packages.push(spec.to_owned());
+        } else if value_options.contains(&token.as_str()) {
+            if rest.next().is_none() {
+                return Vec::new();
+            }
+        } else if !token.starts_with('-') {
+            if packages.is_empty() {
+                packages.push(token.clone());
+            }
+            break;
         }
     }
-    None
+    packages
 }

@@ -84,6 +84,8 @@ fn a_command_review_plans_only_npx_and_bunx_launches() {
     for command in [
         "npx -p flagged-package@1.0.0 node --version",
         "bunx --bun flagged-package@1.0.0",
+        "npx --registry https://registry.example flagged-package@1.0.0",
+        "npx --cache /tmp/npm-cache flagged-package@1.0.0",
     ] {
         assert_eq!(
             answer(command)["artifact"]["metadata"]["targets"][0]["package_name"],
@@ -95,6 +97,10 @@ fn a_command_review_plans_only_npx_and_bunx_launches() {
         "npm install zod --ignore-scripts --allow-git=none",
         "pnpm dlx create-next-app@14.2.0",
         "npm exec --package=create-vite@5.1.0 create-vite",
+        // The evaluator judges one package, so a launch that fetches
+        // several stays with its review.
+        "npx -p left-pad -p flagged-package node",
+        "npx --package=left-pad --package=flagged-package node",
     ] {
         assert_eq!(
             answer(command),

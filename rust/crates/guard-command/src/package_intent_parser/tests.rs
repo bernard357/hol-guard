@@ -252,9 +252,29 @@ fn runner_launches_fetch_the_selected_package() {
         // Options after the executable are its own, not the runner's.
         ("npx tsc -p tsconfig.json", "tsc"),
         ("bunx vitest --package other", "vitest"),
+        // A runner option's value names a registry or a directory.
+        (
+            "npx --registry https://registry.example flagged-package",
+            "flagged-package",
+        ),
+        (
+            "npx --cache /tmp/npm-cache flagged-package",
+            "flagged-package",
+        ),
+        ("bunx --cwd app flagged-package", "flagged-package"),
     ] {
         assert_eq!(spec(command).as_deref(), Some(package), "{command}");
     }
     assert_eq!(spec("npx --yes"), None);
     assert_eq!(spec("npx -p"), None);
+    assert_eq!(spec("npx --registry"), None);
+    let packages = |command: &str| {
+        let tokens: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+        runner_packages(&tokens)
+    };
+    assert_eq!(
+        packages("npx -p left-pad -p flagged-package node"),
+        ["left-pad", "flagged-package"]
+    );
+    assert_eq!(packages("npx -c vite"), Vec::<String>::new());
 }
