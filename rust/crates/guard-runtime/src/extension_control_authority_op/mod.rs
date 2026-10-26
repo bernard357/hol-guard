@@ -409,6 +409,29 @@ impl Ctx<'_> {
             return recovery();
         }
         if anchor.phase != Phase::Committed {
+            // The anchor already seals this revision and this digest: the
+            // commit got as far as sealing its head and died before the row
+            // and the anchor said the revision was closed. That is the same
+            // interrupted commit as above, caught one step later, when the
+            // snapshot row had already advanced to the sealed revision. The
+            // proof is no weaker here than there: the sealed snapshot was
+            // verified under the authority key and every field of it pinned
+            // against the row before this point, and `resume_plan` verifies
+            // the prepared row's transition record independently before it
+            // settles anything, so finishing the phase authorises nothing the
+            // anchor had not already authorised. A prepared anchor is left
+            // alone, since nothing has sealed a head for it to finish.
+            if anchor.phase == Phase::Anchored
+                && !self.request.rollback_attempted
+                && !self.request.resume_attempted
+            {
+                return Ok(Read::Action(json!({
+                    "action": "resume_pending",
+                    "revision": revision,
+                    "current_revision": revision,
+                    "stored_catalog_digest": &stored_catalog_digest,
+                })));
+            }
             return recovery();
         }
         self.validate_transition_chain(revision, &row_str(row, "snapshot_digest")?)?;

@@ -393,15 +393,28 @@ class ExtensionControlAuthorityReadsMixin:
 
         The resident has already re-verified that row and the anchor over it,
         so the work left is the write. A reader holding only a shared lease
-        cannot make it; that read reports the state it found and the explicit
-        recovery verb stays available, which is strictly better than reporting
-        a tampered authority for a row this caller merely could not settle.
+        cannot make every one of them: a transition that activates a command
+        pack writes the activation journal, which demands an exclusive lease.
+        That is not a verdict on the authority, so it is reported as the
+        mutation this read turned out to need, and the caller that can take an
+        exclusive lease — the daemon's refresh does exactly that — retries and
+        finishes the row. A caller that cannot reports the state it found, with
+        the explicit recovery verb still available, which is strictly better
+        than reporting a tampered authority for a row it merely could not
+        settle.
         """
 
+        from .native_command_control_authority_io import NativeCommandControlMutationRequiredError
         from .native_policy_snapshot_constants import NativePolicySnapshotError
 
         try:
             with self._connect() as connection:
                 return self._resume_transition(connection, int(cast(int, action["revision"])), key=key)
-        except (ExtensionControlAuthorityError, NativePolicySnapshotError):
+        except NativeCommandControlMutationRequiredError:
+            raise
+        except NativePolicySnapshotError as error:
+            if str(error) == "native_command_control_mutation_lease_missing":
+                raise NativeCommandControlMutationRequiredError() from error
+            return None
+        except ExtensionControlAuthorityError:
             return None
