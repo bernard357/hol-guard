@@ -346,7 +346,7 @@ fn lex(command: &str) -> Result<(Vec<Token>, bool), &'static str> {
                 return Err("unsupported escape");
             }
             if PRESERVE_UNQUOTED_BACKSLASH
-                && !crate::command_tokens::backslash_escapes_operator(characters, index)
+                && !crate::command_tokens::backslash_escapes_operator(&characters, index)
             {
                 word.get_or_insert_with(String::new).push(character);
                 index += 1;
