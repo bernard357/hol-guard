@@ -55,16 +55,35 @@ def _respond(tmp_path: Path, native_result: dict[str, object] = REVIEW, *, works
 @pytest.mark.parametrize(
     "native_result",
     [
-        {"reason_code": "native_command_review_required", "minimum_action": "review"},
+        {"reason_code": "native_file_read_review", "minimum_action": "review"},
         {"reason_code": "native_package_review", "minimum_action": "block"},
+        {"reason_code": "native_command_review_required", "minimum_action": "block"},
     ],
 )
-def test_only_a_package_review_is_planned(
+def test_only_a_package_or_command_review_is_planned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_result: dict[str, object]
 ) -> None:
     monkeypatch.setattr(package_review, "package_review_plan", _plan(AssertionError("planned")))
 
     assert _respond(tmp_path, native_result) is None
+
+
+@pytest.mark.parametrize("reason_code", ["native_package_review", "native_command_review_required"])
+def test_the_plan_is_told_which_review_it_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason_code: str
+) -> None:
+    """The resident plans a command review only for `npx`/`bunx`, block-only."""
+
+    reasons: list[object] = []
+
+    def plan(*_args: object, **kwargs: object) -> tuple[None, bool]:
+        reasons.append(kwargs["review_reason"])
+        return None, False
+
+    monkeypatch.setattr(package_review, "package_review_plan", plan)
+
+    assert _respond(tmp_path, {"reason_code": reason_code, "minimum_action": "review"}) is None
+    assert reasons == [reason_code]
 
 
 @pytest.mark.parametrize(

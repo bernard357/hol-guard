@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-BJ7QvS_t.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-CReuh24f.js","assets/chunks/feed-health-workspace-BjOjUPpw.js","assets/chunks/home-protection-module-DZsYd8li.js","assets/chunks/supply-chain-protection-stats-BbhzE3ad.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-CWxn4gFT.js","assets/chunks/audit-workspace-CCc1AfLx.js","assets/chunks/workspace-findings-workspace-JGS8mDDs.js"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-sq4yLYSA.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-CVA2jjBv.js","assets/chunks/feed-health-workspace-B-0Rw-Sw.js","assets/chunks/home-protection-module-DZsYd8li.js","assets/chunks/supply-chain-protection-stats-BbhzE3ad.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-Dy_eTP05.js","assets/chunks/audit-workspace-Dk3dULFi.js","assets/chunks/workspace-findings-workspace-DOV8JFC1.js"])))=>i.map(i=>d[i]);
 import { dh as isSupplyChainAuditIncomplete, di as isSupplyChainAuditEvidence, cW as GuardHarnessActionError, dj as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, f as formatRelativeTime, T as Tag, dk as IconActionButton, aA as HiMiniXCircle, cY as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dl as HiMiniBeaker, dm as ActivationSummary, dn as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, A as ActionButton, dp as HiMiniBugAnt, dq as fetchSupplyChainBundle, a2 as useFocusTrap, s as HiMiniCheckCircle, _ as HiMiniXMark, dr as closeOnEscape, aS as buildApprovalProofCredentials, cU as GuardModalLayer, ds as ConnectFlowCard, dt as ApprovalProofInline, co as HiMiniArrowTopRightOnSquare, du as HiMiniCloudArrowDown, bQ as useResolvedApprovalGate, dv as fetchPackageFirewallStatus, dw as runPackageAudit, dx as resolveSupplyChainAuditFailure, dy as runPackageSync, dz as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dA as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dB as repairSupplyChainProtection, dC as runPackageFirewallAction, dD as parseInterceptProofSnapshot, dE as activatePackageFirewallRuntime, dF as EntitlementNotice, aG as ApprovalProofModal, dG as chooseSupplyChainAuditFolder, dH as fetchReceipts, ba as WorkspacePageHeader, dI as lazyWorkspace, dJ as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
@@ -504,15 +504,20 @@ const SYNC_RECOVERY_STEPS = [
   }
 ];
 function createSupplyChainSyncApprovalGate(options) {
+  const autoRetryAuditAfterPrimary = options?.autoRetryAuditAfterPrimary ?? false;
   return {
     obstacle: "sync_required",
-    headline: "Sync supply-chain intel before auditing",
+    headline: autoRetryAuditAfterPrimary ? "Sync supply-chain intel before auditing" : "Approve supply-chain intel sync",
     detail: "Enter your local approval password so Guard can download the latest signed supply-chain bundle on this device.",
-    steps: [...SYNC_RECOVERY_STEPS],
+    // A standalone sync does not run an audit afterwards, so it must not promise one.
+    steps: autoRetryAuditAfterPrimary ? [...SYNC_RECOVERY_STEPS] : [SYNC_RECOVERY_STEPS[0]],
     primaryAction: "sync",
     primaryLabel: "Sync supply-chain intel",
-    autoRetryAuditAfterPrimary: options?.autoRetryAuditAfterPrimary ?? false
+    autoRetryAuditAfterPrimary
   };
+}
+function isStandaloneSyncRecoveryGate(gate) {
+  return gate.primaryAction === "sync" && !gate.autoRetryAuditAfterPrimary;
 }
 function resolveSupplyChainAuditRecoveryGate(detail) {
   if (!isSupplyChainAuditIncomplete(detail)) {
@@ -1630,6 +1635,7 @@ function AuditRecoveryModal({
     setApprovalSubmitting(false);
   }, [phase]);
   const activeStep = resolveActiveStepIndex(gate, phase);
+  const standaloneSync = isStandaloneSyncRecoveryGate(gate);
   const primaryBusy = phase === "syncing" || phase === "connecting" || phase === "auditing";
   const PrimaryIcon = resolvePrimaryIcon(gate, phase);
   const showConnectFlow = gate.primaryAction === "connect" && connectFlow !== null && phase !== "auditing";
@@ -1650,88 +1656,95 @@ function AuditRecoveryModal({
     setApprovalSubmitting(true);
     onApprovalSubmit(buildApprovalProofCredentials(approvalGate, { approvalPassword, approvalTotpCode }));
   }, [approvalGate, approvalPassword, approvalTotpCode, onApprovalSubmit]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(GuardModalLayer, { ariaLabel: "Finish workspace audit setup", onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white shadow-xl", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-b border-slate-100 px-5 py-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 space-y-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-blue", children: "Workspace audit" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: resolvePhaseTone(phase), children: resolvePhaseLabel(phase) })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold tracking-[-0.02em] text-brand-dark", children: gate.headline }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "max-w-xl text-sm leading-relaxed text-slate-600", children: gate.detail })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          type: "button",
-          onClick: onClose,
-          className: "shrink-0 text-sm font-medium text-slate-500 hover:text-brand-dark",
-          children: "Close"
-        }
-      )
-    ] }) }),
-    showConnectFlow ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ConnectFlowCard,
-      {
-        minimal: true,
-        purpose: "audit",
-        mode: "repair",
-        connectFlow,
-        connectStarting,
-        connectError,
-        headline: gate.headline,
-        detail: gate.detail,
-        onStartConnect
-      }
-    ) : showApprovalStep ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-5 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-      ApprovalProofInline,
-      {
-        approvalGate,
-        approvalPassword,
-        approvalTotpCode,
-        error: error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, approvalStep: true, operation: errorOperation }) : null,
-        submitLabel: "Sync supply-chain intel",
-        submitBusy: approvalSubmitting,
-        onApprovalPasswordChange: handleApprovalPasswordChange,
-        onApprovalTotpCodeChange: handleApprovalTotpCodeChange,
-        onSubmit: handleApprovalSubmit,
-        onBack: onApprovalBack
-      }
-    ) }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 px-5 py-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("ol", { className: "grid gap-3 sm:grid-cols-2", children: gate.steps.map((step, index) => {
-        const stepNumber = index + 1;
-        const isActive = stepNumber === activeStep;
-        const isComplete = stepNumber < activeStep;
-        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "li",
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    GuardModalLayer,
+    {
+      ariaLabel: standaloneSync ? "Approve supply-chain intel sync" : "Finish workspace audit setup",
+      onClose,
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-200 bg-white shadow-xl", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-b border-slate-100 px-5 py-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 space-y-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-blue", children: standaloneSync ? "Supply-chain intel" : "Workspace audit" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: resolvePhaseTone(phase), children: resolvePhaseLabel(phase) })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold tracking-[-0.02em] text-brand-dark", children: gate.headline }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "max-w-xl text-sm leading-relaxed text-slate-600", children: gate.detail })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              onClick: onClose,
+              className: "shrink-0 text-sm font-medium text-slate-500 hover:text-brand-dark",
+              children: "Close"
+            }
+          )
+        ] }) }),
+        showConnectFlow ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          ConnectFlowCard,
           {
-            className: `rounded-xl border px-3 py-3 ${isActive ? "border-brand-blue/25 bg-brand-blue/[0.04]" : isComplete ? "border-slate-200 bg-slate-50/80" : "border-slate-200 bg-white"}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-semibold uppercase tracking-[0.14em] text-slate-500", children: [
-                "Step ",
-                stepNumber,
-                isComplete ? " · Done" : isActive ? " · In progress" : ""
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm font-semibold text-brand-dark", children: step.title }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-xs leading-relaxed text-slate-600", children: step.body })
-            ]
-          },
-          step.title
-        );
-      }) }),
-      error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, operation: errorOperation }) : null,
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "primary", onClick: handlePrimaryClick, disabled: primaryBusy, children: [
-          primaryBusy ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowPath, { className: "mr-1.5 h-4 w-4 animate-spin", "aria-hidden": "true" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(PrimaryIcon, { className: "mr-1.5 h-4 w-4", "aria-hidden": "true" }),
-          resolvePrimaryLabel(gate, phase)
-        ] }),
-        gate.primaryAction === "connect" && connectFlow?.authorize_url ? /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { href: connectFlow.authorize_url, variant: "outline", children: [
-          "Open sign-in",
-          /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowTopRightOnSquare, { className: "ml-1.5 h-3.5 w-3.5", "aria-hidden": "true" })
-        ] }) : null
+            minimal: true,
+            purpose: "audit",
+            mode: "repair",
+            connectFlow,
+            connectStarting,
+            connectError,
+            headline: gate.headline,
+            detail: gate.detail,
+            onStartConnect
+          }
+        ) : showApprovalStep ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-5 py-5", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          ApprovalProofInline,
+          {
+            approvalGate,
+            approvalPassword,
+            approvalTotpCode,
+            error: error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, approvalStep: true, operation: errorOperation }) : null,
+            submitLabel: "Sync supply-chain intel",
+            submitBusy: approvalSubmitting,
+            onApprovalPasswordChange: handleApprovalPasswordChange,
+            onApprovalTotpCodeChange: handleApprovalTotpCodeChange,
+            onSubmit: handleApprovalSubmit,
+            onBack: onApprovalBack
+          }
+        ) }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5 px-5 py-5", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("ol", { className: "grid gap-3 sm:grid-cols-2", children: gate.steps.map((step, index) => {
+            const stepNumber = index + 1;
+            const isActive = stepNumber === activeStep;
+            const isComplete = stepNumber < activeStep;
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "li",
+              {
+                className: `rounded-xl border px-3 py-3 ${isActive ? "border-brand-blue/25 bg-brand-blue/[0.04]" : isComplete ? "border-slate-200 bg-slate-50/80" : "border-slate-200 bg-white"}`,
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs font-semibold uppercase tracking-[0.14em] text-slate-500", children: [
+                    "Step ",
+                    stepNumber,
+                    isComplete ? " · Done" : isActive ? " · In progress" : ""
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm font-semibold text-brand-dark", children: step.title }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-xs leading-relaxed text-slate-600", children: step.body })
+                ]
+              },
+              step.title
+            );
+          }) }),
+          error !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainAuditFailureNotice, { message: error, operation: errorOperation }) : null,
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { variant: "primary", onClick: handlePrimaryClick, disabled: primaryBusy, children: [
+              primaryBusy ? /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowPath, { className: "mr-1.5 h-4 w-4 animate-spin", "aria-hidden": "true" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(PrimaryIcon, { className: "mr-1.5 h-4 w-4", "aria-hidden": "true" }),
+              resolvePrimaryLabel(gate, phase)
+            ] }),
+            gate.primaryAction === "connect" && connectFlow?.authorize_url ? /* @__PURE__ */ jsxRuntimeExports.jsxs(ActionButton, { href: connectFlow.authorize_url, variant: "outline", children: [
+              "Open sign-in",
+              /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniArrowTopRightOnSquare, { className: "ml-1.5 h-3.5 w-3.5", "aria-hidden": "true" })
+            ] }) : null
+          ] })
+        ] })
       ] })
-    ] })
-  ] }) });
+    }
+  );
 }
 const IDLE_SUPPLY_CHAIN_FIX_ALL_STATE = {
   phase: "idle",
@@ -1899,6 +1912,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
   const [auditConnectGateActive, setAuditConnectGateActive] = reactExports.useState(false);
   const [resumeAuditAfterConnect, setResumeAuditAfterConnect] = reactExports.useState(false);
   const [auditRecoveryGate, setAuditRecoveryGate] = reactExports.useState(null);
+  const auditRecoveryGateRef = reactExports.useRef(null);
   const [auditRecoveryPhase, setAuditRecoveryPhase] = reactExports.useState("ready");
   const [auditRecoveryError, setAuditRecoveryError] = reactExports.useState(null);
   const [auditRecoveryErrorOp, setAuditRecoveryErrorOp] = reactExports.useState("sync");
@@ -1917,6 +1931,9 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
     },
     [resolveApprovalGate]
   );
+  reactExports.useEffect(() => {
+    auditRecoveryGateRef.current = auditRecoveryGate;
+  }, [auditRecoveryGate]);
   const closeAuditRecovery = reactExports.useCallback(() => {
     setAuditRecoveryGate(null);
     setAuditRecoveryPhase("ready");
@@ -2104,7 +2121,9 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
           await continueAuditAfterRecovery();
           return;
         }
-        setAuditRecoveryPhase("ready");
+        if (auditRecoveryGateRef.current === auditRecoveryGate) {
+          closeAuditRecovery();
+        }
       } catch (err) {
         if (isSupplyChainSyncConnectError(err)) {
           const connectGate = resolveSupplyChainSyncConnectRecoveryGate(err);
@@ -2143,6 +2162,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
     },
     [
       auditRecoveryGate,
+      closeAuditRecovery,
       continueAuditAfterRecovery,
       onStateChanged,
       openSyncApprovalRecovery,
@@ -2894,23 +2914,23 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-BJ7QvS_t.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-sq4yLYSA.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
 );
 const SupplyChainWorkspaceDetails = lazyWorkspace(
   "supply-chain-workspace-details",
-  () => __vitePreload(() => import("./supply-chain-workspace-details-CWxn4gFT.js"), true ? __vite__mapDeps([8,1,2,4,6,3,5]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
+  () => __vitePreload(() => import("./supply-chain-workspace-details-Dy_eTP05.js"), true ? __vite__mapDeps([8,1,2,4,6,3,5]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-CCc1AfLx.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-Dk3dULFi.js"), true ? __vite__mapDeps([9,1,2,6]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const WorkspaceFindingsWorkspace = lazyWorkspace(
   "workspace-findings-workspace",
-  () => __vitePreload(() => import("./workspace-findings-workspace-JGS8mDDs.js"), true ? __vite__mapDeps([10,1,2]) : void 0).then((m) => ({ default: m.WorkspaceFindingsWorkspace }))
+  () => __vitePreload(() => import("./workspace-findings-workspace-DOV8JFC1.js"), true ? __vite__mapDeps([10,1,2]) : void 0).then((m) => ({ default: m.WorkspaceFindingsWorkspace }))
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",
-  () => __vitePreload(() => import("./feed-health-workspace-BjOjUPpw.js").then((n) => n.c), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
+  () => __vitePreload(() => import("./feed-health-workspace-B-0Rw-Sw.js").then((n) => n.c), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
 );
 const hubTabs = [
   { value: "supply-chain", label: "Supply Chain" },

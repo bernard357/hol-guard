@@ -15,6 +15,7 @@ fn request(workspace: &str, payload: Value) -> PackageReviewPlanRequestV1 {
         harness: "codex".to_owned(),
         payload,
         home_dir: None,
+        review_reason: None,
     }
 }
 
@@ -55,6 +56,58 @@ fn exec_flows_are_planned_for_blocks_only() {
             "{command}"
         );
         assert_eq!(answer["may_allow"], false, "{command}");
+    }
+}
+
+/// The edge gives `npx` and `bunx` a command review. Their packages are still
+/// fetched, so the review is planned, for a block verdict only; any other
+/// command under that reason is left to the review.
+#[test]
+fn a_command_review_plans_only_npx_and_bunx_launches() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let answer = |command: &str| {
+        let mut input = request(&workspace.path().to_string_lossy(), shell(command));
+        input.review_reason = Some(super::LAUNCH_REVIEW_REASON.to_owned());
+        let bytes = evaluate_package_review_plan(&input).expect("request must encode a result");
+        serde_json::from_slice::<Value>(&bytes).expect("result")["payload"].clone()
+    };
+    for command in ["npx create-vite@5.1.0", "bunx @angular/cli@19.0.0"] {
+        let planned = answer(command);
+        assert_eq!(
+            planned["artifact"]["metadata"]["intent_kind"], "execute",
+            "{command}"
+        );
+        assert_eq!(planned["may_allow"], false, "{command}");
+    }
+    // The package a launch fetches is the one the bundle judges, not the
+    // executable it then runs.
+    for command in [
+        "npx -p flagged-package@1.0.0 node --version",
+        "bunx --bun flagged-package@1.0.0",
+        "npx --cache /tmp/npm-cache flagged-package@1.0.0",
+    ] {
+        assert_eq!(
+            answer(command)["artifact"]["metadata"]["targets"][0]["package_name"],
+            "flagged-package",
+            "{command}"
+        );
+    }
+    for command in [
+        "npm install zod --ignore-scripts --allow-git=none",
+        "pnpm dlx create-next-app@14.2.0",
+        "npm exec --package=create-vite@5.1.0 create-vite",
+        // The evaluator judges one package, so a launch that fetches
+        // several stays with its review.
+        "npx -p left-pad -p flagged-package node",
+        "npx --package=left-pad --package=flagged-package node",
+        // The evaluator reads the redacted command, which hides the URL.
+        "npx --registry https://registry.example flagged-package@1.0.0",
+    ] {
+        assert_eq!(
+            answer(command),
+            json!({"artifact": null, "may_allow": false}),
+            "{command}"
+        );
     }
 }
 

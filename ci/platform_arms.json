@@ -1347,6 +1347,22 @@
    "body": "5dfaf7ec07bc"
   },
   {
+   "verdict": "posix-primitive",
+   "note": "Fsyncing a directory to make a new name durable is a POSIX primitive with no Windows counterpart; the key file itself is still flushed with `sync_all` before it is published, and the Windows publish is a rename, which NTFS orders with the file's own data. The tests in `policy_verifier_key_provision_tests.rs` are not `cfg(unix)`-gated, so they run this arm on Windows.",
+   "file": "rust/crates/guard-runtime/src/policy_verifier_key_provision.rs",
+   "item": "fn sync_directory -- non-Unix block",
+   "cfg": "not(unix)",
+   "body": "14d1c940c90f"
+  },
+  {
+   "verdict": "windows-equivalent",
+   "note": "The Unix arm publishes with `hard_link`, which fails with `AlreadyExists` rather than replacing an existing key. The Windows arm calls `publish_new_windows_private_file`, a rename issued with `FILE_RENAME_REPLACE_IF_EXISTS` cleared, so it reports the same `AlreadyExists` instead of overwriting. Both report `Ok(false)` for a key another writer created first, and `a_changed_master_never_replaces_the_existing_key` in `policy_verifier_key_provision_tests.rs` is not `cfg(unix)`-gated, so it proves the no-replace rule on Windows too.",
+   "file": "rust/crates/guard-runtime/src/policy_verifier_key_provision.rs",
+   "item": "fn publish_without_replacing( temporary: &Path, path: &Path, private_root: &Path, ) -> Result<bool, Option<String>>",
+   "cfg": "not(unix)",
+   "body": "8d076d82e34c"
+  },
+  {
    "verdict": "windows-unsupported",
    "note": "The mirror reproduces a POSIX-rooted resolution only. Off Unix it returns `Unmirrored`, which hands the question to Python rather than answering it wrongly. Fails closed, at the cost of the native fast path on Windows.",
    "file": "rust/crates/guard-runtime/src/project_identity.rs",

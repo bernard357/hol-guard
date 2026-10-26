@@ -47,6 +47,7 @@ def package_review_plan(
     harness: str,
     workspace: Path,
     guard_home: Path,
+    review_reason: str,
     home_dir: Path | None = None,
     deadline: float | None = None,
 ) -> tuple[GuardArtifact | None, bool]:
@@ -65,6 +66,7 @@ def package_review_plan(
         "harness": harness,
         "payload": dict(payload),
         "home_dir": None if home_dir is None else str(home_dir),
+        "review_reason": review_reason,
     }
     try:
         request_sha256 = "sha256:" + _canonical_request_sha256(request)

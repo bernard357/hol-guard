@@ -196,6 +196,7 @@ mod contained_op;
 mod contained_workspace_grant_plan;
 #[cfg(unix)]
 mod contained_workspace_sink;
+mod contained_wrapper_plan_op;
 mod content_sensitivity_op;
 mod context_digest;
 mod context_digest_json;
@@ -353,9 +354,18 @@ mod guard_store_inventory_vectors_tests;
 mod guard_store_json;
 mod guard_store_lineage;
 mod guard_store_local_cli;
+mod guard_store_local_cli_catalog;
 #[cfg(test)]
 mod guard_store_local_cli_grant_vectors_tests;
 mod guard_store_local_cli_grants;
+mod guard_store_local_cli_inventory;
+mod guard_store_local_cli_inventory_capabilities;
+mod guard_store_local_cli_inventory_rows;
+#[cfg(test)]
+mod guard_store_local_cli_inventory_rows_tests;
+#[cfg(test)]
+mod guard_store_local_cli_inventory_vectors_tests;
+mod guard_store_local_cli_mcp_snapshot;
 #[cfg(test)]
 mod guard_store_local_cli_vectors_tests;
 mod guard_store_local_mcp_declarations;
@@ -383,6 +393,7 @@ mod guard_store_policy_source_context;
 mod guard_store_policy_source_context_vectors_tests;
 mod guard_store_policy_source_labels;
 mod guard_store_policy_source_rows;
+mod guard_store_policy_upsert;
 mod guard_store_receipt_analytics;
 mod guard_store_receipt_approval;
 mod guard_store_receipt_decision;
@@ -403,6 +414,7 @@ mod guard_store_state_ops_vectors_tests;
 mod guard_store_storage_maintenance;
 #[cfg(test)]
 mod guard_store_storage_maintenance_vectors_tests;
+mod guard_store_temporary_mcp;
 mod guard_store_tool_call_evidence;
 #[cfg(test)]
 mod guard_store_tool_call_evidence_tests;
@@ -667,6 +679,7 @@ mod policy_runtime_saved;
 mod policy_runtime_saved_reuse;
 mod policy_snapshot_build;
 mod policy_store;
+mod policy_verifier_key_provision;
 mod pre_tool_extension_evidence_op;
 mod project_identity;
 mod prompt_analyze_op;
@@ -699,6 +712,7 @@ mod restricted_pytest_op;
 mod retry_lineage_capture_op;
 mod reviewed_invocation_bindings_op;
 mod rich_command_model_op;
+mod risk_action;
 mod runner_authority_detector;
 mod runner_authority_evaluation;
 mod runner_authority_op;
@@ -773,6 +787,7 @@ mod workspace_fix_fs;
 mod workspace_fix_manifest;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
+mod workspace_mcp_config;
 mod workspace_scan_targets;
 mod workspace_snapshot;
 mod workspace_snapshot_file;

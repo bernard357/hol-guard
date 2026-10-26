@@ -30,6 +30,7 @@ fn request(root: &Path) -> SnapshotRequest {
         secrets: true,
         secret_key: Some(key("install-one")),
         skills: false,
+        hooks: false,
     }
 }
 

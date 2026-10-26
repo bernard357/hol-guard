@@ -228,12 +228,16 @@ def test_explicit_macos_extension_authority_spends_one_interactive_read(
     assert bounded_reads == [legacy_store._anchor_ref()]
 
 
-def test_failed_anchor_write_leaves_recoverable_prepared_transition(tmp_path: Path) -> None:
+def test_failed_anchor_write_leaves_recoverable_prepared_transition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     secrets = MemorySecretStore()
     store = _store(tmp_path, secrets)
     store.read_extension_control_authority(catalog_digest=BUILT_IN_COMMAND_EXTENSION_REGISTRY.catalog_digest)
     secrets.fail_anchor_set_number = secrets.anchor_set_count + 1
-    with pytest.raises(ExtensionControlAuthorityError, match="anchor"):
+    # A process that dies after preparing cannot take its row back.
+    with monkeypatch.context() as patch, pytest.raises(ExtensionControlAuthorityError, match="anchor"):
+        patch.setattr(store, "_roll_back_abandoned_transition", lambda *_args, **_kwargs: False)
         _commit(store)
 
     with store._connect() as connection:

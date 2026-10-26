@@ -190,3 +190,83 @@ def test_links_carry_campaign_attribution(tmp_path: Path) -> None:
     _exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--json"])
     hol = json.loads(output)["hol"]
     assert hol["connect"].endswith("repo=acme/notes-kit&utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit")
+
+
+def test_links_block_prints_only_the_readme_block(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, _output, error = _run(["plugin", "links", str(tmp_path), "--block"])
+    assert exit_code == 1
+    assert "No install block" in error
+
+    (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({"name": "acme", "plugins": [{"name": "notes-kit", "source": "./"}]}), encoding="utf-8"
+    )
+    exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--block"])
+    assert exit_code == 0
+    assert output.startswith("<!-- hol-install-block:v1 slug=acme/notes-kit -->\n")
+    assert "hol-guard plugin install acme/notes-kit --apply" in output
+    assert "Claim the HOL listing" not in output
+
+    _exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--block", "--slug", "acme/notes"])
+    assert "hol-guard plugin install acme/notes --apply" in output
+    exit_code, _output, error = _run(["plugin", "links", str(tmp_path), "--block", "--slug", "../notes"])
+    assert exit_code == 2
+    assert "Use a HOL listing slug" in error
+
+
+def test_convert_to_agent_plugins_writes_a_conforming_package(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_plugin(source)
+    out = tmp_path / "out"
+    exit_code, output, error = _run(["plugin", "convert", str(source), "--to", "agent-plugins", "--out", str(out)])
+    assert (exit_code, error) == (0, ""), output
+    package = out / "agent-plugins"
+    manifest = json.loads((package / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["$schema"].startswith("https://agent-plugins.org/schemas/1.0.0/")
+    assert json.loads((package / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {
+        "notes": {"type": "stdio", "command": "npx", "args": ["-y", "@acme/notes-mcp"]}
+    }
+    assert (package / "skills" / "notes" / "SKILL.md").is_file()
+    assert "conforms to agent-plugins-1.0: 0 errors, 0 warnings" in output
+
+    exit_code, output, error = _run(["plugin", "check", str(package), "--spec", "agent-plugins-1.0", "--json"])
+    assert (exit_code, error) == (0, ""), output
+    assert json.loads(output)["passed"] is True
+
+
+def test_check_spec_names_the_section_a_plugin_breaks(tmp_path: Path) -> None:
+    (tmp_path / "plugin.json").write_text(
+        json.dumps({"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", "name": "Bad Name"}),
+        encoding="utf-8",
+    )
+    exit_code, output, _error = _run(["plugin", "check", str(tmp_path), "--spec", "agent-plugins-1.0"])
+    assert exit_code == 1
+    assert "name_invalid" in output
+    assert "(section " in output
+    assert "Clients reject the whole plugin." in output
+    assert "does not conform to agent-plugins-1.0" in output
+
+
+def test_convert_rejects_an_unknown_target(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, _output, error = _run(["plugin", "convert", str(tmp_path), "--to", "zed"])
+    assert exit_code == 2
+    assert "agent-plugins" in error
+
+
+def test_card_prints_only_json_on_stdout_and_links_the_listing(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, output, error = _run(["plugin", "card", str(tmp_path)])
+    assert exit_code == 0
+    card = json.loads(output)
+    assert card["schema"] == "hol.plugin-card.v0-draft"
+    assert card["identity"] == {"repository": "acme/notes-kit", "verified": False}
+    assert card["permissions"]["startsPrograms"] == ["npx"]
+    assert card["links"]["listing"] == "https://hol.org/registry/plugins/acme%2Fnotes-kit"
+    assert ".well-known/hol-plugin-card.json" in error
+
+    _exit_code, output, _error = _run(["plugin", "card", str(tmp_path), "--slug", "acme/notes"])
+    assert json.loads(output)["links"]["listing"] == "https://hol.org/registry/plugins/acme%2Fnotes"
+    exit_code, _output, error = _run(["plugin", "card", str(tmp_path), "--slug", "../notes"])
+    assert exit_code == 2
+    assert "Use a HOL listing slug" in error

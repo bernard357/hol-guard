@@ -438,6 +438,24 @@ def native_command_artifact_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def native_contained_wrapper_runtime(
+    native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Serve the contained wrapper peel from the real resident.
+
+    The sink's peel is the classifier's own answer now: the grammar lives in
+    `contained_wrapper.rs` alone and this side only carries what it returns.
+    There is no Python peel left to fall back to, so these suites ask the
+    session resident rather than a second copy of the rules.
+    """
+
+    from codex_plugin_scanner.guard import native_contained_wrapper_plan
+
+    monkeypatch.setattr(native_contained_wrapper_plan, "_resolve_digest_home", lambda _guard_home: _native_context_home)
+    return _native_context_home
+
+
+@pytest.fixture
 def native_runtime_detectors_runtime(
     native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
