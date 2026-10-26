@@ -17,6 +17,7 @@ from codex_plugin_scanner.guard.runtime.exact_cloud_review import (
     EXACT_CLOUD_REVIEW_OPERATION,
     _capability_digest,
     _oauth_metadata,
+    _verify,
 )
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.guard_oauth_token_support import oauth_binding_access_token
@@ -129,10 +130,12 @@ def remote_approval(
         # but the Cloud issues a receipt while that window is open and the
         # local clock may have passed it by the time a test builds one. Bind
         # the receipt to the stored capability itself so the expiry is judged
-        # where it belongs, in the write transaction.
-        capability = store.get_sync_payload(EXACT_CLOUD_REVIEW_CAPABILITY_STATE_KEY)
-        assert isinstance(capability, dict)
-        capability_id = _capability_digest(capability)
+        # where it belongs, in the write transaction. The digest the apply path
+        # compares against is taken over the verified capability, which is the
+        # stored payload without its signature.
+        capability_id = _capability_digest(
+            _verify(store, store.get_sync_payload(EXACT_CLOUD_REVIEW_CAPABILITY_STATE_KEY))
+        )
     envelope: dict[str, object] = {
         "actionEnvelopeHash": claim["actionEnvelopeHash"],
         "approvalId": claim["approvalId"],

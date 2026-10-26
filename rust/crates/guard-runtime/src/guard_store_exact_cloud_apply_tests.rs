@@ -29,8 +29,6 @@ fn connection() -> Connection {
                event_name text not null, payload_json text not null, occurred_at text not null);
              create table guard_exact_cloud_review_receipts (receipt_id text primary key,
                request_id text not null, claimed_at text not null);
-             create table approval_requests (request_id text primary key, status text not null,
-               harness text, policy_action text, created_at text);
              create table guard_local_once_approvals (approval_id text primary key,
                request_id text not null, harness text not null, artifact_id text not null,
                artifact_hash text not null, workspace text, publisher text, action text not null,
@@ -38,6 +36,17 @@ fn connection() -> Connection {
                integrity_version integer, payload_hash text, payload_mac text,
                integrity_key_id text, signed_at text, authority_kind text);",
         )
+        .unwrap();
+    // The queue read selects every column the approval reader names, so the
+    // fixture takes its column list from that reader rather than a copy that
+    // can fall behind it.
+    let columns = crate::guard_store_approval_reads::COLUMNS
+        .split(", ")
+        .map(|name| format!("{name} text"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    connection
+        .execute_batch(&format!("create table approval_requests ({columns});"))
         .unwrap();
     connection
 }
