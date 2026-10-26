@@ -98,7 +98,7 @@ jobs:
 
       - name: Scan, check, attest, and register
         id: release
-        uses: hashgraph-online/hol-guard/plugin-release@67a95a406f2354a1c390ae7e1728bf771f9cf731
+        uses: hashgraph-online/hol-guard/plugin-release@c414d1cacb1f26d2f64b8bf7e3a4496dd76523f2
         with:
           plugin_dir: ${{ inputs.plugin_dir }}
           profile: ${{ inputs.profile }}
