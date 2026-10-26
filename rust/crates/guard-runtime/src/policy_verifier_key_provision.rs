@@ -87,17 +87,31 @@ fn temporary_name() -> Result<String, String> {
     ))
 }
 
+/// A failed key write, and whether this call created the file it failed on.
+///
+/// Only the creator of a half-written file may remove it, so the two cases
+/// cannot share one error.
+struct KeyWriteFailure {
+    code: String,
+    created: bool,
+}
+
 /// Write `derived` into a fresh private file and flush it to disk.
 fn write_private_key(
     path: &Path,
     derived: &[u8; VERIFIER_KEY_BYTES],
     private_root: &Path,
-) -> Result<(), String> {
-    let mut file = private_file(path, true, private_root)?;
-    file.write_all(derived)
-        .map_err(|_| "native_policy_verifier_key_write_failed".to_owned())?;
-    file.sync_all()
-        .map_err(|_| "native_policy_verifier_key_write_failed".to_owned())?;
+) -> Result<(), KeyWriteFailure> {
+    let mut file = private_file(path, true, private_root).map_err(|code| KeyWriteFailure {
+        code,
+        created: false,
+    })?;
+    if file.write_all(derived).is_err() || file.sync_all().is_err() {
+        return Err(KeyWriteFailure {
+            code: "native_policy_verifier_key_write_failed".to_owned(),
+            created: true,
+        });
+    }
     Ok(())
 }
 
@@ -130,7 +144,20 @@ fn publish_without_replacing(
     match std::fs::hard_link(temporary, path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(_) => Err(None),
+        // Only a filesystem that refuses links at all may take the fallback.
+        // A full disk, a denied directory or an I/O error says nothing about
+        // link support, and publishing those as "cannot link" would turn a
+        // one-off failure into a create of the final path.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::Unsupported
+                || matches!(
+                    error.raw_os_error(),
+                    Some(libc::EPERM) | Some(libc::EOPNOTSUPP) | Some(libc::ENOSYS)
+                ) =>
+        {
+            Err(None)
+        }
+        Err(_) => Err(Some("native_policy_verifier_key_write_failed".to_owned())),
     }
 }
 
@@ -180,14 +207,13 @@ pub(crate) fn provision_verifier_key(
 
     let temporary: PathBuf = state_base.join(temporary_name()?);
     let written = write_private_key(&temporary, &derived, &private_root);
-    let published =
-        written.and_then(
-            |()| match publish_without_replacing(&temporary, &path, &private_root) {
-                Ok(published) => Ok(Some(published)),
-                Err(Some(code)) => Err(code),
-                Err(None) => Ok(None),
-            },
-        );
+    let published = written.map_err(|failure| failure.code).and_then(|()| {
+        match publish_without_replacing(&temporary, &path, &private_root) {
+            Ok(published) => Ok(Some(published)),
+            Err(Some(code)) => Err(code),
+            Err(None) => Ok(None),
+        }
+    });
     let _ = std::fs::remove_file(&temporary);
     let published = published?;
 
@@ -202,16 +228,41 @@ pub(crate) fn provision_verifier_key(
             sync_directory(state_base)?;
             confirm_existing(state_base, &derived)
         }
-        None => {
-            // No link support. An exclusive create of the final path still
-            // never replaces a key; a reader may briefly see it short, which
-            // `existing_key` waits out.
-            match write_private_key(&path, &derived, &private_root) {
-                Ok(()) => {
-                    sync_directory(state_base)?;
-                    Ok(VerifierKeyProvision::Created)
-                }
-                Err(_) => confirm_existing(state_base, &derived),
+        None => create_final_key(state_base, &path, &derived, &private_root),
+    }
+}
+
+/// Publish the key at its final path, for a filesystem that cannot link.
+///
+/// The exclusive create still never replaces a key; a reader may briefly see
+/// the file short, which `existing_key` waits out.
+fn create_final_key(
+    state_base: &Path,
+    path: &Path,
+    derived: &[u8; VERIFIER_KEY_BYTES],
+    private_root: &Path,
+) -> Result<VerifierKeyProvision, String> {
+    match write_private_key(path, derived, private_root) {
+        Ok(()) => {
+            sync_directory(state_base)?;
+            Ok(VerifierKeyProvision::Created)
+        }
+        Err(failure) if failure.created => {
+            // This call created the file, so removing it cannot destroy a key
+            // another provisioner published. Left behind, a short key would
+            // fail every later provisioning and the resident's own startup
+            // check until someone deleted it by hand.
+            let _ = std::fs::remove_file(path);
+            Err(failure.code)
+        }
+        Err(failure) => {
+            // The create itself failed. Another provisioner winning the race
+            // is the one reason to confirm a key instead of reporting the
+            // failure; with nothing there, the write error is the answer.
+            if std::fs::symlink_metadata(path).is_ok() {
+                confirm_existing(state_base, derived)
+            } else {
+                Err(failure.code)
             }
         }
     }

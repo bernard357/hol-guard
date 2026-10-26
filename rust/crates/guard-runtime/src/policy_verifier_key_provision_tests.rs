@@ -1,4 +1,6 @@
-use super::{provision_verifier_key, VerifierKeyProvision};
+#[cfg(unix)]
+use super::publish_without_replacing;
+use super::{create_final_key, provision_verifier_key, VerifierKeyProvision};
 use guard_policy_snapshot::derive_verifier_key;
 use std::fs;
 use std::path::PathBuf;
@@ -85,6 +87,47 @@ fn an_oversized_key_file_is_reported_without_waiting() {
     assert_eq!(
         provision_verifier_key(&state_base, &[4u8; 32]),
         Err("native_policy_verifier_key_invalid".to_owned())
+    );
+    fs::remove_dir_all(&state_base).unwrap();
+}
+
+#[test]
+fn a_create_failure_with_no_key_present_reports_the_write_failure() {
+    let state_base = root();
+    // Nothing exists under this parent, so the exclusive create fails and
+    // leaves nothing behind. Confirming a key here would answer a write
+    // failure with "no key", which reads as a missing install.
+    let path = state_base.join("gone").join("policy-verifier.key");
+    assert_eq!(
+        create_final_key(
+            &state_base,
+            &path,
+            &derive_verifier_key(&[8u8; 32]),
+            &state_base
+        ),
+        Err("native_resident_state_write_failed".to_owned())
+    );
+    assert!(!path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_failure_that_is_not_missing_link_support_is_reported() {
+    // Windows publishes through `publish_new_windows_private_file`, which
+    // already reports every error it gets. Only the Unix link arm can mistake
+    // a one-off failure for a filesystem that cannot link at all, and then
+    // create the final path on a disk that just refused the write.
+    let state_base = root();
+    fs::create_dir_all(&state_base).unwrap();
+    let temporary = state_base.join("policy-verifier.key.tmp");
+    fs::write(&temporary, [6u8; 32]).unwrap();
+    assert_eq!(
+        publish_without_replacing(
+            &temporary,
+            &state_base.join("gone").join("policy-verifier.key"),
+            &state_base
+        ),
+        Err(Some("native_policy_verifier_key_write_failed".to_owned()))
     );
     fs::remove_dir_all(&state_base).unwrap();
 }
