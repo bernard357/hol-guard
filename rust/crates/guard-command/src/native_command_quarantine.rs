@@ -15,7 +15,18 @@ impl CompiledNativeCommandControls {
         // on its own arrival, so holding the prompt itself protects nothing and
         // locks the operator out of the only session that could install the
         // verified replacement this block asks for.
-        if result.action.action_type == PreToolActionTypeV1::Prompt {
+        //
+        // The action type alone does not prove that. `infer_action_type` also
+        // types a named tool as a prompt whenever its name carries a prompt
+        // word -- `spawn_subagent`, `send_message`, `ask_user` -- and those are
+        // PreToolUse calls that do run something. An owner-less arrival is what
+        // proves nothing executes here: a real submission carries neither a
+        // parsed command nor a tool name, and every tool call keeps the broad
+        // quarantine it had before.
+        if result.action.action_type == PreToolActionTypeV1::Prompt
+            && command.is_none()
+            && tool.is_none()
+        {
             return;
         }
         if !self.quarantine_applies(command, tool) {
@@ -231,6 +242,17 @@ mod tests {
         assert_eq!(mcp_call.policy_action, "block", "{mcp_call:?}");
         assert_eq!(mcp_call.reason_code, "native_active_pack_quarantine");
 
+        // A tool whose name carries a prompt word is typed as a prompt by
+        // `infer_action_type`, but it is still a PreToolUse call that runs
+        // something, so the quarantine holds it.
+        for tool in ["spawn_subagent", "send_message", "ask_user"] {
+            let mut call = quarantined_result("prompt", "submit", "PreToolUse");
+            controls.enforce_quarantine(None, Some(tool), &mut call);
+            assert_eq!(call.policy_action, "block", "{tool}: {call:?}");
+            assert_eq!(call.decision, "deny", "{tool}: {call:?}");
+            assert_eq!(call.reason_code, "native_active_pack_quarantine");
+        }
+
         // A pending quarantine covers every owner, and still releases prompts.
         controls
             .set_security_quarantine(true, &BTreeSet::new())
@@ -245,5 +267,9 @@ mod tests {
             "{pending_command:?}"
         );
         assert_eq!(pending_command.reason_code, "native_active_pack_quarantine");
+        let mut pending_tool = quarantined_result("prompt", "submit", "PreToolUse");
+        controls.enforce_quarantine(None, Some("spawn_subagent"), &mut pending_tool);
+        assert_eq!(pending_tool.policy_action, "block", "{pending_tool:?}");
+        assert_eq!(pending_tool.reason_code, "native_active_pack_quarantine");
     }
 }
