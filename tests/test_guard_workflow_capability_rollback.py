@@ -11,7 +11,6 @@ import json
 import sqlite3
 
 import pytest
-from workflow_capability_frame_support import sign_workflow_capability
 
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_workflow_capability_common import WORKFLOW_CAPABILITY_STORE_CLOCK
@@ -25,6 +24,7 @@ from tests.test_guard_workflow_capabilities import (
     _now,
     _store,
 )
+from tests.workflow_capability_frame_support import sign_workflow_capability
 from tests.workflow_capability_transitions_support import (
     authority_transition_sha256,
     decode_signed_authority_transition,

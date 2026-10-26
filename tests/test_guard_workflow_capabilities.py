@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from workflow_capability_frame_support import sign_workflow_capability, sign_workflow_capability_receipt
 
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_workflow_capability_common import WORKFLOW_CAPABILITY_STORE_CLOCK
@@ -33,6 +32,7 @@ from codex_plugin_scanner.guard.workflow_capabilities import (
     WorkflowCapabilityRuleBinding,
     format_utc_timestamp,
 )
+from tests.workflow_capability_frame_support import sign_workflow_capability, sign_workflow_capability_receipt
 
 _KEY = b"k" * 32
 _KEY_ID = "guard-policy-integrity-key:test"
