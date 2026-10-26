@@ -570,8 +570,8 @@ def evaluate_detection(
     prior_receipts = store.count_receipts(detection.harness) if persist else 0
     previous_snapshots = store.list_snapshots(detection.harness)
     runtime_risk_signals_v2 = _runtime_detector_risk_signals(runtime_detector_context)
-    # A runtime detector block is never recorded as a user override.
-    override_labels = {} if runtime_detector_block_reason else dict(trusted_request_override_labels or {})
+    # The resident records a label only when the trusted request decided.
+    override_labels = dict(trusted_request_override_labels or {})
     authority_inputs = _ConsumerAuthorityInputs(
         store=store,
         harness=detection.harness,

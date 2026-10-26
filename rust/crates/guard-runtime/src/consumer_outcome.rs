@@ -18,6 +18,9 @@ const INVALID: &str = "native_consumer_artifact_project_request_invalid";
 const COMPOSE_UNAVAILABLE_REASON: &str = "consumer_artifact_compose_unavailable";
 const REMOVED_SCORING_RECOMMENDATION: &str = "warn";
 
+/// The compose reason a runtime detector block records.
+const RUNTIME_DETECTOR_BLOCK_REASON: &str = "runtime_detector_block";
+
 /// The composed runtime answer, or the refusal shown in its place.
 struct Runtime {
     answer: Value,
@@ -123,8 +126,12 @@ impl Runtime {
             .map(|decision| decision.decision_v2.dashboard_primary_detail.as_str())
     }
 
+    /// The request's override label, only when the trusted request decided
+    /// and no runtime detector block overruled it.
     fn user_override(&self, query: &Value) -> Value {
-        if self.answer["trusted_request_override"] == Value::Bool(true) {
+        if self.answer["trusted_request_override"] == Value::Bool(true)
+            && self.answer["decision_reason"] != RUNTIME_DETECTOR_BLOCK_REASON
+        {
             query["user_override"].clone()
         } else {
             Value::Null

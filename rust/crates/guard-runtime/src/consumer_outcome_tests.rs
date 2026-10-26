@@ -285,6 +285,20 @@ fn the_receipt_carries_the_evidence_and_the_override_only_when_it_applied() {
 }
 
 #[test]
+fn a_runtime_detector_block_records_no_override() {
+    let decision = decision(GuardAction::Block, true, &[]);
+    let mut runtime = runtime_answer(&decision, true);
+    runtime["decision_reason"] = json!("runtime_detector_block");
+    runtime["approval_source"] = json!("runtime-detector");
+    let outcome = artifact_outcome(&detected(runtime.clone(), Value::Null)).unwrap();
+    assert_eq!(outcome["receipt"]["user_override"], Value::Null);
+    let mut query = removed(runtime, Value::Null, json!([]));
+    query["user_override"] = json!("trusted request");
+    let outcome = removed_outcome(&query).unwrap();
+    assert_eq!(outcome["receipt"]["user_override"], Value::Null);
+}
+
+#[test]
 fn only_a_change_to_a_known_artifact_raises_the_change_event() {
     let decision = decision(GuardAction::Review, true, &[]);
     let mut query = detected(runtime_answer(&decision, false), Value::Null);

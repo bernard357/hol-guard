@@ -149,6 +149,7 @@ _RECEIPT: dict[str, str] = {
     "approval_source": "s",
     "scanner_evidence": "l",
 }
+_BLOCKING_ACTIONS = frozenset({"review", "require-reapproval", "sandbox-required", "block"})
 _RESULT_FIELDS: dict[str, str] = {
     "artifact_id": "s",
     "policy_action": "a",
@@ -190,13 +191,28 @@ def _result_valid(row: dict[str, object]) -> bool:
     )
 
 
+def _outcome_consistent(payload: dict[str, object], result: dict[str, object], receipt: dict[str, object]) -> bool:
+    # One decision: the row, the receipt and the enforcement flags agree on it,
+    # and nothing that blocks may advance the stored snapshot.
+    action = payload["policy_action"]
+    blocking = action in _BLOCKING_ACTIONS
+    return (
+        result.get("policy_action") == action
+        and receipt["policy_decision"] == action
+        and payload["blocking"] is blocking
+        and not (blocking and payload["snapshot_permitted"] is True)
+    )
+
+
 def _answer_valid(kind: str, payload: dict[str, object]) -> bool:
     if not _exact(_ANSWERS[kind], payload):
         return False
     if kind not in {"artifact_outcome", "removed_outcome"}:
         return True
-    result = payload["result"]
-    if not isinstance(result, dict) or not _exact(_RECEIPT, payload["receipt"]):
+    result, receipt = payload["result"], payload["receipt"]
+    if not isinstance(result, dict) or not isinstance(receipt, dict) or not _exact(_RECEIPT, receipt):
+        return False
+    if not _outcome_consistent(payload, result, receipt):
         return False
     if kind == "removed_outcome":
         return result.get("removed") is True and isinstance(payload["event"], dict)

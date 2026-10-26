@@ -285,12 +285,12 @@ def _removed_outcome() -> dict[str, object]:
         json.dumps(
             {
                 "result": removed["result"],
-                "policy_action": "block",
+                "policy_action": "require-reapproval",
                 "blocking": True,
                 "snapshot_permitted": False,
                 "receipt": {
                     "artifact_hash": "h",
-                    "policy_decision": "block",
+                    "policy_decision": "require-reapproval",
                     "capabilities_summary": "mcp server",
                     "changed_capabilities": ["removed"],
                     "provenance_summary": "project artifact removed",
@@ -327,6 +327,12 @@ def test_a_well_formed_removed_outcome_is_returned(monkeypatch: pytest.MonkeyPat
         lambda payload: payload["receipt"].pop("approval_source"),
         lambda payload: payload["receipt"].update(extra=1),
         lambda payload: payload.update(extra=1),
+        # Contradictory decisions: a block that permits the snapshot, a block
+        # that does not block, or a row and receipt that disagree.
+        lambda payload: payload.update(snapshot_permitted=True),
+        lambda payload: payload.update(blocking=False),
+        lambda payload: payload["receipt"].update(policy_decision="allow"),
+        lambda payload: payload["result"].update(policy_action="allow"),
     ],
 )
 def test_malformed_removed_outcomes_raise(monkeypatch: pytest.MonkeyPatch, mutate) -> None:
