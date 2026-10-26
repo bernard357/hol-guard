@@ -201,10 +201,15 @@ def _trust_refresh_ca():
     ):
         yield
         return
-    from requests.certs import where
+    import requests.certs as requests_certs
 
+    where = getattr(requests_certs, "where", None)
+    bundle = where() if callable(where) else None
+    if not isinstance(bundle, str) or not bundle:
+        yield
+        return
     with _TRUST_ENVIRONMENT_LOCK:
-        os.environ["SSL_CERT_FILE"] = where()
+        os.environ["SSL_CERT_FILE"] = bundle
         try:
             yield
         finally:
