@@ -333,8 +333,15 @@ def test_package_policy_and_sandbox_context_changes_invalidate_review_approval(
     artifact = _package_artifact(workspace)
     context = build_package_execution_context(workspace_dir=workspace, artifact=artifact, executable="npm")
     base_evaluation = _package_evaluation("review")
+    # A new reason code changes the verdict the approval was granted under. A
+    # policy or bundle version bump alone does not.
     current_evaluation = (
-        replace(base_evaluation, policy_version="policy-v3") if changed_dimension == "policy" else base_evaluation
+        replace(
+            base_evaluation,
+            reasons=(*base_evaluation.reasons, {"code": "malicious_package", "message": "Known malicious package."}),
+        )
+        if changed_dimension == "policy"
+        else base_evaluation
     )
     base_config = GuardConfig(guard_home=tmp_path / "guard-home", workspace=workspace, sandbox_analysis="off")
     current_config = GuardConfig(
