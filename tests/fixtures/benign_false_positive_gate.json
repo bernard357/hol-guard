@@ -11836,6 +11836,41 @@
       "expect": "allow"
     },
     {
+      "id": "session-git-worktree-remove-absent-sibling",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree remove ../app-portal-fix"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "negative-git-worktree-remove-registered-by-suffix",
+      "fix_area": "negative",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree remove app-portal-fix"
+      },
+      "cwd": "org_app",
+      "contained_ok": true,
+      "expect": "not_allow"
+    },
+    {
       "id": "session-git-worktree-add-missing-private-temporary-parent",
       "fix_area": "git-sibling-worktree",
       "harnesses": [
