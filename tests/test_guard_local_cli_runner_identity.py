@@ -251,3 +251,34 @@ def test_registry_identity_keeps_valid_id_for_hyphenated_names(tmp_path: Path) -
     assert identity is not None
     assert identity.is_registry_package
     assert is_local_cli_id(identity.cli_id)
+
+
+@pytest.mark.parametrize("verdict", [["allowed"], {"allowed": True}, 1, None])
+def test_malformed_resident_verdict_leaves_the_review_standing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: object
+) -> None:
+    store = GuardStore(tmp_path / "guard-home")
+    monkeypatch.setattr(hook_native_local_cli, "ensure_resident_prerequisite", lambda guard_home: True)
+
+    def resident(**kwargs: object) -> dict[str, object]:
+        request = kwargs["request"]
+        assert isinstance(request, Mapping)
+        return {
+            "schema": "guard-hook-local-cli-rule-result.v1",
+            "request_id": request["request_id"],
+            "status": "ok",
+            "verdict": verdict,
+        }
+
+    monkeypatch.setattr(hook_native_local_cli, "_resident_request", resident)
+
+    response = hook_native_local_cli.native_local_cli_grant_response(
+        store,
+        harness="codex",
+        payload={"tool_input": {"command": "npx wrangler whoami"}, "cwd": str(tmp_path)},
+        native_result={"decision": "review", "policy_action": "review", "minimum_action": "review"},
+        workspace=tmp_path,
+        home_dir=tmp_path,
+    )
+
+    assert response is None

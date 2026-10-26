@@ -166,7 +166,8 @@ def _rule_verdict(
         response is None
         or not set(response) <= _RESULT_FIELDS
         or response.get("request_id") != request["request_id"]
-        or response.get("verdict") not in _VERDICTS
+        or not isinstance(response.get("verdict"), str)
+        or response["verdict"] not in _VERDICTS
     ):
         return None
     name = response.get("name")
