@@ -72,6 +72,25 @@ fn reason_without_url(guard_home: &Path, home_dir: &str) -> String {
 ///
 /// Everything else is left exactly as the native evaluation produced it,
 /// including a block this module cannot compose a link for byte for byte.
+/// The repair as the edge reaches it. The health lives in the admitted
+/// snapshot's compiled command extensions and both paths in the request's own
+/// source, so the edge hands over what it holds rather than taking those
+/// pieces apart at the call.
+pub(crate) fn apply_at_edge(
+    result: &mut Value,
+    snapshot: Option<&crate::policy_enforcement::AdmittedPolicySnapshot>,
+    source: &guard_contracts::GuardHookSourceMetadataV2,
+) {
+    apply(
+        result,
+        snapshot
+            .and_then(|snapshot| snapshot.command_extensions.as_ref())
+            .map(guard_command::native_command_controls::CompiledNativeCommandControls::health),
+        Path::new(&source.guard_home),
+        &source.home_dir,
+    );
+}
+
 pub(crate) fn apply(result: &mut Value, health: Option<&str>, guard_home: &Path, home_dir: &str) {
     let Some(object) = result.as_object() else {
         return;
