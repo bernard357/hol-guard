@@ -55,6 +55,10 @@ pub(crate) struct LeadingSubcommandConfig {
     interleaved_options_with_values: BTreeSet<String>,
     #[serde(default)]
     forbidden_flags_before_delimiter: BTreeSet<String>,
+    /// When set, an option that this rule does not name misses the rule.
+    /// Omitted or false keeps the historical match so existing sources stay stable.
+    #[serde(default)]
+    fail_secure_unknown_options: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +255,9 @@ impl LeadingSubcommandConfig {
         if !segment_matches_executable(segment, &self.executables)? {
             return Ok(false);
         }
+        if self.has_unknown_option(&segment.arguments)? {
+            return Ok(false);
+        }
         let (flags, operands) =
             leading_flags_and_operands(&segment.arguments, &self.options_with_values)?;
         if !self.forbidden_flags.is_disjoint(&flags)
@@ -329,6 +336,69 @@ impl LeadingSubcommandConfig {
         }
         Ok(false)
     }
+
+    fn known_option(&self, name: &str) -> bool {
+        self.options_with_values.contains(name)
+            || self.interleaved_options_with_values.contains(name)
+            || self.forbidden_flags.contains(name)
+            || self.required_flags_anywhere.contains(name)
+            || self.forbidden_flags_before_delimiter.contains(name)
+    }
+
+    fn option_takes_value(&self, name: &str) -> bool {
+        self.options_with_values.contains(name)
+            || self.interleaved_options_with_values.contains(name)
+    }
+
+    /// An option token is unknown when it is not one of the rule's named sets.
+    /// Value options consume the next argument, or an attached `=` / clustered
+    /// short value, so that value is not itself an option. `--` ends the walk.
+    fn has_unknown_option(&self, arguments: &[String]) -> Result<bool, &'static str> {
+        if !self.fail_secure_unknown_options {
+            return Ok(false);
+        }
+        let mut index = 0;
+        while index < arguments.len() {
+            let argument = &arguments[index];
+            if argument == "--" {
+                break;
+            }
+            if !argument.starts_with('-') || argument == "-" {
+                index += 1;
+                continue;
+            }
+            let option_name = normalize_option_token(argument.split('=').next().unwrap_or(""))?;
+            let has_cluster = !argument.starts_with("--") && argument.chars().nth(2).is_some();
+            let mut names = Vec::new();
+            let mut takes_value = false;
+            let mut attached = argument.contains('=');
+            if has_cluster {
+                for (offset, character) in argument.char_indices().skip(1) {
+                    if !python_is_alphanumeric(character) {
+                        break;
+                    }
+                    let flag = format!("-{character}");
+                    names.push(flag.clone());
+                    if self.option_takes_value(&flag) {
+                        takes_value = true;
+                        attached = attached || argument[offset..].chars().nth(1).is_some();
+                        break;
+                    }
+                }
+            } else {
+                takes_value = self.option_takes_value(&option_name);
+                names.push(option_name);
+            }
+            if names.is_empty() || names.iter().any(|name| !self.known_option(name)) {
+                return Ok(true);
+            }
+            if takes_value && !attached {
+                index += 1;
+            }
+            index += 1;
+        }
+        Ok(false)
+    }
 }
 
 pub(crate) fn ascii_lower(value: &str) -> Result<String, &'static str> {
@@ -369,3 +439,7 @@ pub(crate) fn check_command_bounds(command: &CanonicalCommandV1) -> Result<(), &
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "command_database_matcher_fail_secure_tests.rs"]
+mod fail_secure_tests;
