@@ -192,7 +192,7 @@ fn case_named(name: &str) -> Value {
         .as_array()
         .expect("cases")
         .iter()
-        .find(|case| case["name"] == Value::from(name))
+        .find(|case| case["name"] == name)
         .unwrap_or_else(|| panic!("no vector case named {name}"))
         .clone()
 }
