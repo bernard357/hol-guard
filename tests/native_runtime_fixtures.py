@@ -514,11 +514,16 @@ def native_route_policy_with_hooks_off(monkeypatch: pytest.MonkeyPatch) -> Path:
     handling in the same test still observes ``off``.
     """
 
-    from codex_plugin_scanner.guard import native_daemon_route, native_runtime
+    from codex_plugin_scanner.guard import (
+        native_daemon_route,
+        native_policy_snapshot_publisher,
+        native_runtime,
+    )
 
     runtime = _resolve_native_hook_runtime()
     real_request = native_daemon_route._resident_request
     real_mode = native_runtime.native_mode
+    real_provision = native_policy_snapshot_publisher.provision_native_verifier_key_for_store
     pinned = threading.local()
 
     def pinned_mode():
@@ -530,15 +535,33 @@ def native_route_policy_with_hooks_off(monkeypatch: pytest.MonkeyPatch) -> Path:
         # The caller resolved its status before the pin applied; resolve it again
         # inside the pin so the request sees the pinned runtime.
         kwargs.pop("status", None)
+        previous = getattr(pinned, "active", False)
         pinned.active = True
         try:
             return real_request(**kwargs)
         finally:
-            pinned.active = False
+            pinned.active = previous
+
+    def pinned_provision(store):
+        # The resident's verifier key is derived by the native runtime, so this
+        # prerequisite needs the same pinned runtime the route call gets. Without
+        # the pin the override binary is invisible in ``auto``/``off`` mode and
+        # the daemon answers every route request with a fail-closed 503.
+        previous = getattr(pinned, "active", False)
+        pinned.active = True
+        try:
+            return real_provision(store)
+        finally:
+            pinned.active = previous
 
     # The runtime path is only honoured for shadow/force, so naming it is
     # inert for hook handling that observes ``off``.
     monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(runtime))
     monkeypatch.setattr(native_runtime, "native_mode", pinned_mode)
     monkeypatch.setattr(native_daemon_route, "_resident_request", pinned_request)
+    monkeypatch.setattr(
+        native_policy_snapshot_publisher,
+        "provision_native_verifier_key_for_store",
+        pinned_provision,
+    )
     return runtime
