@@ -397,21 +397,26 @@ pub(crate) fn direct_answer(
 }
 
 /// The harness response a live resident answered for a bounded bridge hook,
-/// or `None` to take the daemon path.
+/// or why the hook takes the daemon path.
 pub(crate) fn bounded_direct_answer(
     harness: &str,
     guard_home: &Path,
     event_name: &str,
     data: &str,
     rpc_deadline: Instant,
-) -> Option<String> {
-    if !bounded_event(harness, event_name) || !direct_enabled(BOUNDED_DIRECT_SWITCH) {
-        return None;
+) -> Result<String, DirectMiss> {
+    if !direct_enabled(BOUNDED_DIRECT_SWITCH) {
+        return Err(DirectMiss::Disabled);
+    }
+    if !bounded_event(harness, event_name) {
+        return Err(DirectMiss::Event);
     }
     let deadline = Instant::now() + remaining(rpc_deadline).min(DIRECT_TIMEOUT);
-    let request = bounded_direct_request(harness, guard_home, data, remaining(deadline))?;
-    let output = send_to_live_resident(&guard_home.join(STATE_DIRECTORY), &request, deadline)?;
-    answered_response(&output)
+    let request = bounded_direct_request(harness, guard_home, data, remaining(deadline))
+        .ok_or(DirectMiss::Request)?;
+    let output =
+        send_to_live_resident_reporting(&guard_home.join(STATE_DIRECTORY), &request, deadline)?;
+    answered_response_reporting(&output)
 }
 
 /// The harness response a live resident answered for a Grok hook, or why

@@ -13,6 +13,10 @@ const MINIMUM_DIRECT_TIMEOUT: Duration = Duration::from_millis(50);
 /// Why a bridge took a hook to the daemon without a resident answer. The
 /// bridge names it to the daemon, which counts it beside the hook; nothing
 /// decides a hook by it.
+/// The header a bridge names its [`DirectMiss`] in when it hands a hook to
+/// the daemon.
+pub(crate) const DIRECT_MISS_HEADER: &str = "X-Guard-Direct-Miss";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DirectMiss {
     /// The direct lane is switched off for this bridge.
