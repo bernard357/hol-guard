@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import NoReturn, cast
 
 import pytest
 
-from codex_plugin_scanner.guard.daemon import extension_control_api as extension_control_api_module
+from codex_plugin_scanner.guard.daemon import extension_control_targets
 from codex_plugin_scanner.guard.daemon.extension_control_api import ExtensionControlApiService
 from codex_plugin_scanner.guard.daemon.server import _GuardDaemonHttpServer
 from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
@@ -17,7 +17,6 @@ from codex_plugin_scanner.guard.runtime.extension_control_authority import (
     ExtensionControlAuthorityError,
     ExtensionControlAuthorityView,
 )
-from codex_plugin_scanner.guard.runtime.extension_control_proof import ExtensionControlProof
 from codex_plugin_scanner.guard.runtime.extension_control_runtime import ExtensionControlRuntime
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -72,22 +71,25 @@ class _SharedReadCannotHealStore:
         return _view(AuthorityHealth.RECOVERY_REQUIRED if read_only else AuthorityHealth.PROTECTED)
 
 
+class _PastTheAuthorityGateError(Exception):
+    pass
+
+
 def test_preview_heals_authority_a_failed_save_left_behind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(extension_control_api_module, "prepare_candidate", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        extension_control_api_module,
-        "issue_extension_control_proof",
-        lambda *_args, **_kwargs: cast(ExtensionControlProof, SimpleNamespace(proof_id="proof-1")),
-    )
+    def reached(*_args: object, **_kwargs: object) -> NoReturn:
+        raise _PastTheAuthorityGateError
+
+    # Target metadata is prepared only once the authority is protected.
+    monkeypatch.setattr(extension_control_targets, "request_metadata", reached)
     store = _SharedReadCannotHealStore(tmp_path / "guard-home")
     runtime = ExtensionControlRuntime(_view(AuthorityHealth.RECOVERY_REQUIRED))
     service = ExtensionControlApiService(
-        store=cast(GuardStore, store), registry=BUILT_IN_COMMAND_EXTENSION_REGISTRY, runtime=runtime
+        store=cast(GuardStore, cast(object, store)), registry=BUILT_IN_COMMAND_EXTENSION_REGISTRY, runtime=runtime
     )
 
-    preview = service.preview({**_mutation_payload(), "session_nonce": "session-1", "approval_password": "pw"})
+    with pytest.raises(_PastTheAuthorityGateError):
+        service.preview({**_mutation_payload(), "session_nonce": "session-1", "approval_password": "pw"})
 
-    assert preview["proof_id"] == "proof-1"
     assert runtime.current().health is AuthorityHealth.PROTECTED
     assert store.reads[:2] == [True, False]
 
@@ -96,8 +98,8 @@ def test_daemon_refresh_reads_as_the_writer_when_a_shared_read_needs_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = GuardStore(tmp_path / "guard-home")
-    protected = store.read_extension_control_authority_for_registry(BUILT_IN_COMMAND_EXTENSION_REGISTRY)
-    runtime = ExtensionControlRuntime(_view(AuthorityHealth.RECOVERY_REQUIRED, protected.revision))
+    protected = _view(AuthorityHealth.PROTECTED, 0)
+    runtime = ExtensionControlRuntime(_view(AuthorityHealth.RECOVERY_REQUIRED, 0))
     server = cast(
         _GuardDaemonHttpServer,
         cast(
