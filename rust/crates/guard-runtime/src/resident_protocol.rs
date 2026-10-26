@@ -230,6 +230,7 @@ pub(crate) enum ResidentOperationV1 {
     ApprovalScope(ApprovalScopeRequestV1),
     ApprovalScopeSelect(guard_contracts::ApprovalScopeSelectRequestV1),
     ApprovalResolutionEligibility(guard_contracts::ApprovalResolutionEligibilityRequestV1),
+    CommandCapability(guard_contracts::CommandCapabilityRequestV1),
     ContainedWrapperPlan(guard_contracts::ContainedWrapperPlanRequestV1),
     ApprovalPersistSelect(guard_contracts::ApprovalPersistSelectRequestV1),
     HookRender(guard_contracts::HookRenderRequestV1),

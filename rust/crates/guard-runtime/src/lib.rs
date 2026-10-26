@@ -163,6 +163,7 @@ mod codex_tool_output_vectors_tests;
 mod codex_value;
 #[cfg(all(test, unix))]
 mod codex_vectors_tests;
+mod command_capability_op;
 mod command_effect;
 mod command_expression_validate_op;
 mod command_policy_decide_op;
