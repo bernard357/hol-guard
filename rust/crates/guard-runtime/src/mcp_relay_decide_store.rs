@@ -75,14 +75,6 @@ pub(super) fn saved<'c>(
 ) -> Result<Option<Saved<'c>>, &'static str> {
     let shape = Shape { connection };
     let now = utc_now().ok_or(SAVED_UNVERIFIABLE)?;
-    // The lookup reads the bundle's decision identities only to keep or drop a
-    // policy-bundle row, and it reaches a row bound to this harness or to every
-    // harness: with none of those, the identities change nothing here.
-    let bundle_identities = if shape.bundle_row_for(harness)? {
-        cached_bundle_identities(connection, &now).ok_or(SAVED_REMOTE)?
-    } else {
-        Vec::new()
-    };
     let has_local_policy = shape.any(
         "policy_decisions",
         &format!("select 1 from policy_decisions where source not in {REMOTE_SOURCES_SQL}"),
@@ -102,6 +94,16 @@ pub(super) fn saved<'c>(
     if shape.stored_integrity_state()?.as_ref() != Some(&integrity_state) {
         return Err(SAVED_UNVERIFIABLE);
     }
+    // The lookup reads the bundle's decision identities only to keep or drop a
+    // policy-bundle row, and it reaches a row bound to this harness or to every
+    // harness: with none of those, the identities change nothing here. They
+    // are derived last, so a store the resident cannot verify never pays for
+    // the bundle's signature and payload checks.
+    let bundle_identities = if shape.bundle_row_for(harness)? {
+        cached_bundle_identities(connection, &now).ok_or(SAVED_REMOTE)?
+    } else {
+        Vec::new()
+    };
     Ok(Some(Saved {
         connection,
         store_path: Path::new(guard_home)

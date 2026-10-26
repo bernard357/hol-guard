@@ -1363,20 +1363,12 @@
    "body": "d4309f13f345"
   },
   {
-   "verdict": "windows-equivalent",
-   "note": "`nix::unistd::gethostname` has no Windows build, so off Unix the node name comes from `COMPUTERNAME`, which Windows always sets and which `cloud_audit_sync::EnvCloudAuditWorkspaceContext` already reads the host by. Both arms feed the same `machine_display_name` trimming, so a Windows device is named after its host exactly as a Unix one is. Proven off Unix by `windows_host_name_reads_the_computer_name`, which runs `host_name_from_env` \u2014 the whole of the arm's own logic \u2014 on every platform.",
+   "verdict": "windows-unsupported",
+   "note": "Python's `platform.node()` is the DNS host name on Windows, which `COMPUTERNAME` (the upper-cased, 15-character NetBIOS name) does not match, and a bundle rule scoped to a device compares its name exactly. The arm reports no host name, so a device still on a generic label has no known name, `cached_bundle_identities` answers none, and every caller defers the bundle's rows to the store rather than authorizing them under a name the store would not use.",
    "file": "rust/crates/guard-runtime/src/policy_bundle_store_identities.rs",
    "item": "fn host_name() -> Option<String>",
    "cfg": "not(unix)",
-   "body": "f6de96dac6ce"
-  },
-  {
-   "verdict": "windows-equivalent",
-   "note": "The reading of the host-name variable, compiled off Unix and under test so the Windows arm's logic is not a Windows-only build. It is pure: an unset or blank variable yields none and the device keeps its label, which is what an unreadable `gethostname` does on Unix. Proven off Unix by `windows_host_name_reads_the_computer_name` and `a_blank_computer_name_leaves_the_device_on_its_label`, which run on every platform.",
-   "file": "rust/crates/guard-runtime/src/policy_bundle_store_identities.rs",
-   "item": "fn host_name_from_env(value: Option<String>) -> Option<String>",
-   "cfg": "any(not(unix), test)",
-   "body": "10ac389e1cd3"
+   "body": "6a7c0c4ecb3c"
   },
   {
    "verdict": "other-platform",

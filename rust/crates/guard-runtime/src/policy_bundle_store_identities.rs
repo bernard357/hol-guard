@@ -33,6 +33,9 @@ mod tests;
 
 /// `CHUNK_CHARS` (`native_policy_bundle.py`).
 const CHUNK_CHARS: usize = 100_000;
+/// `MAX_DOCUMENT_BYTES` (`native_policy_bundle.py`), counted in characters as
+/// `len(text)` counts them.
+const MAX_DOCUMENT_CHARS: usize = 3 * 1024 * 1024;
 /// `_ORDERING_KEYS` (`policy_bundle_parser.py`).
 const ORDERING_KEYS: [&str; 5] = [
     "bundleVersion",
@@ -94,6 +97,11 @@ fn validated(
 ) -> Option<Option<Map<String, Value>>> {
     let (managed_configured, managed_keys) = managed_keys()?;
     let provenance = sync_payload(connection, "managed_policy_bundle_keyring_provenance")?;
+    // The store drops every row of a bundle it cannot encode for validation,
+    // such as one past the document limit.
+    let Some(bundle_chunks) = chunks(&Value::Object(bundle.clone())) else {
+        return Some(None);
+    };
     let input = json!({
         "stored_keyring": sync_payload(connection, "policy_bundle_keyring")?,
         "sync_keys_raw": null,
@@ -105,7 +113,7 @@ fn validated(
         "key_now": epoch_now()?.as_secs_f64(),
         "now_micros": i64::try_from(epoch_now()?.as_micros()).ok()?,
         "daemon_version": crate::PACKAGE_VERSION,
-        "bundle_chunks": chunks(&Value::Object(bundle.clone()))?,
+        "bundle_chunks": bundle_chunks,
     });
     let Ok(result) = authority("validate_synced", input)? else {
         return Some(None);
@@ -295,21 +303,13 @@ fn host_name() -> Option<String> {
     nix::unistd::gethostname().ok()?.into_string().ok()
 }
 
-/// Off Unix the node name comes from `COMPUTERNAME`, the convention
-/// `cloud_audit_sync::EnvCloudAuditWorkspaceContext` already reads the host
-/// by, so a Windows device is named after its host rather than falling back to
-/// the label every time.
+/// Off Unix, `platform.node()` is the DNS host name, which `COMPUTERNAME`
+/// (the upper-cased, 15-character NetBIOS name) does not match. The resident
+/// cannot read it yet, so the device name is unknown and the bundle's
+/// identities are left to the store.
 #[cfg(not(unix))]
 fn host_name() -> Option<String> {
-    host_name_from_env(std::env::var("COMPUTERNAME").ok())
-}
-
-/// The node name a host-name variable holds, or none when it is unset or
-/// blank, so an empty variable leaves the device on its label.
-#[cfg(any(not(unix), test))]
-fn host_name_from_env(value: Option<String>) -> Option<String> {
-    let name = value?;
-    (!name.trim().is_empty()).then_some(name)
+    None
 }
 
 /// One `sync_state` payload as `get_sync_payload` reads it: `Some(None)` when
@@ -334,10 +334,14 @@ fn ordering_view(bundle: &Value) -> Value {
     Value::Object(view)
 }
 
-/// `policy_bundle_chunks`: compact JSON text in bounded chunks.
+/// `policy_bundle_chunks`: compact JSON text in bounded chunks, or `None`
+/// for a document past the limit, which `policy_bundle_chunks` refuses.
 fn chunks(document: &Value) -> Option<Vec<String>> {
     let text = serde_json::to_string(document).ok()?;
     let chars: Vec<char> = text.chars().collect();
+    if chars.len() > MAX_DOCUMENT_CHARS {
+        return None;
+    }
     let chunks: Vec<String> = chars
         .chunks(CHUNK_CHARS)
         .map(|chunk| chunk.iter().collect())
