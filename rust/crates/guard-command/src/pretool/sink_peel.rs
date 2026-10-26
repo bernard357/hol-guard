@@ -98,6 +98,9 @@ pub(super) fn peel(
     let (mut tokens, exact) = lex(&text)?;
     let base = Path::new(cwd.unwrap_or(workspace));
     let mut directory = PathBuf::from(workspace);
+    // The text `directory` was resolved from, which decides whether a `\\?\`
+    // prefix on it is the caller's or one Windows generated.
+    let mut spelled = PathBuf::from(workspace);
     let mut wrapped = status.is_some();
     let mut output: Option<ContainedOutput> = None;
 
@@ -125,8 +128,9 @@ pub(super) fn peel(
         }
         let inside =
             std::fs::canonicalize(workspace).map_err(|_| "cd target outside the workspace")?;
-        directory = std::fs::canonicalize(base.join(&target))
-            .map_err(|_| "cd target outside the workspace")?;
+        spelled = base.join(&target);
+        directory =
+            std::fs::canonicalize(&spelled).map_err(|_| "cd target outside the workspace")?;
         let within = directory.starts_with(&inside);
         let root = sibling_root(&directory, home_dir);
         // Only a host with no workspace sandbox peels an `&&`-joined relative
@@ -159,7 +163,7 @@ pub(super) fn peel(
             if let Some(joined) = joined_list(&tokens) {
                 return Ok(Some(ContainedWrapperCore {
                     core: joined,
-                    directory,
+                    directory: python_resolved(&spelled, directory),
                     output: status.map(|(_, label)| ContainedOutput {
                         status_label: Some(label),
                         ..passthrough()
@@ -168,13 +172,14 @@ pub(super) fn peel(
             }
         }
     } else if exact {
-        if let Some((rewritten, resolved)) = package_directory(&tokens, base) {
+        if let Some((rewritten, resolved, joined)) = package_directory(&tokens, base) {
             let inside = std::fs::canonicalize(workspace)
                 .map_err(|_| "package directory outside the workspace")?;
             if !(resolved.starts_with(&inside) || sibling_root(&resolved, home_dir).is_some()) {
                 return Err("package directory outside the workspace");
             }
             tokens = rewritten;
+            spelled = joined;
             directory = resolved;
             wrapped = true;
         }
@@ -239,9 +244,32 @@ pub(super) fn peel(
     }
     Ok(Some(ContainedWrapperCore {
         core: shlex_join(tokens.iter().map(|(value, _)| value.as_str())),
-        directory,
+        directory: python_resolved(&spelled, directory),
         output,
     }))
+}
+
+/// The directory as Python's `Path.resolve` would spell it.
+///
+/// The sink compares this directory against its own `workspace.resolve()` and
+/// runs the core in it, so the two must be spelled alike. On Windows
+/// `canonicalize` keeps the `\\?\` prefix `GetFinalPathNameByHandle` adds and
+/// `resolve` strips it, which would leave every peeled directory reading as
+/// outside the workspace it is in. A prefix the caller spelled is left alone,
+/// as `resolve` leaves it.
+fn python_resolved(spelled: &Path, resolved: PathBuf) -> PathBuf {
+    let _ = spelled;
+    #[cfg(windows)]
+    let resolved = PathBuf::from(
+        crate::launch_identity_common::strip_generated_extended_prefix(
+            &spelled.to_string_lossy(),
+            resolved
+                .into_os_string()
+                .into_string()
+                .unwrap_or_else(|path| path.to_string_lossy().into_owned()),
+        ),
+    );
+    resolved
 }
 
 /// Output passed through untouched, which a merge, a chain or a status label
@@ -458,7 +486,7 @@ fn bounded_count(values: &[String]) -> Option<u32> {
 /// directory is joined to the physical working directory and normalized
 /// lexically, as the package manager's `path.resolve` does, then resolved on
 /// disk. Other spellings return `None` and keep the unwrapped path.
-fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathBuf)> {
+fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathBuf, PathBuf)> {
     let manager = tokens.first().map(word)?;
     let flags = directory_flags(manager);
     if flags.is_empty() {
@@ -510,10 +538,11 @@ fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathB
         .ok()
         .and_then(|root| std::fs::canonicalize(lexical(&root.join(value))).ok())
         .filter(|directory| directory.is_dir())?;
+    let joined = lexical(&base.join(value));
     let mut rewritten = vec![tokens[0].clone()];
     rewritten.extend(rest.iter().map(|value| ((*value).to_owned(), false)));
     rewritten.extend_from_slice(&tokens[end..]);
-    Some((rewritten, resolved))
+    Some((rewritten, resolved, joined))
 }
 
 /// Any spelling of a directory flag: `--cwd`, `--cwd=x`, `-C`, `-Cx`.
