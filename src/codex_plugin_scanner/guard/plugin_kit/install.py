@@ -268,7 +268,7 @@ _GATE_TEXT = {
 }
 
 
-def write_security(security: Mapping[str, Any] | None, out: TextIO) -> None:
+def write_security(security: Mapping[str, Any] | None, out: TextIO | None) -> None:
     if not security:
         return
     print(f"  Security: {_GATE_TEXT.get(str(security.get('gate')), 'Unknown.')}", file=out)
