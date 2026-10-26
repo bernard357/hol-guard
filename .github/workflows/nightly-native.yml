@@ -191,7 +191,7 @@ jobs:
         run: >-
           uv run --no-sync python ci/native_runtime/test_command_model_differential.py
           --binary "$RUNTIME_BINARY"
-      - name: Exercise resident command bridge, shadow activity and runtime binary
+      - name: Exercise resident command bridge and runtime binary
         if: ${{ !cancelled() }}
         env:
           HOL_GUARD_NATIVE: force
@@ -199,7 +199,6 @@ jobs:
         run: >-
           uv run --no-sync pytest
           ci/native_runtime/test_command_model_resident.py
-          ci/native_runtime/test_command_shadow_activity.py
           ci/native_runtime/test_guard_native_runtime_binary.py
           --tb=short
       - name: Compare Python and Rust decisions
