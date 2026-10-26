@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -214,6 +215,39 @@ def _context_digest_runtime_binary() -> Path | None:
     # Release only: the debug resident exceeds the 600ms startup budget.
     candidate = root / "rust" / "target" / "release" / "hol-guard-runtime"
     return candidate if candidate.is_file() else None
+
+
+def patch_popen_past_native_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement: Callable[..., object],
+) -> None:
+    """Stand ``replacement`` in for ``Popen`` while Guard's own runtime calls still run.
+
+    ``subprocess.Popen`` is shared by every in-process spawn, so a fake meant
+    for one spawn also intercepts the bounded runtime invocations Guard makes
+    itself -- provisioning the resident verifier key, for instance -- and hands
+    the hook launcher a stand-in with no pipes. Invocations of the native
+    runtime binary keep reaching the real ``Popen``; everything else goes to
+    ``replacement``. The runtime is probed first, because the probe spawns too.
+    """
+
+    from codex_plugin_scanner.guard.native_runtime import native_runtime_status
+
+    real_popen = subprocess.Popen
+    identity = native_runtime_status().identity
+    native_argv0 = None if identity is None else str(identity.path)
+
+    def popen(command: object, *args: object, **kwargs: object) -> object:
+        if (
+            native_argv0 is not None
+            and isinstance(command, (list, tuple))
+            and command
+            and str(command[0]) == native_argv0
+        ):
+            return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
+        return replacement(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
 
 
 @pytest.fixture(autouse=True)
