@@ -1219,6 +1219,8 @@ def _fetch_supply_chain_bundle_payload(request: urllib.request.Request) -> dict[
             raise GuardSyncNotAvailableError(message, retryable=True) from error
         raise RuntimeError(message) from error
     except OSError as error:
+        if _is_guard_cloud_unreachable_error(error):
+            raise GuardSyncNotAvailableError(_GUARD_CLOUD_UNREACHABLE_MESSAGE, retryable=True) from error
         raise RuntimeError(_sync_url_error_message(error)) from error
 
 
@@ -3378,6 +3380,21 @@ def _sync_url_error_message(error: OSError) -> str:
         if reason_text:
             return f"Guard sync failed: {reason_text}"
     return "Guard sync failed because the remote endpoint could not be reached."
+
+
+_GUARD_CLOUD_UNREACHABLE_MESSAGE = "Guard Cloud could not be reached. Local Guard keeps protecting this machine."
+
+
+def _is_guard_cloud_unreachable_error(error: OSError) -> bool:
+    """Return whether a sync request failed because Guard Cloud was offline, not misconfigured.
+
+    Refused or reset connections, DNS failures and timeouts clear up on their own, so
+    the caller can offer a retry. TLS verification failures are not included.
+    """
+    if _is_timeout_error(error):
+        return True
+    reason = getattr(error, "reason", error)
+    return isinstance(reason, ConnectionError | socket.gaierror)
 
 
 def _is_timeout_error(error: OSError) -> bool:
