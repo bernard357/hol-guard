@@ -361,6 +361,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
+            ResidentOperationV1::ContainedWrapperPlan(request) => {
+                crate::contained_wrapper_plan_op::evaluate_contained_wrapper_plan_request(&request)
+            }
             ResidentOperationV1::ApprovalPersistSelect(request) => {
                 crate::approval_persist_select_op::evaluate_approval_persist_select_request(
                     &request,
@@ -405,8 +408,8 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::PackageEvaluationCompose(request) => {
                 crate::package_evaluation_compose_op::evaluate_package_evaluation_compose(&request)
             }
-            ResidentOperationV1::VerifiedNpm(request) => {
-                crate::verified_npm_op::evaluate_verified_npm(&request)
+            ResidentOperationV1::PackageReviewPlan(request) => {
+                crate::package_review_plan_op::evaluate_package_review_plan(&request)
             }
             ResidentOperationV1::PolicyDocumentDecide(request) => {
                 crate::policy_document_decide_op::evaluate_policy_document_decision_request(
@@ -803,7 +806,7 @@ fn operation_guard_home(operation: &ResidentOperationV1) -> Option<&str> {
         ResidentOperationV1::CommandPackRecord(request) => Some(&request.guard_home),
         ResidentOperationV1::PackageAdvisoryIds(request) => Some(&request.guard_home),
         ResidentOperationV1::PackageEvaluationCompose(request) => Some(&request.guard_home),
-        ResidentOperationV1::VerifiedNpm(request) => Some(&request.guard_home),
+        ResidentOperationV1::PackageReviewPlan(request) => Some(&request.guard_home),
         ResidentOperationV1::PackageApprovalHash(request) => Some(&request.guard_home),
         ResidentOperationV1::PackagePolicyResolve(request) => Some(&request.guard_home),
         ResidentOperationV1::PackageProtectFinalize(request) => Some(&request.guard_home),

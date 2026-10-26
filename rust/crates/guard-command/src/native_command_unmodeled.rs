@@ -43,6 +43,8 @@ use crate::CanonicalCommandV1;
 
 #[path = "native_command_unmodeled_case.rs"]
 mod case_labels;
+#[path = "native_command_unmodeled_compound.rs"]
+mod compound;
 #[path = "native_command_unmodeled_expansion.rs"]
 mod expansion;
 #[path = "native_command_unmodeled_find_exec.rs"]
@@ -325,7 +327,12 @@ impl CompiledNativeCommandControls {
                 // command the prefix runs is the one the text already names,
                 // and its own programs count toward the owners below.
                 None if crate::pretool::prefixed_launch(command, context) => {}
-                None => return None,
+                None if compound::redirected_launch(command, context) => {}
+                None => named.extend(
+                    compound::listed_inline_sources(&bare, sourced_bounded, context)?
+                        .iter()
+                        .flat_map(|source| named_words(source)),
+                ),
             }
         }
         // The programs read out of an `xargs` or a `find -exec`. Reading one
@@ -561,7 +568,8 @@ fn named_xargs_pipeline(text: &str) -> bool {
 fn named_find_exec(text: &str) -> bool {
     let literal = unquoted_literal(text);
     find_exec_programs(text).is_some_and(|programs| !programs.is_empty())
-        && !text.contains(['<', '>', '`', '$', '\n'])
+        && !text.contains(['<', '>', '`', '\n'])
+        && (!text.contains('$') || compound::parameters_only_root_paths(text))
         && !moves_data(&literal)
 }
 
@@ -835,7 +843,10 @@ fn moves_data(literal: &str) -> bool {
     literal.contains(['<', '>', '`'])
         || literal.contains("$(")
         || command_words(literal).any(|word| {
-            (is_assignment(word) && !saves_job_pid(word) && !assigns_nothing(word))
+            (is_assignment(word)
+                && !saves_job_pid(word)
+                && !assigns_nothing(word)
+                && !compound::binds_a_shell_variable(word))
                 || matches!(
                     word,
                     "export" | "declare" | "typeset" | "readonly" | "local" | "unset" | "alias"

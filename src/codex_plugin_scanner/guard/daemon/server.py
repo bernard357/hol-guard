@@ -820,11 +820,19 @@ class _GuardDaemonHTTPServer(BoundedThreadingHTTPServer):
             self._enroll_authority_by_default()
         try:
             try:
-                return read(shared=True)
+                snapshot = read(shared=True)
             except NativeCommandControlMutationRequiredError:
                 # Release the shared lease before migration and recapture the
                 # active projection under the exclusive mutation fence.
                 return read(shared=False)
+            if snapshot.health is AuthorityHealth.RECOVERY_REQUIRED:
+                # A save that failed before anchoring leaves a prepared
+                # transition that only a writer may roll back, and a shared
+                # read only reports it. Read again as the writer so the
+                # authority heals here instead of refusing every save and
+                # holding every extension blocked until someone repairs it.
+                return read(shared=False)
+            return snapshot
         except NativeCommandControlAuthorityUnavailableError:
             # Nothing was read, so there is nothing to refresh from. Keeping the
             # snapshot already installed beats replacing a known authority with

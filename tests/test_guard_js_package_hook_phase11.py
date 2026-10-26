@@ -255,17 +255,12 @@ def test_guard_hook_blocks_js_exec_flows_before_subprocess(
     assert rc == 0
     assert captured.err == ""
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    if command.startswith("npm install"):
-        assert payload["policy_action"] == "block"
-        assert "blocked" in payload["hookSpecificOutput"]["permissionDecisionReason"].lower()
-        assert store.list_approval_requests(limit=5) == []
-        return
-    # The daemon reviews exec flows without consulting the package bundle, so
-    # a flagged package reaches the user as an approvable review.
-    pending = store.list_approval_requests(limit=5)
-    assert payload["policy_action"] == "review"
-    assert [item["request_id"] for item in payload["approval_requests"]] == [pending[0]["request_id"]]
-    assert pending[0]["action_envelope_json"]["command"] == command
+    # Installs and every exec flow consult the package bundle, including the
+    # `npx` and `bunx` launches the edge reviews as commands, so a flagged
+    # package is blocked before anything is queued.
+    assert payload["policy_action"] == "block"
+    assert "blocked" in payload["hookSpecificOutput"]["permissionDecisionReason"].lower()
+    assert store.list_approval_requests(limit=5) == []
 
 
 @pytest.mark.usefixtures("native_hook_force")

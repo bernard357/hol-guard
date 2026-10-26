@@ -29,6 +29,7 @@ from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_headless_daemon_api import _dashboard_token_for, _read_json_response, _request
 from tests.test_guard_workspace_assessment_runner import (
     AUDIT,
+    HOOKS_COMPLETE,
     KEYS,
     SCANNED,
     SECRETS_COMPLETE,
@@ -233,7 +234,7 @@ def test_unreadable_secret_result_is_an_error(payload: dict[str, object]) -> Non
 
 def test_runner_projects_secret_findings_and_stays_complete(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
-    scanned = replace(SNAPSHOT, secrets=secrets_result(native_finding()), skills=SKILLS_COMPLETE)
+    scanned = replace(SNAPSHOT, secrets=secrets_result(native_finding()), skills=SKILLS_COMPLETE, hooks=HOOKS_COMPLETE)
     monkeypatch.setattr(runner, "workspace_snapshot", lambda root, **_: scanned)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     outcome = runner.execute(store, None, claimed, clock=lambda: T0)
@@ -247,7 +248,13 @@ def test_runner_hands_the_native_scan_a_stable_per_install_key(tmp_path: Path, m
     keys: list[object] = []
 
     def snapshot(
-        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None, skills: bool = False
+        root: Path,
+        *,
+        mode: str = "content",
+        secrets: bool = False,
+        secret_key: str | None = None,
+        skills: bool = False,
+        hooks: bool = False,
     ):
         if secrets:
             keys.append(secret_key)
@@ -268,7 +275,13 @@ def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Pat
     requested: list[bool] = []
 
     def snapshot(
-        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None, skills: bool = False
+        root: Path,
+        *,
+        mode: str = "content",
+        secrets: bool = False,
+        secret_key: str | None = None,
+        skills: bool = False,
+        hooks: bool = False,
     ) -> native.WorkspaceSnapshot:
         requested.append(secrets)
         if secrets:
@@ -281,7 +294,11 @@ def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Pat
     assert requested == [True, False, False]
     assert outcome.state == "partial"
     assert outcome.coverage is not None
-    assert outcome.coverage["reasons"] == ["detector_not_run:secrets", "detector_not_run:skill_content_v1"]
+    assert outcome.coverage["reasons"] == [
+        "detector_not_run:secrets",
+        "detector_not_run:skill_content_v1",
+        "detector_not_run:hook_config_v1",
+    ]
     assert outcome.coverage["detectors"]["secrets"] == "not_run"
 
 

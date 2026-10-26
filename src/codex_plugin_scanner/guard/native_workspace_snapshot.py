@@ -6,7 +6,9 @@ returns only digests, counts and the worktree's local keys. A request may also
 ask for the secret scan of the same bytes; the native side redacts every
 finding before it crosses this boundary. It may likewise ask for the skill
 content rules over the agent skills among those bytes; their findings carry
-fixed rule text and never quote the skill.
+fixed rule text and never quote the skill. A request may also ask for the
+check of every hook command in the project's agent configuration files; its
+findings name the file and hook event, never the command.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from typing import Literal
 WORKSPACE_SNAPSHOT_FEATURE = "workspace-snapshot-v1"
 WORKSPACE_SECRETS_FEATURE = "workspace-snapshot-secrets-v1"
 WORKSPACE_SKILLS_FEATURE = "workspace-snapshot-skills-v1"
+WORKSPACE_HOOKS_FEATURE = "workspace-snapshot-hooks-v1"
 WORKSPACE_SNAPSHOT_COMMAND = "workspace-snapshot"
 WORKSPACE_SNAPSHOT_SCHEMA = "guard.workspace-snapshot.v1"
 
@@ -52,6 +55,7 @@ class WorkspaceSnapshot:
     summary: dict[str, object]
     secrets: dict[str, object] | None = None
     skills: dict[str, object] | None = None
+    hooks: dict[str, object] | None = None
 
 
 def workspace_snapshot(
@@ -61,6 +65,7 @@ def workspace_snapshot(
     secrets: bool = False,
     secret_key: str | None = None,
     skills: bool = False,
+    hooks: bool = False,
 ) -> WorkspaceSnapshot:
     """Snapshot ``root``; ``secrets`` also scans the hashed bytes for secrets.
 
@@ -71,7 +76,8 @@ def workspace_snapshot(
     ``workspace_snapshot_secrets_unavailable`` so the caller can fall back to a
     plain snapshot and report the detector as not run. ``skills`` runs the
     skill content rules; a runtime without them raises
-    ``workspace_snapshot_skills_unavailable`` the same way.
+    ``workspace_snapshot_skills_unavailable`` the same way, and ``hooks``,
+    the project hook check, raises ``workspace_snapshot_hooks_unavailable``.
     """
 
     request: dict[str, object] = {"root": str(root), "mode": mode}
@@ -81,7 +87,9 @@ def workspace_snapshot(
             request["secret_key"] = secret_key
     if skills:
         request["skills"] = True
-    reply = _native_request(request, needs_secrets=secrets, needs_skills=skills)
+    if hooks:
+        request["hooks"] = True
+    reply = _native_request(request, needs_secrets=secrets, needs_skills=skills, needs_hooks=hooks)
     if reply.get("ok") is not True:
         error = reply.get("error")
         raise WorkspaceSnapshotError(error if isinstance(error, str) and error else "workspace_snapshot_failed")
@@ -89,7 +97,7 @@ def workspace_snapshot(
 
 
 def _native_request(
-    request: dict[str, object], *, needs_secrets: bool = False, needs_skills: bool = False
+    request: dict[str, object], *, needs_secrets: bool = False, needs_skills: bool = False, needs_hooks: bool = False
 ) -> dict[str, object]:
     import os
 
@@ -109,6 +117,8 @@ def _native_request(
         raise WorkspaceSnapshotError("workspace_snapshot_secrets_unavailable")
     if needs_skills and WORKSPACE_SKILLS_FEATURE not in status.capabilities.features:
         raise WorkspaceSnapshotError("workspace_snapshot_skills_unavailable")
+    if needs_hooks and WORKSPACE_HOOKS_FEATURE not in status.capabilities.features:
+        raise WorkspaceSnapshotError("workspace_snapshot_hooks_unavailable")
     runtime = status.identity.path
     environment = {key: value for key in _CHILD_ENVIRONMENT_KEYS if (value := os.environ.get(key))}
     completed = run_isolated_hook_process(
@@ -158,6 +168,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
     }
     secrets = result.get("secrets")
     skills = result.get("skills")
+    hooks = result.get("hooks")
     return WorkspaceSnapshot(
         mode=mode,  # type: ignore[arg-type]
         root=str(result["root"]),
@@ -172,6 +183,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
         summary=summary,
         secrets=secrets if isinstance(secrets, dict) else None,
         skills=skills if isinstance(skills, dict) else None,
+        hooks=hooks if isinstance(hooks, dict) else None,
     )
 
 
@@ -180,6 +192,7 @@ def _is_digest(value: object) -> bool:
 
 
 __all__ = [
+    "WORKSPACE_HOOKS_FEATURE",
     "WORKSPACE_SECRETS_FEATURE",
     "WORKSPACE_SKILLS_FEATURE",
     "WORKSPACE_SNAPSHOT_FEATURE",

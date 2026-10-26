@@ -50,6 +50,7 @@ def test_release_publication_reuses_one_hashed_build_artifact() -> None:
         "build-native-guard-wheel-macos-arm64",
         "build-native-guard-wheel-windows-x64",
         "build-native-guard-wheel-windows-arm64",
+        "build-native-guard-wheel-linux-arm64",
         "publish-installed-bundle-assets",
     ]
     assert "needs.build.result == 'success'" in assemble["if"]

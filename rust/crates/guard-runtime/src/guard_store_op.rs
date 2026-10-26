@@ -48,6 +48,7 @@ use crate::guard_store_connector_context as connector_context;
 use crate::guard_store_db::{exec, query_all, query_one, text, StoreError, StoreResult};
 use crate::guard_store_inventory as inventory;
 use crate::guard_store_local_cli as local_cli;
+use crate::guard_store_local_cli_catalog as local_cli_catalog;
 use crate::guard_store_local_cli_grants as local_cli_grants;
 use crate::guard_store_local_mcp_declarations as local_mcp_declarations;
 use crate::guard_store_local_mcp_observation as local_mcp;
@@ -64,6 +65,7 @@ use crate::guard_store_outbox_reads as reads;
 use crate::guard_store_outbox_recover::recover_sequences;
 use crate::guard_store_outbox_requeue::{repair_rejected_correlation, requeue_method};
 use crate::guard_store_policy_source_context::policy_source_contexts;
+use crate::guard_store_policy_upsert::upsert_policy;
 use crate::guard_store_receipt_reads as receipt_reads;
 use crate::guard_store_receipt_rollups as receipt_rollups;
 use crate::guard_store_receipt_writes as receipt_writes;
@@ -71,6 +73,7 @@ use crate::guard_store_sessions as sessions;
 use crate::guard_store_silent_review::add_silent_native_review_approval_request;
 use crate::guard_store_state_ops as state_ops;
 use crate::guard_store_storage_maintenance as storage_maintenance;
+use crate::guard_store_temporary_mcp::apply_temporary_mcp_grant;
 use crate::guard_store_tool_call_evidence as tool_call_evidence;
 use crate::guard_store_wfcap_wire as wfcap;
 
@@ -78,8 +81,19 @@ pub(crate) const MAX_BUSY_TIMEOUT_MS: u64 = 600_000;
 const CACHE_SIZE_KIB: i64 = 256 * 1024;
 const MMAP_SIZE_BYTES: i64 = 1024 * 1024 * 1024;
 
+/// The digest never covers policy-integrity key bytes: a reply, log or
+/// diagnostic that carries the digest reveals nothing about the key. The
+/// caller drops the same arguments before computing its own digest, exactly as
+/// the policy-integrity rows request does.
+const UNDIGESTED_ARGS: [&str; 1] = ["integrity_key_b64"];
+
 fn request_digest(request: &GuardStoreRequestV1) -> Result<String, &'static str> {
-    let material = serde_json::to_value(request).map_err(|_| "native_guard_store_invalid")?;
+    let mut material = serde_json::to_value(request).map_err(|_| "native_guard_store_invalid")?;
+    if let Some(args) = material.get_mut("args").and_then(Value::as_object_mut) {
+        for field in UNDIGESTED_ARGS {
+            args.remove(field);
+        }
+    }
     let mut bytes = Vec::new();
     write_canonical_json_with_limit(&material, &mut bytes, GUARD_STORE_MAX_REQUEST_BYTES)
         .map_err(|_| "native_guard_store_request_too_large")?;
@@ -353,6 +367,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "resolve_approval_request"
         | "resolve_one_request_only"
         | "resolve_harness_native_approval_request"
+        | "apply_temporary_mcp_grant_resolution"
         | "resolve_request_with_queue_result"
         | "resolve_native_workspace_review_request"
         | "resolve_matching_duplicate_requests"
@@ -409,11 +424,13 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "managed_keyring_reconcile"
         | "record_local_cli_observation"
         | "replace_local_cli_commands"
+        | "merge_local_cli_commands"
         | "forget_local_cli_observation"
         | "record_connector_setup_context"
         | "local_cli_replay_allowed"
         | "prune_inactive_local_cli_observations"
-        | "cache_advisories" => Kind::Write,
+        | "cache_advisories"
+        | "upsert_policy" => Kind::Write,
         "find_local_mcp_observation" => Kind::Read,
         "ensure_local_mcp_observation"
         | "reconcile_remote_mcp_declarations"
@@ -433,6 +450,7 @@ fn dispatch(
     owner: Option<&crate::policy_store::PolicySnapshotStore>,
 ) -> StoreResult<Value> {
     match method {
+        "upsert_policy" => upsert_policy(connection, args),
         "review_event_outbox_status" => queries::status(connection, source, args),
         "list_ready_review_events" => reads::list_ready(connection, source, args),
         "list_review_event_snapshots" => reads::list_snapshots(connection, source, args),
@@ -540,7 +558,12 @@ fn dispatch(
         "workflow_capability_plan" => wfcap::plan(connection, args),
         "workflow_capability_commit" => wfcap::commit(connection, args),
         "record_local_cli_observation" => local_cli::record_observation(connection, args),
-        "replace_local_cli_commands" => local_cli::replace_commands(connection, args),
+        "replace_local_cli_commands" => {
+            local_cli_catalog::write_local_cli_catalog(connection, args, false)
+        }
+        "merge_local_cli_commands" => {
+            local_cli_catalog::write_local_cli_catalog(connection, args, true)
+        }
         "forget_local_cli_observation" => local_cli::forget_observation(connection, args),
         "record_connector_setup_context" => connector_context::record_context(connection, args),
         "local_cli_replay_allowed" => local_cli::replay_allowed_op(connection, args),
@@ -635,6 +658,9 @@ fn dispatch(
         "resolve_one_request_only" => resolve_approval_request(connection, guard_home, args, true),
         "resolve_harness_native_approval_request" => {
             resolve_harness_native_approval_request(connection, guard_home, args)
+        }
+        "apply_temporary_mcp_grant_resolution" => {
+            apply_temporary_mcp_grant(connection, guard_home, args, owner)
         }
         "resolve_request_with_queue_result" => {
             queue_result::resolve_request_with_queue_result(connection, guard_home, args, owner)

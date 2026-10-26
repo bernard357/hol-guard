@@ -16,6 +16,7 @@ fn request(root: &Path, mode: SnapshotMode) -> SnapshotRequest {
         secrets: false,
         secret_key: None,
         skills: false,
+        hooks: false,
     }
 }
 
