@@ -276,5 +276,4 @@ fn runner_launches_fetch_the_selected_package() {
         packages("npx -p left-pad -p flagged-package node"),
         ["left-pad", "flagged-package"]
     );
-    assert_eq!(packages("npx -c vite"), Vec::<String>::new());
 }

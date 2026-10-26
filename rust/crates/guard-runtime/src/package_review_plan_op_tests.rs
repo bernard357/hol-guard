@@ -84,7 +84,6 @@ fn a_command_review_plans_only_npx_and_bunx_launches() {
     for command in [
         "npx -p flagged-package@1.0.0 node --version",
         "bunx --bun flagged-package@1.0.0",
-        "npx --registry https://registry.example flagged-package@1.0.0",
         "npx --cache /tmp/npm-cache flagged-package@1.0.0",
     ] {
         assert_eq!(
@@ -101,6 +100,8 @@ fn a_command_review_plans_only_npx_and_bunx_launches() {
         // several stays with its review.
         "npx -p left-pad -p flagged-package node",
         "npx --package=left-pad --package=flagged-package node",
+        // The evaluator reads the redacted command, which hides the URL.
+        "npx --registry https://registry.example flagged-package@1.0.0",
     ] {
         assert_eq!(
             answer(command),
