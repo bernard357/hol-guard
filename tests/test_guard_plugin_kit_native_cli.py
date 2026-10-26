@@ -230,6 +230,19 @@ def test_the_native_unavailable_message_names_the_platform_and_the_fix(
     assert plugin_kit_cli.native_unavailable_message(**kwargs) == expected  # type: ignore[arg-type]
 
 
+def test_a_compatible_runtime_without_the_plugin_kit_is_too_old(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = SimpleNamespace(
+        available=True,
+        compatible=True,
+        identity=SimpleNamespace(path="runtime"),
+        capabilities=SimpleNamespace(features=frozenset()),
+    )
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda **_kwargs: status)
+    with pytest.raises(plugin_kit_cli.PluginKitNativeError, match="too old") as raised:
+        plugin_kit_cli._native_request({})
+    assert "does not match" not in str(raised.value)
+
+
 def test_a_found_runtime_that_does_not_match_is_not_called_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     status = SimpleNamespace(
         available=True,

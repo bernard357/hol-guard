@@ -199,8 +199,10 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     status = native_runtime_status()
     if not status.available or status.identity is None:
         raise PluginKitNativeError(native_unavailable_message())
-    if not status.compatible or status.capabilities is None or PLUGIN_KIT_FEATURE not in status.capabilities.features:
+    if not status.compatible or status.capabilities is None:
         raise PluginKitNativeError(native_unavailable_message(incompatible=True))
+    if PLUGIN_KIT_FEATURE not in status.capabilities.features:
+        raise PluginKitNativeError(native_unavailable_message(outdated=True))
     runtime = status.identity.path
     completed = run_isolated_hook_process(
         (str(runtime), PLUGIN_KIT_COMMAND, "--stdin"),
