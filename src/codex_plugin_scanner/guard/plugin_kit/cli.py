@@ -15,6 +15,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .output import write_check, write_conformance, write_links
+
 PLUGIN_KIT_COMMAND = "plugin-kit"
 PLUGIN_KIT_FEATURE = "plugin-kit-v1"
 AGENT_PLUGINS_SPEC = "agent-plugins-1.0"
@@ -268,71 +270,6 @@ def _request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
-def _write_check(result: Mapping[str, Any]) -> None:
-    plugin = result.get("plugin") or {}
-    name = plugin.get("name") or "(unnamed)"
-    version = plugin.get("version")
-    print(f"{name}{' ' + version if version else ''}")
-    summary = result.get("summary") or {}
-    parts = [
-        f"{summary.get(key, 0)} {label}"
-        for key, label in (
-            ("skills", "skills"),
-            ("mcp_servers", "MCP servers"),
-            ("commands", "commands"),
-            ("agents", "agents"),
-        )
-        if summary.get(key)
-    ]
-    if parts:
-        print("  " + ", ".join(parts))
-    diagnostics = result.get("diagnostics") or []
-    if diagnostics:
-        print()
-    for item in diagnostics:
-        location = f" {item.get('path')}" if item.get("path") else ""
-        print(f"  {item.get('level', 'error')}: {item.get('code')}{location}")
-        print(f"    {item.get('message')}")
-    print()
-    print("Runtimes:")
-    for runtime in result.get("runtimes") or []:
-        mark = "yes" if runtime.get("supported") else "no "
-        dropped = runtime.get("dropped") or []
-        note = f"  (drops {', '.join(dropped)})" if runtime.get("supported") and dropped else ""
-        print(f"  {mark}  {runtime.get('runtime')}{note}")
-    print()
-    errors = int(summary.get("errors", 0))
-    warnings = int(summary.get("warnings", 0))
-    verdict = "passed" if result.get("passed") else "failed"
-    print(f"Check {verdict}: {errors} errors, {warnings} warnings.")
-
-
-def _write_conformance(result: Mapping[str, Any]) -> None:
-    plugin = result.get("plugin") or {}
-    name = plugin.get("name") or "(unnamed)"
-    version = plugin.get("version")
-    print(f"{name}{' ' + version if version else ''}")
-    components = result.get("components") or {}
-    skills = len(components.get("skills") or [])
-    servers = len(components.get("mcp_servers") or [])
-    print(f"  Agent Plugins {result.get('version')}: {skills} skills, {servers} MCP servers")
-    diagnostics = result.get("diagnostics") or []
-    if diagnostics:
-        print()
-    for item in diagnostics:
-        location = f" {item.get('path')}" if item.get("path") else ""
-        section = f" (section {item.get('section')})" if item.get("section") else ""
-        print(f"  {item.get('level', 'error')}: {item.get('code')}{location}{section}")
-        print(f"    {item.get('message')}")
-    print()
-    summary = result.get("summary") or {}
-    verdict = "conforms" if result.get("passed") else "does not conform"
-    print(
-        f"The plugin {verdict} to {result.get('spec')}: "
-        f"{int(summary.get('errors', 0))} errors, {int(summary.get('warnings', 0))} warnings."
-    )
-
-
 def _convert(args: argparse.Namespace) -> int:
     """``package`` for one runtime; an Agent Plugins result is then checked against the spec."""
 
@@ -356,7 +293,7 @@ def _convert(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"package": result, "conformance": conformance}, indent=2, sort_keys=True))
     elif not result.get("packaged"):
-        _write_check(result.get("check") or {})
+        write_check(result.get("check") or {})
         print("\nNothing was written. Fix the errors above and run convert again.")
     else:
         print(f"Converted into {output}")
@@ -372,33 +309,10 @@ def _convert(args: argparse.Namespace) -> int:
             print(f"  Left out: {', '.join(dropped)}")
         if conformance is not None:
             print()
-            _write_conformance(conformance)
+            write_conformance(conformance)
     if not result.get("packaged") or (conformance is not None and not conformance.get("passed")):
         return 1
     return 0
-
-
-def _write_links(result: Mapping[str, Any]) -> None:
-    install = result.get("install") or []
-    if not result.get("repository"):
-        print("No GitHub repository found. Set repository in the plugin manifest to get install links.")
-    for entry in install:
-        print(f"{entry.get('runtime')}:")
-        for command in entry.get("commands") or []:
-            print(f"  {command}")
-        if entry.get("verify"):
-            print(f"  check: {entry['verify']}")
-        print()
-    hol = result.get("hol")
-    if isinstance(hol, dict):
-        print(f"Claim the HOL listing: {hol.get('connect')}")
-        print(f"List a new plugin on HOL: {hol.get('submit')}")
-        print()
-    pending = [step for step in result.get("checklist") or [] if not step.get("done")]
-    if pending:
-        print("Next steps:")
-        for step in pending:
-            print(f"  - {step.get('message')}")
 
 
 def _write_block(result: Mapping[str, Any]) -> int:
@@ -499,13 +413,13 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "check" and args.spec:
-        _write_conformance(result)
+        write_conformance(result)
     elif args.command == "check":
-        _write_check(result)
+        write_check(result)
     elif args.command == "links" and args.block:
         return _write_block(result)
     elif args.command == "links":
-        _write_links(result)
+        write_links(result)
     elif args.command == "init":
         for path in result.get("written") or []:
             print(f"wrote {path}")
@@ -513,7 +427,7 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
             print("\nNext: edit the description and skill, then run `hol-guard plugin check`.")
     elif args.command == "package":
         if not result.get("packaged"):
-            _write_check(result.get("check") or {})
+            write_check(result.get("check") or {})
             print("\nNothing was written. Fix the errors above and run package again.")
         else:
             print(f"Packaged {len(result.get('files') or [])} files into {result.get('out_dir')}")

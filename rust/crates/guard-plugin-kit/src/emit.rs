@@ -22,7 +22,9 @@ use crate::config::Excludes;
 use crate::model::Plugin;
 use crate::walk;
 
-use servers::{agent_plugins_servers, gemini_settings, registry_document, servers, Syntax};
+use servers::{
+    agent_plugins_servers, gemini_settings, registry_document, servers, servers_left_out, Syntax,
+};
 
 /// The largest single file a package copies.
 const MAX_COPY_BYTES: u64 = 5 * 1024 * 1024;
@@ -148,6 +150,17 @@ pub fn dropped(runtime: Runtime, plugin: &Plugin) -> Vec<&'static str> {
         .filter(|(name, has)| *has && !kept.contains(name))
         .map(|(name, _)| name)
         .collect();
+    let syntax = match runtime {
+        Runtime::ClaudeCode | Runtime::Codex => Some(Syntax::Claude),
+        Runtime::GeminiCli => Some(Syntax::Gemini),
+        Runtime::Cursor => Some(Syntax::Cursor),
+        Runtime::Vscode => Some(Syntax::Vscode),
+        Runtime::Opencode => Some(Syntax::Opencode),
+        Runtime::McpRegistry | Runtime::AgentSkills | Runtime::AgentPlugins => None,
+    };
+    if syntax.is_some_and(|syntax| servers_left_out(plugin, syntax)) {
+        dropped.push("mcp_servers_not_portable");
+    }
     if runtime == Runtime::AgentPlugins {
         // Agent Plugins has no user-variable references, so environment
         // variables and headers stay behind; so do skills whose folder
@@ -355,6 +368,34 @@ fn copies(
             let dir = root.join(&folder);
             for file in walk::files(&dir, &folder, excludes)? {
                 found.push((dir.join(&file), format!("hooks/{}", walk::display(&file))));
+            }
+        }
+    }
+    if runtime == Runtime::AgentPlugins {
+        // A server's command and args resolve against the package root, so
+        // the files they name travel at the same paths.
+        let (entries, _) = agent_plugins_servers(plugin);
+        let plugin_dir = root.join(&plugin.base);
+        let mut bundled = BTreeSet::new();
+        for name in entries.keys() {
+            bundled.extend(plugin.mcp_servers[name].bundled.iter().cloned());
+        }
+        for relative in bundled {
+            let path = plugin_dir.join(&relative);
+            if path.is_dir() {
+                let repository_path = if plugin.base.is_empty() {
+                    relative.clone()
+                } else {
+                    format!("{}/{relative}", plugin.base)
+                };
+                for file in walk::files(&path, &repository_path, excludes)? {
+                    found.push((
+                        path.join(&file),
+                        format!("{relative}/{}", walk::display(&file)),
+                    ));
+                }
+            } else {
+                found.push((path, relative));
             }
         }
     }

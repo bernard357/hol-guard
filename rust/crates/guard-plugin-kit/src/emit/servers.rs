@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 
 use crate::agent_plugins;
 use crate::check::is_kebab;
-use crate::model::{McpServer, Plugin};
+use crate::model::{McpServer, Plugin, ROOT_PLACEHOLDERS};
 use crate::reference;
 
 const MCP_REGISTRY_SCHEMA: &str =
@@ -56,11 +56,12 @@ fn server_value(server: &McpServer, syntax: Syntax) -> Option<Value> {
         })
         .collect();
     let mut entry = Map::new();
-    if let Some(command) = &server.command {
+    if server.command.is_some() {
+        let (command, args) = rooted_command(server, syntax)?;
         match syntax {
             Syntax::Opencode => {
-                let mut command_line = vec![command.clone()];
-                command_line.extend(server.args.iter().cloned());
+                let mut command_line = vec![command];
+                command_line.extend(args);
                 entry.insert("type".into(), json!("local"));
                 entry.insert("command".into(), json!(command_line));
                 if !env.is_empty() {
@@ -74,8 +75,8 @@ fn server_value(server: &McpServer, syntax: Syntax) -> Option<Value> {
             _ => {}
         }
         entry.insert("command".into(), json!(command));
-        if !server.args.is_empty() {
-            entry.insert("args".into(), json!(server.args));
+        if !args.is_empty() {
+            entry.insert("args".into(), json!(args));
         }
         if !env.is_empty() {
             entry.insert("env".into(), Value::Object(env));
@@ -174,14 +175,6 @@ pub(super) fn gemini_settings(plugin: &Plugin) -> Vec<Value> {
         .collect()
 }
 
-/// The plugin-root placeholders other runtimes use. Agent Plugins expands
-/// only `${PLUGIN_ROOT}`, and a `command` must be a bare name or `./` path.
-const ROOT_PLACEHOLDERS: [&str; 3] = [
-    "${CLAUDE_PLUGIN_ROOT}",
-    "${PLUGIN_ROOT}",
-    "${extensionPath}",
-];
-
 /// What an Agent Plugins `mcp.json` could not carry.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AgentPluginsLoss {
@@ -201,21 +194,31 @@ pub(super) fn agent_plugins_servers(plugin: &Plugin) -> (Map<String, Value>, Age
     for (name, server) in &plugin.mcp_servers {
         let mut entry = Map::new();
         if let Some(command) = &server.command {
-            let Some(command) = portable_command(command) else {
+            // A server whose files the package cannot carry would not start.
+            let Some(command) = portable_command(command).filter(|_| !server.bundle_missing) else {
                 loss.servers = true;
                 continue;
             };
+            let args: Vec<String> = server.args.iter().map(|arg| portable_arg(arg)).collect();
+            // Agent Plugins expands only its own placeholders, so an argument
+            // that reads a user variable would arrive as written.
+            if args.iter().any(|arg| user_variable(arg)) {
+                loss.servers = true;
+                continue;
+            }
             entry.insert("type".into(), json!("stdio"));
             entry.insert("command".into(), json!(command));
-            if !server.args.is_empty() {
-                let args: Vec<String> = server.args.iter().map(|arg| portable_arg(arg)).collect();
+            if !args.is_empty() {
                 entry.insert("args".into(), json!(args));
+            }
+            if let Some(cwd) = &server.cwd {
+                entry.insert("cwd".into(), json!(cwd));
             }
         } else {
             let Some(url) = server
                 .url
                 .as_deref()
-                .filter(|url| !url.contains('$') && agent_plugins::url_problem(url).is_none())
+                .filter(|url| !user_variable(url) && agent_plugins::url_problem(url).is_none())
             else {
                 loss.servers = true;
                 continue;
@@ -262,6 +265,53 @@ fn portable_command(command: &str) -> Option<String> {
             .then_some(command),
         None => (!command.contains('/')).then_some(command),
     }
+}
+
+/// Whether `value` references a variable other than the Agent Plugins
+/// placeholders: `${NAME}` or `$NAME`. A `$` before a digit or at the end,
+/// as in `price=$5`, is literal.
+fn user_variable(value: &str) -> bool {
+    let value = value
+        .replace("${PLUGIN_ROOT}", "")
+        .replace("${PLUGIN_DATA}", "");
+    value.match_indices('$').any(|(index, _)| {
+        value[index + 1..]
+            .chars()
+            .next()
+            .is_some_and(|next| next == '{' || next == '_' || next.is_ascii_alphabetic())
+    })
+}
+
+/// A server's command and args with `${PLUGIN_ROOT}`, which only Agent
+/// Plugins sources use, written in the runtime's placeholder. `None` when
+/// the runtime has no plugin-root placeholder, or the server needs a working
+/// folder or `${PLUGIN_DATA}`, which no other runtime config can express.
+fn rooted_command(server: &McpServer, syntax: Syntax) -> Option<(String, Vec<String>)> {
+    let command = server.command.clone()?;
+    let values = || std::iter::once(&command).chain(&server.args);
+    if server.cwd.is_some() || values().any(|value| value.contains("${PLUGIN_DATA}")) {
+        return None;
+    }
+    if !values().any(|value| value.contains("${PLUGIN_ROOT}")) {
+        return Some((command.clone(), server.args.clone()));
+    }
+    let root = match syntax {
+        Syntax::Claude => "${CLAUDE_PLUGIN_ROOT}",
+        Syntax::Gemini => "${extensionPath}",
+        Syntax::Cursor | Syntax::Vscode | Syntax::Opencode => return None,
+    };
+    let render = |value: &String| value.replace("${PLUGIN_ROOT}", root);
+    Some((render(&command), server.args.iter().map(render).collect()))
+}
+
+/// Whether some complete server has no entry in this syntax. A server with
+/// neither a command nor a url is already reported as incomplete.
+pub(super) fn servers_left_out(plugin: &Plugin, syntax: Syntax) -> bool {
+    plugin
+        .mcp_servers
+        .values()
+        .filter(|server| server.command.is_some() || server.url.is_some())
+        .any(|server| server_value(server, syntax).is_none())
 }
 
 /// An argument with each plugin-root placeholder written as `${PLUGIN_ROOT}`.

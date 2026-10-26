@@ -402,9 +402,13 @@ fn an_agent_plugins_package_round_trips() {
         ("plugin.json", &plugin.to_string()),
         ("mcp.json", &mcp(servers.clone())),
         ("skills/fill-forms/SKILL.md", SKILL),
+        ("bin/server", "#!/bin/sh\n"),
+        ("data/forms.json", "{}"),
     ]);
     let out = package(&root, "agent-plugins");
     assert_eq!(read_json(&out.join("plugin.json")), plugin);
+    assert!(out.join("bin/server").is_file());
+    assert!(out.join("data/forms.json").is_file());
     assert_eq!(
         read_json(&out.join("mcp.json")),
         json!({"$schema": MCP_SCHEMA, "mcpServers": servers})
@@ -448,8 +452,12 @@ fn a_claude_code_plugin_converts_to_a_conforming_package() {
         ),
         ("skills/fill-forms/SKILL.md", SKILL),
         ("commands/fill.md", "Fill the form."),
+        ("bin/server", "#!/bin/sh\n"),
+        ("data/forms.json", "{}"),
     ]);
     let out = package(&root, "agent-plugins");
+    assert!(out.join("bin/server").is_file());
+    assert!(out.join("data/forms.json").is_file());
     let result = conformance(&out, true);
     assert_eq!(result["passed"], json!(true), "{result}");
     assert_eq!(
@@ -482,4 +490,102 @@ fn a_claude_code_plugin_converts_to_a_conforming_package() {
             ],
         })
     );
+}
+
+fn dropped_for(root: &Path, runtime: &str) -> Value {
+    let check = call(json!({"command": "check", "root": root.to_str().expect("path")}));
+    check["result"]["runtimes"]
+        .as_array()
+        .expect("runtimes")
+        .iter()
+        .find(|entry| entry["runtime"] == json!(runtime))
+        .expect("runtime")["dropped"]
+        .clone()
+}
+
+#[test]
+fn servers_whose_files_or_variables_cannot_travel_are_left_out() {
+    let root = repo(&[
+        (
+            ".claude-plugin/plugin.json",
+            &json!({"name": "pdf-tools", "version": "1.0.0", "description": "Fill PDF forms."})
+                .to_string(),
+        ),
+        (
+            ".mcp.json",
+            &json!({"mcpServers": {
+                "built": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]},
+                "home": {"command": "pdf-server", "args": ["--config", "${HOME}/.pdf"]},
+                "priced": {"type": "http", "url": "https://mcp.acme.example/mcp?price=$5"},
+            }})
+            .to_string(),
+        ),
+        ("skills/fill-forms/SKILL.md", SKILL),
+    ]);
+    let out = package(&root, "agent-plugins");
+    assert_eq!(
+        read_json(&out.join("mcp.json"))["mcpServers"],
+        json!({
+            "priced": {"type": "streamable-http", "url": "https://mcp.acme.example/mcp?price=$5"},
+        })
+    );
+    assert_eq!(
+        dropped_for(&root, "agent-plugins"),
+        json!(["mcp_servers_not_portable"])
+    );
+}
+
+#[test]
+fn an_agent_plugins_source_keeps_its_root_in_other_runtimes() {
+    let plugin = json!({
+        "$schema": PLUGIN_SCHEMA,
+        "name": "pdf-tools",
+        "version": "1.0.0",
+        "description": "Fill PDF forms.",
+    });
+    let root = repo(&[
+        ("plugin.json", &plugin.to_string()),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "pdf": {"type": "stdio", "command": "./bin/server", "args": ["${PLUGIN_ROOT}/data"]},
+                "scratch": {"type": "stdio", "command": "pdf-cache", "cwd": "${PLUGIN_DATA}"},
+            })),
+        ),
+        ("bin/server", "#!/bin/sh\n"),
+        ("data/forms.json", "{}"),
+    ]);
+    let out = package(&root, "claude-code");
+    assert_eq!(
+        read_json(&out.join(".mcp.json"))["mcpServers"],
+        json!({"pdf": {
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/server",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/data"],
+        }})
+    );
+    assert_eq!(
+        dropped_for(&root, "claude-code"),
+        json!(["mcp_servers_not_portable"])
+    );
+    assert_eq!(
+        dropped_for(&root, "cursor"),
+        json!(["mcp_servers_not_portable"])
+    );
+}
+
+#[test]
+fn a_command_the_package_does_not_contain_is_skipped() {
+    let root = repo(&[
+        (
+            "plugin.json",
+            &json!({"$schema": PLUGIN_SCHEMA, "name": "pdf-tools", "version": "1.0.0"}).to_string(),
+        ),
+        (
+            "mcp.json",
+            &mcp(json!({"pdf": {"type": "stdio", "command": "./bin/server"}})),
+        ),
+    ]);
+    let result = conformance(&root, false);
+    assert_eq!(result["passed"], json!(false), "{result}");
+    assert_eq!(codes(&result), ["mcp_command_not_found"], "{result}");
 }

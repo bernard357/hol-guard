@@ -175,7 +175,7 @@ hol-guard plugin links            # install commands per runtime, plus listing l
 hol-guard plugin init --name my-plugin   # scaffold a new plugin in an empty folder
 ```
 
-Runtimes: `claude-code`, `codex`, `gemini-cli`, `cursor`, `vscode`, `opencode`, `mcp-registry` and `agent-skills`. See [the Plugin Kit guide](docs/guard/plugin-kit.md).
+Runtimes: `claude-code`, `codex`, `gemini-cli`, `cursor`, `vscode`, `opencode`, `mcp-registry`, `agent-skills` and `agent-plugins`. See [the Plugin Kit guide](docs/guard/plugin-kit.md).
 
 ### GitHub Actions
 

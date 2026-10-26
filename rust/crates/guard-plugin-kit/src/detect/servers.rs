@@ -4,11 +4,12 @@
 //! detection does.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde_json::{Map, Value};
 
 use super::text;
-use crate::model::{McpServer, Plugin};
+use crate::model::{McpServer, Plugin, ROOT_PLACEHOLDERS};
 use crate::reference::{normalize_template, single_reference};
 
 /// Adds each server in an `mcpServers` map that is not already known.
@@ -18,6 +19,7 @@ pub(super) fn collect_servers(
     raw_env: &mut Vec<(String, String, bool)>,
     value: Option<&Value>,
     gemini: bool,
+    agent_plugins: bool,
 ) {
     let Some(Value::Object(entries)) = value else {
         return;
@@ -36,9 +38,22 @@ pub(super) fn collect_servers(
                 raw_env.push((name.clone(), key.clone(), literal));
             }
         }
-        servers
-            .entry(name.clone())
-            .or_insert_with(|| server_entry(config, gemini));
+        servers.entry(name.clone()).or_insert_with(|| {
+            let mut server = server_entry(config, gemini);
+            if agent_plugins {
+                // Agent Plugins resolves a `./` command against the
+                // plugin root; other runtimes need the placeholder.
+                if let Some(rest) = server.command.as_deref().and_then(|c| c.strip_prefix("./")) {
+                    server.command = Some(format!("${{PLUGIN_ROOT}}/{rest}"));
+                }
+                server.cwd = config
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .filter(|cwd| !cwd.is_empty())
+                    .map(str::to_owned);
+            }
+            server
+        });
     }
 }
 
@@ -104,7 +119,63 @@ fn server_entry(config: &Map<String, Value>, gemini: bool) -> McpServer {
         env,
         headers,
         literal_headers,
+        ..McpServer::default()
     }
+}
+
+/// Records, for each server, the paths below `plugin_dir` its command and
+/// args name, and whether any of them is missing there.
+pub(super) fn resolve_bundles(plugin_dir: &Path, servers: &mut BTreeMap<String, McpServer>) {
+    let Ok(canonical_root) = plugin_dir.canonicalize() else {
+        return;
+    };
+    for server in servers.values_mut() {
+        for relative in root_references(server) {
+            let present = plugin_dir
+                .join(&relative)
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
+            if present {
+                if !server.bundled.contains(&relative) {
+                    server.bundled.push(relative);
+                }
+            } else {
+                server.bundle_missing = true;
+            }
+        }
+        server.bundled.sort();
+    }
+}
+
+/// Paths below the plugin root named by a placeholder at the start of the
+/// command or anywhere in an argument, such as `dist/index.js` in
+/// `--entry=${CLAUDE_PLUGIN_ROOT}/dist/index.js`. A path that climbs out of
+/// the root is returned as written, so it never resolves inside it.
+pub(crate) fn root_references(server: &McpServer) -> Vec<String> {
+    let mut found = Vec::new();
+    let values = server.command.iter().chain(&server.args);
+    for value in values {
+        let value = value.replace("${/}", "/");
+        for placeholder in ROOT_PLACEHOLDERS {
+            let mut rest = value.as_str();
+            while let Some(index) = rest.find(placeholder) {
+                rest = &rest[index + placeholder.len()..];
+                let Some(path) = rest.strip_prefix('/') else {
+                    continue;
+                };
+                let end = path
+                    .find(|c: char| {
+                        c.is_whitespace() || matches!(c, '"' | '\'' | ',' | ';' | ':' | '$')
+                    })
+                    .unwrap_or(path.len());
+                let path = path[..end].trim_end_matches('/');
+                if !path.is_empty() {
+                    found.push(path.to_owned());
+                }
+            }
+        }
+    }
+    found
 }
 
 /// An MCP Registry `server.json` becomes one server: its first package as a

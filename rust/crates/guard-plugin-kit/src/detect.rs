@@ -115,6 +115,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
                     &mut raw_env,
                     document.get("mcpServers"),
                     source.kind == SourceKind::GeminiExtension,
+                    source.kind == SourceKind::AgentPluginMcp,
                 );
             }
             SourceKind::McpServer if source_base(source) == base => {
@@ -133,6 +134,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
     plugin
         .skills
         .sort_by(|left, right| left.dir.cmp(&right.dir));
+    servers::resolve_bundles(&root.join(&base), &mut plugin.mcp_servers);
 
     let join = |name: &str| {
         if base.is_empty() {

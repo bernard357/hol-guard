@@ -243,6 +243,7 @@ def test_check_spec_names_the_section_a_plugin_breaks(tmp_path: Path) -> None:
     assert exit_code == 1
     assert "name_invalid" in output
     assert "(section " in output
+    assert "Clients reject the whole plugin." in output
     assert "does not conform to agent-plugins-1.0" in output
 
 
