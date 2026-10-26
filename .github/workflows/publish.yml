@@ -2176,7 +2176,7 @@ jobs:
           packages-dir: upload-dist-hol-guard/
       - name: Skip plugin-scanner when its PyPI project is over quota
         id: scanner_quota
-        if: steps.pypi.outputs.plugin_scanner_upload == 'true'
+        if: steps.pypi.outputs.plugin_scanner_upload == 'true' && needs.build.outputs.release_train == 'main'
         run: |
           set -euo pipefail
           quota_output=$(uv run --with packaging==25.0 python scripts/pypi_project_storage.py \

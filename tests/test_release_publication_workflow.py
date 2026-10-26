@@ -400,7 +400,9 @@ def test_registry_state_is_revalidated_at_each_publication_boundary() -> None:
     )
     assert "--project plugin-scanner" in scanner_quota["run"]
     assert "--pending-dir dist-plugin-scanner" in scanner_quota["run"]
-    assert scanner_quota["if"] == "steps.pypi.outputs.plugin_scanner_upload == 'true'"
+    assert scanner_quota["if"] == (
+        "steps.pypi.outputs.plugin_scanner_upload == 'true' && needs.build.outputs.release_train == 'main'"
+    )
     scanner_publish = next(step for step in alpha_publishers if step["with"]["packages-dir"] == "dist-plugin-scanner/")
     assert scanner_publish["if"] == (
         "steps.pypi.outputs.plugin_scanner_upload == 'true' && steps.scanner_quota.outputs.blocked != 'true'"
