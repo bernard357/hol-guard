@@ -433,6 +433,8 @@ _INSTALL_EXITS = {
     "plugin_kit_install_runtime_unknown": 2,
     "plugin_kit_install_runtime_not_offered": 2,
     "plugin_kit_install_not_recorded": 2,
+    "plugin_kit_install_recorded_elsewhere": 2,
+    "plugin_kit_install_endpoint_invalid": 2,
     "plugin_kit_request_invalid": 2,
 }
 _NO_TERMINAL = "No terminal to confirm in. Run it in a terminal, or add --yes to install without prompts."

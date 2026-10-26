@@ -865,18 +865,18 @@ def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
 
 
 def test_an_overridden_endpoint_does_not_follow_redirects(
-    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    local_portal: tuple[str, list[str]], runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     endpoint, requests = local_portal
     moved = endpoint.replace("api/guard/plugins/install-spec", "moved")
     monkeypatch.setenv(install.SPEC_URL_ENV, moved)
     exit_code, _output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes", "--runtime", "codex"])
-    assert (exit_code, programs, requests) == (2, [], ["/moved?slug=acme%2Ftoolgate"])
+    assert (exit_code, runtimes.ran, requests) == (2, [], ["/moved?slug=acme%2Ftoolgate&schema=2"])
     assert f"{install.SPEC_URL_ENV} answered with a redirect" in error
 
 
 def test_uninstall_through_another_endpoint_names_the_mismatch(
-    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    local_portal: tuple[str, list[str]], runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     endpoint, _requests = local_portal
     monkeypatch.setenv(install.SPEC_URL_ENV, endpoint)
