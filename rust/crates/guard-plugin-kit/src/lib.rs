@@ -11,6 +11,7 @@ mod config;
 mod detect;
 mod emit;
 mod init;
+mod install;
 mod links;
 mod model;
 mod output;
@@ -51,11 +52,30 @@ enum Request {
     },
     Links {
         root: String,
+        #[serde(default)]
+        block: bool,
+        #[serde(default)]
+        slug: Option<String>,
     },
     Init {
         root: String,
         #[serde(default)]
         name: Option<String>,
+    },
+    /// The spec is the registry's untrusted answer; see `install.rs`.
+    Install {
+        spec: Value,
+        #[serde(default)]
+        available: Vec<String>,
+        #[serde(default)]
+        runtimes: Vec<String>,
+    },
+    Uninstall {
+        spec: Value,
+        #[serde(default)]
+        available: Vec<String>,
+        #[serde(default)]
+        runtimes: Vec<String>,
     },
 }
 
@@ -76,10 +96,10 @@ fn handle(request: Request) -> Result<Value, String> {
             let root = resolve_root(&root)?;
             check_report(&root, strict)
         }
-        Request::Links { root } => {
+        Request::Links { root, block, slug } => {
             let root = resolve_root(&root)?;
             let detection = detect::detect(&root)?;
-            serde_json::to_value(links::links(&detection))
+            serde_json::to_value(links::links(&detection, block, slug.as_deref())?)
                 .map_err(|_| "plugin_kit_encode_failed".to_owned())
         }
         Request::Init { root, name } => {
@@ -89,6 +109,16 @@ fn handle(request: Request) -> Result<Value, String> {
             let written = output::write(&root, &outputs, output::Mode::Exclusive)?;
             Ok(json!({"written": written, "scaffolded": detection.sources.is_empty()}))
         }
+        Request::Install {
+            spec,
+            available,
+            runtimes,
+        } => install_plan(spec, install::Action::Install, &available, &runtimes),
+        Request::Uninstall {
+            spec,
+            available,
+            runtimes,
+        } => install_plan(spec, install::Action::Uninstall, &available, &runtimes),
         Request::Package {
             root,
             out_dir,
@@ -100,6 +130,16 @@ fn handle(request: Request) -> Result<Value, String> {
             package(&root, out_dir.as_deref(), &runtimes, force, strict)
         }
     }
+}
+
+fn install_plan(
+    spec: Value,
+    action: install::Action,
+    available: &[String],
+    runtimes: &[String],
+) -> Result<Value, String> {
+    let plan = install::plan(spec, action, available, runtimes)?;
+    serde_json::to_value(plan).map_err(|_| "plugin_kit_encode_failed".to_owned())
 }
 
 fn resolve_root(root: &str) -> Result<PathBuf, String> {

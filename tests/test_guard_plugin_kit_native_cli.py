@@ -190,3 +190,25 @@ def test_links_carry_campaign_attribution(tmp_path: Path) -> None:
     _exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--json"])
     hol = json.loads(output)["hol"]
     assert hol["connect"].endswith("repo=acme/notes-kit&utm_source=hol-guard&utm_medium=cli&utm_campaign=plugin-kit")
+
+
+def test_links_block_prints_only_the_readme_block(tmp_path: Path) -> None:
+    _write_plugin(tmp_path)
+    exit_code, _output, error = _run(["plugin", "links", str(tmp_path), "--block"])
+    assert exit_code == 1
+    assert "No install block" in error
+
+    (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({"name": "acme", "plugins": [{"name": "notes-kit", "source": "./"}]}), encoding="utf-8"
+    )
+    exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--block"])
+    assert exit_code == 0
+    assert output.startswith("<!-- hol-install-block:v1 slug=acme/notes-kit -->\n")
+    assert "hol-guard plugin install acme/notes-kit --apply" in output
+    assert "Claim the HOL listing" not in output
+
+    _exit_code, output, _error = _run(["plugin", "links", str(tmp_path), "--block", "--slug", "acme/notes"])
+    assert "hol-guard plugin install acme/notes --apply" in output
+    exit_code, _output, error = _run(["plugin", "links", str(tmp_path), "--block", "--slug", "../notes"])
+    assert exit_code == 2
+    assert "Use a HOL listing slug" in error
