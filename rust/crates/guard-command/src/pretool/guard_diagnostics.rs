@@ -5,6 +5,13 @@
 //! incident, uninstall, policy and other control subcommands keep the normal
 //! review or critical-floor path.
 //!
+//! The reading verbs are admitted as a group (`record_inspection`): `events`,
+//! `exceptions`, `policies`, `receipts`, `history`, `advisories`, `inventory`
+//! and `trust`, each printing what the local store already holds. An agent
+//! that has to ask for an approval before it can read its own approval
+//! history learns nothing from the pause, so these stay silent; the
+//! subcommands that write or leave the machine do not.
+//!
 //! `hol-guard settings` is admitted with its read-only views (`list`, `explain`
 //! and `doctor`, each with an optional `--json`). They print the saved
 //! configuration and the posture summary. `settings set`, `approval-password`
@@ -81,8 +88,18 @@ pub(super) fn names_launcher(text: &str) -> bool {
     })
 }
 
+/// Whether the working directory could supply the program a bare `hol-guard`
+/// reaches. A launcher file sitting in it wins the bare-name lookup, and a
+/// generated shim directory (`package-shims/bin`) is the one place a frozen
+/// launcher runs its first word as a script instead of parsing it, so a run
+/// from inside one is refused too.
 fn cwd_shadows_launcher(cwd: &Path) -> bool {
     !cwd.is_absolute()
+        || (cwd.file_name().is_some_and(|name| name == "bin")
+            && cwd
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "package-shims"))
         || SHADOW_NAMES.iter().any(|name| {
             // A directory cannot be executed through a bare-name lookup;
             // files and symlinks (even to directories) still shadow.
@@ -108,20 +125,25 @@ pub(super) fn safe_hol_guard_arguments(arguments: &[String]) -> bool {
     ) || help_request(&words)
         || command_inspection(&words)
         || approval_inspection(&words)
+        || record_inspection(&words)
 }
 
-/// The approval queue and the retry hint of one resolved request. The decision
-/// subcommands (`approve`, `deny`), `resume`, `open`, `lock`, `unlock` and
-/// `clear-history`, and every root override (`--home`, `--guard-home`,
-/// `--workspace`), are not admitted.
+/// The approval queue and the retry hint of one resolved request, plus
+/// `approvals open <id>`, which shows one request in the user's own approval
+/// center. Opening is what the admitted bare `approvals` form and `dashboard`
+/// already do, named at one request instead of the next pending one, and it
+/// resolves nothing. The decision subcommands (`approve`, `deny`), `resume`,
+/// `lock`, `unlock` and `clear-history`, and every root override (`--home`,
+/// `--guard-home`, `--workspace`), are not admitted.
 fn approval_inspection(words: &[&str]) -> bool {
     match words {
         ["approvals"]
         | ["approvals", "--json"]
         | ["approvals", "list"]
         | ["approvals", "list", "--json"] => true,
-        ["approvals", "retry-hint" | "wait", id]
-        | ["approvals", "retry-hint" | "wait", id, "--json"] => request_id(id),
+        ["approvals", "retry-hint" | "wait" | "open", id]
+        | ["approvals", "retry-hint" | "wait" | "open", id, "--json"]
+        | ["approvals", "open", "--json", id] => request_id(id),
         ["approvals", "wait", id, "--timeout", seconds]
         | ["approvals", "wait", id, "--timeout", seconds, "--json"] => {
             request_id(id) && seconds.parse::<u16>().is_ok_and(|seconds| seconds <= 600)
@@ -173,10 +195,16 @@ fn extension_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-/// `--help` for the launcher or a documented subcommand. The parser prints
-/// usage and exits before any subcommand runs. The leading word must name a
-/// known subcommand: a frozen launcher treats a leading word naming a package
-/// manager as a shim script path, which the working directory could supply.
+/// `--help` for the launcher or any of its subcommands. The parser prints
+/// usage and exits before a subcommand runs, and an unknown name only prints
+/// usage and fails, so the name itself carries no privilege and the admitted
+/// set does not have to be kept in step with the CLI. What the leading word
+/// must not do is name something the launcher would run instead of parsing:
+/// a frozen launcher runs a generated package-manager shim when the first
+/// word resolves to one, so the word has to be a plain subcommand name, it
+/// must not be one of the managers Guard generates a shim for, and the
+/// working directory must not be a shim directory, which
+/// [`cwd_shadows_launcher`] refuses.
 ///
 /// A leading `guard` is the launcher's no-op prefix (`hol-guard guard --help`
 /// runs `hol-guard --help`), so it is dropped before the same check.
@@ -185,306 +213,80 @@ fn help_request(words: &[&str]) -> bool {
         ["guard", rest @ ..] => rest,
         _ => words,
     };
+    let named = |word: &&str| subcommand_name(word);
     match words {
-        ["help", rest @ ..] => help_path(rest),
-        [rest @ .., "--help" | "-h"] => help_path(rest),
+        ["help", rest @ ..] => rest.len() <= 2 && rest.iter().all(named),
+        [rest @ .., "--help" | "-h"] => rest.len() <= 2 && rest.iter().all(named),
         _ => false,
     }
 }
 
-/// The subcommand path a help request names. Only the leading word carries the
-/// shim risk the launcher has to rule out, so it is the only one matched
-/// against the known names. A subcommand's own verbs are never enumerated here:
-/// the list would go stale every time the CLI grows one, and `hol-guard command
-/// test --help` would ask for approval while `hol-guard command --help` stays
-/// silent. A verb only has to be shaped like one, which keeps out flags, paths
-/// and anything a value could carry.
-fn help_path(words: &[&str]) -> bool {
-    match words {
-        [] => true,
-        [subcommand] => HELP_SUBCOMMANDS.contains(subcommand),
-        [subcommand, verb] => HELP_SUBCOMMANDS.contains(subcommand) && subcommand_verb(verb),
-        _ => false,
-    }
-}
-
-fn subcommand_verb(word: &str) -> bool {
-    word.starts_with(|first: char| first.is_ascii_alphabetic())
+/// Whether `word` is spelled like one of the launcher's own subcommands: a
+/// short lower-case name, no separator a path could be written with, and not
+/// a package manager Guard generates a shim for.
+fn subcommand_name(word: &str) -> bool {
+    word.len() <= 32
+        && word.starts_with(|first: char| first.is_ascii_lowercase())
         && word
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && !SHIM_MANAGERS.contains(&word)
 }
 
-const HELP_SUBCOMMANDS: &[&str] = &[
-    "abom",
-    "advisories",
-    "allow",
-    "approvals",
-    "apps",
-    "bootstrap",
-    "command",
-    "daemon",
-    "dashboard",
-    "deny",
-    "detect",
-    "diff",
-    "doctor",
-    "events",
-    "exceptions",
-    "explain",
-    "export",
-    "history",
-    "hooks",
-    "import",
-    "init",
-    "install",
-    "inventory",
-    "list",
-    "mcp",
-    "policies",
-    "policy",
-    "receipts",
-    "repair",
-    "retry-hint",
-    "risk-report",
-    "run",
-    "scan",
-    "secrets",
-    "security-level",
-    "set",
-    "settings",
-    "show",
-    "skills",
-    "start",
-    "status",
-    "stop",
-    "sync",
-    "trust",
-    "uninstall",
-    "update",
-    "validate",
+/// The package managers Guard generates a shim for
+/// (`native_shim_admin.SUPPORTED_PACKAGE_SHIM_MANAGERS`). A frozen launcher
+/// handed one of these as its first word looks for the generated shim rather
+/// than parsing a subcommand, so none of them is read as a help request.
+const SHIM_MANAGERS: &[&str] = &[
+    "brew", "bun", "bundle", "bunx", "cargo", "composer", "go", "gradle", "mvn", "npm", "npx",
+    "pip", "pip3", "pipenv", "pipx", "pnpm", "poetry", "uv", "uvx", "yarn",
 ];
 
-#[cfg(test)]
-mod tests {
-    use super::{safe_hol_guard_arguments, safe_hol_guard_segment};
-
-    fn arguments(command: &str) -> Vec<String> {
-        command.split_whitespace().map(str::to_owned).collect()
-    }
-
-    #[test]
-    fn admits_only_exact_read_only_diagnostics() {
-        for command in [
-            "--version",
-            "status",
-            "status --json",
-            "daemon status",
-            "daemon status --json",
-            "doctor",
-            "doctor --json",
-            "settings",
-            "settings --json",
-            "settings list",
-            "settings list --json",
-            "settings explain",
-            "settings explain --json",
-            "settings doctor",
-            "settings doctor --json",
-            "dashboard",
-            "dashboard --json",
-            "--help",
-            "-h",
-            "help",
-            "help doctor",
-            "doctor --help",
-            "daemon status -h",
-            "secrets --help",
-            "update --help",
-            "help update",
-            "command extensions",
-            "command extensions --json",
-            "command extensions node.eval",
-            "guard --help",
-            "guard -h",
-            "guard help",
-            "guard doctor --help",
-            "guard help doctor",
-            "approvals",
-            "approvals --json",
-            "approvals list",
-            "approvals list --json",
-            "approvals retry-hint 0123456789abcdef0123456789abcdef",
-            "approvals retry-hint req-1 --json",
-            "approvals wait req-1 --json",
-            "approvals wait req-1 --timeout 0",
-            "approvals wait req-1 --timeout 600 --json",
-            "approvals --help",
-            "approvals list --help",
-            "approvals retry-hint --help",
-            "command test --help",
-            "command explain -h",
-            "command extensions --help",
-            "help command test",
-            "guard command test --help",
-            "daemon start --help",
-            "policy set --help",
-        ] {
-            assert!(safe_hol_guard_arguments(&arguments(command)), "{command}");
+/// Guard's own read-only records: the local event log, the active exceptions,
+/// the remembered rules, the receipts, the decision history, the cached
+/// advisories, the artifact inventory and the local trust posture. Each prints
+/// what Guard already holds and writes nothing.
+///
+/// The subcommands that leave the local store are not admitted: `advisories
+/// sync` and `inventory --sync` report to Guard Cloud, and `policies clear`,
+/// `repair` and `migrate-local-integrity` rewrite remembered rules, as do
+/// `trust setup`, `test` and `reset`. Every root override (`--home`,
+/// `--guard-home`, `--workspace`) is refused by the exact shapes below.
+fn record_inspection(words: &[&str]) -> bool {
+    let json_flags = words.iter().filter(|word| **word == "--json").count();
+    let rest: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|word| *word != "--json")
+        .collect();
+    json_flags <= 1
+        && match rest.as_slice() {
+            ["events" | "exceptions" | "receipts" | "history" | "advisories" | "inventory"
+            | "policies" | "trust"]
+            | ["advisories", "list"]
+            | ["policies", "verify" | "integrity-status"]
+            | ["trust", "status"] => true,
+            ["events", "--name", value]
+            | ["exceptions", "--harness", value]
+            | ["policies", "--harness", value]
+            | ["advisories", "list", "--severity", value] => plain_value(value),
+            ["advisories" | "history", "explain", id] => extension_id(id),
+            _ => false,
         }
-        for command in [
-            "",
-            "--json",
-            "--version --json",
-            "status --repair",
-            "status --json --repair",
-            "doctor --repair",
-            "doctor --fix",
-            "doctor --incident",
-            "doctor codex",
-            "doctor --json --incident",
-            "doctor --harnesses",
-            "daemon",
-            "daemon start",
-            "daemon stop",
-            "daemon status --port 1",
-            "settings set mode off",
-            "settings set protection off",
-            "settings list --home /tmp",
-            "settings explain --guard-home /tmp",
-            "settings doctor --workspace /tmp",
-            "settings list extra",
-            "settings list --json --json",
-            "settings approval-password",
-            "settings approval-totp",
-            "settings get",
-            "uninstall",
-            "repair",
-            "repair --json",
-            "repair --dry-run",
-            "hooks remove",
-            "hooks remove --json",
-            "policy disable",
-            "clear --all",
-            "capability consume",
-            "--home /tmp status",
-            "status --home /tmp",
-            "npm --help",
-            "__guard-claude-hook --help",
-            "status --json --help",
-            "help npm",
-            "a b c --help",
-            "command ../test --help",
-            "command -x --help",
-            "command test extra --help",
-            "npm test --help",
-            "command",
-            "command test",
-            "command explain",
-            "command controls",
-            "command controls --json",
-            "command setup --detect",
-            "command extensions -x",
-            "command extensions ../x",
-            "command extensions a b",
-            "command explain a b",
-            "command explain --home",
-            "command explain -x",
-            "command --json --json extensions",
-            "--json command extensions",
-            "--home /tmp command extensions",
-            "command extensions --home /tmp",
-            "command extensions --guard-home /tmp",
-            "command extensions --workspace /tmp",
-            "guard",
-            "guard repair",
-            "guard start",
-            "guard status --repair",
-            "guard guard --help",
-            "guard npm --help",
-            "guard a b c --help",
-            "dashboard --home /tmp",
-            "dashboard --guard-home /tmp",
-            "dashboard --workspace /tmp",
-            "dashboard --json --json",
-            "dashboard open",
-            "--home /tmp dashboard",
-            "approvals approve req-1",
-            "approvals approve req-1 --scope global",
-            "approvals deny req-1",
-            "approvals resume req-1",
-            "approvals open req-1",
-            "approvals unlock",
-            "approvals lock",
-            "approvals clear-history --all",
-            "approvals list extra",
-            "approvals list --home /tmp",
-            "approvals --home /tmp",
-            "approvals --guard-home /tmp --json",
-            "approvals --workspace /tmp",
-            "approvals --json --json",
-            "approvals --json list",
-            "approvals retry-hint",
-            "approvals retry-hint --json",
-            "approvals retry-hint --home /tmp",
-            "approvals retry-hint -x",
-            "approvals retry-hint req-1 --home /tmp",
-            "approvals retry-hint req-1 req-2",
-            "approvals retry-hint ../req",
-            "approvals retry-hint req/1",
-            "approvals wait",
-            "approvals wait req-1 --timeout 601",
-            "approvals wait req-1 --timeout -1",
-            "approvals wait req-1 --home /tmp",
-            "list approvals",
-            "approve req-1",
-        ] {
-            assert!(!safe_hol_guard_arguments(&arguments(command)), "{command}");
-        }
-    }
-
-    #[test]
-    fn command_inspection_takes_one_literal_command_text() {
-        let words = |text: &str, json: bool| {
-            let mut words = vec!["command".to_owned(), "explain".to_owned(), text.to_owned()];
-            if json {
-                words.push("--json".to_owned());
-            }
-            words
-        };
-        for text in ["bun run build", "rm -rf /", "git push --force origin main"] {
-            assert!(safe_hol_guard_arguments(&words(text, false)), "{text}");
-            assert!(safe_hol_guard_arguments(&words(text, true)), "{text}");
-        }
-        let too_long = "x".repeat(4_097);
-        for text in [
-            "",
-            "   ",
-            "--home /tmp/evil",
-            "-c x",
-            "a\0b",
-            too_long.as_str(),
-        ] {
-            assert!(!safe_hol_guard_arguments(&words(text, false)), "{text:?}");
-        }
-        let mut extra = words("bun run build", false);
-        extra.extend(["--home".to_owned(), "/tmp/evil".to_owned()]);
-        assert!(!safe_hol_guard_arguments(&extra));
-    }
-
-    #[test]
-    fn working_directory_launcher_or_unknown_cwd_keeps_review() {
-        let workspace =
-            std::env::temp_dir().join(format!("guard-diagnostics-shadow-{}", std::process::id()));
-        std::fs::create_dir_all(&workspace).unwrap();
-        let cwd = workspace.to_str().unwrap().to_owned();
-        let status = arguments("status");
-        assert!(safe_hol_guard_segment(&status, Some(&cwd), 0));
-        assert!(!safe_hol_guard_segment(&status, None, 0));
-        assert!(!safe_hol_guard_segment(&status, Some("relative/dir"), 0));
-        std::fs::write(workspace.join("hol-guard"), "#!/bin/sh\n").unwrap();
-        let shadowed = safe_hol_guard_segment(&status, Some(&cwd), 0);
-        std::fs::remove_dir_all(&workspace).unwrap();
-        assert!(!shadowed);
-    }
 }
+
+/// A single literal selector: a harness, a dotted event name or a severity.
+/// Nothing a path, a flag or a second word could be written with is admitted,
+/// and a leading dot or dash is refused so the value can be neither a relative
+/// path nor an option.
+fn plain_value(value: &str) -> bool {
+    value.len() <= 64
+        && value.starts_with(|first: char| first.is_ascii_alphanumeric())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+#[cfg(test)]
+#[path = "guard_diagnostics_tests.rs"]
+mod tests;
