@@ -50,6 +50,7 @@ use crate::guard_store_inventory as inventory;
 use crate::guard_store_local_cli as local_cli;
 use crate::guard_store_local_cli_catalog as local_cli_catalog;
 use crate::guard_store_local_cli_grants as local_cli_grants;
+use crate::guard_store_local_cli_inventory as local_cli_inventory;
 use crate::guard_store_local_mcp_declarations as local_mcp_declarations;
 use crate::guard_store_local_mcp_observation as local_mcp;
 use crate::guard_store_native_receipts as native_receipts;
@@ -343,6 +344,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "read_local_cli_grant"
         | "read_local_cli_command_catalog"
         | "read_local_cli_command_states"
+        | "list_local_cli_items"
         | "list_cached_advisories"
         | "policy_source_contexts"
         | "matching_native_review_block" => Kind::Read,
@@ -540,6 +542,7 @@ fn dispatch(
             local_cli_grants::read_command_catalog(connection, args)
         }
         "read_local_cli_command_states" => local_cli_grants::read_command_states(connection, args),
+        "list_local_cli_items" => local_cli_inventory::list_items(connection, args),
         "cache_advisories" => advisory_cache::cache(connection, args),
         "list_cached_advisories" => advisory_cache::list(connection, args),
         "consume_native_review_approval" => native_review_consume::consume(connection, args),
