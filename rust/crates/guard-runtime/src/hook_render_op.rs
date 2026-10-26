@@ -10,6 +10,8 @@
 //! artifact id an event is filed under - so no rule that decides what a user
 //! sees or which override applies is evaluated outside the runtime.
 
+use std::path::Path;
+
 use crate::hook_cli_claude_text::claude_approval_copy;
 use crate::hook_cli_emit::cli_hook_emit_document;
 use guard_command::hook_responses::cli_documents::{
@@ -166,8 +168,17 @@ fn render(request: &HookRenderRequestV1) -> Result<Value, &'static str> {
             .get("response_json")
             .and_then(Value::as_str)
             .ok_or("native_hook_render_invalid")?;
-        let document = cli_hook_emit_document(harness, event_name, response_json)
-            .ok_or("native_hook_render_unrenderable")?;
+        // The store the caller's command names. Optional on the wire: a
+        // caller that sends none gets the recovery line for the default
+        // home, which is what every caller printed before this key existed.
+        let guard_home = params.get("guard_home").and_then(Value::as_str);
+        let document = cli_hook_emit_document(
+            harness,
+            event_name,
+            response_json,
+            guard_home.map(Path::new),
+        )
+        .ok_or("native_hook_render_unrenderable")?;
         return Ok(cli_payload(CliOutcome::Document(document)));
     }
     if matches!(
