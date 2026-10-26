@@ -188,6 +188,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
 #[cfg(unix)]
