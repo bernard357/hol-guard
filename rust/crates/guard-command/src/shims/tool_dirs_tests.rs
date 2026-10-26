@@ -194,6 +194,18 @@ fn the_launcher_path_wins_over_a_discovered_directory() {
 }
 
 #[test]
+fn an_unresolved_variable_ahead_of_the_shim_is_not_protection() {
+    let machine = machine();
+    let shim_dir = machine.guard_home.join("package-shims").join("bin");
+    fs::create_dir_all(&shim_dir).expect("shim dir");
+    let path = format!("$VOLTA_HOME/bin:{}", shim_dir.to_string_lossy());
+    let order = get_path_order_status(&context(&machine, Some("1")), "bun", Some(&path))
+        .expect("path order");
+    assert_eq!(order.get("shim_precedes_real"), Some(&Value::Bool(false)));
+    assert_eq!(order.get("path_broken"), Some(&Value::Bool(true)));
+}
+
+#[test]
 fn the_real_binary_is_reported_from_the_discovered_directory() {
     let machine = machine();
     let bun = install_tool(&machine.home.join(".bun/bin"), "bun");

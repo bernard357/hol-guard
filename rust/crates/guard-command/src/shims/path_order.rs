@@ -30,6 +30,10 @@ fn is_foreign_package_shim_binary(
         && !is_trusted_package_shim_binary(facts, candidate, trusted_shim_dir)?)
 }
 
+fn has_unresolved_path_variable(entry: &str) -> bool {
+    entry.contains('$') || entry.contains('%')
+}
+
 fn index_value(index: Option<usize>) -> Value {
     index.map_or(Value::Null, |value| json!(value))
 }
@@ -57,7 +61,13 @@ pub fn get_path_order_status(
     let mut foreign_shim_index: Option<usize> = None;
     let mut foreign_shim_path: Option<String> = None;
     let mut real_binary_path: Option<String> = None;
+    let mut unresolved_ahead = false;
     for (index, entry) in effective_path.split(context.pathsep()).enumerate() {
+        // `$VOLTA_HOME/bin` is not a directory we can search. Left ahead of the
+        // shim, it can hide the real binary and the shim looks like it leads.
+        if shim_dir_index.is_none() && has_unresolved_path_variable(entry) {
+            unresolved_ahead = true;
+        }
         let directory = facts.resolve(&facts.expanduser(entry)?)?;
         if facts.path_eq(&directory, &shim_dir) && shim_dir_index.is_none() {
             shim_dir_index = Some(index);
@@ -123,20 +133,20 @@ pub fn get_path_order_status(
     }
     let Some(real_index) = real_dir_index else {
         return Ok(object(json!({
-            "shim_precedes_real": true,
+            "shim_precedes_real": !unresolved_ahead,
             "real_binary_found": false,
             "real_binary_path": null,
             "real_binary_path_index": null,
             "shim_in_path": true,
             "shim_path_index": shim_index,
-            "path_broken": false,
+            "path_broken": unresolved_ahead,
             "foreign_shim_bypass": false,
             "foreign_shim_path": foreign_path,
             "foreign_shim_path_index": index_value(foreign_shim_index),
             "shim_dir": shim_dir,
         })));
     };
-    let precedes = shim_index < real_index;
+    let precedes = shim_index < real_index && !unresolved_ahead;
     Ok(object(json!({
         "shim_precedes_real": precedes,
         "real_binary_found": true,
@@ -144,7 +154,7 @@ pub fn get_path_order_status(
         "real_binary_path_index": real_index,
         "shim_in_path": true,
         "shim_path_index": shim_index,
-        "path_broken": !precedes,
+        "path_broken": !precedes || unresolved_ahead,
         "foreign_shim_bypass": false,
         "foreign_shim_path": foreign_path,
         "foreign_shim_path_index": index_value(foreign_shim_index),
