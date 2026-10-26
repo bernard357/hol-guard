@@ -657,6 +657,73 @@ fn a_working_folder_with_no_packaged_files_is_reported_not_shipped() {
 }
 
 #[test]
+fn an_excluded_file_a_server_names_is_reported_not_shipped() {
+    let root = repo(&[
+        (
+            "plugin.json",
+            &manifest(json!({"description": "Fill PDF forms."})),
+        ),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "secret": {"type": "stdio", "command": "pdf-server", "args": ["${PLUGIN_ROOT}/config/secrets.json"]},
+                "kept": {"type": "stdio", "command": "pdf-server", "args": ["${PLUGIN_ROOT}/data/forms.json"]},
+            })),
+        ),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"config/*\"]\n",
+        ),
+        ("config/secrets.json", "{}"),
+        ("data/forms.json", "{}"),
+    ]);
+    let out = package(&root, "agent-plugins");
+    assert!(!out.join("config").exists());
+    assert_eq!(
+        read_json(&out.join("mcp.json"))["mcpServers"]
+            .as_object()
+            .expect("servers")
+            .keys()
+            .collect::<Vec<_>>(),
+        ["kept"]
+    );
+    assert_eq!(
+        dropped_for(&root, "agent-plugins"),
+        json!(["mcp_servers_not_portable"])
+    );
+}
+
+#[test]
+fn a_server_file_too_large_to_copy_fails_the_package() {
+    let root = repo(&[
+        (
+            "plugin.json",
+            &manifest(json!({"description": "Fill PDF forms."})),
+        ),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "pdf": {"type": "stdio", "command": "pdf-server", "args": ["${PLUGIN_ROOT}/data/model.bin"]},
+            })),
+        ),
+    ]);
+    fs::create_dir_all(root.join("data")).expect("data folder");
+    fs::write(root.join("data/model.bin"), vec![0_u8; 5 * 1024 * 1024 + 1]).expect("model");
+    let out = root.parent().expect("parent").join("dist");
+    let response = call(json!({
+        "command": "package",
+        "root": root.to_str().expect("path"),
+        "out_dir": out.to_str().expect("path"),
+        "runtimes": ["agent-plugins"],
+    }));
+    assert_eq!(
+        response,
+        json!({"ok": false, "error": "plugin_kit_package_too_large"}),
+        "{response}"
+    );
+}
+
+#[test]
 fn an_agent_plugins_source_keeps_its_root_in_other_runtimes() {
     let plugin = json!({
         "$schema": PLUGIN_SCHEMA,

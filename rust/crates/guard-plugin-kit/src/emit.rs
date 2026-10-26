@@ -376,8 +376,13 @@ fn copies(
             }
         }
     }
+    // A server's files must all ship: the server is already in mcp.json.
+    let mut required = BTreeSet::new();
     if runtime == Runtime::AgentPlugins {
-        found.extend(agent_plugins_bundled(root, plugin, excludes)?);
+        for (source, target) in agent_plugins_bundled(root, plugin, excludes)? {
+            required.insert(target.clone());
+            found.push((source, target));
+        }
     }
     if runtime == Runtime::GeminiCli {
         // Detection keeps only a context file the walk found inside the
@@ -399,6 +404,9 @@ fn copies(
             }
         }
         let Some(content) = walk::read_bytes(&source, MAX_COPY_BYTES) else {
+            if required.contains(&target) {
+                return Err("plugin_kit_package_too_large".to_owned());
+            }
             continue;
         };
         budget.files += 1;

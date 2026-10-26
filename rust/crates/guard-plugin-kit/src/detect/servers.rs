@@ -126,10 +126,10 @@ fn server_entry(config: &Map<String, Value>, gemini: bool) -> McpServer {
 
 /// Records, for each server, the paths below `plugin_dir` its command, args
 /// and `cwd` name, and whether any of them is missing there. `files` is the
-/// repository walk and `base` the plugin folder within it: a folder counts
-/// only when the walk found a file in it, since packaging copies the walked
-/// files and an empty or fully excluded folder would not exist in the
-/// package.
+/// repository walk and `base` the plugin folder within it: a file counts only
+/// when the walk found it, and a folder only when the walk found a file in
+/// it, since packaging copies the walked files and an excluded file or an
+/// empty or fully excluded folder would not exist in the package.
 pub(super) fn resolve_bundles(
     plugin_dir: &Path,
     base: &str,
@@ -139,15 +139,22 @@ pub(super) fn resolve_bundles(
     let Ok(canonical_root) = plugin_dir.canonicalize() else {
         return;
     };
-    let carries_files = |relative: &str| {
-        let folder = if base.is_empty() {
-            format!("{relative}/")
+    let repository_path = |relative: &str| {
+        if base.is_empty() {
+            relative.to_owned()
         } else {
-            format!("{base}/{relative}/")
-        };
+            format!("{base}/{relative}")
+        }
+    };
+    let carries_files = |relative: &str| {
+        let folder = format!("{}/", repository_path(relative));
         files
             .iter()
             .any(|file| walk::display(file).starts_with(&folder))
+    };
+    let carries_file = |relative: &str| {
+        let path = repository_path(relative);
+        files.iter().any(|file| walk::display(file) == path)
     };
     for server in servers.values_mut() {
         for relative in root_references(server) {
@@ -157,7 +164,11 @@ pub(super) fn resolve_bundles(
             let present = resolved
                 .canonicalize()
                 .is_ok_and(|resolved| resolved == canonical_root.join(&relative))
-                && (!resolved.is_dir() || carries_files(&relative));
+                && if resolved.is_dir() {
+                    carries_files(&relative)
+                } else {
+                    carries_file(&relative)
+                };
             if present {
                 if !server.bundled.contains(&relative) {
                     server.bundled.push(relative);
