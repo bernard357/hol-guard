@@ -3388,6 +3388,7 @@ def _sync_url_error_message(error: OSError) -> str:
 
 
 _UNREACHABLE_NETWORK_ERRNOS = frozenset({errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ENETDOWN})
+_MANAGED_PROXY_REQUEST_FAILED = "managed_proxy_request_failed"
 _GUARD_CLOUD_UNREACHABLE_MESSAGE = "Guard Cloud could not be reached. Local Guard keeps protecting this machine."
 
 
@@ -3395,9 +3396,26 @@ def _is_guard_cloud_unreachable_error(error: OSError) -> bool:
     """Return whether a sync request failed because Guard Cloud was offline, not misconfigured.
 
     Refused or reset connections, unreachable hosts or networks, DNS failures and
-    timeouts clear up on their own, so
-    the caller can offer a retry. TLS verification failures are not included.
+    timeouts clear up on their own, so the caller can offer a retry, including
+    when they happen behind a managed proxy. TLS verification failures are not
+    included.
     """
+    if _is_network_outage_error(error):
+        return True
+    if getattr(error, "reason", None) != _MANAGED_PROXY_REQUEST_FAILED:
+        return False
+    # A managed proxy keeps the transport failure only in the exception chain.
+    seen: set[int] = set()
+    cause = error.__cause__ or error.__context__
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, OSError) and _is_network_outage_error(cause):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
+def _is_network_outage_error(error: OSError) -> bool:
     if _is_timeout_error(error):
         return True
     reason = getattr(error, "reason", error)

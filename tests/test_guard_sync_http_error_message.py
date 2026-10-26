@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 
 import pytest
+import urllib3
 
 from codex_plugin_scanner.guard.runtime.runner import (
     GuardSyncNotAvailableError,
@@ -268,9 +269,18 @@ def test_fetch_supply_chain_bundle_payload_reports_unreachable_guard_cloud_as_re
     assert "Errno" not in str(exc_info.value)
 
 
+def _managed_proxy_failure(transport: BaseException | None) -> urllib.error.URLError:
+    """Build the error the managed proxy transport raises, chained as it chains it."""
+    proxy_failure = urllib3.exceptions.ProxyError("Unable to connect to proxy", transport)
+    proxy_failure.__cause__ = transport
+    error = urllib.error.URLError("managed_proxy_request_failed")
+    error.__cause__ = proxy_failure
+    return error
+
+
 def _refresh_with_urlopen_failure(monkeypatch: pytest.MonkeyPatch, reason: BaseException) -> None:
     def _raise(*_args: object, **_kwargs: object) -> object:
-        raise urllib.error.URLError(reason)
+        raise reason if isinstance(reason, urllib.error.URLError) else urllib.error.URLError(reason)
 
     monkeypatch.setattr("codex_plugin_scanner.guard.runtime.runner._guard_runtime_was_upgraded", lambda: False)
     monkeypatch.setattr("codex_plugin_scanner.guard.runtime.runner._sign_guard_dpop_proof", lambda **_kwargs: "proof")
@@ -308,6 +318,37 @@ def test_oauth_refresh_keeps_tls_failures_non_retryable(monkeypatch: pytest.Monk
         _refresh_with_urlopen_failure(monkeypatch, ssl.SSLCertVerificationError(1, "certificate verify failed"))
     assert not isinstance(exc_info.value, GuardSyncNotAvailableError)
     assert "certificate verify failed" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [ConnectionRefusedError(61, "Connection refused"), TimeoutError("timed out")],
+)
+def test_unreachable_guard_cloud_behind_a_managed_proxy_is_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: OSError,
+) -> None:
+    with pytest.raises(GuardSyncNotAvailableError) as refresh_info:
+        _refresh_with_urlopen_failure(monkeypatch, _managed_proxy_failure(transport))
+    assert refresh_info.value.retryable is True
+
+    def _raise_proxy_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise _managed_proxy_failure(transport)
+
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.runner._urlopen_json_with_timeout_retry",
+        _raise_proxy_failure,
+    )
+    request = urllib.request.Request("https://hol.org/api/guard/supply-chain/bundle?workspaceId=test")
+    with pytest.raises(GuardSyncNotAvailableError) as fetch_info:
+        _fetch_supply_chain_bundle_payload(request)
+    assert fetch_info.value.retryable is True
+
+
+def test_managed_proxy_failure_without_a_network_cause_stays_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        _refresh_with_urlopen_failure(monkeypatch, _managed_proxy_failure(None))
+    assert not isinstance(exc_info.value, GuardSyncNotAvailableError)
 
 
 def test_fetch_supply_chain_bundle_payload_keeps_tls_failures_non_retryable(
