@@ -1,14 +1,13 @@
-//! The execution sink's peel, answered by the classification that decided it.
+//! The execution sink's peel, decided once, in the grammar the classifier uses.
 //!
 //! The sink used to recover the core command, its directory and its output
 //! handling by lexing the text a second time in Python. That copy carried its
 //! own sibling-repository rule, which could not read a Windows owner SID, so
 //! it peeled checkouts the classifier had refused and handed the sandbox a
-//! core no receipt covered. One peel now serves both: the classifier answers
-//! the shape it already resolved, and the sink runs that answer.
-
+//! core no receipt covered. The grammar lives in `sink_peel` now, beside the
+//! classifier's own, and both read the same sibling-repository rule.
 use super::{contained_wrapper, workspace_contained, PathContext};
-use crate::{parse_command, CanonicalCommandV1, CommandModelRequestV1};
+use crate::{parse_command, CommandModelRequestV1};
 use std::path::PathBuf;
 
 /// The sink refused the shape and runs the command whole in its sandbox, as
@@ -97,14 +96,42 @@ fn wrapper_plan(
     home_dir: Option<&str>,
     peels_relative_inside: bool,
 ) -> ContainedWrapperPlan {
-    let Ok(model) = parse_command(&CommandModelRequestV1 {
+    match super::sink_peel::peel(command, workspace, cwd, home_dir, peels_relative_inside) {
+        Ok(Some(core)) => {
+            let directory_sibling_root = outside_root(&core.directory, workspace, home_dir);
+            ContainedWrapperPlan {
+                plan: Some(core),
+                directory_sibling_root,
+                ..ContainedWrapperPlan::default()
+            }
+        }
+        Ok(None) => ContainedWrapperPlan {
+            anchored_sibling_root: anchored_root(command, workspace, cwd, home_dir),
+            ..ContainedWrapperPlan::default()
+        },
+        Err(_) => ContainedWrapperPlan {
+            refusal: Some(CONTAINED_WRAPPER_PLAN_UNSUPPORTED),
+            anchored_sibling_root: anchored_root(command, workspace, cwd, home_dir),
+            ..ContainedWrapperPlan::default()
+        },
+    }
+}
+
+/// The sibling repository one plain command's absolute script or tool names,
+/// which roots the sandbox there as a `cd <root> &&` prefix would.
+fn anchored_root(
+    command: &str,
+    workspace: &str,
+    cwd: Option<&str>,
+    home_dir: Option<&str>,
+) -> Option<PathBuf> {
+    let model = parse_command(&CommandModelRequestV1 {
         command: command.to_owned(),
         dialect: "posix".into(),
         transport: "shell_string".into(),
         extraction_provenance: "pre-tool-generic".into(),
-    }) else {
-        return ContainedWrapperPlan::default();
-    };
+    })
+    .ok()?;
     let context = PathContext {
         home_dir,
         cwd: cwd.or(Some(workspace)),
@@ -112,58 +139,9 @@ fn wrapper_plan(
         shell_home_matches: true,
         ..PathContext::default()
     };
-    let sink = contained_wrapper::SinkContext {
-        workspace,
-        peels_relative_inside,
-    };
-    if let Some(peeled) = contained_wrapper::contained_plan(&model, context, Some(sink)) {
-        let directory = peeled
-            .directory
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(cwd.unwrap_or(workspace)));
-        let directory_sibling_root = outside_root(&directory, workspace, home_dir);
-        return ContainedWrapperPlan {
-            plan: Some(ContainedWrapperCore {
-                core: peeled.core_text.clone(),
-                directory,
-                output: output_handling(&peeled),
-            }),
-            refusal: None,
-            directory_sibling_root,
-            ..ContainedWrapperPlan::default()
-        };
-    }
-    // `cd <sibling root> && a && b` runs the whole list in that root; a filter
-    // after `a && b` would apply to `b` alone, so none is peeled there.
-    match workspace_contained::sibling::sibling_run(&model, context) {
-        Some((root, Some(rest))) => {
-            let Some(core) = joined_text(&rest) else {
-                return ContainedWrapperPlan {
-                    refusal: Some(CONTAINED_WRAPPER_PLAN_UNSUPPORTED),
-                    ..ContainedWrapperPlan::default()
-                };
-            };
-            let directory_sibling_root = outside_root(&root, workspace, home_dir);
-            ContainedWrapperPlan {
-                plan: Some(ContainedWrapperCore {
-                    core,
-                    directory: root,
-                    output: None,
-                }),
-                refusal: None,
-                directory_sibling_root,
-                ..ContainedWrapperPlan::default()
-            }
-        }
-        Some((root, None)) => ContainedWrapperPlan {
-            refusal: wrapped_shape(&model).then_some(CONTAINED_WRAPPER_PLAN_UNSUPPORTED),
-            anchored_sibling_root: Some(root),
-            ..ContainedWrapperPlan::default()
-        },
-        None => ContainedWrapperPlan {
-            refusal: wrapped_shape(&model).then_some(CONTAINED_WRAPPER_PLAN_UNSUPPORTED),
-            ..ContainedWrapperPlan::default()
-        },
+    match workspace_contained::sibling::sibling_run(&model, context)? {
+        (root, None) => Some(root),
+        (_, Some(_)) => None,
     }
 }
 
@@ -179,104 +157,6 @@ fn outside_root(
         return None;
     }
     contained_wrapper::sibling_project_root(directory, home_dir?)
-}
-
-/// The source text of every segment left after the `cd`.
-fn joined_text(rest: &CanonicalCommandV1) -> Option<String> {
-    let first = rest.segments.first()?;
-    let last = rest.segments.last()?;
-    contained_wrapper::text(rest, first.span.start, last.span.end)
-}
-
-fn output_handling(peeled: &contained_wrapper::ContainedPlan) -> Option<ContainedOutput> {
-    if peeled.stages.is_empty() && !peeled.merge_stderr && peeled.status_label.is_none() {
-        return None;
-    }
-    let (kind, count) = match peeled.stages.as_slice() {
-        [] => ("all", 0),
-        [stage] if stage.first().is_some_and(|name| name == "head") => ("head", stage_count(stage)),
-        [stage] if stage.first().is_some_and(|name| name == "tail") => ("tail", stage_count(stage)),
-        _ => ("pipe", 0),
-    };
-    Some(ContainedOutput {
-        kind,
-        count,
-        merge_stderr: peeled.merge_stderr,
-        status_label: peeled.status_label.clone(),
-        stages: if kind == "pipe" {
-            peeled.stages.clone()
-        } else {
-            Vec::new()
-        },
-    })
-}
-
-fn stage_count(stage: &[String]) -> u32 {
-    stage
-        .get(1)
-        .and_then(|count| count.parse::<u32>().ok())
-        .unwrap_or(0)
-}
-
-/// A shape the Python peel would have accepted or rejected outright, rather
-/// than left alone: a `cd` prefix, an output filter, a merge or a status echo.
-fn wrapped_shape(model: &CanonicalCommandV1) -> bool {
-    if model.segments.is_empty() {
-        return unmodeled_wrapped_shape(&model.normalized_text);
-    }
-    model
-        .segments
-        .first()
-        .is_some_and(|segment| segment.executable.as_deref() == Some("cd"))
-        || model
-            .segments
-            .iter()
-            .any(|segment| segment.pipeline_index != 0)
-        || model.segments.iter().any(|segment| {
-            segment
-                .arguments
-                .last()
-                .is_some_and(|argument| argument == "2>&1")
-        })
-        || model
-            .segments
-            .last()
-            .is_some_and(|segment| contained_wrapper::status_echo(model, segment))
-}
-
-/// The same question asked of text the parse could not model.
-///
-/// `pytest -q | xargs rm` is uncertain, because `xargs` runs a program this
-/// model does not read, and an uncertain parse carries no segments at all.
-/// The Python peel lexed that same text, saw the pipe, and raised for the
-/// filter it could not read; the sink answered that by running the command
-/// whole in its sandbox. Reading the shape from the text keeps that answer,
-/// where an empty segment list would silently send the command down the
-/// sink's other routes instead.
-fn unmodeled_wrapped_shape(raw: &str) -> bool {
-    // The flag the parser itself lexed this text with: unquoted Windows path
-    // separators stay separators there. It decides how the text is read, not
-    // which answer this returns.
-    let preserve_unquoted_backslash = cfg!(windows);
-    let Ok(segments) =
-        crate::parser_segments::split_execution_segments(raw, preserve_unquoted_backslash)
-    else {
-        return false;
-    };
-    let characters: Vec<char> = raw.chars().collect();
-    let text = |segment: &crate::RawSegment| -> String {
-        characters[segment.start..segment.end].iter().collect()
-    };
-    segments.iter().any(|segment| segment.pipeline_index != 0)
-        || segments.first().is_some_and(|segment| {
-            text(segment)
-                .strip_prefix("cd")
-                .is_some_and(|rest| rest.starts_with([' ', '\t']))
-        })
-        || segments.last().is_some_and(|segment| {
-            let last = text(segment);
-            last.ends_with("2>&1") || contained_wrapper::status_echo_syntax(&last)
-        })
 }
 
 #[cfg(test)]

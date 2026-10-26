@@ -177,6 +177,7 @@ mod secret_aliases;
 pub(crate) mod sed_edits;
 mod segment_proof;
 mod shell_script;
+mod sink_peel;
 mod stderr_merge;
 mod stdin_filters;
 mod symlink_writes;

@@ -9,7 +9,7 @@
 use crate::CommandSegmentV1;
 
 /// The longest chain the sink applies.
-pub(super) const MAX_FILTERS: usize = 3;
+pub(in crate::pretool) const MAX_FILTERS: usize = 3;
 
 /// Single-letter `grep` switches that change only which lines of standard
 /// input are printed and how. Recursion (`-r`), pattern files (`-f`), file
@@ -25,7 +25,11 @@ const RG_SWITCHES: &str = "FNSUacinosvwx";
 /// Options that take a line count, spelled alike by both programs.
 const GREP_COUNTS: &[&str] = &["-A", "-B", "-C", "-m"];
 
-fn bounded_count(value: &str) -> bool {
+/// Whether `value` is a line count small enough to be a filter's bound.
+///
+/// The sink's own peel reads its count from the command text, so it asks here
+/// rather than spelling the same bound a second time.
+pub(in crate::pretool) fn bounded_count(value: &str) -> bool {
     !value.is_empty() && value.len() <= 6 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
@@ -46,34 +50,24 @@ pub(super) fn filter_stage(segment: &CommandSegmentV1, source: &str) -> bool {
     }
 }
 
-pub(super) fn head_tail_arguments(arguments: &[String]) -> bool {
-    head_tail_count(arguments).is_some()
-}
-
-/// The line count a `head`/`tail` stage asks for, spelled either way.
+/// Whether `program <arguments>` is a matcher reading only standard input.
 ///
-/// The sink applies the number, not the spelling, so `-5` and `-n 5` reach it
-/// as the same stage.
-pub(super) fn head_tail_count(arguments: &[String]) -> Option<&str> {
-    match arguments {
-        [count] => count.strip_prefix('-').filter(|count| bounded_count(count)),
-        [flag, count] if flag == "-n" && bounded_count(count) => Some(count.as_str()),
-        _ => None,
+/// The sink's own peel reads a stage from the command text rather than from a
+/// parsed segment, so it asks this directly.
+pub(in crate::pretool) fn matcher_stage(program: &str, arguments: &[String]) -> bool {
+    match program {
+        "grep" | "egrep" | "fgrep" => stdin_arguments(arguments, GREP_SWITCHES),
+        "rg" => stdin_arguments(arguments, RG_SWITCHES),
+        _ => false,
     }
 }
 
-/// One filter stage as the sink runs it: the program, then its arguments. A
-/// `head`/`tail` stage carries its count alone, whichever way it was spelled.
-pub(super) fn stage_argv(segment: &CommandSegmentV1) -> Option<Vec<String>> {
-    let program = segment.executable.as_deref()?;
-    let arguments = match program {
-        "head" | "tail" => vec![head_tail_count(&segment.arguments)?.to_owned()],
-        _ => segment.arguments.clone(),
-    };
-    let mut argv = Vec::with_capacity(arguments.len() + 1);
-    argv.push(program.to_owned());
-    argv.extend(arguments);
-    Some(argv)
+pub(super) fn head_tail_arguments(arguments: &[String]) -> bool {
+    match arguments {
+        [count] => count.strip_prefix('-').is_some_and(bounded_count),
+        [flag, count] => flag == "-n" && bounded_count(count),
+        _ => false,
+    }
 }
 
 /// A matcher that reads only standard input: switches from `switches`,
