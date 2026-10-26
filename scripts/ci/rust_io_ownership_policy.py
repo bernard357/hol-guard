@@ -299,7 +299,6 @@ _ASYNC_POLICY_PATHS: Final = frozenset(
     }
 )
 _PERSISTENCE_PATH_PREFIXES: Final = (
-    "src/codex_plugin_scanner/guard/runtime/hook_enrichment_queue.py",
     "src/codex_plugin_scanner/guard/daemon/hook_metrics.py",
     "src/codex_plugin_scanner/guard/private_file_io.py",
     "src/codex_plugin_scanner/guard/local_dashboard_session.py",
