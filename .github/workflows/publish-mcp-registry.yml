@@ -17,9 +17,10 @@ on:
 permissions: {}
 
 concurrency:
-  # Tag runs and repair dispatches publish in order. GitHub keeps one pending run per group,
-  # so each branch push run gets its own group and can never cancel a queued release.
-  group: hol-guard-mcp-registry-${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'workflow_dispatch') && 'release' || format('push-{0}', github.event.workflow_run.id) }}
+  # GitHub keeps one pending run per group and drops the older one, so no other run may share a
+  # tag run's group. Repairs queue among themselves; each push run is alone. The publish-time
+  # latest-release check, not ordering, stops an older version from replacing a newer one.
+  group: hol-guard-mcp-registry-${{ github.event_name == 'workflow_dispatch' && 'repair' || github.event.workflow_run.event == 'workflow_dispatch' && format('tag-{0}', github.event.workflow_run.head_branch) || format('push-{0}', github.event.workflow_run.id) }}
   cancel-in-progress: false
 
 jobs:

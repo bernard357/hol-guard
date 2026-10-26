@@ -187,13 +187,14 @@ def test_consumers_publish_the_verified_tag_not_the_highest_tag_at_the_sha() -> 
         assert 'tag="$VERIFIED_TAG"' in resolve["run"]
 
 
-def test_release_publications_queue_in_order_and_pushes_cannot_cancel_them() -> None:
-    """Tag runs and repairs share a group; a push run never displaces a pending release."""
+def test_no_other_run_can_displace_a_pending_tag_publication() -> None:
+    """GitHub drops the older pending run in a group, so a tag run shares its group with no other release."""
     workflow = yaml.safe_load((WORKFLOWS / "publish-mcp-registry.yml").read_text())
     group = workflow["concurrency"]["group"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert "inputs.publication_run_id" not in group
-    assert "github.event.workflow_run.event == 'workflow_dispatch') && 'release'" in group
+    assert "github.event_name == 'workflow_dispatch' && 'repair'" in group
+    assert "format('tag-{0}', github.event.workflow_run.head_branch)" in group
     assert "format('push-{0}', github.event.workflow_run.id)" in group
     steps = [step["name"] for step in workflow["jobs"]["publish"]["steps"]]
     assert steps.index("Refuse to replace a newer stable release") < steps.index("Publish to MCP registry")
