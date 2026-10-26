@@ -25,10 +25,17 @@ _REQUEST_SCHEMA = "guard-hook-render-request.v1"
 _RESULT_SCHEMA = "guard-hook-render-result.v1"
 _TIMEOUT_SECONDS = 5.0
 _MAX_REQUEST_BYTES = 256 * 1024
+# ``cli_hook_emit`` carries a whole daemon answer as escaped JSON text; the
+# resident gives that kind the larger budget too (``hook_render_max_bytes``).
+_CLI_HOOK_EMIT_MAX_REQUEST_BYTES = 4 * 1024 * 1024
 
 
 def _render_payload(
-    request: dict[str, object], guard_home: Path | None, deadline: float | None = None
+    request: dict[str, object],
+    guard_home: Path | None,
+    deadline: float | None = None,
+    *,
+    max_request_bytes: int = _MAX_REQUEST_BYTES,
 ) -> dict[str, object] | None:
     timeout = _TIMEOUT_SECONDS
     if deadline is not None:
@@ -47,7 +54,7 @@ def _render_payload(
             timeout_seconds=timeout,
             required_feature=HOOK_RENDER_FEATURE,
             response_schema=_RESULT_SCHEMA,
-            max_request_bytes=_MAX_REQUEST_BYTES,
+            max_request_bytes=max_request_bytes,
             record_success=False,
         )
     except (TypeError, ValueError, OSError, RuntimeError):
@@ -77,7 +84,12 @@ def native_render_cli(
     (``document``, ``silent`` or ``fallback``) and the document for ``document``.
     """
 
-    payload = _render_payload({"kind": kind, "harness": harness, "cli": dict(params)}, guard_home, deadline)
+    payload = _render_payload(
+        {"kind": kind, "harness": harness, "cli": dict(params)},
+        guard_home,
+        deadline,
+        max_request_bytes=_CLI_HOOK_EMIT_MAX_REQUEST_BYTES if kind == "cli_hook_emit" else _MAX_REQUEST_BYTES,
+    )
     outcome = payload.get("outcome") if payload is not None else None
     if payload is None or outcome not in {"document", "silent", "fallback"}:
         return None
@@ -108,7 +120,12 @@ def native_hermes_bridge(
 
 
 def native_cli_hook_emit(
-    harness: str, response: Mapping[str, object], *, event_name: str, guard_home: Path | None = None
+    harness: str,
+    response: Mapping[str, object],
+    *,
+    event_name: str,
+    guard_home: Path | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object] | None:
     """Read a daemon answer the way ``hol-guard hook`` prints it.
 
@@ -117,7 +134,8 @@ def native_cli_hook_emit(
     exit status follows. ``None`` when the resident cannot answer, so the
     caller fails closed rather than reading the answer here. The answer
     travels as compact JSON so the resident reads the exact text Python would
-    have printed, lone surrogates included.
+    have printed, lone surrogates included. ``deadline`` is the hook's
+    absolute ``time.monotonic()`` budget; the render gets only what remains.
     """
 
     try:
@@ -129,6 +147,7 @@ def native_cli_hook_emit(
         harness,
         {"event_name": event_name, "response_json": response_json},
         guard_home=guard_home,
+        deadline=deadline,
     )
     return rendered[1] if rendered is not None else None
 

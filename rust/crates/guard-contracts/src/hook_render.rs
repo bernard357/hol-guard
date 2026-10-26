@@ -17,6 +17,21 @@ pub const HOOK_RENDER_RESULT_SCHEMA: &str = "guard-hook-render-result.v1";
 pub const HOOK_RENDER_FEATURE: &str = "hook-render-v2";
 /// Largest canonical request serialization the op will accept.
 pub const HOOK_RENDER_MAX_BYTES: usize = 256 * 1024;
+/// Largest canonical `cli_hook_emit` request. That kind carries a whole daemon
+/// answer as escaped JSON text, and the answer is built in-process from the
+/// hook payload with no cap of its own, so it gets a budget that still fits
+/// the resident's request frame.
+pub const HOOK_RENDER_CLI_EMIT_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// The canonical request budget for one render `kind`.
+#[must_use]
+pub fn hook_render_max_bytes(kind: &str) -> usize {
+    if kind == "cli_hook_emit" {
+        HOOK_RENDER_CLI_EMIT_MAX_BYTES
+    } else {
+        HOOK_RENDER_MAX_BYTES
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

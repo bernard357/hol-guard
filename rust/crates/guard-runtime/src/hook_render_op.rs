@@ -20,8 +20,8 @@ use guard_command::hook_responses::{
 };
 use guard_contracts::{
     artifact_id_from_event, cursor_after_shell_observed, cursor_observer_event_for_payload,
-    evaluation_has_terminal_policy_action, HookRenderRequestV1, HookRenderResultV1,
-    HOOK_RENDER_MAX_BYTES, HOOK_RENDER_RESULT_SCHEMA,
+    evaluation_has_terminal_policy_action, hook_render_max_bytes, HookRenderRequestV1,
+    HookRenderResultV1, HOOK_RENDER_RESULT_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -30,7 +30,7 @@ use crate::package_authority_op::request_digest_with_limit;
 pub(crate) fn evaluate_hook_render_request(
     request: &HookRenderRequestV1,
 ) -> Result<Vec<u8>, String> {
-    let request_sha256 = request_digest_with_limit(request, HOOK_RENDER_MAX_BYTES)
+    let request_sha256 = request_digest_with_limit(request, hook_render_max_bytes(&request.kind))
         .map_err(|_| "native_hook_render_too_large".to_owned())?;
     let (status, code, payload) = match render(request) {
         Ok(payload) => ("ok".to_owned(), "ok".to_owned(), Some(payload)),
