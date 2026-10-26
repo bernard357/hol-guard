@@ -72,6 +72,14 @@ fn admits_comparisons_against_a_filter_or_a_literal() {
         "select(.state == \"open\" and .draft == false)",
         "select(.state == \"open\" or .state == \"merged\")",
         ".items | select(length > 2)",
+        ".score >= 1.5",
+        ".score < -1",
+        ".score == -1.5",
+        ".score > .5",
+        ".score == 1e-2",
+        "select(.score >= 1.5)",
+        "select(.score < -1)",
+        "map(select(.ratio >= 0.5)) | length",
     ] {
         assert!(safe_filter(filter), "expected admitted: {filter}");
     }
@@ -192,6 +200,12 @@ fn rejects_assignment_and_arithmetic() {
         ".a < 1 < 2",
         ".a ==",
         "== .a",
+        ".a == +1",
+        ".a == 1e",
+        ".a == 1e+",
+        ".a == -",
+        ".a == --1",
+        ".a == 1.2.3",
         ".a and",
         ".a or",
         "and .a",

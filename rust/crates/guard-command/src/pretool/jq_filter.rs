@@ -230,8 +230,9 @@ fn stage(part: &str) -> bool {
 }
 
 /// Outside string literals only names, projections, spaces, call and group
-/// parentheses, comparison operators, `//` and bracket punctuation may
-/// appear; inside one only printable ASCII and the `\n`, `\t` and `\\`
+/// parentheses, comparison operators, the `+` and `-` a number literal
+/// uses, `//` and bracket punctuation may appear; inside one only printable
+/// ASCII and the `\n`, `\t` and `\\`
 /// escapes, so neither `\(` interpolation nor an escaped quote can appear.
 /// Brackets must balance and close in the kind they opened.
 fn valid_characters(filter: &str) -> bool {
@@ -260,7 +261,7 @@ fn valid_characters(filter: &str) -> bool {
             byte if byte.is_ascii_alphanumeric()
                 || matches!(
                     byte,
-                    b'.' | b'_' | b' ' | b'|' | b'/' | b'=' | b'!' | b'<' | b'>'
+                    b'.' | b'_' | b' ' | b'|' | b'/' | b'=' | b'!' | b'<' | b'>' | b'+' | b'-'
                 ) => {}
             _ => return false,
         }
@@ -413,8 +414,12 @@ fn call(stage: &str) -> Option<(&str, &str)> {
     Some((name.trim_end(), rest.strip_suffix(')')?))
 }
 
-/// A plain value: a bounded string with no inner quote, a decimal number, or
-/// a JSON keyword.
+/// A plain value: a bounded string with no inner quote, a jq number, or a
+/// JSON keyword. The number is jq's own literal — an optional minus, digits
+/// or a leading fraction, and an optional exponent — and nothing else. A
+/// `+` or `-` standing between two operands is arithmetic, which [`stage`]
+/// never reads, so allowing the signs through [`valid_characters`] does not
+/// admit `.a + 1` or `.a - 1`.
 fn literal(part: &str) -> bool {
     matches!(part, "true" | "false" | "null")
         || (part.len() <= MAX_LITERAL
@@ -422,7 +427,65 @@ fn literal(part: &str) -> bool {
                 .strip_prefix('"')
                 .and_then(|value| value.strip_suffix('"'))
                 .is_some_and(|value| !value.contains('"')))
-        || ((1..=18).contains(&part.len()) && part.bytes().all(|byte| byte.is_ascii_digit()))
+        || numeric_literal(part)
+}
+
+/// `1`, `-1`, `1.5`, `.5`, `1e-2`: a bounded jq number. A leading `+` is the
+/// addition operator, not a sign, and a trailing dot or a bare exponent is
+/// not a number this grammar will guess at.
+fn numeric_literal(part: &str) -> bool {
+    let bytes = part.as_bytes();
+    if bytes.is_empty() || bytes.len() > 32 {
+        return false;
+    }
+    let mut index = 0;
+    if bytes[0] == b'-' {
+        index = 1;
+    }
+    if index >= bytes.len() {
+        return false;
+    }
+    let mut saw_digit = false;
+    if bytes[index] == b'.' {
+        index += 1;
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        saw_digit = index > start;
+    } else if bytes[index].is_ascii_digit() {
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        saw_digit = true;
+        if index < bytes.len() && bytes[index] == b'.' {
+            index += 1;
+            let start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            if index == start {
+                return false;
+            }
+        }
+    }
+    if !saw_digit {
+        return false;
+    }
+    if index < bytes.len() && matches!(bytes[index], b'e' | b'E') {
+        index += 1;
+        if index < bytes.len() && matches!(bytes[index], b'+' | b'-') {
+            index += 1;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+    }
+    index == bytes.len()
 }
 
 /// Field/index projections only: no functions, file operands, modules or

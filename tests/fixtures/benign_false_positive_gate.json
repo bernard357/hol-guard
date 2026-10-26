@@ -28091,6 +28091,54 @@
       "expect": "not_allow"
     },
     {
+      "id": "jq-stdin-select-decimal",
+      "fix_area": "gh",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr list --json number | jq '[.[] | select(.number >= 1.5)] | length'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-stdin-select-negative",
+      "fix_area": "gh",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr list --json number | jq '[.[] | select(.number < -1)] | length'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-stdin-subtraction",
+      "fix_area": "gh",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr list --json number | jq '.[] | .number - 1'"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "jq-stdin-limit-two-arguments",
       "fix_area": "gh",
       "harnesses": [
