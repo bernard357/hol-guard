@@ -370,7 +370,11 @@ class ExtensionControlAuthorityReadsMixin:
                 attempted["restore_attempted"] = True
             elif kind == "resume_pending":
                 resumed = self._resume_pending_transition(action, key=key)
-                if resumed is not None and resumed.health is AuthorityHealth.PROTECTED:
+                if (
+                    resumed is not None
+                    and resumed.health is AuthorityHealth.PROTECTED
+                    and resumed.catalog_digest == catalog_digest
+                ):
                     return resumed, None
                 attempted["resume_attempted"] = True
             elif kind == "roll_back_abandoned":
@@ -402,6 +406,13 @@ class ExtensionControlAuthorityReadsMixin:
         the explicit recovery verb still available, which is strictly better
         than reporting a tampered authority for a row it merely could not
         settle.
+
+        Only that missing write permission is read as "not settled here".
+        Every verdict the resident reaches about the row itself — a transition
+        or snapshot whose MAC does not authenticate, a head that does not match
+        the anchor over it, a recovery whose re-read does not come back
+        protected — is a tampered authority and propagates, so a forged
+        prepared row is never reported as merely recoverable.
         """
 
         from .native_command_control_authority_io import NativeCommandControlMutationRequiredError
@@ -415,6 +426,4 @@ class ExtensionControlAuthorityReadsMixin:
         except NativePolicySnapshotError as error:
             if str(error) == "native_command_control_mutation_lease_missing":
                 raise NativeCommandControlMutationRequiredError() from error
-            return None
-        except ExtensionControlAuthorityError:
             return None

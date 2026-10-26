@@ -183,6 +183,31 @@ def test_sealed_transition_is_finished_on_the_next_read(tmp_path: Path) -> None:
     assert view.revision == 1
 
 
+def test_sealed_transition_under_another_catalog_answers_the_registry_that_asked(
+    tmp_path: Path,
+) -> None:
+    """Finishing an interrupted commit must not hand the caller another catalog's controls.
+
+    A registry read for a catalog the store is not on is answered by reading
+    the catalog it is on first, so the resume that read asks for names the
+    stored catalog's row. Returning the view it leaves would bind this
+    registry to controls that were never composed for it.
+    """
+
+    secrets = MemorySecretStore()
+    store = _store(tmp_path, secrets)
+    secrets.fail_anchor_set_number = secrets.anchor_set_count + 2
+    with pytest.raises(ExtensionControlAuthorityError, match="final anchor"):
+        _commit(store)
+    other = _upgraded_registry()
+    assert other.catalog_digest != _CATALOG
+
+    view = store.read_extension_control_authority_for_registry(other)
+
+    assert view.health is AuthorityHealth.PROTECTED
+    assert view.catalog_digest == other.catalog_digest
+
+
 def test_unexpected_apply_failure_returns_a_stable_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     service = _service(GuardStore(tmp_path / "guard-home"))
 
