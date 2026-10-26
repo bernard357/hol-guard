@@ -566,6 +566,9 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     def record(runtime: str) -> None:
         install.record(guard_home, slug, runtime, installed=installing, spec=spec, listing_origin=listing_origin)
 
+    def progress(done: Sequence[install.Outcome]) -> None:
+        document["runtimes"] = [outcome.as_json() for outcome in [*done, *outcomes[len(done) :]]]
+
     try:
         outcomes = install.apply_plan(
             plan,
@@ -574,6 +577,7 @@ def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
             record=record,
             accept_command=getattr(args, "accept_command", None),
             json_output=args.json,
+            progress=progress,
         )
     except install.PluginInstallError as error:
         raise _InstallStopError(error.exit_code, error.code, str(error)) from error

@@ -50,6 +50,27 @@ def _world_writable(mode: int) -> bool:
     return bool(mode & stat.S_IWOTH)
 
 
+def _open_ancestor(found: str) -> str | None:
+    """The first folder above ``found``, or above the file it links to, that any
+    user can rename entries in. A sticky folder such as /tmp only lets owners
+    rename, so it does not count."""
+
+    for start in (found, os.path.realpath(found)):
+        folder = os.path.dirname(start)
+        while True:
+            try:
+                mode = os.stat(folder).st_mode
+            except OSError:
+                break
+            if _world_writable(mode) and not mode & stat.S_ISVTX:
+                return folder
+            parent = os.path.dirname(folder)
+            if parent == folder:
+                break
+            folder = parent
+    return None
+
+
 def _candidate(folder: str, name: str, *, windows: bool) -> str | None:
     if windows:
         for extension in _WINDOWS_EXTENSIONS:
@@ -101,9 +122,18 @@ def find_programs(
             found = _candidate(folder, name, windows=windows)
             if found is None:
                 continue
-            if not windows and _world_writable(os.stat(found).st_mode):
-                lookup.ignored.append(f"Guard ignored {found}: every user can write to it.")
-                continue
+            if not windows:
+                try:
+                    mode = os.stat(found).st_mode
+                except OSError:
+                    continue
+                if _world_writable(mode):
+                    lookup.ignored.append(f"Guard ignored {found}: every user can write to it.")
+                    continue
+                folder_open = _open_ancestor(found)
+                if folder_open is not None:
+                    lookup.ignored.append(f"Guard ignored {found}: every user can change {folder_open}.")
+                    continue
             lookup.programs[name] = Program(name, found)
             break
     return lookup

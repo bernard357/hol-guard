@@ -286,6 +286,21 @@ def test_ctrl_c_exits_130_and_records_nothing(spec_file: Path, runtimes: FakeRun
     assert install.recorded_installs(guard_home) == {}
 
 
+def test_ctrl_c_after_one_runtime_still_reports_it_in_json(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes.raise_on = (("codex", "plugin", "marketplace", "add"), KeyboardInterrupt())
+    exit_code, output, _error = _install(spec_file, "--apply", "--yes", "--json")
+    document = json.loads(output)
+    assert (exit_code, document["error"]["code"]) == (130, "interrupted")
+    assert [(item["runtime"], item["status"]) for item in document["runtimes"]] == [
+        ("claude-code", "installed"),
+        ("codex", "planned"),
+        ("agent-skills", "skipped"),
+    ]
+    assert set(install.recorded_installs(guard_home)) == {"acme/toolgate"}
+
+
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [
@@ -377,6 +392,31 @@ def test_claude_code_installing_another_commit_is_rolled_back(
     assert install.recorded_installs(guard_home) == {}
 
 
+def test_claude_code_already_at_another_commit_is_left_as_it_is(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes._save(
+        "installed_plugins.json",
+        {"version": 2, "plugins": {"toolgate@acme": [{"scope": "user", "gitCommitSha": OTHER}]}},
+    )
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert (exit_code, runtimes.ran) == (4, [])
+    assert f"Claude Code already has toolgate@acme at commit {OTHER[:7]}, not the commit HOL scanned" in error
+    assert "remove it first with: claude plugin uninstall toolgate@acme" in error
+    assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_claude_code_install_that_never_finishes_takes_back_the_marketplace(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes.raise_on = (("claude", "plugin", "install"), subprocess.TimeoutExpired(["claude"], 600))
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert exit_code == 1
+    assert "claude did not finish within 600 seconds. Guard removed what it added." in error
+    assert runtimes.ran[-1] == ["claude", "plugin", "marketplace", "remove", "acme"]
+    assert install.recorded_installs(guard_home) == {}
+
+
 def test_a_marketplace_the_user_added_is_kept_and_one_from_elsewhere_is_refused(
     spec_file: Path, runtimes: FakeRuntimes
 ) -> None:
@@ -414,6 +454,14 @@ def test_codex_at_another_commit_is_refused_before_the_plugin_is_added(
     assert "You added that marketplace before" in error
     assert ["codex", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
     assert install.recorded_installs(guard_home) == {}
+
+    # A reply that does not say whether Codex added the marketplace leaves it.
+    runtimes.ran.clear()
+    runtimes.codex_already = "yes"  # type: ignore[assignment]
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 4
+    assert "Codex did not say whether it added that marketplace, so Guard left it." in error
+    assert ["codex", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
 
 
 def test_a_declared_install_command_runs_only_when_its_sha256_is_accepted(
@@ -655,6 +703,44 @@ def test_programs_come_only_from_absolute_folders_nobody_else_can_write(
     shared.chmod(0o755)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_programs_under_a_folder_anyone_can_change_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    open_root = tmp_path / "open"
+    nested = _program(open_root / "tools" / "bin", "claude")
+    sticky_root = tmp_path / "sticky"
+    sticky = _program(sticky_root / "bin", "claude")
+    linked_folder = tmp_path / "linked"
+    linked_folder.mkdir()
+    (linked_folder / "codex").symlink_to(_program(open_root / "real", "codex"))
+    open_root.chmod(0o777)
+    sticky_root.chmod(0o1777)
+    try:
+        lookup = runner.find_programs(("claude", "codex"), {"PATH": f"{nested.parent}:{linked_folder}:{sticky.parent}"})
+        assert lookup.programs["claude"].path == str(sticky)
+        assert "codex" not in lookup.programs
+        assert lookup.ignored == [
+            f"Guard ignored {nested}: every user can change {open_root}.",
+            f"Guard ignored {linked_folder / 'codex'}: every user can change {open_root}.",
+        ]
+    finally:
+        open_root.chmod(0o755)
+        sticky_root.chmod(0o755)
+
+    # The program is there when the folder is searched and gone a moment later.
+    real_stat = os.stat
+    calls: list[str] = []
+
+    def vanishing(target: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(target) == str(sticky):
+            calls.append(str(target))
+            if len(calls) > 1:
+                raise FileNotFoundError(target)
+        return real_stat(target, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner.os, "stat", vanishing)
+    assert runner.find_programs(("claude",), {"PATH": str(sticky.parent)}).programs == {}
+
+
 def test_windows_prefers_an_exe_ignores_the_current_folder_and_guards_shim_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -688,6 +774,8 @@ def test_git_head_follows_symbolic_and_packed_refs(tmp_path: Path) -> None:
     (git / "HEAD").write_text("ref: refs/../../../etc/passwd\n", encoding="utf-8")
     assert install.git_head(tmp_path / "repo") is None
     assert install.git_head(tmp_path / "missing") is None
+    (git / "HEAD").write_bytes(b"ref: refs/heads/\xff\n")
+    assert install.git_head(tmp_path / "repo") is None
 
 
 def test_telemetry_marks_only_listings_guard_installed(guard_home: Path) -> None:

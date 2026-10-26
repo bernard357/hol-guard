@@ -472,7 +472,7 @@ def git_head(root: Path) -> str | None:
             commit, _, name = line.partition(" ")
             if name == ref and _COMMIT.fullmatch(commit):
                 return commit
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     return None
 
@@ -531,17 +531,39 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
             f"Claude Code already has a marketplace named {marketplace} from another source, "
             "so Guard did not install from it.",
         )
+    had_plugin, prior = _claude_install(context.home, plugin_id)
+    if had_plugin and expected and prior != expected:
+        raise _StoppedError(
+            "blocked",
+            f"Claude Code already has {plugin_id} at commit {_short(prior)}, not the commit HOL scanned "
+            f"({_short(expected)}), so Guard did not change it. To install what HOL scanned, remove it first "
+            f"with: claude plugin uninstall {plugin_id}",
+        )
     added = source is None
     if added:
         _run_step(program, add, context)
-    had_plugin, _ = _claude_install(context.home, plugin_id)
 
     def undo_marketplace() -> str:
         return _undo(program, remove_marketplace, context) if added else ""
 
+    def run_install(arguments: Sequence[str]) -> runner.Completed:
+        """Run Claude Code's install; if it never finishes, take back what
+        Guard added before reporting the failure."""
+
+        try:
+            return runner.run(program, arguments, capture=True)
+        except runner.RunnerError as error:
+            undone = ""
+            if not had_plugin and _claude_install(context.home, plugin_id)[0]:
+                undone = _undo(program, ["claude", "plugin", "uninstall", plugin_id], context)
+            undone += undo_marketplace()
+            raise runner.RunnerError(
+                f"{error}{undone}" if undone else f"{error} Guard removed what it added."
+            ) from None
+
     arguments = [*install[1:], "--json"]
     print(f"$ {_shown(install)}", file=context.out)
-    completed = runner.run(program, arguments, capture=True)
+    completed = run_install(arguments)
     reply = _reply(completed.stdout)
     if completed.returncode != 0 and reply.get("failureCode") == "command_source_refused":
         try:
@@ -558,7 +580,7 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
                 else f"The install command was not accepted, so nothing ran. To run it, add --accept-command {digest}."
             )
             raise _StoppedError("blocked", f"{reason}{undo_marketplace()}")
-        completed = runner.run(program, [*arguments, "--accept-command", digest], capture=True)
+        completed = run_install([*arguments, "--accept-command", digest])
         reply = _reply(completed.stdout)
     try:
         _ran(completed, install, reply)
@@ -572,8 +594,8 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
     if had_plugin:
         raise _StoppedError(
             "blocked",
-            f"Claude Code already had {plugin_id} at commit {_short(commit)}, not the commit HOL scanned "
-            f"({_short(expected)}). Guard left your install as it was.",
+            f"Claude Code moved {plugin_id} from commit {_short(prior)} to {_short(commit)}, not the commit HOL "
+            f"scanned ({_short(expected)}). Remove it with: claude plugin uninstall {plugin_id}",
         )
     undone = _undo(program, ["claude", "plugin", "uninstall", plugin_id], context) + undo_marketplace()
     raise _StoppedError(
@@ -597,16 +619,22 @@ def _install_codex(step: Mapping[str, Any], program: runner.Program, context: _C
     completed = runner.run(program, [*add[1:], "--json"], capture=True)
     reply = _reply(completed.stdout)
     _ran(completed, add, reply)
-    root, already = reply.get("installedRoot"), reply.get("alreadyAdded") is True
+    root, already = reply.get("installedRoot"), reply.get("alreadyAdded")
     head = git_head(Path(root)) if isinstance(root, str) and os.path.isabs(root) else None
     if head != expected:
         marketplace = str(step.get("marketplace"))
         remove = ["codex", "plugin", "marketplace", "remove", marketplace]
-        hint = (
-            f" You added that marketplace before; to install what HOL scanned, remove it with: {_shown(remove)}"
-            if already
-            else _undo(program, remove, context)
-        )
+        # Only take back a marketplace Codex says it just added; one the
+        # user added before, or one Codex did not say, stays.
+        if already is False:
+            hint = _undo(program, remove, context)
+        elif already is True:
+            hint = f" You added that marketplace before; to install what HOL scanned, remove it with: {_shown(remove)}"
+        else:
+            hint = (
+                " Codex did not say whether it added that marketplace, so Guard left it. "
+                f"If you did not add it, remove it with: {_shown(remove)}"
+            )
         raise _StoppedError(
             "blocked",
             f"Codex has the {marketplace} marketplace at commit {_short(head)}, not the commit HOL scanned "
@@ -625,8 +653,11 @@ def apply_plan(
     ask: Callable[[str], bool] = confirm,
     json_output: bool = False,
     home: Path | None = None,
+    progress: Callable[[Sequence[Outcome]], None] | None = None,
 ) -> list[Outcome]:
-    """Run each automatic step the user confirms, then ``record`` its runtime."""
+    """Run each automatic step the user confirms, then ``record`` its runtime.
+    ``progress`` sees the outcomes so far after each runtime, so an interrupt
+    still reports the ones that finished."""
 
     action = str(plan.get("action"))
     context = _Context(
@@ -639,22 +670,28 @@ def apply_plan(
         home=home or claude_home(),
     )
     outcomes: list[Outcome] = []
+
+    def add(outcome: Outcome) -> None:
+        outcomes.append(outcome)
+        if progress is not None:
+            progress(outcomes)
+
     for step in plan.get("steps") or []:
         runtime, name = str(step.get("runtime")), str(step.get("program"))
         program = lookup.programs.get(name)
         if not step.get("automatic"):
-            outcomes.append(Outcome(runtime, "skipped", message="Guard does not run this one; run it yourself."))
+            add(Outcome(runtime, "skipped", message="Guard does not run this one; run it yourself."))
             continue
         if program is None:
             print(f"\n{runtime}: skipped, {name} is not installed.", file=context.out)
-            outcomes.append(Outcome(runtime, "skipped", message=f"{name} was not found."))
+            add(Outcome(runtime, "skipped", message=f"{name} was not found."))
             continue
         commands = step.get("commands") or []
         if any(not argv or str(argv[0]) != name for argv in commands):
             raise PluginInstallError("The install plan was not in the expected shape.", exit_code=EXIT_FAILED)
         if not assume_yes and not ask(f"{_verb(action)} for {runtime} with {program.path}?"):
             print(f"{runtime}: skipped.", file=context.out)
-            outcomes.append(Outcome(runtime, "declined", program.path))
+            add(Outcome(runtime, "declined", program.path))
             continue
         try:
             if action == "install" and runtime == "claude-code" and len(commands) == 2:
@@ -666,11 +703,11 @@ def apply_plan(
                     _run_step(program, [str(part) for part in argv], context)
         except _StoppedError as stop:
             print(f"{runtime}: {stop}", file=sys.stderr)
-            outcomes.append(Outcome(runtime, stop.status, program.path, stop.exit_code, str(stop)))
+            add(Outcome(runtime, stop.status, program.path, stop.exit_code, str(stop)))
             continue
         except runner.RunnerError as error:
             print(f"{runtime}: {error}", file=sys.stderr)
-            outcomes.append(Outcome(runtime, "failed", program.path, None, str(error)))
+            add(Outcome(runtime, "failed", program.path, None, str(error)))
             continue
         verify = step.get("verify")
         done = "installed; start a new session to load it" if action == "install" else "removed"
@@ -681,7 +718,7 @@ def apply_plan(
         except PluginInstallError as error:
             message = f"{error} Guard's record of this listing may be out of date."
             print(f"{runtime}: {message}", file=sys.stderr)
-            outcomes.append(Outcome(runtime, "failed", program.path, 0, message))
+            add(Outcome(runtime, "failed", program.path, 0, message))
             continue
-        outcomes.append(Outcome(runtime, "installed" if action == "install" else "removed", program.path, 0))
+        add(Outcome(runtime, "installed" if action == "install" else "removed", program.path, 0))
     return outcomes
