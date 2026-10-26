@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci import verify_release_workflow_run as verifier
 from tests.test_mcp_release_source_verification import IDENTITY, OTHER_SHA, REPOSITORY, SHA, GitHubFixture
 
 TAG = "v3.57.0"
 PREFIX = f"/repos/{REPOSITORY}"
+WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
 
 
 class TagRunFixture(GitHubFixture):
@@ -156,7 +158,7 @@ def test_repair_dispatch_emits_checkout_outputs(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("PUBLICATION_RUN_ID", "12345")
     monkeypatch.setattr(verifier, "github_json", fixture.fetch)
     assert verifier.main() == 0
-    assert output_path.read_text(encoding="utf-8") == f"sha={SHA}\nbranch=main\n"
+    assert output_path.read_text(encoding="utf-8") == f"sha={SHA}\nbranch=main\ntag={TAG}\n"
 
 
 def test_repair_dispatch_without_a_run_id_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,3 +170,27 @@ def test_repair_dispatch_without_a_run_id_fails_closed(tmp_path: Path, monkeypat
     monkeypatch.setattr(verifier, "github_json", TagRunFixture().fetch)
     assert verifier.main() == 1
     assert not output_path.exists()
+
+
+def test_consumers_publish_the_verified_tag_not_the_highest_tag_at_the_sha() -> None:
+    fixture = TagRunFixture()
+    assert verifier.released_tag(fixture.event) == TAG
+    branch_run = TagRunFixture()
+    for run in (branch_run.run, branch_run.event["workflow_run"]):
+        run.update(head_branch="main", event="push")
+    assert verifier.released_tag(branch_run.event) == ""
+    for name in ("publish-mcp-registry.yml", "publish-mcpb.yml"):
+        jobs = yaml.safe_load((WORKFLOWS / name).read_text())["jobs"]
+        publish = jobs["publish"]
+        resolve = next(step for step in publish["steps"] if step.get("id") == "release")
+        assert resolve["env"]["VERIFIED_TAG"] == "${{ needs.verify.outputs.tag }}"
+        assert 'tag="$VERIFIED_TAG"' in resolve["run"]
+
+
+def test_registry_publications_on_one_train_never_overtake_each_other() -> None:
+    workflow = yaml.safe_load((WORKFLOWS / "publish-mcp-registry.yml").read_text())
+    group = workflow["concurrency"]["group"]
+    assert "inputs.publication_run_id" not in group
+    assert "'release-3.0' || 'main'" in group
+    steps = [step["name"] for step in workflow["jobs"]["publish"]["steps"]]
+    assert steps.index("Refuse to replace a newer stable release") < steps.index("Publish to MCP registry")

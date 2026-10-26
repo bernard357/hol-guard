@@ -142,6 +142,19 @@ def dispatched_release_event(run_id: str, *, repository: str, fetch_json: Callab
     return {"repository": {"id": identity.get("id"), "full_name": identity.get("full_name")}, "workflow_run": run}
 
 
+def released_tag(event: dict) -> str:
+    """Name the stable tag a verified tag-dispatched run released, or "" for a branch run.
+
+    Consumers publish exactly this tag. Picking the highest tag at the SHA instead
+    could publish a different version when two stable tags share a commit.
+    """
+    run = _mapping(event.get("workflow_run"), "workflow run event")
+    branch = run.get("head_branch")
+    if run.get("event") == "workflow_dispatch" and isinstance(branch, str) and _STABLE_TAG.fullmatch(branch):
+        return branch
+    return ""
+
+
 def publication_completed(
     event: dict, *, repository: str, sha: str, branch: str, fetch_json: Callable[[str], object]
 ) -> bool:
@@ -252,7 +265,7 @@ def main() -> int:
             print("Publishing workflow completed without a release; downstream publication is skipped")
             return 0
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-            output.write(f"sha={sha}\nbranch={branch}\n")
+            output.write(f"sha={sha}\nbranch={branch}\ntag={released_tag(event)}\n")
     except (KeyError, ValueError, OSError, urllib.error.URLError) as error:
         print(f"Release source verification failed: {error}", file=sys.stderr)
         return 1

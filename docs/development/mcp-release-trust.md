@@ -21,7 +21,8 @@ Release Please dispatches each stable publication on its tag, so GitHub reports
 a `workflow_dispatch` run, requires the tag to point at the run's exact SHA
 (following an annotated tag to its commit), and then treats the release as a
 `main` release: the SHA must be on `main` and both main publication jobs must have
-succeeded.
+succeeded. The gate outputs that tag, and both consumers publish
+exactly it rather than the highest tag at the SHA.
 
 A branch name in a run payload is not enough. GitHub's compare API must show that
 the exact SHA is an ancestor of, or identical to, the named release branch. A
@@ -38,6 +39,9 @@ the latest release from GitHub; nothing else comes from the dispatcher, and the
 rebuilt event goes through every check above. Only the current latest stable
 release qualifies, so a dispatch cannot move the MCP Registry back to an older
 version. The dispatch runs trusted `main` code, as a `workflow_run` does.
+All Registry publications on one train share a concurrency group, and the publish
+job checks again that its tag is still the latest stable release just before it
+publishes, so a delayed run never replaces a newer version.
 
 The three release checkouts depend on the successful gate and consume only its
 validated outputs. They do not fall back to event data or the latest branch tip.

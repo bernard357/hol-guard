@@ -15,6 +15,9 @@ on:
       branch:
         description: Verified canonical release branch
         value: ${{ jobs.verify.outputs.branch }}
+      tag:
+        description: Verified stable tag of a tag-dispatched release; empty for branch runs
+        value: ${{ jobs.verify.outputs.tag }}
 
 permissions: {}
 
@@ -31,6 +34,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       branch: ${{ steps.source.outputs.branch }}
+      tag: ${{ steps.source.outputs.tag }}
     steps:
       # workflow_run's github.sha is the trusted default-branch commit, not the upstream run's source.
       - name: Check out trusted verification code
