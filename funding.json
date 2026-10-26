@@ -1,0 +1,39 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.0.0",
+  "entity": {
+    "type": "organisation",
+    "role": "maintainer",
+    "name": "Hashgraph Online",
+    "email": "",
+    "description": "Hashgraph Online maintains HOL Guard.",
+    "webpageUrl": {
+      "url": "https://github.com/hashgraph-online/hol-guard"
+    }
+  },
+  "projects": [
+    {
+      "guid": "hol-guard",
+      "name": "HOL Guard",
+      "description": "HOL Guard reviews AI agent actions before they run, including shell commands, file access, package installs and MCP tool calls. It allows, blocks or requests approval according to policy.",
+      "webpageUrl": {
+        "url": "https://github.com/hashgraph-online/hol-guard"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/hashgraph-online/hol-guard"
+      },
+      "licenses": ["spdx:Apache-2.0"],
+      "tags": ["security", "developer-tools", "ai", "python", "rust"]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "github-sponsors",
+        "type": "payment-provider",
+        "address": "https://github.com/sponsors/hashgraph-online"
+      }
+    ],
+    "plans": []
+  }
+}
