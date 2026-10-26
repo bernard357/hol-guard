@@ -39,6 +39,7 @@ fn env(connection: &Connection) -> Env<'_> {
 fn recorded(pending: &Value) -> Map<String, Value> {
     let mut row = pending.as_object().expect("pending").clone();
     row.insert("session_id".into(), json!(SESSION));
+    row.insert("saved_at".into(), json!(NOW));
     row.entry("artifact_hash")
         .or_insert(json!("sha256:artifact"));
     row.entry("command").or_insert(json!("rm -rf build"));
