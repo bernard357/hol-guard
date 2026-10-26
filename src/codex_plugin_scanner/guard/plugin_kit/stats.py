@@ -78,8 +78,10 @@ def _count(value: object) -> str:
 
 
 def render_stats(stats: Mapping[str, Any]) -> list[str]:
-    listing = stats.get("listing") if isinstance(stats.get("listing"), Mapping) else {}
-    window = listing.get("window") if isinstance(listing.get("window"), Mapping) else {}
+    raw_listing = stats.get("listing")
+    listing: Mapping[str, Any] = raw_listing if isinstance(raw_listing, Mapping) else {}
+    raw_window = listing.get("window")
+    window: Mapping[str, Any] = raw_window if isinstance(raw_window, Mapping) else {}
     start = str(window.get("from") or "")[:10]
     end = str(window.get("to") or "")[:10]
     lines = [f"{stats.get('plugin')}", "", f"Listing, last {window.get('days', 28)} days ({start} to {end} UTC)"]
@@ -103,7 +105,8 @@ def render_stats(stats: Mapping[str, Any]) -> list[str]:
     via_guard = installs.get("viaGuard")
     if isinstance(via_guard, int) and not isinstance(via_guard, bool):
         lines.append(f"  via hol-guard    {via_guard:,}")
-    for cell in installs.get("byRuntime") or []:
+    by_runtime = installs.get("byRuntime")
+    for cell in by_runtime if isinstance(by_runtime, list) else []:
         if isinstance(cell, Mapping):
             lines.append(f"  {cell.get('runtime')!s:<16} {_count(cell.get('machines'))}")
     return lines

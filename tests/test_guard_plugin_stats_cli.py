@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 import urllib.error
+from email.message import Message
 from typing import Any
 
 import pytest
@@ -13,7 +14,7 @@ import pytest
 from codex_plugin_scanner import cli as guard_cli
 from codex_plugin_scanner.guard.plugin_kit import stats
 
-STATS = {
+STATS: dict[str, Any] = {
     "apiVersion": "v1",
     "plugin": "acme/toolgate",
     "generatedAt": "2026-10-26T12:00:00.000Z",
@@ -131,7 +132,7 @@ def test_stats_explains_refusals_without_echoing_the_key(
     monkeypatch: pytest.MonkeyPatch, status: int, message: str
 ) -> None:
     def refuse(request: Any, timeout: float) -> Reply:
-        raise urllib.error.HTTPError(request.full_url, status, "refused", {}, None)  # type: ignore[arg-type]
+        raise urllib.error.HTTPError(request.full_url, status, "refused", Message(), None)
 
     monkeypatch.setattr(stats, "managed_urlopen", refuse)
     monkeypatch.setenv("HOL_API_KEY", "holp_abc.secret")
