@@ -17,7 +17,11 @@
 
 use std::collections::BTreeSet;
 
-use guard_contracts::{PolicyIntegrityGenerationOutcomeV1, PolicyIntegrityGenerationRequestV1};
+use guard_contracts::{
+    PolicyIntegrityGenerationOutcomeV1, PolicyIntegrityGenerationRequestV1,
+    PolicyIntegrityReconcileOutcomeV1, PolicyIntegrityReconcileRequestV1,
+    POLICY_INTEGRITY_RECONCILE_MAX_ROWS,
+};
 use guard_policy_snapshot::policy_integrity::{verify_local_policy_row, REMOTE_POLICY_SOURCES};
 use rusqlite::types::ValueRef;
 use serde_json::{json, Map, Value};
@@ -66,6 +70,33 @@ pub(crate) fn decide(
     Ok(PolicyIntegrityGenerationOutcomeV1 {
         prepared_state: prepared_state(&rows, has_legacy, &verifier, trusted),
         still_matches,
+    })
+}
+
+/// Decide what becomes of a pending generation, over the caller's own rows.
+///
+/// The store is not read: the caller runs this inside an open transaction
+/// whose rows a separate read-only connection would not see, so it ships the
+/// rows its connection returned. Only the pending generation is decided here;
+/// adopting a newer generation and marking cutover complete stay with the
+/// startup decision, which reads the store itself.
+pub(crate) fn reconcile(
+    request: &PolicyIntegrityReconcileRequestV1,
+    key: &[u8],
+    key_id: &str,
+) -> Result<PolicyIntegrityReconcileOutcomeV1, &'static str> {
+    let trusted = normalize_policy_integrity_control_state(&request.trusted_state)
+        .filter(|normalized| *normalized == request.trusted_state)
+        .ok_or("native_policy_integrity_state_invalid")?;
+    if request.rows.len() > POLICY_INTEGRITY_RECONCILE_MAX_ROWS {
+        return Err("native_policy_integrity_rows_too_many_items");
+    }
+    if request.rows.iter().any(|row| !row.is_object()) {
+        return Err("native_policy_integrity_row_invalid");
+    }
+    let verifier = Verifier { key, key_id };
+    Ok(PolicyIntegrityReconcileOutcomeV1 {
+        next_state: resolved_pending_generation(&request.rows, &verifier, trusted),
     })
 }
 

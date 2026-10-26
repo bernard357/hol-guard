@@ -11,7 +11,9 @@
 //! The `generation` section decides startup's trusted control state from
 //! the store's local rows: it adopts a single newer authenticated generation,
 //! completes or abandons a pending generation, and marks cutover complete once
-//! no legacy row remains.
+//! no legacy row remains. The `reconcile` section decides only the fate of a
+//! pending generation, over rows the caller ships from its own open
+//! transaction.
 //!
 //! The key arrives as base64url without padding, is held zeroized for the
 //! duration of the request, and never appears in a result or an error.
@@ -28,11 +30,20 @@ pub const POLICY_INTEGRITY_ROWS_FEATURE: &str = "policy-integrity-rows-v1";
 /// Capability advertised by the runtime when the request may carry a
 /// `generation` section.
 pub const POLICY_INTEGRITY_GENERATION_FEATURE: &str = "policy-integrity-generation-v1";
+/// Capability advertised by the runtime when the request may carry a
+/// `reconcile` section.
+pub const POLICY_INTEGRITY_RECONCILE_FEATURE: &str = "policy-integrity-reconcile-v1";
 
 /// Largest canonical request serialization the op will accept.
 pub const POLICY_INTEGRITY_ROWS_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Most verify plus sign items one request may carry.
 pub const POLICY_INTEGRITY_ROWS_MAX_ITEMS: usize = 1024;
+/// Most rows a `reconcile` section may carry. The decision needs every local
+/// row at once, so a reconcile cannot be split across requests the way verify
+/// and sign batches are; `POLICY_INTEGRITY_ROWS_MAX_BYTES` bounds it first in
+/// practice. A store above either bound fails the request, and its caller
+/// falls back to degraded mode rather than deciding the generation itself.
+pub const POLICY_INTEGRITY_RECONCILE_MAX_ROWS: usize = 16_384;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +67,10 @@ pub struct PolicyIntegrityRowsRequestV1 {
     /// key; answered in the payload's `generation` section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<PolicyIntegrityGenerationRequestV1>,
+    /// Pending-generation reconcile over rows the caller supplies. Needs the
+    /// key; answered in the payload's `reconcile` section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconcile: Option<PolicyIntegrityReconcileRequestV1>,
 }
 
 /// Decide the startup policy-integrity control state from the local rows of
@@ -67,6 +82,30 @@ pub struct PolicyIntegrityGenerationRequestV1 {
     pub guard_home: String,
     /// The normalized control state the store currently trusts.
     pub trusted_state: Value,
+}
+
+/// Decide what becomes of a pending generation, over rows the caller ships
+/// rather than rows read from the store.
+///
+/// The store is deliberately not read here. This runs while the caller holds
+/// an open transaction, whose rows a separate read-only connection would not
+/// see, so the caller passes the rows its own connection returned.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyIntegrityReconcileRequestV1 {
+    /// The normalized control state the store currently trusts.
+    pub trusted_state: Value,
+    /// The store's local `policy_decisions` rows, as JSON objects. Remote
+    /// sources are excluded by the caller's own query.
+    pub rows: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyIntegrityReconcileOutcomeV1 {
+    /// The control state the store should trust. Equal to `trusted_state`
+    /// when the pending generation is neither completed nor abandoned.
+    pub next_state: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -117,6 +156,8 @@ pub struct PolicyIntegrityRowsPayloadV1 {
     pub sign: Vec<PolicyIntegritySignatureV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<PolicyIntegrityGenerationOutcomeV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconcile: Option<PolicyIntegrityReconcileOutcomeV1>,
 }
 
 /// `PolicyIntegrityVerificationResult` fields, one per verify item in order.

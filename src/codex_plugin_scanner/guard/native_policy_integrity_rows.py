@@ -33,6 +33,7 @@ from .policy_integrity import PolicyIntegrityStatus, PolicyIntegrityVerification
 
 POLICY_INTEGRITY_ROWS_FEATURE = "policy-integrity-rows-v1"
 POLICY_INTEGRITY_GENERATION_FEATURE = "policy-integrity-generation-v1"
+POLICY_INTEGRITY_RECONCILE_FEATURE = "policy-integrity-reconcile-v1"
 _REQUEST_SCHEMA = "guard-policy-integrity-rows-request.v1"
 _RESULT_SCHEMA = "guard-policy-integrity-rows-result.v1"
 _KEY_FIELD = "integrity_key_b64"
@@ -159,6 +160,38 @@ def native_prepare_policy_integrity_generation(
     return prepared_state, still_matches
 
 
+def native_reconcile_policy_integrity_generation(
+    *,
+    guard_home: Path,
+    key: bytes,
+    key_id: str,
+    trusted_state: Mapping[str, object],
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """The control state the store should trust once the pending generation
+    is decided over ``rows``.
+
+    The caller ships its own rows because it holds an open transaction, whose
+    rows the resident's read-only connection would not see. The returned state
+    equals ``trusted_state`` when nothing about the pending generation changes.
+    """
+
+    _ensure_verifier_key(guard_home, key)
+    request = _request(key=key, key_id=key_id, verify=[], sign=[])
+    request["reconcile"] = {
+        "trusted_state": dict(trusted_state),
+        "rows": [_wire_row(row) for row in rows],
+    }
+    payload = _resident_payload(guard_home, request, required_feature=POLICY_INTEGRITY_RECONCILE_FEATURE)
+    outcome = payload.get("reconcile")
+    if payload.get("verify") != [] or payload.get("sign") != [] or not isinstance(outcome, dict):
+        raise NativePolicyIntegrityUnavailableError()
+    next_state = outcome.get("next_state")
+    if set(outcome) != {"next_state"} or not isinstance(next_state, dict):
+        raise NativePolicyIntegrityUnavailableError()
+    return next_state
+
+
 def _run(
     guard_home: Path,
     *,
@@ -268,7 +301,9 @@ def _request_chunk(
     other = payload.get("sign" if field == "verify" else "verify")
     if not isinstance(outcomes, list) or len(outcomes) != len(items) or other != []:
         raise NativePolicyIntegrityUnavailableError()
-    if "generation" in payload or not all(isinstance(outcome, dict) for outcome in outcomes):
+    if "generation" in payload or "reconcile" in payload:
+        raise NativePolicyIntegrityUnavailableError()
+    if not all(isinstance(outcome, dict) for outcome in outcomes):
         raise NativePolicyIntegrityUnavailableError()
     return outcomes
 
