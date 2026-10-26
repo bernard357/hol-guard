@@ -320,8 +320,9 @@ fn the_administrative_tree_and_guarded_names_keep_their_review() {
     }
     // A hidden file at the leaf of the work tree is not a document below a
     // hidden directory. It is read under `hidden_project_document`, which
-    // screens the name for a tool's login; this rule must not reach past it.
-    for document in [".mcp.json", ".yarnrc.yml", ".shell-aliases.toml"] {
+    // screens the name for a tool's login; this rule must not reach past it,
+    // and the names that screen holds stay held.
+    for document in [".mcp.json", ".claude.json"] {
         plant(&repo.join(document), "x\n");
         assert!(!read(&repo.join(document), &home, &repo), "{document}");
     }
@@ -333,6 +334,22 @@ fn the_administrative_tree_and_guarded_names_keep_their_review() {
         &plain.join(".codex-plugin/plugin.json"),
         &home,
         &plain
+    ));
+    // A sibling checkout's hidden tree is not the session's own content: the
+    // same manifest reads from the checkout the session is working in and
+    // keeps its review from the one beside it.
+    let sibling = home.join("app-fix");
+    std::fs::create_dir_all(sibling.join(".git")).unwrap();
+    plant(&sibling.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(!read(
+        &sibling.join(".codex-plugin/plugin.json"),
+        &home,
+        &repo
+    ));
+    assert!(read(
+        &sibling.join(".codex-plugin/plugin.json"),
+        &home,
+        &sibling
     ));
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -377,9 +394,11 @@ fn a_repository_at_the_home_directory_opens_no_dotfiles() {
     let cwd = home.join("app");
     std::fs::create_dir_all(&cwd).unwrap();
     // A dotfiles checkout at the home directory would make every hidden
-    // directory in it "the repository's own content".
-    plant(&home.join(".notes/plan.md"), "x\n");
-    assert!(!read(&home.join(".notes/plan.md"), &home, &cwd));
+    // directory in it "the repository's own content". The search for a work
+    // tree stops below home, and the listing, which does reach the home
+    // directory itself, is refused there.
+    plant(&home.join(".notes/.plan.md"), "x\n");
+    assert!(!read(&home.join(".notes/.plan.md"), &home, &cwd));
     assert!(!listed(&home.join(".notes"), &home, &cwd));
     std::fs::remove_dir_all(root).unwrap();
 }

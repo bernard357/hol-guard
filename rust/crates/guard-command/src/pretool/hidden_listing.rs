@@ -22,6 +22,7 @@ fn guarded_hidden_name(name: &str) -> bool {
     AGENT_STATE_NAMES.contains(&name)
         || home::CREDENTIAL_STORE_NAMES.contains(&name)
         || home::HARNESS_HOME_NAMES.contains(&name)
+        || name.starts_with(".env")
 }
 
 /// Whether `value` names an existing directory below a hidden component that
@@ -120,6 +121,9 @@ fn repository_hidden_below(
     if home.starts_with(repository) {
         return false;
     }
+    if content_read && !working_in(repository, cwd) {
+        return false;
+    }
     let Ok(below) = canonical.strip_prefix(repository) else {
         return false;
     };
@@ -133,18 +137,17 @@ fn repository_hidden_below(
     let Some((leaf, parents)) = names.split_last() else {
         return false;
     };
-    if names.iter().any(|name| {
-        guarded_hidden_name(name)
-            || name.starts_with(".env")
-            || (content_read && name.as_str() == ".git")
-    }) {
+    if names
+        .iter()
+        .any(|name| guarded_hidden_name(name) || (content_read && name.as_str() == ".git"))
+    {
         return false;
     }
     // A listing names the entries of a directory, so the hidden component may
     // be the entry itself. A content read is the repository's own document
     // *under* a hidden directory: a hidden file at the leaf of a work tree is
     // `hidden_project_document`'s territory, which applies the full screens
-    // over its name, so `.mcp.json` and `.yarnrc.yml` keep their review here.
+    // over its name, so `.mcp.json` keeps its review here.
     let hidden_parent = parents.iter().any(|name| name.starts_with('.'));
     let hidden_component = hidden_parent || leaf.starts_with('.');
     let hidden_below = if content_read {
@@ -160,7 +163,48 @@ fn repository_hidden_below(
     }
     guard_secure_fs::sensitive_path_family(canonical).is_none()
         && !guard_secure_fs::credential_named_path(canonical)
-        && super::resolved_path_allowed(repository, home_dir, cwd)
+        && repository_location_allowed(repository, &home, home_dir, cwd)
+}
+
+/// Whether the session is working inside `repository`.
+///
+/// A content read opens the checkout the session is in. A sibling checkout's
+/// hidden tree keeps its review: a developer's own `.private` notes sit beside
+/// code exactly as a published manifest does, and nothing in the path tells
+/// the two apart. A listing is not held to this — it prints names, and reading
+/// the entries of a sibling's `node_modules/.bin` is ordinary work.
+fn working_in(repository: &Path, cwd: Option<&str>) -> bool {
+    cwd.and_then(|value| std::fs::canonicalize(value).ok())
+        .is_some_and(|cwd| cwd.starts_with(repository))
+}
+
+/// What the repository's own path has to clear.
+///
+/// Not the hidden-component screen: a checkout may sit below a hidden
+/// directory of the developer's own, as `~/.workspace/app` does, and that
+/// screen refuses such a path on sight. What matters is where the checkout is
+/// — a system root, another user's home, a sensitive family, a
+/// credential-named path — and that no component of it below the home
+/// directory names agent state, a credential store, a harness home or an
+/// environment file.
+fn repository_location_allowed(
+    repository: &Path,
+    home: &Path,
+    home_dir: Option<&str>,
+    cwd: Option<&str>,
+) -> bool {
+    if let Ok(below) = repository.strip_prefix(home) {
+        let guarded = below.components().any(|component| match component {
+            Component::Normal(name) => {
+                guarded_hidden_name(&name.to_string_lossy().to_ascii_lowercase())
+            }
+            _ => true,
+        });
+        if guarded {
+            return false;
+        }
+    }
+    super::resolved_location_allowed(repository, home_dir, cwd, false)
 }
 
 /// The name screens a content read adds over the components below the
