@@ -461,6 +461,28 @@ pub(super) fn evaluate_signals(
         );
         return result;
     }
+    // Collecting the result of work the harness already started names no file,
+    // no address, no command and no package, so it reaches nothing outside the
+    // harness's own records. The call that started that work carried its own
+    // proof; asking again for its output stops the agent without protecting
+    // anything.
+    if action_type == PreToolActionTypeV1::Harness
+        && operation == PreToolOperationV1::Read
+        && !signals.sensitive_target
+        && !signals.content_sensitive
+        && signals.command.is_none()
+        && !signals.package_present
+        && !signals.prompt_present
+        && signals.path_values.is_empty()
+        && signals.url_values.is_empty()
+    {
+        return generic_result(
+            action,
+            "allow",
+            "native_harness_result_read",
+            "The Rust authority proved this call only collects the result of work the harness already started: it names no file, address, command or package, and the call that started that work was judged on its own.",
+        );
+    }
     let (reason_code, mut reason) = review_reason(action_type);
     if action_type == PreToolActionTypeV1::Unknown
         && matches!(harness, "omp" | "pi")
