@@ -83,6 +83,10 @@ fn a_directory_selector_is_not_an_inert_value() {
     for arguments in [
         vec!["--filter", "{/opt/other}", "build"],
         vec!["--filter", "{packages/web}", "build"],
+        vec!["--filter", "web{/opt/other}", "build"],
+        vec!["--filter", "@scope/*{components/**}", "build"],
+        vec!["--filter", "[origin/main]{/opt/other}", "build"],
+        vec!["--filter", "!{/opt/other}", "build"],
         vec!["--filter=C:/other", "build"],
         vec!["--filter", "C:\\other", "build"],
         vec!["--filter", "$HOME/other", "build"],

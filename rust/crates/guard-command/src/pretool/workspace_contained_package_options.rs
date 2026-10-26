@@ -54,15 +54,18 @@ pub(super) fn skip_inert_options(manager: &str, arguments: &[&str]) -> usize {
 /// every spelling of a directory is read: a leading `.`, `/` or `~`, a parent
 /// step, a Windows separator, a drive letter in `C:/other`, and the braces of
 /// pnpm's own `{<dir>}` selector, whose contents are a directory by
-/// definition. A value carrying `$` is refused with them, since what it names
-/// is not in the text. A scoped name such as `@acme/web` still passes, and so
-/// does a changed-since selector such as `[origin/main]`, which names a git
-/// ref rather than a place on disk.
+/// definition. The braces are not only a prefix. pnpm accepts the directory
+/// selector after a name pattern, a changed-since ref or an exclusion, as in
+/// `web{/opt/other}`, `[origin/main]{/opt/other}` and `!{/opt/other}`, so a
+/// brace anywhere in the value is a directory. A value carrying `$` is
+/// refused with them, since what it names is not in the text. A scoped name
+/// such as `@acme/web` still passes, and so does a changed-since selector
+/// such as `[origin/main]`, which names a git ref rather than a place on disk.
 fn inert_value(value: &str) -> bool {
     !value.is_empty()
-        && !value.starts_with(['-', '.', '/', '~', '{'])
+        && !value.starts_with(['-', '.', '/', '~'])
         && !value.contains("..")
-        && !value.contains(['\\', '$'])
+        && !value.contains(['\\', '$', '{', '}'])
         && !is_drive_prefixed(value)
         && !value.chars().any(char::is_whitespace)
 }
