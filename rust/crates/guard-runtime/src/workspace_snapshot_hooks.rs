@@ -151,12 +151,17 @@ impl HookScan {
             return;
         };
         self.files_scanned += 1;
-        for command in hook_commands(&document) {
+        for command in hook_commands(relative, &document) {
             if self.commands_scanned >= MAX_COMMANDS {
                 self.command_cap_hit = true;
                 return;
             }
-            if command.text.len() > MAX_COMMAND_BYTES {
+            let bytes = command.text.len()
+                + command
+                    .args
+                    .as_deref()
+                    .map_or(0, |args| args.iter().map(String::len).sum());
+            if bytes > MAX_COMMAND_BYTES {
                 self.command_oversize = true;
                 continue;
             }
@@ -277,17 +282,19 @@ fn is_hook_file(relative: &str) -> bool {
 }
 
 /// Every hook command in a configuration document. Hooks sit under a `hooks`
-/// object, or make up the whole document (Devin's `hooks.v1.json`, some
-/// Copilot files), keyed by event. Each event lists entries that carry a
+/// object keyed by event. Only Devin's `hooks.v1.json` and Copilot's hook
+/// files may instead be keyed by event at the top level; in a settings file
+/// other top-level lists are not hooks. Each event lists entries that carry a
 /// command themselves or a nested `hooks` list of them.
-fn hook_commands(document: &Value) -> Vec<Command<'_>> {
-    let events = match document.get("hooks") {
-        Some(Value::Object(events)) => events,
-        Some(_) => return Vec::new(),
-        None => match document {
-            Value::Object(events) => events,
-            _ => return Vec::new(),
-        },
+fn hook_commands<'a>(relative: &str, document: &'a Value) -> Vec<Command<'a>> {
+    let flat = relative == ".devin/hooks.v1.json"
+        || relative
+            .strip_prefix(COPILOT_HOOK_DIRECTORY)
+            .is_some_and(|rest| rest.starts_with('/'));
+    let events = match (document.get("hooks"), document) {
+        (Some(Value::Object(events)), _) => events,
+        (None, Value::Object(events)) if flat => events,
+        _ => return Vec::new(),
     };
     let mut commands = Vec::new();
     for (event, entries) in events {

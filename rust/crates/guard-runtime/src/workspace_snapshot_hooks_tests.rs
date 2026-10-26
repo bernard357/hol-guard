@@ -293,3 +293,50 @@ fn the_hook_scan_runs_only_when_asked_and_needs_content_mode() {
         "workspace_snapshot_hooks_need_content"
     );
 }
+
+#[test]
+fn top_level_lists_in_a_settings_file_are_not_hooks() {
+    let root = tempfile::tempdir().unwrap();
+    let lists = format!(
+        r#"{{"notify": ["{REMOTE}"], "excludeTools": ["{REMOTE}"], "companyAnnouncements": ["{REMOTE}"]}}"#
+    );
+    for relative in [
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".cursor/hooks.json",
+        ".gemini/settings.json",
+        ".devin/config.json",
+    ] {
+        write(root.path(), relative, &lists);
+    }
+    write(
+        root.path(),
+        ".codex/config.toml",
+        &format!("notify = [\"{REMOTE}\"]\n"),
+    );
+
+    let hooks = scan(root.path());
+
+    assert_eq!(hooks["status"], "complete");
+    assert_eq!(hooks["files_scanned"], 6);
+    assert_eq!(hooks["commands_scanned"], 0);
+    assert!(found(&hooks).is_empty());
+}
+
+#[test]
+fn an_oversized_script_argument_leaves_the_scan_incomplete() {
+    let root = tempfile::tempdir().unwrap();
+    // Over the 64 KiB command bound only once the arguments are counted.
+    let script = "a".repeat(64 * 1024);
+    write(
+        root.path(),
+        ".cursor/hooks.json",
+        &format!(r#"{{"hooks": {{"stop": [{{"command": "bash", "args": ["-c", "{script}"]}}]}}}}"#),
+    );
+
+    let hooks = scan(root.path());
+
+    assert_eq!(hooks["status"], "incomplete");
+    assert_eq!(hooks["truncation_reasons"], json!(["command_oversize"]));
+    assert!(found(&hooks).is_empty());
+}
