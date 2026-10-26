@@ -154,16 +154,18 @@ class TestZCodeHookResponses:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # PowerShell expands `$name` inside double quotes and reads a backtick
-        # as an escape; `cmd.exe` expands `%VAR%`. Single quotes would hold
-        # them in PowerShell but become part of the path in `cmd.exe`, so no
-        # rendering reaches the store. Naming it would send the person to
-        # repair whatever the shell rewrote it into while this install stays
-        # blocked.
+        # as an escape; `cmd.exe` expands `%VAR%`, and `!name!` too once delayed
+        # expansion is on. Single quotes would hold them in PowerShell but
+        # become part of the path in `cmd.exe`, so no rendering reaches the
+        # store. All four characters are legal in a Windows file name. Naming
+        # such a home would send the person to repair whatever the shell
+        # rewrote it into while this install stays blocked.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
         for home in (
             "C:\\guards\\$ci",
             "C:\\guards\\%CI%",
             "C:\\guards\\`ci",
+            "C:\\guards\\!ci",
             "C:\\Program Files\\guard$\\.hol-guard",
         ):
             assert _quote_home(home, True) is None, home
@@ -267,6 +269,7 @@ class TestAuthorityRemediationParity:
             "C:\\guards\\$ci",
             "C:\\guards\\%CI%",
             "C:\\guards\\`ci",
+            "C:\\guards\\!ci",
             "",
         )
         for home in homes:

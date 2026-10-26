@@ -109,7 +109,8 @@ def _git_config_no_system_enabled(value: str | None) -> bool:
 # included. A Windows path cannot hold a `"`, so nothing inside has to be
 # escaped. Double quotes are not literal to either shell, though: PowerShell
 # expands `$name` inside them and reads a backtick as an escape, and `cmd.exe`
-# expands `%VAR%`. Single quotes would hold those in PowerShell but become part
+# expands `%VAR%` and, with delayed expansion, `!name!`. Single quotes would
+# hold those in PowerShell but become part
 # of the path in `cmd.exe`, so no one rendering reaches such a store and the
 # block keeps the short command instead of naming a path the shell rewrote.
 def _quote_home(home: str, windows: bool) -> str | None:
@@ -121,7 +122,7 @@ def _quote_home(home: str, windows: bool) -> str | None:
     )
     if plain:
         return home
-    if any(character in home for character in "$%`"):
+    if any(character in home for character in "$%`!"):
         return None
     return '"' + home + '"'
 

@@ -111,12 +111,14 @@ fn the_two_shells_get_their_own_spelling() {
     );
 }
 
-/// A Windows home holding `$`, `%` or a backtick survives no rendering: the
-/// double quotes both shells would need let PowerShell expand `$name` and
-/// `cmd.exe` expand `%VAR%`, and single quotes become part of the path in
-/// `cmd.exe`. Naming it would send the person to repair whatever the shell
-/// rewrote it into while this install stays blocked, so the block keeps the
-/// short command, which at least repairs the default store.
+/// A Windows home holding `$`, `%`, a backtick or `!` survives no rendering:
+/// the double quotes both shells would need let PowerShell expand `$name` and
+/// `cmd.exe` expand `%VAR%` and, under delayed expansion, `!name!` too, while
+/// single quotes become part of the path in `cmd.exe`. All four are legal in a
+/// Windows file name, so each names a home someone can really hold. Naming it
+/// would send the person to repair whatever the shell rewrote it into while
+/// this install stays blocked, so the block keeps the short command, which at
+/// least repairs the default store.
 #[test]
 fn a_windows_home_the_shells_would_rewrite_keeps_the_short_command() {
     let windows_home = Path::new("C:\\Users\\casey");
@@ -124,6 +126,7 @@ fn a_windows_home_the_shells_would_rewrite_keeps_the_short_command() {
         "C:\\guards\\$ci",
         "C:\\guards\\%CI%",
         "C:\\guards\\`ci",
+        "C:\\guards\\!ci",
         "C:\\Program Files\\guard$\\.hol-guard",
     ] {
         assert_eq!(quote_home(home, true), None, "{home}");

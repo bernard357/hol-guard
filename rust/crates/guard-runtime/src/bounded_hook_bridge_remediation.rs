@@ -98,7 +98,8 @@ fn remediation_for_home(
 ///
 /// Double quotes are not literal to either shell, though. PowerShell expands
 /// `$name` inside them and reads a backtick as an escape, and `cmd.exe`
-/// expands `%VAR%`; a Windows path may legally hold all three. Single quotes
+/// expands `%VAR%` and, with delayed expansion, `!name!`. A Windows path may
+/// legally hold all four. Single quotes
 /// would hold them in PowerShell but become part of the path in `cmd.exe`, so
 /// no one rendering reaches such a store. Naming it anyway would send the
 /// person to repair a path the shell rewrote while this install stays blocked,
@@ -117,7 +118,7 @@ pub(crate) fn quote_home(home: &str, windows: bool) -> Option<String> {
     if plain {
         return Some(home.to_owned());
     }
-    if home.contains(['$', '%', '`']) {
+    if home.contains(['$', '%', '`', '!']) {
         return None;
     }
     Some(format!("\"{home}\""))
