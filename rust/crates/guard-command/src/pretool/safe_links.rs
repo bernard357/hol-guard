@@ -11,10 +11,11 @@ use super::safe_writes::{absent_move_destination, bounded_file_write_target};
 /// sibling worktree of the same repository.
 ///
 /// A relative source resolves against the link's directory, not the cwd, so
-/// only absolute and `~/` sources are proved. The source may be a directory
-/// but never the home directory or one of its ancestors, and never a path
-/// that contains the workspace: later reads through the link still resolve
-/// to the target, yet a link that exposes the whole home is not routine.
+/// the proof resolves it the same way the kernel will and screens the path it
+/// lands on. The source may be a directory but never the home directory or one
+/// of its ancestors, and never a path that contains the workspace: later reads
+/// through the link still resolve to the target, yet a link that exposes the
+/// whole home is not routine.
 pub(super) fn safe_symlink_arguments(
     source: &str,
     destination: &str,
@@ -27,14 +28,10 @@ pub(super) fn safe_symlink_arguments(
     {
         return false;
     }
-    let Some(expanded) = expand_home_read_path(source, context.home_dir).or_else(|| {
-        std::path::Path::new(source)
-            .is_absolute()
-            .then(|| source.to_owned())
-    }) else {
+    let Some(screened) = screened_source(source, destination, context) else {
         return false;
     };
-    let Ok(target) = std::fs::canonicalize(&expanded) else {
+    let Ok(target) = std::fs::canonicalize(&screened.absolute) else {
         return false;
     };
     let contains_session_root = [context.home_dir, context.cwd]
@@ -47,9 +44,73 @@ pub(super) fn safe_symlink_arguments(
         })
         .any(|root| root.starts_with(&target));
     !contains_session_root
-        && super::read_paths::bounded_read_target(source, context.home_dir, context.cwd, true)
+        && super::read_paths::bounded_read_target(
+            &screened.as_screened,
+            context.home_dir,
+            context.cwd,
+            true,
+        )
         && bounded_file_write_target(destination, context.home_dir, context.cwd)
         && absent_move_destination(destination, context)
+}
+
+/// The two spellings of a link's source: the absolute path the link will point
+/// at, and the path the bounded read target screens.
+struct ScreenedSource {
+    absolute: String,
+    as_screened: String,
+}
+
+/// Resolve a link's source the way the kernel will resolve it.
+///
+/// An absolute or `~/` source is screened as written. A relative source
+/// resolves against the directory holding the new link, which is where the
+/// kernel resolves it from, so the screens run on the path the link actually
+/// reaches rather than on a spelling that means nothing on its own.
+fn screened_source(
+    source: &str,
+    destination: &str,
+    context: super::PathContext<'_>,
+) -> Option<ScreenedSource> {
+    if let Some(absolute) = expand_home_read_path(source, context.home_dir) {
+        return Some(ScreenedSource {
+            absolute,
+            as_screened: source.to_owned(),
+        });
+    }
+    if std::path::Path::new(source).is_absolute() {
+        return Some(ScreenedSource {
+            absolute: source.to_owned(),
+            as_screened: source.to_owned(),
+        });
+    }
+    let resolved = std::fs::canonicalize(link_directory(destination, context)?.join(source))
+        .ok()?
+        .to_str()?
+        .to_owned();
+    Some(ScreenedSource {
+        absolute: resolved.clone(),
+        as_screened: resolved,
+    })
+}
+
+/// The directory that will hold the new link: a relative destination resolves
+/// against the cwd, an absolute one is taken as written.
+fn link_directory(
+    destination: &str,
+    context: super::PathContext<'_>,
+) -> Option<std::path::PathBuf> {
+    let destination = expand_home_read_path(destination, context.home_dir)
+        .unwrap_or_else(|| destination.to_owned());
+    let destination = std::path::PathBuf::from(destination);
+    let destination = if destination.is_absolute() {
+        destination
+    } else {
+        let cwd = context.cwd?;
+        let cwd = expand_home_read_path(cwd, context.home_dir).unwrap_or_else(|| cwd.to_owned());
+        std::path::PathBuf::from(cwd).join(destination)
+    };
+    std::fs::canonicalize(destination.parent()?).ok()
 }
 
 /// `rm [-f] [--] FILE...` over a few existing regular files in the workspace.

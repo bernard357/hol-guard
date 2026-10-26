@@ -5656,6 +5656,74 @@
       "expect": "allow"
     },
     {
+      "id": "queue-ln-s-relative-sibling-node-modules",
+      "fix_area": "queue",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/web/node_modules web/node_modules"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "queue-ln-s-relative-sibling-node-modules-from-package-dir",
+      "fix_area": "queue",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/dashboard/node_modules node_modules"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-ln-s-relative-git-directory-into-worktree",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/.git web/gitlink"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-ln-s-relative-escape-to-home-ssh",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../../home/.ssh web/sshlink"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "neg-cp-recursive-to-ssh",
       "fix_area": "shell",
       "harnesses": [
