@@ -369,8 +369,11 @@ pub(super) fn definitely_live(state_base: &Path, digest: &str) -> bool {
         .any(|entry| {
             let name = entry.file_name();
             let name = name.to_string_lossy();
+            // A lease is a regular file. Opening anything else named like
+            // one, such as a FIFO, could block the resident's answer.
             name.starts_with(LEASE_PREFIX)
                 && name.ends_with(LEASE_SUFFIX)
+                && entry.file_type().is_ok_and(|kind| kind.is_file())
                 && read_lease(&entry.path(), &private_root)
                     .is_ok_and(|record| record_is_live(&record, Some(digest), observed_at))
         })

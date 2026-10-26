@@ -64,6 +64,19 @@ pub(crate) fn refuses_shutdown(
     })
 }
 
+/// Answers an authenticated shutdown: refuses a handoff `refuses_shutdown`
+/// declines with `SHUTDOWN_REFUSED_IN_USE`, otherwise starts the stop.
+pub(crate) fn answer_shutdown(
+    request: &serde_json::Value,
+    policy_store: Option<&crate::policy_store::PolicySnapshotStore>,
+) -> Result<serde_json::Value, String> {
+    if refuses_shutdown(request, policy_store) {
+        return Err(SHUTDOWN_REFUSED_IN_USE.to_owned());
+    }
+    super::request_shutdown();
+    Ok(serde_json::json!({"status": "stopping"}))
+}
+
 /// `published_runtime` yields the runtime the publisher's latest snapshot is
 /// bound to, or `None` when that cannot be read. It runs only for a handoff,
 /// and the lease directory is probed only when it names this runtime.

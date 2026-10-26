@@ -759,16 +759,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                 "status": "ready",
                 "protocol_version": crate::RESIDENT_PROTOCOL_VERSION,
             })),
-            // A handoff is refused while this resident's clients still use
-            // the runtime the home publishes for; see `refuses_shutdown`.
-            ResidentOperationV1::Shutdown(request)
-                if crate::managed_resident::refuses_shutdown(&request, policy_store) =>
-            {
-                Err(crate::managed_resident::SHUTDOWN_REFUSED_IN_USE.to_owned())
-            }
-            ResidentOperationV1::Shutdown(_request) => {
-                crate::managed_resident::request_shutdown();
-                encode_response(&serde_json::json!({"status": "stopping"}))
+            ResidentOperationV1::Shutdown(request) => {
+                crate::managed_resident::answer_shutdown(&request, policy_store)
+                    .and_then(|response| encode_response(&response))
             }
         },
         ResidentRequestV1::Hook(request) => {

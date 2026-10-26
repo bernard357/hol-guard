@@ -338,3 +338,35 @@ fn a_bare_legacy_shutdown_parses_as_a_handoff() {
         ShutdownIntent::Handoff
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn regression_a_fifo_named_like_a_lease_does_not_block_the_refusal_probe() {
+    // `DirEntry::file_type` does not follow links, and only a regular file is
+    // opened, so a FIFO planted in the lease directory answers "not live"
+    // instead of blocking the resident's shutdown answer on its open.
+    let root = test_root("handoff-fifo");
+    let digest = runtime_digest().unwrap();
+    drop(super::lease::acquire(&root).unwrap());
+    let fifo = root
+        .join("resident-client-leases.v1")
+        .join(format!("client-{}.lease", &digest[..8]));
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let probe_root = root.clone();
+    let probe_digest = digest.clone();
+    std::thread::spawn(move || {
+        let _ = sender.send(super::lease::definitely_live(&probe_root, &probe_digest));
+    });
+    let answer = receiver.recv_timeout(Duration::from_secs(10));
+    if answer.is_err() {
+        // Release a probe stuck on the FIFO's open before failing.
+        let _ = fs::OpenOptions::new().write(true).open(&fifo);
+    }
+    assert_eq!(answer, Ok(false));
+    fs::remove_dir_all(root).unwrap();
+}

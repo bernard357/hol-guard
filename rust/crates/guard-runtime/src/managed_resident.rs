@@ -19,7 +19,7 @@ pub(crate) use client_timeout_policy::{client_timeout, DAEMON_LIFECYCLE_TIMEOUT_
 mod containment;
 #[path = "managed_resident_handoff.rs"]
 mod handoff;
-pub(crate) use handoff::{refuses_shutdown, SHUTDOWN_REFUSED_IN_USE};
+pub(crate) use handoff::answer_shutdown;
 #[path = "managed_resident_lease.rs"]
 mod lease;
 pub(crate) use lease::client_request;
