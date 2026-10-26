@@ -107,7 +107,7 @@ fn a_report_records_whether_any_tool_is_decided_by_the_proxy() {
     let request = McpRelayServerReportRequestV1 {
         tools: vec![
             json!({"name": "read_file"}),
-            json!({"name": "COMPOSIO_EXECUTE"}),
+            json!({"description": "nameless"}),
         ],
         ..request
     };
