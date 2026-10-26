@@ -13,8 +13,9 @@ use super::{
     MAX_RISK_CLASSES,
 };
 
-/// `_observed_risk_classes`, filtered and capped as `connector_setup_hint`
-/// keeps them. A rule id whose trim or case fold could differ from Python's
+/// The risk classes of the catalog rules the paused evidence observed, sorted,
+/// deduplicated and capped; a critical or destructive shell rule also records
+/// `destructive`. A rule id whose trim or case fold could differ from Python's
 /// defers, as does a catalog the resident cannot load.
 pub(super) fn observed_risk_classes(result: &Object) -> Result<Vec<String>, HookDirectDefer> {
     let observations = result
@@ -61,7 +62,7 @@ pub(super) fn observed_risk_classes(result: &Object) -> Result<Vec<String>, Hook
         .collect())
 }
 
-/// `connector_setup_hint` through `validated_connector_setup_hint`: the hint
+/// The connector setup hint `validated_connector_setup_hint` accepts: the hint
 /// for a connector whose fields are all well formed, else null.
 pub(super) fn setup_hint(connector: &Connector, risk_classes: &[String]) -> Value {
     let display_name = connector.display_name();

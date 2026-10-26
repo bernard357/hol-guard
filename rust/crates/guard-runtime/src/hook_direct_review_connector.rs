@@ -477,6 +477,17 @@ fn pathlib_name(path: &str) -> &str {
     path.rsplit(separator).next().unwrap_or_default()
 }
 
+/// The connector-setup hint for a connector-setup review the daemon queues
+/// itself, as `extension_review_hint` answers it: the connector `_setup_connector`
+/// accepts and the risk classes the paused evidence observed. A connector this
+/// lane would not accept, or evidence whose risk classes the resident cannot
+/// read, answers no hint.
+pub(crate) fn queued_setup_hint(connector: &Value, paused: &Object) -> Option<Value> {
+    let connector = Connector::parse(connector)?;
+    let risk_classes = observed_risk_classes(paused).ok()?;
+    Some(setup_hint(&connector, &risk_classes)).filter(|hint| !hint.is_null())
+}
+
 #[path = "hook_direct_review_connector_hint.rs"]
 mod hint;
 
