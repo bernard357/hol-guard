@@ -2,8 +2,9 @@
 //! the composed current policy action, and the approval-context artifact hash
 //! that `local_supply_chain.py` used to compute in Python.
 //!
-//! The caller hydrates only facts it alone can read (the bound `GuardConfig`
-//! view, the Python-built execution context and the extension-control digest).
+//! The caller hydrates only facts it alone can read (the configuration fields
+//! the policy view is built from, the Python-built execution context and the
+//! extension-control digest).
 //! The cached feed snapshot hash is still accepted but not bound: a feed
 //! refresh only matters when it changes the matched advisory ids. The runtime
 //! reads the advisory cache and the workspace manifests itself, composes the
@@ -37,14 +38,55 @@ fn field<'a>(map: &'a Value, key: &str) -> &'a Value {
     map.get(key).unwrap_or(&Value::Null)
 }
 
+/// The policy view the composed action and the approval context are bound to.
+///
+/// A caller that holds the loaded configuration sends the fields and the view
+/// is hydrated here, so the `package_script` action and the override folded
+/// into the composed action are resolved by the runtime and never by the
+/// caller. A caller with no configuration to hydrate it from — the relay,
+/// which holds the harness view the publisher bound, and a request with no
+/// config bound at all — sends the view itself.
+fn resolve_config_policy(request: &PackageApprovalHashRequestV1) -> Result<Value, String> {
+    let Some(facts) = request.config_facts.as_ref() else {
+        return match request.config_policy.is_object() {
+            true => Ok(request.config_policy.clone()),
+            false => Err(invalid()),
+        };
+    };
+    if !request.config_policy.is_null() {
+        return Err(invalid());
+    }
+    let facts = facts.as_object().ok_or_else(invalid)?;
+    let artifact = &request.artifact;
+    let harness = field(artifact, "harness").as_str().ok_or_else(invalid)?;
+    let artifact_id = field(artifact, "artifact_id")
+        .as_str()
+        .ok_or_else(invalid)?;
+    // The configuration fields and the managed-policy pair the approval hash
+    // binds arrive in one map, so it stands for both halves.
+    crate::package_config_mirror::config_policy(
+        facts,
+        facts,
+        &crate::package_config_mirror::ArtifactIdentity {
+            artifact_id,
+            publisher: field(artifact, "publisher").as_str(),
+            harness,
+        },
+    )
+    .ok_or_else(invalid)
+}
+
 /// `most_restrictive_guard_action(policy_action, additional?, config actions…)`.
-fn compose_current_action(request: &PackageApprovalHashRequestV1) -> GuardAction {
+fn compose_current_action(
+    request: &PackageApprovalHashRequestV1,
+    config_policy: &Value,
+) -> GuardAction {
     let mut actions = vec![field(&request.evaluation, "policy_action").clone()];
     if let Some(additional) = request.additional_current_action.as_ref() {
         actions.push(additional.clone());
     }
     for key in ["effective_package_script_action", "resolved_override"] {
-        let action = field(&request.config_policy, key);
+        let action = field(config_policy, key);
         if !action.is_null() {
             actions.push(action.clone());
         }
@@ -192,6 +234,7 @@ fn policy_packages(packages: &Value) -> Value {
 /// void a saved approval.
 fn policy_context(
     request: &PackageApprovalHashRequestV1,
+    config_policy: &Value,
     current_action: GuardAction,
     matched_ids: Vec<String>,
 ) -> Value {
@@ -217,7 +260,7 @@ fn policy_context(
     );
     feed.insert("matched_advisory_ids".to_owned(), json!(matched_ids));
     json!({
-        "configuration": request.config_policy,
+        "configuration": config_policy,
         "current_action": current_action.as_str(),
         "additional": request
             .additional_policy_context
@@ -230,6 +273,7 @@ fn policy_context(
 
 fn artifact_hash(
     request: &PackageApprovalHashRequestV1,
+    config_policy: &Value,
     current_action: GuardAction,
 ) -> Result<String, String> {
     let store_path = request.store_path.as_deref().ok_or_else(invalid)?;
@@ -248,7 +292,7 @@ fn artifact_hash(
     let matched_ids = matched_advisory_ids(&request.artifact, store_path)?
         .into_iter()
         .collect::<Vec<_>>();
-    let policy = policy_context(request, current_action, matched_ids);
+    let policy = policy_context(request, config_policy, current_action, matched_ids);
 
     let artifact = &request.artifact;
     let metadata = artifact
@@ -337,14 +381,12 @@ fn artifact_hash(
 pub(crate) fn package_current_action_and_hash(
     request: &PackageApprovalHashRequestV1,
 ) -> Result<(GuardAction, String), String> {
-    if !request.evaluation.is_object()
-        || !request.artifact.is_object()
-        || !request.config_policy.is_object()
-    {
+    if !request.evaluation.is_object() || !request.artifact.is_object() {
         return Err(invalid());
     }
-    let current_action = compose_current_action(request);
-    let artifact_hash = artifact_hash(request, current_action)?;
+    let config_policy = resolve_config_policy(request)?;
+    let current_action = compose_current_action(request, &config_policy);
+    let artifact_hash = artifact_hash(request, &config_policy, current_action)?;
     Ok((current_action, artifact_hash))
 }
 
@@ -359,11 +401,11 @@ pub(crate) fn evaluate_package_approval_hash(
         || request.guard_home.is_empty()
         || !request.evaluation.is_object()
         || !request.artifact.is_object()
-        || !request.config_policy.is_object()
     {
         return Err(invalid());
     }
-    let current_action = compose_current_action(request);
+    let config_policy = resolve_config_policy(request)?;
+    let current_action = compose_current_action(request, &config_policy);
     let mut payload = Map::new();
     payload.insert("current_action".to_owned(), json!(current_action.as_str()));
     match request.kind.as_str() {
@@ -371,7 +413,7 @@ pub(crate) fn evaluate_package_approval_hash(
         "artifact_hash" => {
             payload.insert(
                 "artifact_hash".to_owned(),
-                Value::String(artifact_hash(request, current_action)?),
+                Value::String(artifact_hash(request, &config_policy, current_action)?),
             );
         }
         _ => return Err(invalid()),

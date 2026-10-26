@@ -652,6 +652,7 @@ mod package_approval_hash_op;
 mod package_audit_projection_op;
 mod package_authority_config;
 mod package_authority_op;
+mod package_config_mirror;
 mod package_context_build_op;
 mod package_evaluation_compose_op;
 mod package_evaluation_view_op;

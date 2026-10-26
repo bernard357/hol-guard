@@ -155,6 +155,82 @@ fn rejects_malformed_requests() {
     );
 }
 
+/// The same vector with the configuration fields in place of the view they
+/// hydrate, as the caller holding a loaded `GuardConfig` sends it.
+fn with_config_facts(vector: &Value) -> Value {
+    let mut vector = vector.clone();
+    let facts = vector["config_facts"].clone();
+    let request = vector["request"].as_object_mut().unwrap();
+    request.remove("config_policy");
+    request.insert("config_facts".to_owned(), facts);
+    vector
+}
+
+/// The resident hydrates the bound policy view from the sent fields, so an
+/// approval saved against the view Python used to send stays valid: the hash
+/// binds the same bytes and the composed action is the same.
+#[test]
+fn hydrated_config_facts_reproduce_the_sent_view() {
+    let vectors: Vec<Value> = serde_json::from_str(VECTORS).unwrap();
+    let mut covered = 0;
+    for vector in &vectors {
+        if vector["config_facts"].is_null() {
+            continue;
+        }
+        covered += 1;
+        let name = vector["name"].as_str().unwrap();
+        let workspace = Workspace::new(name);
+        let hydrated = run(&request(
+            &with_config_facts(vector),
+            &workspace,
+            "artifact_hash",
+        ))
+        .unwrap();
+        assert_eq!(
+            hydrated["artifact_hash"], vector["expected"]["artifact_hash"],
+            "{name}"
+        );
+        assert_eq!(
+            hydrated["current_action"], vector["expected"]["current_action"],
+            "{name}"
+        );
+    }
+    assert!(covered >= 3, "no configured vector exercised the fields");
+}
+
+/// Exactly one source per request: a request carrying both, and one carrying a
+/// field the mirror cannot read, defer rather than deciding under a guess.
+#[test]
+fn an_unreadable_or_doubled_configuration_defers() {
+    let vectors: Vec<Value> = serde_json::from_str(VECTORS).unwrap();
+    let vector = vectors
+        .iter()
+        .find(|vector| vector["name"] == "config_harness_block_managed")
+        .unwrap();
+
+    let mut both = with_config_facts(vector);
+    both["request"]["config_policy"] = vector["request"]["config_policy"].clone();
+    let workspace = Workspace::new("both");
+    assert_eq!(
+        run(&request(&both, &workspace, "artifact_hash")).unwrap_err(),
+        "native_package_approval_hash_invalid"
+    );
+
+    for key in ["harness_actions", "risk_actions", "security_level", "mode"] {
+        let mut broken = with_config_facts(vector);
+        broken["request"]["config_facts"]
+            .as_object_mut()
+            .unwrap()
+            .remove(key);
+        let workspace = Workspace::new("broken");
+        assert_eq!(
+            run(&request(&broken, &workspace, "artifact_hash")).unwrap_err(),
+            "native_package_approval_hash_invalid",
+            "a missing {key} should defer"
+        );
+    }
+}
+
 fn advisory_vector() -> Value {
     let vectors: Vec<Value> = serde_json::from_str(VECTORS).unwrap();
     vectors
