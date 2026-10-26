@@ -81,8 +81,6 @@ const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "::1", "localhost"];
 pub(super) const PACKAGE_PROMPT: &str = "mcp_relay_package_prompt";
 /// The fact the route names when the client's inline elicitation answers.
 const INLINE_APPROVAL: &str = "inline_approval";
-/// The source the route forwards a natively approved call under.
-const NATIVE_APPROVED: &str = "native-approved";
 const ASK_UNSUPPORTED: &str = "mcp_relay_ask_unsupported";
 const ASK_QUEUE_FAILED: &str = "mcp_relay_ask_queue_failed";
 const REMEMBER_UNSUPPORTED: &str = "mcp_relay_remember_unsupported";
@@ -98,16 +96,21 @@ pub(super) fn native_prompt_allows(harness: &str, tool: &McpToolFactsV1) -> bool
     harness == OPENCODE && tool.source != "policy"
 }
 
-/// Whether the proxy prompts for a package call under `ask` before its package
-/// lane runs.
+/// Whether the proxy raises the client's inline elicitation for a package call
+/// under `ask` before its package lane runs.
 ///
 /// The proxy sends a package call through `_route_tool_call` before
-/// `_handle_package_request`, and that route raises the native prompt and the
-/// client's inline elicitation for a tool decision it would otherwise queue
-/// or observe. The package lane raises neither, so a call either prompt would
-/// answer defers with [`PACKAGE_PROMPT`], which hands its server to the proxy.
-/// A call no prompt answers falls through to the queue or the observed
-/// forward, which the lane takes itself.
+/// `_handle_package_request`, and that route raises the client's inline
+/// elicitation for a tool decision it would otherwise queue or observe. The
+/// package lane does not raise it, so a call the elicitation would answer
+/// defers with [`PACKAGE_PROMPT`], which hands its server to the proxy.
+///
+/// The native prompt needs no defer. `_allow_after_native_prompt` reads the
+/// decision's source and raises nothing, and the `package` route it leads to
+/// hands `_handle_package_request` a tool decision that handler never reads:
+/// it resolves the tool authority afresh and composes the package lane from
+/// that, which is the lane this resident runs. A call no prompt answers falls
+/// through to the queue or the observed forward, which the lane takes too.
 ///
 /// The route is asked as for a plain call: a package call reaches the same
 /// prompts on the same decision, and only a saved package block, which skips
@@ -132,8 +135,7 @@ pub(super) fn prompts_before_package(
     let payload = crate::mcp_tool_policy_proxy::proxy_payload(&input, decision, |tool| {
         Some(native_prompt_allows(harness, tool))
     });
-    let route = &payload["route"];
-    route["need"] == INLINE_APPROVAL || route["route"]["decision_source"] == NATIVE_APPROVED
+    payload["route"]["need"] == INLINE_APPROVAL
 }
 
 /// Whether the allow a remembered inline approval saves would be refused, in

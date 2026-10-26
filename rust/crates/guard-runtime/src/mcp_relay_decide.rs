@@ -441,7 +441,8 @@ fn decide(
     let asks = admitted.binding.review.blocked_request_mode.as_deref() == Some(ASK_MODE);
     // A package call is answered by its own lane, under the package policy and
     // the tool authority together, so none of the tool-only route below runs
-    // for it. The prompts that route raises first under `ask` are the proxy's.
+    // for it. The inline elicitation that route raises first under `ask` is
+    // the proxy's.
     if let Some(packaged) = legged.as_ref().and_then(Legged::decided) {
         if asks
             && ask::prompts_before_package(
