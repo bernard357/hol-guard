@@ -581,7 +581,12 @@ def test_runtime_payload_hash_matches_the_policy_document_reading(edits: dict[st
     verification_key = _verification_key(private_key)
     bundle = _signed_bundle(private_key, verification_key, payload_base=_fixture_payload(**edits))
 
-    assert validated_policy_bundle_v2_payload(bundle, trusted_verification_keys=(verification_key,)) == (bundle, None)
+    assert validated_policy_bundle_v2_payload(
+        bundle,
+        trusted_verification_keys=(verification_key,),
+        anchored_verification_keys=(verification_key,),
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+    ) == (bundle, None)
 
 
 @pytest.mark.parametrize(
