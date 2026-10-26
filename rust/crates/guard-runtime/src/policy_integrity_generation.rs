@@ -20,7 +20,7 @@ use std::collections::BTreeSet;
 use guard_contracts::{
     PolicyIntegrityGenerationOutcomeV1, PolicyIntegrityGenerationRequestV1,
     PolicyIntegrityReconcileOutcomeV1, PolicyIntegrityReconcileRequestV1,
-    POLICY_INTEGRITY_RECONCILE_MAX_ROWS,
+    PolicyIntegrityReconcileTallyV1, POLICY_INTEGRITY_RECONCILE_MAX_ROWS,
 };
 use guard_policy_snapshot::policy_integrity::{verify_local_policy_row, REMOTE_POLICY_SOURCES};
 use rusqlite::types::ValueRef;
@@ -80,6 +80,12 @@ pub(crate) fn decide(
 /// rows its connection returned. Only the pending generation is decided here;
 /// adopting a newer generation and marking cutover complete stay with the
 /// startup decision, which reads the store itself.
+///
+/// A store with more rows than one request holds sends them in chunks. Each
+/// chunk is folded into counters that the caller carries into the next one,
+/// and the last chunk asks for the decision. The counters are all the decision
+/// reads, so chunking cannot change its answer, and the caller never reads
+/// them: it carries the resident's own numbers back unchanged.
 pub(crate) fn reconcile(
     request: &PolicyIntegrityReconcileRequestV1,
     key: &[u8],
@@ -94,10 +100,34 @@ pub(crate) fn reconcile(
     if request.rows.iter().any(|row| !row.is_object()) {
         return Err("native_policy_integrity_row_invalid");
     }
+    let carried = request.carried.unwrap_or_default();
+    if !countable(&carried) {
+        return Err("native_policy_integrity_tally_invalid");
+    }
     let verifier = Verifier { key, key_id };
-    Ok(PolicyIntegrityReconcileOutcomeV1 {
-        next_state: resolved_pending_generation(&request.rows, &verifier, trusted),
+    let tally = fold_rows(&request.rows, &verifier, pending_window(&trusted), carried);
+    Ok(if request.decide {
+        PolicyIntegrityReconcileOutcomeV1 {
+            next_state: Some(resolve_pending_generation(&tally, trusted)),
+            tally: None,
+        }
+    } else {
+        PolicyIntegrityReconcileOutcomeV1 {
+            next_state: None,
+            tally: Some(tally),
+        }
     })
+}
+
+/// Counters that could have come from counting rows.
+///
+/// A chunk's reply travels back through the caller, so the numbers it carries
+/// are checked for the arithmetic the fold guarantees before the decision rule
+/// reads them. The caller cannot widen the decision by inventing a total.
+fn countable(tally: &PolicyIntegrityReconcileTallyV1) -> bool {
+    tally.pending_valid <= tally.pending_candidates
+        && tally.pending_candidates <= tally.rows
+        && tally.pending_valid.saturating_add(tally.current_valid) <= tally.rows
 }
 
 struct Verifier<'a> {
@@ -168,41 +198,74 @@ fn newer_authenticated_generation(
 }
 
 fn resolved_pending_generation(rows: &[Value], verifier: &Verifier<'_>, trusted: Value) -> Value {
-    let Some(current) = generation_of(&trusted) else {
-        return trusted;
-    };
-    let pending = match trusted["pending_generation"].as_i64() {
-        Some(pending) if pending > current => pending,
-        _ => return trusted,
-    };
-    if rows.is_empty() {
-        return cut_over_at(pending);
+    let tally = fold_rows(
+        rows,
+        verifier,
+        pending_window(&trusted),
+        PolicyIntegrityReconcileTallyV1::default(),
+    );
+    resolve_pending_generation(&tally, trusted)
+}
+
+/// The generations a pending cutover runs between, when one is pending.
+fn pending_window(trusted: &Value) -> Option<(i64, i64)> {
+    let current = generation_of(trusted)?;
+    match trusted["pending_generation"].as_i64() {
+        Some(pending) if pending > current => Some((current, pending)),
+        _ => None,
     }
-    let mut has_legacy = false;
-    let (mut pending_candidates, mut pending_valid, mut current_valid) = (0usize, 0usize, 0usize);
+}
+
+/// `carried` plus what `rows` say about the pending cutover.
+///
+/// With no cutover pending there is nothing to say about the rows, so they are
+/// only counted: `resolve_pending_generation` returns the trusted state
+/// unchanged in that case.
+fn fold_rows(
+    rows: &[Value],
+    verifier: &Verifier<'_>,
+    window: Option<(i64, i64)>,
+    carried: PolicyIntegrityReconcileTallyV1,
+) -> PolicyIntegrityReconcileTallyV1 {
+    let mut tally = carried;
+    tally.rows = tally.rows.saturating_add(rows.len() as u64);
+    let Some((current, pending)) = window else {
+        return tally;
+    };
     for row in rows {
         let current_ok = verifier.valid_at(row, Some(current));
         if row["integrity_version"].as_i64() == Some(POLICY_INTEGRITY_VERSION) {
-            pending_candidates += 1;
+            tally.pending_candidates = tally.pending_candidates.saturating_add(1);
             if verifier.valid_at(row, Some(pending)) {
-                pending_valid += 1;
+                tally.pending_valid = tally.pending_valid.saturating_add(1);
                 continue;
             }
         } else {
-            has_legacy = true;
+            tally.has_legacy = true;
         }
         if current_ok {
-            current_valid += 1;
+            tally.current_valid = tally.current_valid.saturating_add(1);
         }
     }
+    tally
+}
+
+/// What the counted rows make of the pending generation.
+fn resolve_pending_generation(tally: &PolicyIntegrityReconcileTallyV1, trusted: Value) -> Value {
+    let Some((_, pending)) = pending_window(&trusted) else {
+        return trusted;
+    };
+    if tally.rows == 0 {
+        return cut_over_at(pending);
+    }
     let mut next = trusted;
-    if has_legacy {
-        if pending_candidates > 0 && current_valid == rows.len() {
+    if tally.has_legacy {
+        if tally.pending_candidates > 0 && tally.current_valid == tally.rows {
             next["pending_generation"] = Value::Null;
         }
-    } else if pending_valid == rows.len() {
+    } else if tally.pending_valid == tally.rows {
         next = cut_over_at(pending);
-    } else if current_valid == rows.len() {
+    } else if tally.current_valid == tally.rows {
         next["pending_generation"] = Value::Null;
     }
     next

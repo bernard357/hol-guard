@@ -38,11 +38,10 @@ pub const POLICY_INTEGRITY_RECONCILE_FEATURE: &str = "policy-integrity-reconcile
 pub const POLICY_INTEGRITY_ROWS_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Most verify plus sign items one request may carry.
 pub const POLICY_INTEGRITY_ROWS_MAX_ITEMS: usize = 1024;
-/// Most rows a `reconcile` section may carry. The decision needs every local
-/// row at once, so a reconcile cannot be split across requests the way verify
-/// and sign batches are; `POLICY_INTEGRITY_ROWS_MAX_BYTES` bounds it first in
-/// practice. A store above either bound fails the request, and its caller
-/// falls back to degraded mode rather than deciding the generation itself.
+/// Most rows one `reconcile` section may carry. The decision runs over every
+/// local row, but the rows arrive in chunks that are folded into counters, so
+/// this bounds a single request rather than the store. A store of any size can
+/// settle its pending generation by sending more chunks.
 pub const POLICY_INTEGRITY_RECONCILE_MAX_ROWS: usize = 16_384;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,22 +89,61 @@ pub struct PolicyIntegrityGenerationRequestV1 {
 /// The store is deliberately not read here. This runs while the caller holds
 /// an open transaction, whose rows a separate read-only connection would not
 /// see, so the caller passes the rows its own connection returned.
+///
+/// A store larger than one request sends its rows in chunks. Each chunk is
+/// folded into [`PolicyIntegrityReconcileTallyV1`] counters and handed back,
+/// the caller carries those counters into the next chunk, and the last chunk
+/// asks for the decision. The decision itself is taken only here, from the
+/// counters; the caller never interprets them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyIntegrityReconcileRequestV1 {
     /// The normalized control state the store currently trusts.
     pub trusted_state: Value,
-    /// The store's local `policy_decisions` rows, as JSON objects. Remote
-    /// sources are excluded by the caller's own query.
+    /// This chunk of the store's local `policy_decisions` rows, as JSON
+    /// objects. Remote sources are excluded by the caller's own query.
     pub rows: Vec<Value>,
+    /// The counters folded from the chunks already sent for this store, or
+    /// `None` for the first chunk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried: Option<PolicyIntegrityReconcileTallyV1>,
+    /// `true` decides the pending generation from `carried` plus `rows`;
+    /// `false` returns their running counters for the next chunk to carry.
+    pub decide: bool,
+}
+
+/// What the rows seen so far say about the pending generation.
+///
+/// Every field counts rows, so chunks add: the decision rule reads the totals
+/// exactly as it would read one pass over the whole store.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyIntegrityReconcileTallyV1 {
+    /// Rows folded so far.
+    pub rows: u64,
+    /// A row carries an integrity version older than the current one.
+    pub has_legacy: bool,
+    /// Rows at the current integrity version.
+    pub pending_candidates: u64,
+    /// Rows that verify at the pending generation.
+    pub pending_valid: u64,
+    /// Rows that do not verify at the pending generation but do verify at the
+    /// current one.
+    pub current_valid: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyIntegrityReconcileOutcomeV1 {
-    /// The control state the store should trust. Equal to `trusted_state`
-    /// when the pending generation is neither completed nor abandoned.
-    pub next_state: Value,
+    /// The control state the store should trust, present when the request
+    /// asked for the decision. Equal to `trusted_state` when the pending
+    /// generation is neither completed nor abandoned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_state: Option<Value>,
+    /// The running counters, present when the request did not ask for the
+    /// decision. The caller carries them into its next chunk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tally: Option<PolicyIntegrityReconcileTallyV1>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

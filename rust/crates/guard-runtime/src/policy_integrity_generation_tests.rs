@@ -5,8 +5,9 @@
 use base64ct::{Base64UrlUnpadded, Encoding};
 use guard_contracts::{
     PolicyIntegrityGenerationRequestV1, PolicyIntegrityReconcileRequestV1,
-    PolicyIntegrityRowsRequestV1, POLICY_INTEGRITY_RECONCILE_FEATURE,
-    POLICY_INTEGRITY_RECONCILE_MAX_ROWS, POLICY_INTEGRITY_ROWS_REQUEST_SCHEMA,
+    PolicyIntegrityReconcileTallyV1, PolicyIntegrityRowsRequestV1,
+    POLICY_INTEGRITY_RECONCILE_FEATURE, POLICY_INTEGRITY_RECONCILE_MAX_ROWS,
+    POLICY_INTEGRITY_ROWS_REQUEST_SCHEMA,
 };
 use rusqlite::{params_from_iter, types::Value as SqlValue, Connection};
 use serde_json::{json, Value};
@@ -200,7 +201,16 @@ fn reconcile_request(case: &Value) -> PolicyIntegrityReconcileRequestV1 {
     PolicyIntegrityReconcileRequestV1 {
         trusted_state: case["trusted_state"].clone(),
         rows: case["rows"].as_array().expect("rows").clone(),
+        carried: None,
+        decide: true,
     }
+}
+
+fn decided(request: &PolicyIntegrityReconcileRequestV1) -> Value {
+    reconcile(request, &key(), &key_id())
+        .expect("reconcile")
+        .next_state
+        .expect("next_state")
 }
 
 fn reconciled(name: &str) -> Value {
@@ -208,6 +218,7 @@ fn reconciled(name: &str) -> Value {
     reconcile(&reconcile_request(&case), &key(), &key_id())
         .unwrap_or_else(|code| panic!("{name}: {code}"))
         .next_state
+        .unwrap_or_else(|| panic!("{name}: no next_state"))
 }
 
 /// Every pending-generation outcome the Python reconcile produced, over the
@@ -263,18 +274,86 @@ fn reconcile_judges_exactly_the_rows_it_is_given() {
     let mut request = reconcile_request(&case);
     request.rows.truncate(1);
     assert_eq!(
-        reconcile(&request, &key(), &key_id())
-            .expect("reconcile")
-            .next_state,
+        decided(&request),
         json!({"cutover_complete": true, "generation": 4, "pending_generation": null, "version": 1})
     );
     request.rows.clear();
     assert_eq!(
-        reconcile(&request, &key(), &key_id())
-            .expect("reconcile")
-            .next_state,
+        decided(&request),
         json!({"cutover_complete": true, "generation": 4, "pending_generation": null, "version": 1})
     );
+}
+
+/// A store too large for one request sends its rows in chunks, carrying the
+/// counters forward, and settles on the same generation as a single request.
+#[test]
+fn reconcile_folds_chunked_rows_into_the_same_decision() {
+    for name in [
+        "pending_all_at_pending",
+        "pending_all_at_current",
+        "pending_mixed",
+        "pending_legacy_unsigned",
+    ] {
+        let case = case_named(name);
+        let whole = reconcile_request(&case);
+        assert!(whole.rows.len() > 1, "{name}: needs several rows");
+        let mut carried = None;
+        for (index, row) in whole.rows.iter().enumerate() {
+            let last = index == whole.rows.len() - 1;
+            let outcome = reconcile(
+                &PolicyIntegrityReconcileRequestV1 {
+                    trusted_state: whole.trusted_state.clone(),
+                    rows: vec![row.clone()],
+                    carried,
+                    decide: last,
+                },
+                &key(),
+                &key_id(),
+            )
+            .unwrap_or_else(|code| panic!("{name}: {code}"));
+            if last {
+                assert_eq!(outcome.next_state, Some(reconciled(name)), "{name}");
+                assert_eq!(outcome.tally, None, "{name}");
+            } else {
+                assert_eq!(outcome.next_state, None, "{name}");
+                carried = Some(outcome.tally.unwrap_or_else(|| panic!("{name}: no tally")));
+            }
+        }
+    }
+}
+
+/// Counters that no fold could have produced are refused rather than decided
+/// on, so a caller cannot talk the resident into a generation by arithmetic.
+#[test]
+fn reconcile_refuses_impossible_carried_counters() {
+    let case = case_named("pending_mixed");
+    for carried in [
+        PolicyIntegrityReconcileTallyV1 {
+            rows: 1,
+            pending_candidates: 2,
+            ..Default::default()
+        },
+        PolicyIntegrityReconcileTallyV1 {
+            rows: 2,
+            pending_candidates: 1,
+            pending_valid: 2,
+            ..Default::default()
+        },
+        PolicyIntegrityReconcileTallyV1 {
+            rows: 2,
+            pending_candidates: 2,
+            pending_valid: 2,
+            current_valid: 1,
+            ..Default::default()
+        },
+    ] {
+        let mut request = reconcile_request(&case);
+        request.carried = Some(carried);
+        assert_eq!(
+            reconcile(&request, &key(), &key_id()),
+            Err("native_policy_integrity_tally_invalid")
+        );
+    }
 }
 
 #[test]
