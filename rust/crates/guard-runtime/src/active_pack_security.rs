@@ -289,10 +289,25 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
                 }
                 return Err("active_security_epoch_rollback".into());
             }
+            // A remote Root is kept over an installed bundle that reports the
+            // same authority and revocations: the published one is the fresher
+            // observation of the same security state. That only holds while the
+            // retained Root describes an engine this runtime can serve. A Root
+            // admitted under another engine proves nothing about this engine's
+            // extensions, so `complete` denies every one of them and the whole
+            // pack is quarantined with nothing actually revoked. Guard homes are
+            // shared between runtimes built from different sources -- a Desktop
+            // core beside a CLI install, or a development build that ran once --
+            // so this is reachable without an attacker. Let the installed bundle,
+            // which carries this runtime's engine and is authenticated by the
+            // same authority, take the Root back. The revocation check below
+            // still refuses any bundle that would drop a revocation at this
+            // epoch, so the exchange cannot weaken the retained security state.
             if input["profile"] == "installed"
                 && old.identity["profile"] == "remote"
                 && epoch == old.epoch
                 && authority == old.authority
+                && old.root["engine"] == root["engine"]
             {
                 return Ok(json!({"ignored":true}));
             }

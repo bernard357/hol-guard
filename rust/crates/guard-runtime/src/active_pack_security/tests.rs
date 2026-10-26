@@ -213,3 +213,70 @@ fn only_the_release_the_activation_admits_is_restored() {
     let early = begin_under(&key, upgraded_record, &floor, &previous, &upgrade);
     assert_eq!(early, json!({"error":"pack_lifecycle_version_rollback"}));
 }
+
+/// A published Root at `engine`, carrying the revocations an installed bundle
+/// of the same authority reports.
+fn remote(engine: char, publication_id: &str, authority: u64) -> String {
+    serde_json::to_string(&json!({"authority_epoch":authority,
+        "engine":engine.to_string().repeat(64), "source_sha":SOURCE,
+        "publication_id":publication_id,
+        "policy":{"revocations":{"epoch":2, "revoked":[]}}}))
+    .unwrap()
+}
+
+/// `begin` for a published Root while `active` is the admitted activation.
+fn begin_remote(
+    key: &[u8],
+    record: Option<&str>,
+    floor: &str,
+    publication: &str,
+    active: &(String, Value),
+) -> Value {
+    let mut input = activation(key, active);
+    input["key"] = hex::encode(key).into();
+    input["operation"] = "begin".into();
+    input["profile"] = "remote".into();
+    input["record"] = json!(record);
+    input["lineage_floor"] = floor.into();
+    input["publication"] = publication.into();
+    match evaluate(&input) {
+        Ok(value) => value,
+        Err(code) => json!({"error":code}),
+    }
+}
+
+#[test]
+fn an_installed_bundle_takes_back_a_root_admitted_under_another_engine() {
+    let key = [7; 32];
+    let release = installed('a', "3.55.1", 3);
+    let floor = crate::pack_lifecycle::enrolled_floor(&release.1, &key);
+
+    // Another runtime sharing this Guard home admitted a published Root built
+    // from a different engine. Nothing was revoked: the authority and the
+    // revocations are the ones this release already reports.
+    let foreign = begin_remote(&key, None, &floor, &remote('d', "900.1", 3), &release);
+    let foreign_record = foreign["record"].as_str();
+    let state = Security::decode(foreign_record.unwrap(), &key).unwrap();
+    assert_eq!(state.root["engine"], "d".repeat(64));
+
+    // This runtime cannot serve that engine, so every extension would be
+    // quarantined. Its own authenticated bundle takes the Root back.
+    let healed = begin(&key, foreign_record, &floor, &release);
+    assert_eq!(healed["pending"], true, "{healed}");
+    let state = Security::decode(healed["record"].as_str().unwrap(), &key).unwrap();
+    assert_eq!(state.root["engine"], "a".repeat(64));
+    assert_eq!(state.identity["profile"], "installed");
+}
+
+#[test]
+fn an_installed_bundle_does_not_displace_a_root_of_its_own_engine() {
+    let key = [7; 32];
+    let release = installed('a', "3.55.1", 3);
+    let floor = crate::pack_lifecycle::enrolled_floor(&release.1, &key);
+
+    // The published Root describes the engine this runtime runs, so it stays
+    // the fresher observation of the same security state.
+    let published = begin_remote(&key, None, &floor, &remote('a', "900.1", 3), &release);
+    let ignored = begin(&key, published["record"].as_str(), &floor, &release);
+    assert_eq!(ignored, json!({"ignored":true}));
+}
