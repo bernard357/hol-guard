@@ -420,6 +420,39 @@ fn rollback_abandons_only_a_stale_unanchored_prepared_row() {
     );
 }
 
+/// A commit that failed before anchoring its own prepared row names it, so
+/// the row goes at once instead of refusing every save for the retry window.
+#[test]
+fn rollback_abandons_the_callers_own_failed_row_without_waiting() {
+    let home = Home::new();
+    let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
+    home.commit(2, &catalog('a'), &[local(&catalog('a'))], "prepared");
+    let own: String = home
+        .db
+        .query_row(
+            "select transition_digest from extension_control_authority_transition where revision = 2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let outcome = |digest: &str, pin: &str| {
+        run(&ExtensionControlAuthorityRequestV1 {
+            own_transition_digest: Some(digest.to_owned()),
+            ..rollback_request(&home, pin, SOON)
+        })["plan"]["outcome"]
+            .clone()
+    };
+    assert_eq!(outcome(own.as_str(), head.as_str()), json!("abandon"));
+    // Another request's row is still kept for its own retry.
+    assert_eq!(
+        outcome("0".repeat(64).as_str(), head.as_str()),
+        json!("keep")
+    );
+    // Naming the row never abandons one the anchor already moved onto.
+    let moved = anchor(1, &snapshot_digest(&home, 1), "anchored");
+    assert_eq!(outcome(own.as_str(), moved.as_str()), json!("keep"));
+}
+
 #[test]
 fn resume_plan_finishes_a_committed_row_whose_final_anchor_was_lost() {
     let home = Home::new();

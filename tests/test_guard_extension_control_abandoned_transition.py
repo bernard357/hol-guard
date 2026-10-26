@@ -40,6 +40,20 @@ def _transition_count(store: GuardStore) -> int:
         return int(connection.execute("select count(*) from extension_control_authority_transition").fetchone()[0])
 
 
+def _crash_after_prepare(store: GuardStore, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail a save after its prepared row is written, as a process that died would.
+
+    A save that fails in process takes its own row back; one that dies cannot,
+    so the row is left for reads and later saves to deal with.
+    """
+
+    secrets.fail_anchor_set_number = secrets.anchor_set_count + 1
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_roll_back_abandoned_transition", lambda *_args, **_kwargs: False)
+        with pytest.raises(ExtensionControlAuthorityError, match="anchor"):
+            _commit(store)
+
+
 def test_catalog_flip_flop_with_no_layers_commits_no_revisions(tmp_path: Path) -> None:
     store = _store(tmp_path, MemorySecretStore())
     other = _upgraded_registry()
@@ -66,12 +80,12 @@ def test_commit_after_catalog_flip_flop_chains_normally(tmp_path: Path) -> None:
     assert view.layers == (_disabled_layer(),)
 
 
-def test_recent_prepared_transition_survives_reads_so_the_same_request_can_retry(tmp_path: Path) -> None:
+def test_recent_prepared_transition_survives_reads_so_the_same_request_can_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     secrets = MemorySecretStore()
     store = _store(tmp_path, secrets)
-    secrets.fail_anchor_set_number = secrets.anchor_set_count + 1
-    with pytest.raises(ExtensionControlAuthorityError, match="anchor"):
-        _commit(store)
+    _crash_after_prepare(store, secrets, monkeypatch)
 
     view = store.read_extension_control_authority_for_registry(BUILT_IN_COMMAND_EXTENSION_REGISTRY)
 
@@ -85,9 +99,7 @@ def test_abandoned_prepared_transition_is_rolled_back_on_next_read(
     monkeypatch.setattr(transitions, "_now", _after_retry_window)
     secrets = MemorySecretStore()
     store = _store(tmp_path, secrets)
-    secrets.fail_anchor_set_number = secrets.anchor_set_count + 1
-    with pytest.raises(ExtensionControlAuthorityError, match="anchor"):
-        _commit(store)
+    _crash_after_prepare(store, secrets, monkeypatch)
     assert _transition_count(store) == 1
 
     view = store.read_extension_control_authority_for_registry(BUILT_IN_COMMAND_EXTENSION_REGISTRY)
@@ -105,9 +117,7 @@ def test_new_request_after_abandoned_transition_commits_without_manual_recovery(
     monkeypatch.setattr(transitions, "_now", _after_retry_window)
     secrets = MemorySecretStore()
     store = _store(tmp_path, secrets)
-    secrets.fail_anchor_set_number = secrets.anchor_set_count + 1
-    with pytest.raises(ExtensionControlAuthorityError, match="anchor"):
-        _commit(store)
+    _crash_after_prepare(store, secrets, monkeypatch)
 
     _commit(store, key="change-2")
 

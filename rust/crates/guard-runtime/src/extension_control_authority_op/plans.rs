@@ -265,8 +265,9 @@ impl Ctx<'_> {
 
     /// `rollback_plan`: `_roll_back_abandoned_transition`. The prepared row
     /// above the committed head is abandoned only when the anchor never
-    /// moved past that head and the row outlived its retry window; anything
-    /// else keeps it for its own retry or explicit recovery.
+    /// moved past that head and the row outlived its retry window, or the
+    /// caller names it as its own failed write; anything else keeps it for
+    /// its own retry or explicit recovery.
     pub(super) fn rollback_plan(&self) -> Res<Value> {
         let keep = || Ok(plan("keep", Map::new()));
         let (Some(revision), Some(snapshot_digest), Some(now)) = (
@@ -295,7 +296,17 @@ impl Ctx<'_> {
         let stale = utc_micros(&row_str(&pending, "created_at")?).is_some_and(|created| {
             now.saturating_sub(created) >= ABANDONED_TRANSITION_GRACE_MICROS
         });
-        if !stale {
+        // A commit that failed before anchoring its own row abandons it at
+        // once. Waiting out the retry window would refuse every save in the
+        // meantime, and only a writer lease would ever clear it afterwards.
+        let own = self
+            .request
+            .own_transition_digest
+            .as_deref()
+            .is_some_and(|digest| {
+                row_str(&pending, "transition_digest").is_ok_and(|row| row == digest)
+            });
+        if !stale && !own {
             return keep();
         }
         match Expected::of_row(&pending).and_then(|expected| self.resume(&pending, &expected, None))
