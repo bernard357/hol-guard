@@ -862,7 +862,7 @@ function useExtensionPolicyDraft(props) {
     } finally {
       setPreviewBusy(false);
     }
-  }, [baseEffective, draftLayers]);
+  }, [baseEffective, draftLayers, handleApiError]);
   const keepConflicts = reactExports.useCallback(() => {
     if (!pendingRebase) return;
     setDraftLayers(keepExtensionPolicyRebaseConflicts(pendingRebase.result, pendingRebase.latestEffective));
