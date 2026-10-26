@@ -290,17 +290,28 @@ def test_untrusted_active_identity_cannot_select_security_scope(device, delivery
     assert active_security.read(device) is None
 
 
-@pytest.mark.parametrize("floor", ["authority", "engine"])
-def test_applicable_native_minimum_and_engine_floor_quarantine(device, delivery, floor):
+def test_an_authority_rollback_quarantines_the_selected_packs(device, delivery):
     root = copy.deepcopy(delivery.value)
     root["publication_id"] = "12.2"
-    if floor == "authority":
-        root["authority_epoch"] = 2
-    else:
-        root["engine"] = "2" * 64
-        root["policy"]["root"]["engine"] = "2" * 64
+    root["authority_epoch"] = 2
     result = observe(device, delivery.verified(root), delivery)
     assert result["quarantine"] == ["command.core"] and result["applicable_digest"] is not None
+
+
+def test_an_engine_the_activation_cannot_serve_records_a_floor_and_runs(device, delivery):
+    """A root built by another compiler says nothing about this pack.
+
+    It cannot carry revocations this runtime could act on either, because a
+    publication is only admitted when its root engine matches the running
+    build. Record the floor so the binding still covers it, and leave the
+    operator's commands running.
+    """
+    root = copy.deepcopy(delivery.value)
+    root["publication_id"] = "12.2"
+    root["engine"] = "2" * 64
+    root["policy"]["root"]["engine"] = "2" * 64
+    result = observe(device, delivery.verified(root), delivery)
+    assert result["quarantine"] == [] and result["applicable_digest"] is not None
 
 
 def test_security_fetches_never_hold_the_mutation_lease(device, delivery):

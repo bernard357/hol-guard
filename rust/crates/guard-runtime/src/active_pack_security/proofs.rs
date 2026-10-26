@@ -257,13 +257,25 @@ pub(super) fn complete(state: &mut Security, header: &Value, directory: &Path) -
         let manifest = lookup(directory, &index["index"], total, &id)?.ok_or_else(invalid)?;
         let manifest_digest = manifest["sha256"].as_str().ok_or_else(invalid)?;
         let old_manifest = object(directory, &manifest)?;
-        let mut denied = state.authority
-            > header["authority_epoch"].as_u64().ok_or_else(invalid)?
-            || state.root["engine"] != header["engine"];
+        // An activation older than an observation this home already
+        // authenticated is a security fact about the pack, so hold it.
+        let rollback = state.authority > header["authority_epoch"].as_u64().ok_or_else(invalid)?;
+        // An engine mismatch is not. It says the retained root describes a
+        // different compiler from the one running, so it carries no judgement
+        // about this pack either way, and this runtime can never obtain that
+        // engine's revocations: a publication is admitted only when its root
+        // engine equals this build's implementation digest. The revocations
+        // this runtime can read are checked below whatever the floor says, so
+        // holding every command the pack matches on an engine mismatch alone
+        // enforces an absence of information rather than a security fact.
+        let engine_mismatch = state.root["engine"] != header["engine"];
+        let mut denied = rollback;
         // A publisher can change reviewed trust without revoking the entire
         // extension. Only the active identity's authenticated native path is
-        // traversed; inactive policy payload never participates.
-        if !denied {
+        // traversed; inactive policy payload never participates. The retained
+        // root's trust index describes its own engine, so under a mismatch it
+        // holds no entry for this extension and would deny on absence alone.
+        if !denied && !engine_mismatch {
             match super::trust::latest(directory, &state.root, &id)? {
                 Some(latest) => {
                     let incompatible = latest["trust_digest"] != old_manifest["trust_digest"]
@@ -278,9 +290,7 @@ pub(super) fn complete(state: &mut Security, header: &Value, directory: &Path) -
                 None => denied = true,
             }
         }
-        if state.authority > header["authority_epoch"].as_u64().ok_or_else(invalid)?
-            || state.root["engine"] != header["engine"]
-        {
+        if rollback || engine_mismatch {
             state.applied.insert(
                 format!("floor:{id}"),
                 json!({"authority":state.authority,"engine":state.root["engine"]}),
