@@ -75,7 +75,15 @@ fn writes_a_named_file(text: &str, bare: &str) -> bool {
             },
             rest => rest,
         };
-        let target = target.trim_end_matches([';', '&', '|']);
+        // `>run.js&&node run.js` ends the target at the operator, and a
+        // process substitution such as `> >(sh)` writes to a command.
+        if target.starts_with(['>', '(']) {
+            return true;
+        }
+        let target = target.split([';', '&', '|', ')']).next().unwrap_or(target);
+        if target.is_empty() || target.contains('(') {
+            return true;
+        }
         if target != "/dev/null" {
             targets.push(target);
         }
@@ -142,10 +150,16 @@ fn stem(name: &str) -> &str {
     }
 }
 
-/// The last path component of a word with its quotes and escapes removed.
+/// The last non-empty path component of a word with its quotes and escapes
+/// removed. `lib/` names `lib`, and a word with no component left, such as
+/// `./` or `/`, names the directory itself as `.` does.
 fn file_name(word: &str) -> String {
     let word = unquoted_word(word);
-    word.rsplit('/').next().unwrap_or(&word).to_owned()
+    let name = word.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    match name {
+        "" => ".".to_owned(),
+        name => name.to_owned(),
+    }
 }
 
 /// Whether the shell could expand the word into a name it does not spell: a

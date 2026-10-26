@@ -82,6 +82,8 @@ fn the_reported_shapes_keep_their_floor_when_a_part_could_run_something_else() {
         "printf x > run.js && node ru\"n.js\" > /tmp/x.log 2>&1 &",
         "printf x > run.js && node run > /tmp/x.log 2>&1 &",
         "printf x > lib/index.js && node ./lib > /tmp/x.log 2>&1 &",
+        "printf x > index.js && node ./ > /tmp/x.log 2>&1 &",
+        "printf x > lib/index.js && node lib/ > /tmp/x.log 2>&1 &",
         "builtin cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
         "command cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
         "find \"$HOME/x\" -type f -exec env FOO=bar gh {} \\;",

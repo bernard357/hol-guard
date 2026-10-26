@@ -126,6 +126,17 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
             "printf x && python3 -m run",
         ),
         ("printf x > run && node run", "printf x && node run"),
+        ("printf x > index.js && node ./", "printf x && node ./"),
+        ("printf x >run.js&&node run.js", "printf x&&node run.js"),
+        ("node server.js > >(sh) &", "node server.js &"),
+        (
+            "printf x > lib/index.js && node lib/",
+            "printf x && node lib/",
+        ),
+        (
+            "printf x > lib/index.js && node /w/lib//",
+            "printf x && node /w/lib//",
+        ),
     ] {
         assert!(writes_a_named_file(text, bare), "{text}");
     }
