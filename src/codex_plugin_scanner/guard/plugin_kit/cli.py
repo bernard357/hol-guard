@@ -381,6 +381,10 @@ def _install(args: argparse.Namespace) -> int:
         install.write_plan(plan, apply=args.apply)
     if not args.apply:
         return 0
+    # Refuse before anything runs when the install record cannot be read,
+    # rather than installing and then failing to record it.
+    if _call({"command": "installs", "guard_home": str(guard_home)}) is None:
+        return 2
 
     def record(runtime: str) -> None:
         install.record(guard_home, slug, runtime, installed=installing, spec=spec)

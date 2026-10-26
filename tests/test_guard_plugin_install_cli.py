@@ -202,18 +202,34 @@ def test_uninstall_only_removes_what_guard_installed(
         _run(["plugin", "uninstall", "acme/toolgate", "--spec-file", str(spec_file)])
 
 
-def test_a_record_that_cannot_be_written_fails_the_install(
+def test_an_unreadable_record_stops_apply_before_anything_runs(
     spec_file: Path, programs: list[list[str]], guard_home: Path
 ) -> None:
     (guard_home / "plugin-kit").mkdir()
     (guard_home / "plugin-kit" / "installs.json").write_text("{not json", encoding="utf-8")
+    argv = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--runtime", "codex"]
+    exit_code, output, error = _run([*argv, "--apply", "--yes"])
+    assert (exit_code, programs) == (2, [])
+    assert "installed" not in output
+    assert "could not be read" in error
+    assert (guard_home / "plugin-kit" / "installs.json").read_text(encoding="utf-8") == "{not json"
+    # A plan alone never reads the record.
+    assert _run(argv)[0] == 0
+
+
+def test_a_record_that_cannot_be_written_fails_the_install(
+    spec_file: Path, monkeypatch: pytest.MonkeyPatch, programs: list[list[str]]
+) -> None:
+    def fail(*_args: Any, **_kwargs: Any) -> None:
+        raise install.PluginInstallError("Guard could not update its install record in the Guard home.")
+
+    monkeypatch.setattr(install, "record", fail)
     exit_code, output, error = _run(
         ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
     )
     assert exit_code == 1
     assert "codex: installed" in output
-    assert "could not be read" in error
-    assert (guard_home / "plugin-kit" / "installs.json").read_text(encoding="utf-8") == "{not json"
+    assert "may be out of date" in error
 
 
 def test_only_allowed_programs_can_run(monkeypatch: pytest.MonkeyPatch, guard_home: Path) -> None:
