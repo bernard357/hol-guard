@@ -450,12 +450,19 @@ impl Ctx<'_> {
         // forth faster than a dashboard draft can be applied.
         let oscillates = mode.allow_migration
             && self.migration_oscillates(revision, catalog_digest, stored_catalog_digest)?;
+        // The source read serves the committed view while a prepare that
+        // decides nothing still holds the next revision. Migrating now would
+        // insert a second transition at that occupied revision, so the
+        // migration waits for the writer that discards the row and the read
+        // is served rebound in memory meanwhile.
+        let next_occupied =
+            mode.allow_migration && self.pending_transition(revision + 1)?.is_some();
         let Some(current_manifest) = self.current_manifest() else {
             return Ok(Read::NeedManifest);
         };
         let (layers, retired_targets) =
             self.rebound_catalog_layers(&previous, catalog_digest, current_manifest)?;
-        if !mode.allow_migration || oscillates {
+        if !mode.allow_migration || oscillates || next_occupied {
             return Ok(Read::View(View {
                 catalog_digest: catalog_digest.to_owned(),
                 layers,

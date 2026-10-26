@@ -409,6 +409,28 @@ fn catalog_change_needs_a_registry_then_the_manifest_then_migrates() {
 }
 
 #[test]
+fn a_waiting_prepare_holds_the_catalog_migration_back() {
+    let home = Home::new();
+    let anchor = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
+    home.commit(2, &catalog('a'), &[], "prepared");
+    // The rollback was asked for and the row is still inside its retry
+    // window, so the source read serves revision 1. A migration planned from
+    // that view would take revision 2, which the prepare still holds.
+    let request = ExtensionControlAuthorityRequestV1 {
+        migration: true,
+        allow_migration: true,
+        rollback_attempted: true,
+        current_manifest: Some(manifest("fp1")),
+        ..read_request(&home, &catalog('b'), Some(anchor))
+    };
+    let result = run(&request);
+    assert!(result.get("action").is_none(), "{result}");
+    assert_eq!(health(&result), "protected");
+    assert_eq!(result["view"]["revision"], json!(1));
+    assert_eq!(result["view"]["catalog_digest"], json!(catalog('b')));
+}
+
+#[test]
 fn migration_retires_targets_the_new_catalog_dropped() {
     let home = Home::new();
     let anchor = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
