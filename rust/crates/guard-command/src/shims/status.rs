@@ -463,7 +463,22 @@ pub fn package_shim_cloud_coverage(
     context: &ShimContext,
     generated_at: Option<&str>,
 ) -> ShimResult<Value> {
-    let status = package_shim_status(context, None)?;
+    let mut status = package_shim_status(context, None)?;
+    // A sync launched outside a login shell (a background service, the desktop
+    // app, a hook) does not inherit the shim directory the shell profile
+    // prepends. Judge PATH order the way a new shell will see it, so a machine
+    // whose shells are protected is not reported as bypassed.
+    if status.get("path_status").and_then(Value::as_str) == Some("restart_required")
+        && flag(&status, "shell_profile_configured")
+    {
+        let login_path = format!(
+            "{}{}{}",
+            context.shim_dir(),
+            context.pathsep(),
+            context.env_path()
+        );
+        status = package_shim_status(context, Some(&login_path))?;
+    }
     Ok(json!({
         "generatedAt": generated_at.filter(|text| !text.is_empty()).unwrap_or(&context.facts.now),
         "configuredManagers": string_items(status.get("installed_managers")),
