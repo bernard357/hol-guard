@@ -56,6 +56,9 @@ on:
       supported_runtimes:
         description: Number of agent runtimes the Plugin Kit can package this plugin for
         value: ${{ jobs.release.outputs.supported_runtimes }}
+      sbom_components:
+        description: Number of components in the CycloneDX SBOM, 0 when the release declares no packages
+        value: ${{ jobs.release.outputs.sbom_components }}
       attestation_url:
         description: GitHub artifact attestation URL
         value: ${{ jobs.release.outputs.attestation_url }}
@@ -83,6 +86,7 @@ jobs:
       score: ${{ steps.release.outputs.score }}
       check_passed: ${{ steps.release.outputs.check_passed }}
       supported_runtimes: ${{ steps.release.outputs.supported_runtimes }}
+      sbom_components: ${{ steps.release.outputs.sbom_components }}
       attestation_url: ${{ steps.release.outputs.attestation_url }}
       release_status: ${{ steps.release.outputs.release_status }}
       release_url: ${{ steps.release.outputs.release_url }}
@@ -105,3 +109,14 @@ jobs:
           register_release: ${{ inputs.register_release }}
           offer_line: ${{ inputs.offer_line }}
           release_endpoint: https://hol.org/api/guard/plugins/releases/attestations
+
+      - name: Keep the evidence and SBOM with the run
+        if: ${{ always() && steps.release.outputs.evidence_path != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: hol-plugin-release
+          path: |
+            ${{ runner.temp }}/hol-plugin-release-evidence.json
+            ${{ runner.temp }}/hol-plugin-release-sbom.cdx.json
+          if-no-files-found: ignore
+          retention-days: 90
