@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters.base import _command_available, _resolve_command
+from codex_plugin_scanner.guard.adapters.base import (
+    _command_available,
+    _resolve_command,
+    _which_from_user_directories,
+)
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="launchd and desktop PATH defaults are POSIX-only")
 
@@ -37,14 +41,33 @@ def test_launchd_path_finds_cli_in_user_install_directory(home: Path, monkeypatc
     monkeypatch.setenv("PATH", LAUNCHD_PATH)
 
     assert _command_available("guardtestcli") is True
-    assert _resolve_command("guardtestcli") == str(executable)
+    assert _which_from_user_directories("guardtestcli") == str(executable)
+
+
+def test_launchd_path_never_changes_the_launch_executable(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(home / ".bun" / "bin", "guardtestcli")
+    monkeypatch.setenv("PATH", LAUNCHD_PATH)
+
+    assert _resolve_command("guardtestcli") is None
+
+
+def test_lookup_uses_the_harness_home_not_the_process_home(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install(home / ".bun" / "bin", "guardtestcli")
+    other_home = tmp_path / "other-home"
+    executable = _install(other_home / ".local" / "bin", "guardtestcli")
+    monkeypatch.setenv("PATH", LAUNCHD_PATH)
+
+    assert _which_from_user_directories("guardtestcli", other_home) == str(executable)
+    assert _command_available("guardtestcli", tmp_path / "empty-home") is False
 
 
 def test_launchd_path_finds_cli_in_its_own_installer_directory(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     executable = _install(home / ".guardtestcli" / "bin", "guardtestcli")
     monkeypatch.setenv("PATH", LAUNCHD_PATH)
 
-    assert _resolve_command("guardtestcli") == str(executable)
+    assert _which_from_user_directories("guardtestcli") == str(executable)
 
 
 def test_launchd_path_prefers_newest_nvm_node(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,7 +76,7 @@ def test_launchd_path_prefers_newest_nvm_node(home: Path, monkeypatch: pytest.Mo
     newest = _install(versions / "v25.2.1" / "bin", "guardtestcli")
     monkeypatch.setenv("PATH", LAUNCHD_PATH)
 
-    assert _resolve_command("guardtestcli") == str(newest)
+    assert _which_from_user_directories("guardtestcli") == str(newest)
 
 
 def test_terminal_path_is_not_widened(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,7 +86,14 @@ def test_terminal_path_is_not_widened(home: Path, tmp_path: Path, monkeypatch: p
     monkeypatch.setenv("PATH", f"{empty}{os.pathsep}{LAUNCHD_PATH}")
 
     assert _command_available("guardtestcli") is False
-    assert _resolve_command("guardtestcli") is None
+
+
+@pytest.mark.parametrize("path_value", ["", os.pathsep, os.pathsep * 3])
+def test_empty_path_is_not_widened(home: Path, monkeypatch: pytest.MonkeyPatch, path_value: str) -> None:
+    _install(home / ".bun" / "bin", "guardtestcli")
+    monkeypatch.setenv("PATH", path_value)
+
+    assert _which_from_user_directories("guardtestcli") is None
 
 
 def test_writable_install_directory_is_ignored(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,4 +115,17 @@ def test_world_writable_entrypoint_in_private_directory_is_found(home: Path, mon
     executable = _install(home / ".bun" / "bin", "guardtestcli", mode=0o777)
     monkeypatch.setenv("PATH", LAUNCHD_PATH)
 
-    assert _resolve_command("guardtestcli") == str(executable)
+    assert _which_from_user_directories("guardtestcli") == str(executable)
+
+
+def test_symlink_into_writable_directory_is_ignored(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _install(tmp_path / "shared", "guardtestcli")
+    target.parent.chmod(0o777)
+    link_directory = home / ".bun" / "bin"
+    link_directory.mkdir(parents=True)
+    (link_directory / "guardtestcli").symlink_to(target)
+    monkeypatch.setenv("PATH", LAUNCHD_PATH)
+
+    assert _command_available("guardtestcli") is False

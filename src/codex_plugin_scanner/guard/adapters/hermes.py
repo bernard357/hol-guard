@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -292,7 +293,7 @@ class HermesHarnessAdapter(HarnessAdapter):
         overlay_path, pretool_path = managed_paths or (None, None)
         hook_registered = hermes_runtime_hooks.hermes_runtime_hook_registered(_hermes_home(context) / "config.yaml")
         return {
-            "command": _run_command_probe([self.executable, "--help"]) if _command_available(self.executable) else None,
+            "command": _run_command_probe([self.executable, "--help"]) if shutil.which(self.executable) else None,
             "managed_install_present": bool(manifest),
             "runtime_hook_registered": hook_registered,
             "managed_install_ready": (
@@ -356,7 +357,7 @@ class HermesHarnessAdapter(HarnessAdapter):
             roots = [hermes_home] if host_home is None else [hermes_home, anchor_to_process_directory(host_home)]
             request["skill_identities"] = _portable_skill_identities(roots)
         artifacts, found_paths, warnings = native_adapter_detection_with_warnings("hermes_detect", request)
-        command_available = _command_available(self.executable)
+        command_available = _command_available(self.executable, context.home_dir)
         return HarnessDetection(
             harness=self.harness,
             installed=bool(found_paths) or command_available,
