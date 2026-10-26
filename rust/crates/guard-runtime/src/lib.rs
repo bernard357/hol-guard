@@ -141,6 +141,7 @@ mod codex_hook_bridge;
 mod codex_hook_bridge_direct;
 mod codex_hook_bridge_direct_resident;
 mod codex_hook_bridge_transport;
+mod codex_hook_file_identity_op;
 mod codex_hook_identity;
 mod codex_hook_response;
 mod codex_hooks;
@@ -188,6 +189,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
 #[cfg(unix)]
@@ -670,6 +672,7 @@ use guard_policy_bundle::{
     python as policy_bundle_py, time as policy_bundle_time,
 };
 mod policy_bundle_op;
+mod policy_bundle_payload_hash;
 #[cfg(test)]
 mod policy_bundle_transport_tests;
 mod policy_decision_lookup_op;

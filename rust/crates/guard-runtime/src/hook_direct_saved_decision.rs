@@ -232,6 +232,7 @@ fn custom_grant(context: &Context<'_>, result: &Object) -> Option<ReviewVerdict>
         guard_home: context.guard_home,
         // The daemon pauses no review in Watch, so this lane never records.
         recording_only: false,
+        launch_env: None,
     })
 }
 
@@ -397,7 +398,7 @@ fn approvable(result: &Object) -> bool {
 }
 
 /// `_native_review_is_overridable`: a review a broad local-CLI grant may lift.
-fn overridable(result: &Object) -> bool {
+pub(super) fn overridable(result: &Object) -> bool {
     let action_type = result
         .get("action")
         .and_then(Value::as_object)
