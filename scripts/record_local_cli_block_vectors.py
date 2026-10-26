@@ -101,16 +101,23 @@ def grant_cases() -> list[tuple[str, object]]:
     ]
 
 
-def grant_outcome(label: str) -> str | None:
-    """Return the grant outcome recorded for ``label``.
+def grant_outcome(label: str, payload: object) -> str | None:
+    """Return the grant outcome recorded for ``label`` and its exact answer.
 
     The grant decision and its answer decoder now live only in the resident
     (``local_cli_grant_op.rs``). Their Python copies are retired, so the
-    outcomes they recorded are kept as the reference.
+    outcomes they recorded are kept as the reference. A case whose answer
+    changed, or a new case, has no trustworthy recorded outcome: its expected
+    value must be recorded from the resident, so the recorder refuses it.
     """
 
     recorded = json.loads(OUT.read_text(encoding="utf-8"))["grant_answers"]["cases"]
-    return next(case["expected"] for case in recorded if case["label"] == label)
+    for case in recorded:
+        if case["label"] == label:
+            if case["answer"] != payload:
+                raise SystemExit(f"grant case {label!r} changed; record its outcome from the resident")
+            return case["expected"]
+    raise SystemExit(f"grant case {label!r} has no recorded outcome; record it from the resident")
 
 
 def results() -> list[tuple[str, dict[str, object]]]:
@@ -204,7 +211,7 @@ def document() -> dict[str, object]:
             "cli_id": CLI_ID,
             "identity_hash": HASH,
             "cases": [
-                {"label": label, "answer": payload, "expected": grant_outcome(label)}
+                {"label": label, "answer": payload, "expected": grant_outcome(label, payload)}
                 for label, payload in grant_cases()
             ],
         },
