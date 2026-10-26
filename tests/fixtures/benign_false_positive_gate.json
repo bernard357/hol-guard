@@ -18272,6 +18272,102 @@
       "expect": "allow"
     },
     {
+      "id": "walkup-cd-subdirectory-npx-vitest",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && npx vitest run"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-npx-eslint",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && npx eslint ."
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-npm-exec-tsc",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && npm exec tsc --noEmit"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-npx-tsc",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && npx tsc --noEmit"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-uv-run-pytest",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && uv run pytest -q"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "walkup-cd-subdirectory-cargo-test",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd app && cargo test"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "neg-toolchain-npm-exec-workspace-filter",
       "fix_area": "shell",
       "harnesses": [
@@ -20707,6 +20803,406 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-silent-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --silent run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-reporter-value-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --reporter silent run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-reporter-inline-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --reporter=silent run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-recursive-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -r run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-filter-name-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter web run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-pnpm-filter-short-scoped-run-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -F @acme/web run lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-npm-silent-run-build",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --silent run build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-npm-loglevel-inline-run-build",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --loglevel=error run build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-npm-workspace-run-build",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --workspace web run build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-yarn-silent-build",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --silent build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inert-bun-flag-run-typecheck",
+      "fix_area": "package",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bun --bun run typecheck"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-inert-yarn-silent-has-no-verb",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --silent"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-yarn-frozen-lockfile-installs",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --frozen-lockfile"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-yarn-workspaces-focus-installs",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn workspaces focus"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-yarn-silent-workspaces-focus-installs",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --silent workspaces focus"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-yarn-workspaces-foreach-runs-its-own-command",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn workspaces foreach run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-directory-selector",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter {/opt/other} run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-name-then-directory",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter web{/opt/other} run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-ref-then-directory",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter [origin/main]{/opt/other} run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-exclusion-directory",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter !{/opt/other} run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-drive-selector",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter=C:/other run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-npm-silent-install",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --silent install"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-silent-add-package",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --silent add lodash"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-filter-path-selector",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --filter ./packages/web run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-inert-pnpm-unknown-option-hides-verb",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --registry https://example.test run build"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
     },
     {
       "id": "shell-just-recipe",

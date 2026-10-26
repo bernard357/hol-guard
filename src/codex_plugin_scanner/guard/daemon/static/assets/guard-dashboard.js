@@ -35274,7 +35274,7 @@ async function fetchMcpProviderActions(cliId, options) {
     };
   });
   const nextOffset = body.next_offset;
-  if (nextOffset !== null && (typeof nextOffset !== "number" || !Number.isSafeInteger(nextOffset) || nextOffset !== options.offset + 50 || nextOffset > 1e4)) throw new Error("Invalid provider inventory page");
+  if (nextOffset !== null && (typeof nextOffset !== "number" || !Number.isSafeInteger(nextOffset) || nextOffset <= options.offset || nextOffset > options.offset + 50 || nextOffset > 1e4)) throw new Error("Invalid provider inventory page");
   return { actions, nextOffset, catalogToken: body.catalog_token };
 }
 const EXTENSION_ID_PATTERN = /^command\.[a-z0-9]+(?:[.-][a-z0-9]+)*$/;

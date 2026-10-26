@@ -141,6 +141,7 @@ mod codex_hook_bridge;
 mod codex_hook_bridge_direct;
 mod codex_hook_bridge_direct_resident;
 mod codex_hook_bridge_transport;
+mod codex_hook_file_identity_op;
 mod codex_hook_identity;
 mod codex_hook_response;
 mod codex_hooks;
@@ -188,6 +189,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
 #[cfg(unix)]
@@ -295,6 +297,7 @@ mod guard_config_harness;
 mod guard_config_iso;
 mod guard_config_load;
 mod guard_config_managed;
+mod guard_config_resolve;
 mod guard_config_update;
 mod guard_config_update_coerce;
 mod guard_config_update_harness;
@@ -370,6 +373,10 @@ mod guard_store_local_cli_mcp_snapshot;
 mod guard_store_local_cli_vectors_tests;
 mod guard_store_local_mcp_declarations;
 mod guard_store_local_mcp_observation;
+mod guard_store_mcp_provider_reads;
+#[cfg(test)]
+mod guard_store_mcp_reads_tests;
+mod guard_store_mcp_workflow_reads;
 mod guard_store_native_receipts;
 #[cfg(test)]
 mod guard_store_native_receipts_tests;
@@ -559,6 +566,7 @@ mod mcp_proxy_decision_tests;
 mod mcp_proxy_decision_vectors_tests;
 mod mcp_proxy_inline_approval;
 mod mcp_proxy_package;
+mod mcp_proxy_package_answer;
 mod mcp_proxy_postclaim;
 mod mcp_proxy_projection;
 #[cfg(test)]
