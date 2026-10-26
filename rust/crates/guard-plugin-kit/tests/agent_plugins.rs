@@ -709,18 +709,53 @@ fn a_server_file_too_large_to_copy_fails_the_package() {
     ]);
     fs::create_dir_all(root.join("data")).expect("data folder");
     fs::write(root.join("data/model.bin"), vec![0_u8; 5 * 1024 * 1024 + 1]).expect("model");
-    let out = root.parent().expect("parent").join("dist");
-    let response = call(json!({
-        "command": "package",
-        "root": root.to_str().expect("path"),
-        "out_dir": out.to_str().expect("path"),
-        "runtimes": ["agent-plugins"],
-    }));
+    let response = package_response(&root);
+    let _ = fs::remove_dir_all(root.parent().expect("parent"));
     assert_eq!(
         response,
         json!({"ok": false, "error": "plugin_kit_package_too_large"}),
         "{response}"
     );
+}
+
+#[test]
+fn a_server_file_inside_a_skill_folder_too_large_to_copy_fails_the_package() {
+    // The skill walk reaches the file first; the server still requires it.
+    let root = repo(&[
+        (
+            "plugin.json",
+            &manifest(json!({"description": "Fill PDF forms."})),
+        ),
+        ("skills/fill-forms/SKILL.md", SKILL),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "pdf": {"type": "stdio", "command": "pdf-server", "args": ["${PLUGIN_ROOT}/skills/fill-forms/model.bin"]},
+            })),
+        ),
+    ]);
+    fs::write(
+        root.join("skills/fill-forms/model.bin"),
+        vec![0_u8; 5 * 1024 * 1024 + 1],
+    )
+    .expect("model");
+    let response = package_response(&root);
+    let _ = fs::remove_dir_all(root.parent().expect("parent"));
+    assert_eq!(
+        response,
+        json!({"ok": false, "error": "plugin_kit_package_too_large"}),
+        "{response}"
+    );
+}
+
+fn package_response(root: &Path) -> Value {
+    let out = root.parent().expect("parent").join("dist");
+    call(json!({
+        "command": "package",
+        "root": root.to_str().expect("path"),
+        "out_dir": out.to_str().expect("path"),
+        "runtimes": ["agent-plugins"],
+    }))
 }
 
 #[test]
