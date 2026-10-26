@@ -19,6 +19,9 @@ const SERVER: &str = "srv-1";
 const CATEGORY: &str = "browser_navigation";
 const REASON: &str = "routine browser capability";
 
+/// A stored decision that agrees with a terminal policy action.
+const BLOCK_DECISION: &str = r#"{"action": "block", "approval_scopes": [], "confidence": "likely", "guard_action": "block", "reason": "block", "signals": [], "user_title": "Blocked"}"#;
+
 /// A stored browser intent for one server and one routine category.
 fn browser_intent(server: &str, intent: &str, category: &str) -> String {
     json!({
@@ -85,6 +88,13 @@ fn scenario(vectors: &Value) -> Value {
                 json!(format!("qg-{request_id}")),
             );
             row.insert("browser_intent_json".to_owned(), json!(intent));
+            // The recorded decision states `require-reapproval`. A row whose
+            // policy action is terminal needs a decision that says so too, or
+            // the projection reports a contract inconsistency instead of the
+            // terminal action the sweep is being asked about.
+            if policy_action == "block" {
+                row.insert("decision_v2_json".to_owned(), json!(BLOCK_DECISION));
+            }
             Value::Object(row)
         })
         .collect();
