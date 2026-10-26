@@ -2099,7 +2099,7 @@ class RuntimeMcpGuardProxy:
             # answered.
             overlay = answer["safe_alternative_overlay"]
             message = response["error"]["message"]
-            blocked = package_evaluation.to_dict()
+            blocked = dict(package_evaluation.to_dict())
             user_copy = blocked.get("user_copy")
             blocked.update(decision=overlay["decision"], policy_action=overlay["policy_action"])
             blocked["user_copy"] = {
