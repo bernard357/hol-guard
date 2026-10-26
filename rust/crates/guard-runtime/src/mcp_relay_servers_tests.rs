@@ -60,14 +60,16 @@ fn a_server_past_the_bound_stays_unknown() {
 }
 
 #[test]
-fn composio_and_nameless_tools_are_decided_by_the_proxy() {
+fn only_nameless_tools_are_decided_by_the_proxy() {
+    for tool in [json!({"description": "no name"}), json!({"name": 7})] {
+        assert!(proxy_tool(&tool), "{tool}");
+    }
+    // The resident reads a Composio wrapper's provider catalog hash itself.
     for tool in [
         json!({"name": "COMPOSIO_SEARCH_TOOLS"}),
         json!({"name": "github__composio_execute"}),
-        json!({"description": "no name"}),
-        json!({"name": 7}),
     ] {
-        assert!(proxy_tool(&tool), "{tool}");
+        assert!(!proxy_tool(&tool), "{tool}");
     }
 }
 
