@@ -56,7 +56,9 @@ fn a_logged_launch_a_rooted_find_and_a_looped_inline_program_reach_review() {
 /// that could run something else: a redirect target or input the text does
 /// not spell, a find action that hands its file to a shell, a root that is
 /// not quoted, a launch with a preload, a loop that sources a file or moves
-/// to another directory, and a variable the shell or Node reads.
+/// to another directory, and a variable the shell or Node reads. Where a
+/// sandbox can contain a foreground write, its containment floor answers
+/// first and is stricter than the review a relaxed shape would reach.
 #[test]
 fn the_reported_shapes_keep_their_floor_when_a_part_could_run_something_else() {
     let (home, project) = reported_context();
@@ -93,10 +95,13 @@ fn the_reported_shapes_keep_their_floor_when_a_part_could_run_something_else() {
         let result = evaluate_in(&binding, command, home.path(), &project);
         assert_ne!(result.minimum_action, "allow", "{command}");
         assert!(!result.explicitly_benign, "{command}");
-        assert_eq!(
-            result.reason_code, "native_command_extension_evaluation_failed",
-            "{command} {}",
-            result.minimum_action
+        let contained = result.minimum_action == "sandbox-required"
+            && result.reason_code == "native_workspace_containment_required";
+        assert!(
+            contained || result.reason_code == "native_command_extension_evaluation_failed",
+            "{command} {} {}",
+            result.minimum_action,
+            result.reason_code
         );
     }
 }
