@@ -291,9 +291,6 @@ impl Ctx<'_> {
         let Some(pending) = self.pending_transition(revision + 1)? else {
             return keep();
         };
-        if row_str(&pending, "phase")? != Phase::Prepared.as_str() {
-            return keep();
-        }
         // `_prepared_row_is_stale`: an unreadable clock keeps the row.
         let stale = utc_micros(&row_str(&pending, "created_at")?).is_some_and(|created| {
             now.saturating_sub(created) >= ABANDONED_TRANSITION_GRACE_MICROS
@@ -308,18 +305,32 @@ impl Ctx<'_> {
             .is_some_and(|digest| {
                 row_str(&pending, "transition_digest").is_ok_and(|row| row == digest)
             });
-        if !stale && !own {
+        if (!stale && !own) || !self.pending_carries_no_authority(&pending)? {
             return keep();
         }
-        match Expected::of_row(&pending).and_then(|expected| self.resume(&pending, &expected, None))
-        {
-            Ok((Resume::Abandon, _)) => Ok(plan(
-                "abandon",
-                Map::from_iter([("revision".to_owned(), json!(revision + 1))]),
-            )),
-            // A transition this reader may not abandon is left for its own
-            // retry or explicit recovery.
-            Ok(_) | Err(Fault::Tampered(_)) => keep(),
+        Ok(plan(
+            "abandon",
+            Map::from_iter([("revision".to_owned(), json!(revision + 1))]),
+        ))
+    }
+
+    /// Whether the prepared row above the committed head carries no authority
+    /// of its own: the vault anchor still pins the committed snapshot below
+    /// it, and the row authenticates as a prepare that anchor never moved
+    /// past. Such a row decides nothing the device enforces, so a reader that
+    /// cannot remove it may still serve the committed view, and a writer may
+    /// not take the revision it holds.
+    ///
+    /// A transition that fails to authenticate as that shape is not one a
+    /// caller may discount: it is left for its own retry or for explicit
+    /// recovery.
+    pub(super) fn pending_carries_no_authority(&self, pending: &Row) -> Res<bool> {
+        if row_str(pending, "phase")? != Phase::Prepared.as_str() {
+            return Ok(false);
+        }
+        match Expected::of_row(pending).and_then(|expected| self.resume(pending, &expected, None)) {
+            Ok((Resume::Abandon, _)) => Ok(true),
+            Ok(_) | Err(Fault::Tampered(_)) => Ok(false),
             Err(fault) => Err(fault),
         }
     }
@@ -376,15 +387,27 @@ impl Ctx<'_> {
             let Some(replay) = &replay else {
                 return Err(tampered("extension control authority proof replay"));
             };
-            let phase = Phase::parse(&row_text(replay, "phase")?)
-                .ok_or_else(|| degraded("invalid extension control authority phase"))?;
-            if phase == Phase::Committed {
-                return Err(tampered("extension control authority proof replay"));
-            }
+            // The grant names the one mutation it was issued for and the one
+            // row that reserved it. A grant that names anything else is not
+            // this transition's, whatever state that transition is in.
             if row_text(proof, "mutation_digest")? != commit.mutation_digest
                 || row_py_int(proof, "transition_revision")? != row_int(replay, "revision")?
             {
                 return Err(tampered("extension control authority proof state conflict"));
+            }
+            let phase = Phase::parse(&row_text(replay, "phase")?)
+                .ok_or_else(|| degraded("invalid extension control authority phase"))?;
+            // A committed row whose grant was spent is a second use of a
+            // commit that already returned. A committed row whose grant is
+            // still unspent is this caller's own commit, finished for it by a
+            // read that met the sealed head while the call that prepared it
+            // was still in flight. Refusing that as a replay would strand the
+            // caller: its commit never returned, and the grant it holds is the
+            // only one it has. It falls through to `resume`, which checks the
+            // row against this request's own identity and layers and settles
+            // the grant, so the single use is spent exactly once either way.
+            if phase == Phase::Committed && row_optional_str(proof, "consumed_at")?.is_some() {
+                return Err(tampered("extension control authority proof replay"));
             }
         }
         if let Some(replay) = &replay {
@@ -417,6 +440,20 @@ impl Ctx<'_> {
         }
         if current.revision != commit.expected_revision {
             return Err(tampered("extension control authority revision conflict"));
+        }
+        // Another request's prepared row already holds the revision this
+        // commit would write. A read that may roll it back lets this one
+        // proceed; once such a read has run and the row is still there, it is
+        // a live transition this request must not take. The served view no
+        // longer reports that row -- an unanchored prepare decides nothing,
+        // and reporting it would stop every command on the device -- so the
+        // occupied revision is checked here rather than read off the health
+        // the caller was handed.
+        if self.pending_transition(current.revision + 1)?.is_some() {
+            if self.request.rollback_attempted {
+                return Err(tampered("extension control authority unavailable"));
+            }
+            return Ok(plan("reread", Map::new()));
         }
         let seen = |sql: &str, value: &str| -> Res<bool> {
             Ok(query_row(self.connection, sql, params![value])?.is_some())

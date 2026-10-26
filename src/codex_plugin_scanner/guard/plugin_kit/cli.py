@@ -1,4 +1,4 @@
-"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|links|install|uninstall``.
+"""CLI for the HOL Guard Plugin Kit: ``hol-guard plugin init|check|package|convert|links|card|install|uninstall|stats``.
 
 Detection, checks, packaging and file writes run in the native runtime's
 ``plugin-kit`` command. This module parses arguments, sends one request and
@@ -15,8 +15,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .output import write_check, write_conformance, write_links
+
 PLUGIN_KIT_COMMAND = "plugin-kit"
 PLUGIN_KIT_FEATURE = "plugin-kit-v1"
+AGENT_PLUGINS_SPEC = "agent-plugins-1.0"
 _TIMEOUT_SECONDS = 120.0
 _OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 _NATIVE_UNAVAILABLE = "The HOL Guard Plugin Kit requires the Guard native runtime. Run: pip install -U hol-guard"
@@ -38,8 +41,10 @@ _ERRORS = {
             "opencode",
             "mcp-registry",
             "agent-skills",
+            "agent-plugins",
         )
     ),
+    "plugin_kit_spec_unsupported": "Unknown spec. Supported: agent-plugins-1.0",
     "plugin_kit_runtime_unsupported": (
         "A requested runtime cannot load this plugin. Run check to see what each runtime takes."
     ),
@@ -52,6 +57,7 @@ _ERRORS = {
     ),
     "plugin_kit_output_unwritable": "The output folder could not be written.",
     "plugin_kit_package_too_large": "The plugin is too large to package.",
+    "plugin_kit_package_path_conflict": "Two different files would be packaged at the same path.",
     "plugin_kit_init_needs_name": "This folder has no plugin yet. Pass --name to scaffold one.",
     "plugin_kit_init_name_invalid": "Use a kebab-case --name of at most 64 characters, such as my-plugin.",
     "plugin_kit_init_folder_not_empty": (
@@ -86,6 +92,7 @@ _ERRORS = {
     "plugin_kit_ledger_unwritable": "Guard could not update its install record in the Guard home.",
     "plugin_kit_guard_home_invalid": "The Guard home must be an absolute path.",
     "plugin_kit_links_slug_invalid": "Use a HOL listing slug such as owner/plugin.",
+    "plugin_kit_card_slug_invalid": "Use a HOL listing slug such as owner/plugin.",
 }
 
 
@@ -183,6 +190,20 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
     init.add_argument("--name", help="Kebab-case name for a new plugin in an empty folder.")
     check = add("check", "Report what marketplaces and runtime loaders would reject.")
     check.add_argument("--strict", action="store_true", help="Fail on warnings too.")
+    check.add_argument(
+        "--spec",
+        choices=(AGENT_PLUGINS_SPEC,),
+        help="Check conformance to a published plugin format instead, such as the Agent Plugins spec.",
+    )
+    convert = add("convert", "Write a ready-to-load copy of the plugin for one runtime or format.")
+    convert.add_argument(
+        "--to",
+        required=True,
+        metavar="RUNTIME",
+        help="Runtime or format to convert to, such as agent-plugins, codex or gemini-cli.",
+    )
+    convert.add_argument("--out", help="Output folder (default: hol.json's out, else dist/hol-plugin).")
+    convert.add_argument("--force", action="store_true", help="Replace the files a previous convert wrote.")
     package = add("package", "Write a ready-to-load copy of the plugin for each runtime.")
     package.add_argument("--out", help="Output folder (default: hol.json's out, else dist/hol-plugin).")
     package.add_argument(
@@ -203,6 +224,11 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         help="Print only the README install block: hol-guard plugin install plus each runtime's commands.",
     )
     links.add_argument("--slug", help="HOL listing the block names (default: the GitHub repository).")
+    card = add(
+        "card",
+        "Print a draft .well-known card for the plugin: what it declares, where it is listed.",
+    )
+    card.add_argument("--slug", help="HOL listing the card links to (default: the GitHub repository).")
     for name, help_text in (
         ("install", "Install a HOL listing with each runtime's own CLI. Prints the plan unless --apply."),
         ("uninstall", "Remove a listing that plugin install added. Prints the plan unless --apply."),
@@ -226,17 +252,32 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         if name == "install":
             command.add_argument("--spec-file", help="Read the install spec from a file instead of HOL (offline, CI).")
         command.add_argument("--json", action="store_true", help="Print the plan as JSON.")
+    stats = commands.add_parser(
+        "stats",
+        help="Print a listing you own's views and attested installs from HOL (needs HOL_API_KEY).",
+        description=(
+            "Print a listing you own's views for the last 28 days and last week's attested installs. "
+            "Reads a stats key from HOL_API_KEY; create one in the HOL plugin workspace."
+        ),
+    )
+    stats.add_argument("slug", help="HOL listing you own, such as owner/plugin.")
+    stats.add_argument("--json", action="store_true", help="Print HOL's answer as JSON.")
     return parser
 
 
 def _request(args: argparse.Namespace) -> dict[str, object]:
     request: dict[str, object] = {"command": args.command, "root": str(Path(args.path).resolve())}
+    if args.command == "check" and args.spec:
+        request["command"] = "conformance"
+        request["spec"] = args.spec
     if args.command == "init" and args.name:
         request["name"] = args.name
     if args.command == "links" and args.block:
         request["block"] = True
         if args.slug:
             request["slug"] = args.slug
+    if args.command == "card" and args.slug:
+        request["slug"] = args.slug
     if args.command in {"check", "package"}:
         request["strict"] = bool(args.strict)
     if args.command == "package":
@@ -248,66 +289,49 @@ def _request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
-def _write_check(result: Mapping[str, Any]) -> None:
-    plugin = result.get("plugin") or {}
-    name = plugin.get("name") or "(unnamed)"
-    version = plugin.get("version")
-    print(f"{name}{' ' + version if version else ''}")
-    summary = result.get("summary") or {}
-    parts = [
-        f"{summary.get(key, 0)} {label}"
-        for key, label in (
-            ("skills", "skills"),
-            ("mcp_servers", "MCP servers"),
-            ("commands", "commands"),
-            ("agents", "agents"),
+def _convert(args: argparse.Namespace) -> int:
+    """``package`` for one runtime; an Agent Plugins result is then checked against the spec."""
+
+    request: dict[str, object] = {
+        "command": "package",
+        "root": str(Path(args.path).resolve()),
+        "runtimes": [args.to],
+        "force": bool(args.force),
+    }
+    if args.out:
+        request["out_dir"] = str(Path(args.out).resolve())
+    result = _call(request)
+    if result is None:
+        return 2
+    output = Path(str(result.get("out_dir") or "")) / args.to
+    conformance = None
+    if result.get("packaged") and args.to == "agent-plugins":
+        conformance = _call({"command": "conformance", "root": str(output), "spec": AGENT_PLUGINS_SPEC})
+        if conformance is None:
+            return 2
+    if args.json:
+        print(json.dumps({"package": result, "conformance": conformance}, indent=2, sort_keys=True))
+    elif not result.get("packaged"):
+        write_check(result.get("check") or {})
+        print("\nNothing was written. Fix the errors above and run convert again.")
+    else:
+        print(f"Converted into {output}")
+        dropped = next(
+            (
+                runtime.get("dropped") or []
+                for runtime in result.get("runtimes") or []
+                if runtime.get("runtime") == args.to
+            ),
+            [],
         )
-        if summary.get(key)
-    ]
-    if parts:
-        print("  " + ", ".join(parts))
-    diagnostics = result.get("diagnostics") or []
-    if diagnostics:
-        print()
-    for item in diagnostics:
-        location = f" {item.get('path')}" if item.get("path") else ""
-        print(f"  {item.get('level', 'error')}: {item.get('code')}{location}")
-        print(f"    {item.get('message')}")
-    print()
-    print("Runtimes:")
-    for runtime in result.get("runtimes") or []:
-        mark = "yes" if runtime.get("supported") else "no "
-        dropped = runtime.get("dropped") or []
-        note = f"  (drops {', '.join(dropped)})" if runtime.get("supported") and dropped else ""
-        print(f"  {mark}  {runtime.get('runtime')}{note}")
-    print()
-    errors = int(summary.get("errors", 0))
-    warnings = int(summary.get("warnings", 0))
-    verdict = "passed" if result.get("passed") else "failed"
-    print(f"Check {verdict}: {errors} errors, {warnings} warnings.")
-
-
-def _write_links(result: Mapping[str, Any]) -> None:
-    install = result.get("install") or []
-    if not result.get("repository"):
-        print("No GitHub repository found. Set repository in the plugin manifest to get install links.")
-    for entry in install:
-        print(f"{entry.get('runtime')}:")
-        for command in entry.get("commands") or []:
-            print(f"  {command}")
-        if entry.get("verify"):
-            print(f"  check: {entry['verify']}")
-        print()
-    hol = result.get("hol")
-    if isinstance(hol, dict):
-        print(f"Claim the HOL listing: {hol.get('connect')}")
-        print(f"List a new plugin on HOL: {hol.get('submit')}")
-        print()
-    pending = [step for step in result.get("checklist") or [] if not step.get("done")]
-    if pending:
-        print("Next steps:")
-        for step in pending:
-            print(f"  - {step.get('message')}")
+        if dropped:
+            print(f"  Left out: {', '.join(dropped)}")
+        if conformance is not None:
+            print()
+            write_conformance(conformance)
+    if not result.get("packaged") or (conformance is not None and not conformance.get("passed")):
+        return 1
+    return 0
 
 
 def _write_block(result: Mapping[str, Any]) -> int:
@@ -396,21 +420,50 @@ def _install(args: argparse.Namespace) -> int:
         return 2
 
 
+def _stats(args: argparse.Namespace) -> int:
+    from . import stats
+
+    try:
+        result = stats.fetch_stats(args.slug, stats.read_key())
+    except stats.PluginStatsError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print("\n".join(stats.render_stats(result)))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard plugin") -> int:
     args = build_parser(program_name=program_name).parse_args(argv)
     if args.command in {"install", "uninstall"}:
         return _install(args)
+    if args.command == "convert":
+        return _convert(args)
+    if args.command == "stats":
+        return _stats(args)
     result = _call(_request(args))
     if result is None:
         return 2
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "card":
+        # The card is the output, so stdout stays pure JSON for redirection.
+        print(json.dumps(result, indent=2, sort_keys=True))
+        print(
+            "Publish it at .well-known/hol-plugin-card.json. The HOL listing serves it "
+            "with the verified owner and release attestations added.",
+            file=sys.stderr,
+        )
+    elif args.command == "check" and args.spec:
+        write_conformance(result)
     elif args.command == "check":
-        _write_check(result)
+        write_check(result)
     elif args.command == "links" and args.block:
         return _write_block(result)
     elif args.command == "links":
-        _write_links(result)
+        write_links(result)
     elif args.command == "init":
         for path in result.get("written") or []:
             print(f"wrote {path}")
@@ -418,7 +471,7 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
             print("\nNext: edit the description and skill, then run `hol-guard plugin check`.")
     elif args.command == "package":
         if not result.get("packaged"):
-            _write_check(result.get("check") or {})
+            write_check(result.get("check") or {})
             print("\nNothing was written. Fix the errors above and run package again.")
         else:
             print(f"Packaged {len(result.get('files') or [])} files into {result.get('out_dir')}")
@@ -426,7 +479,8 @@ def main(argv: Sequence[str] | None = None, *, program_name: str = "hol-guard pl
                 if runtime.get("supported"):
                     print(f"  {runtime.get('runtime')}/")
     if not args.json and (
-        (args.command == "check" and result.get("passed")) or (args.command == "package" and result.get("packaged"))
+        (args.command == "check" and not args.spec and result.get("passed"))
+        or (args.command == "package" and result.get("packaged"))
     ):
         _offer_guard_once()
     if args.command == "check" and not result.get("passed"):

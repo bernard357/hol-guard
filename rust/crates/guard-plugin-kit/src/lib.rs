@@ -7,6 +7,8 @@
 //! to `hol-guard-runtime plugin-kit --stdin` and gets one response back:
 //! `{"ok": true, "result": ...}` or `{"ok": false, "error": <code>}`.
 
+mod agent_plugins;
+mod card;
 mod check;
 mod config;
 mod detect;
@@ -41,6 +43,13 @@ enum Request {
         #[serde(default)]
         strict: bool,
     },
+    /// Conformance to a published plugin format; see `agent_plugins.rs`.
+    Conformance {
+        root: String,
+        spec: String,
+        #[serde(default)]
+        strict: bool,
+    },
     Package {
         root: String,
         #[serde(default)]
@@ -56,6 +65,12 @@ enum Request {
         root: String,
         #[serde(default)]
         block: bool,
+        #[serde(default)]
+        slug: Option<String>,
+    },
+    /// A draft `.well-known` card; see `card.rs`.
+    Card {
+        root: String,
         #[serde(default)]
         slug: Option<String>,
     },
@@ -116,10 +131,23 @@ fn handle(request: Request) -> Result<Value, String> {
             let root = resolve_root(&root)?;
             check_report(&root, strict)
         }
+        Request::Conformance { root, spec, strict } => {
+            let root = resolve_root(&root)?;
+            match spec.as_str() {
+                agent_plugins::SPEC => Ok(agent_plugins::check(&root, strict)),
+                _ => Err("plugin_kit_spec_unsupported".to_owned()),
+            }
+        }
         Request::Links { root, block, slug } => {
             let root = resolve_root(&root)?;
             let detection = detect::detect(&root)?;
             serde_json::to_value(links::links(&detection, block, slug.as_deref())?)
+                .map_err(|_| "plugin_kit_encode_failed".to_owned())
+        }
+        Request::Card { root, slug } => {
+            let root = resolve_root(&root)?;
+            let detection = detect::detect(&root)?;
+            serde_json::to_value(card::card(&detection, slug.as_deref())?)
                 .map_err(|_| "plugin_kit_encode_failed".to_owned())
         }
         Request::Init { root, name } => {

@@ -100,8 +100,10 @@ def test_mcp_package_denial_preserves_reason_and_policy_source(tmp_path, monkeyp
         "decision": "review",
         "reasons": [{"code": "changed-package", "message": "Digest no longer matches."}],
         "packages": [{"name": "example", "version": "1.0"}],
+        "risk_summary": "Package integrity changed.",
         "user_copy": {
             "title": "Review package",
+            "summary": "Package changed",
             "dashboard_url": "http://127.0.0.1:4455/requests/example",
             "next_step": "Open Guard to approve",
             "harness_message": "Ask the user to approve",

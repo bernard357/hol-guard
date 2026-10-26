@@ -7,7 +7,7 @@
 //! Registry `server.json`.
 
 mod servers;
-mod skill;
+pub(crate) mod skill;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -56,6 +56,9 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
             Some(Ok(value @ Value::Object(_))) => {
                 documents.insert(source.path.clone(), value);
             }
+            // Other tools use plugin.json and mcp.json too; only files that
+            // name an Agent Plugins schema are sources.
+            _ if agent_plugins_candidate(source.kind) => {}
             _ => diagnostics.push(Diagnostic::error(
                 "manifest_invalid_json",
                 &source.path,
@@ -64,6 +67,14 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
         }
     }
 
+    sources.retain(|source| {
+        !agent_plugins_candidate(source.kind)
+            || documents
+                .get(&source.path)
+                .and_then(|document| document.get("$schema"))
+                .and_then(Value::as_str)
+                .is_some_and(|schema| schema.starts_with(AGENT_PLUGINS_SCHEMAS))
+    });
     let base = plugin_base(&sources);
     let mut plugin = Plugin {
         base: base.clone(),
@@ -93,7 +104,10 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
             continue;
         };
         match source.kind {
-            SourceKind::McpConfig | SourceKind::ClaudePlugin | SourceKind::GeminiExtension
+            SourceKind::McpConfig
+            | SourceKind::AgentPluginMcp
+            | SourceKind::ClaudePlugin
+            | SourceKind::GeminiExtension
                 if source_base(source) == base =>
             {
                 servers::collect_servers(
@@ -101,6 +115,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
                     &mut raw_env,
                     document.get("mcpServers"),
                     source.kind == SourceKind::GeminiExtension,
+                    source.kind == SourceKind::AgentPluginMcp,
                 );
             }
             SourceKind::McpServer if source_base(source) == base => {
@@ -119,6 +134,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
     plugin
         .skills
         .sort_by(|left, right| left.dir.cmp(&right.dir));
+    servers::resolve_bundles(&root.join(&base), &base, &files, &mut plugin.mcp_servers);
 
     let join = |name: &str| {
         if base.is_empty() {
@@ -200,6 +216,8 @@ fn classify(file: &Path) -> Option<SourceKind> {
         ("plugin.json", ".claude-plugin") => Some(SourceKind::ClaudePlugin),
         ("marketplace.json", ".claude-plugin") => Some(SourceKind::ClaudeMarketplace),
         ("plugin.json", ".codex-plugin") => Some(SourceKind::CodexPlugin),
+        ("plugin.json", _) => Some(SourceKind::AgentPlugin),
+        ("mcp.json", _) => Some(SourceKind::AgentPluginMcp),
         ("marketplace.json", "plugins") if grandparent == ".agents" => {
             Some(SourceKind::CodexMarketplace)
         }
@@ -209,6 +227,14 @@ fn classify(file: &Path) -> Option<SourceKind> {
         ("SKILL.md", _) => Some(SourceKind::AgentSkill),
         _ => None,
     }
+}
+
+const AGENT_PLUGINS_SCHEMAS: &str = "https://agent-plugins.org/schemas/";
+
+/// Kinds classified by file name alone, kept only when the file names an
+/// Agent Plugins schema.
+fn agent_plugins_candidate(kind: SourceKind) -> bool {
+    matches!(kind, SourceKind::AgentPlugin | SourceKind::AgentPluginMcp)
 }
 
 /// The directory a source's manifest describes ("" for the repository root).

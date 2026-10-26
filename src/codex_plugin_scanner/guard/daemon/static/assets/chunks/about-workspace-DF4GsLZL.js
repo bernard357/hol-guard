@@ -679,7 +679,7 @@ function AboutFooter() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-semibold text-brand-dark", children: "HOL Guard" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { tone: "success", children: "Local-first" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-brand-dark/75", children: "Built by Hashgraph Online. Open standards for the agent internet." })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-brand-dark/75", children: "Built by HOL. Open standards for the agent internet." })
   ] }) });
 }
 function useEditorialVisibility(threshold = 0.08) {
