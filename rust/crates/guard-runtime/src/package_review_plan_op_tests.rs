@@ -79,6 +79,18 @@ fn a_command_review_plans_only_npx_and_bunx_launches() {
         );
         assert_eq!(planned["may_allow"], false, "{command}");
     }
+    // The package a launch fetches is the one the bundle judges, not the
+    // executable it then runs.
+    for command in [
+        "npx -p flagged-package@1.0.0 node --version",
+        "bunx --bun flagged-package@1.0.0",
+    ] {
+        assert_eq!(
+            answer(command)["artifact"]["metadata"]["targets"][0]["package_name"],
+            "flagged-package",
+            "{command}"
+        );
+    }
     for command in [
         "npm install zod --ignore-scripts --allow-git=none",
         "pnpm dlx create-next-app@14.2.0",

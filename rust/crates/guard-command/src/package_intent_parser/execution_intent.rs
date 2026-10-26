@@ -241,12 +241,8 @@ pub(super) fn exec_package_spec(tokens: &[String]) -> Option<String> {
     if matches!(command.as_str(), "pnpm" | "yarn") && tokens.len() >= 2 && tokens[1] == "dlx" {
         return first_positional(&tokens[2..], &[]);
     }
-    if command == "npx" {
-        return option_value(tokens, "--package")
-            .or_else(|| first_positional(&tokens[1..], &["--package", "-p"]));
-    }
-    if command == "bunx" {
-        return first_positional(&tokens[1..], &["--bun"]);
+    if matches!(command.as_str(), "npx" | "bunx") {
+        return runner_package_spec(tokens);
     }
     if command == "uvx" {
         return uvx_arguments(tokens).find_map(|argument| match argument {
@@ -255,6 +251,26 @@ pub(super) fn exec_package_spec(tokens: &[String]) -> Option<String> {
             }
             _ => None,
         });
+    }
+    None
+}
+
+/// The package an `npx` or `bunx` launch fetches: the value of `--package`
+/// or `-p`, else the executable. Only the options before the executable
+/// belong to the runner, so `npx tsc -p tsconfig.json` fetches `tsc`, and
+/// `--bun` takes no value.
+fn runner_package_spec(tokens: &[String]) -> Option<String> {
+    let mut rest = tokens.iter().skip(1);
+    while let Some(token) = rest.next() {
+        if matches!(token.as_str(), "--package" | "-p") {
+            return rest.next().cloned();
+        }
+        if let Some(spec) = token.strip_prefix("--package=") {
+            return Some(spec.to_owned());
+        }
+        if !token.starts_with('-') {
+            return Some(token.clone());
+        }
     }
     None
 }
