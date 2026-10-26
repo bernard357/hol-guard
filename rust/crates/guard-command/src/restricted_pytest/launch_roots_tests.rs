@@ -426,8 +426,27 @@ fn a_program_only_a_shim_answers_for_is_unreachable() {
     let shims = root.join(".hol-guard/package-shims/bin");
     sealed_dirs(&root, &shims);
     tool(&shims.join("pnpm"), "#!/bin/sh\nexit 0\n");
-    let search_path = format!("{}:/usr/bin:/bin", shims.display());
+    // Only the fixture shim is on PATH. A host `pnpm` in `/usr/bin` or
+    // `/bin` would answer the retry and hide a shim that nothing stands
+    // behind.
+    let search_path = shims.display().to_string();
 
     assert!(outside_at_home(&root, "pnpm", &search_path));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_project_package_shim_directory_stays_reachable() {
+    // The two trailing names are how Guard lays its shims out, and they are
+    // also a directory a project is free to use. One inside the workspace is
+    // a path the sandbox already executes, so it is not the shim layer the
+    // retry strips.
+    let root = sealed_scratch();
+    let shims = root.join("workspace/package-shims/bin");
+    sealed_dirs(&root, &shims);
+    tool(&shims.join("pnpm"), "#!/bin/sh\nexit 0\n");
+    let search_path = shims.display().to_string();
+
+    assert!(!outside_at_home(&root, "pnpm", &search_path));
     let _ = fs::remove_dir_all(&root);
 }
