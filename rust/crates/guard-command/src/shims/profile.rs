@@ -151,16 +151,20 @@ fn profile_already_references_path(content: &str, shim_dir: &str) -> bool {
         })
 }
 
-/// PATH a new shell would have after sourcing every profile target onto this
-/// process's PATH. `None` when a target never names the shim directory, or
-/// the targets disagree. Later assignments replace earlier ones, and a
-/// directory written ahead of the shim stays ahead of it.
+/// PATH the login shell would have after sourcing its own profile onto this
+/// process's PATH. The other profile targets only have to name the shim
+/// directory: a zsh rc often carries PATH lines the bash rc does not, and
+/// requiring those replays to be identical reports a protected login shell as
+/// bypassed. `None` when any target never names the shim directory. Later
+/// assignments in the login profile replace earlier ones, and a directory
+/// written ahead of the shim stays ahead of it.
 pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<String>> {
     let Some(home) = &context.home_dir else {
         return Ok(None);
     };
     let facts = &context.facts;
     let shim_dir = context.shim_dir();
+    let (primary_path, _) = primary_target(facts, home, &shim_dir);
     let targets = profile_targets(facts, home, &shim_dir);
     if targets.is_empty() {
         return Ok(None);
@@ -171,7 +175,7 @@ pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<S
         .filter(|entry| !entry.is_empty())
         .map(str::to_owned)
         .collect();
-    let mut agreed: Option<Vec<String>> = None;
+    let mut primary: Option<Vec<String>> = None;
     for (path, _) in &targets {
         let existing = if facts.exists(path) {
             match facts.read_text(path) {
@@ -186,16 +190,12 @@ pub(crate) fn projected_login_path(context: &ShimContext) -> ShimResult<Option<S
         if !replayed.iter().any(|entry| entry == &shim_dir) {
             return Ok(None);
         }
-        if let Some(previous) = &agreed {
-            if previous != &replayed {
-                return Ok(None);
-            }
-        } else {
-            agreed = Some(replayed);
+        if path == &primary_path {
+            primary = Some(replayed);
         }
     }
     let separator = context.pathsep().to_string();
-    Ok(agreed.map(|entries| entries.join(&separator)))
+    Ok(primary.map(|entries| entries.join(&separator)))
 }
 
 fn replay_profile(content: &str, base: &[String]) -> Vec<String> {
