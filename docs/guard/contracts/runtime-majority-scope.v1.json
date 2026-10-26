@@ -370,7 +370,6 @@
           "src/codex_plugin_scanner/guard/cli/product.py",
           "src/codex_plugin_scanner/guard/cli/docs.py",
           "src/codex_plugin_scanner/guard/cli/progress.py",
-          "src/codex_plugin_scanner/guard/cli/commands_isolation.py",
           "src/codex_plugin_scanner/guard/cli/commands_dispatch_admin.py",
           "src/codex_plugin_scanner/guard/cli/commands_dispatch_cloud.py",
           "src/codex_plugin_scanner/guard/cli/commands_dispatch_desktop.py",
