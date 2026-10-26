@@ -372,10 +372,17 @@ fn retry_overflow_admissions(
 /// an auth worker held by a slow evaluation cannot answer the next caller's
 /// challenge, and that caller gives up after `AUTH_TIMEOUT` and falls back to
 /// the daemon. Concurrent hooks then miss the direct lane in bursts.
+///
+/// A full evaluation queue is the one case left on the auth worker: the
+/// request is read and evaluated, or routed to the control lane, right here.
+/// Answering `native_overloaded` instead would turn saturation into a hook
+/// failure, and a fragmented control request could not reach its reserved
+/// lane while complete evaluation jobs held every queue slot.
 fn dispatch_authenticated(
     pending: PendingRequest,
     control_sender: &SyncSender<PendingRequest>,
     evaluation_sender: &SyncSender<PendingRequest>,
+    policy_store: Option<&Arc<crate::policy_store::PolicySnapshotStore>>,
 ) {
     if pending.payload_prefix.len() == pending.length
         && control::is_request(&pending.payload_prefix)
@@ -385,7 +392,9 @@ fn dispatch_authenticated(
     }
     match evaluation_sender.try_send(pending) {
         Ok(()) => {}
-        Err(TrySendError::Full(mut returned)) => write_overload(&mut returned),
+        Err(TrySendError::Full(returned)) => {
+            handle_pending_request(returned, policy_store.cloned(), Some(control_sender));
+        }
         Err(TrySendError::Disconnected(returned)) => {
             resident_diagnostics::finish_since(
                 Phase::ResidentDispatchWait,
@@ -403,7 +412,7 @@ pub(crate) fn start_resident_workers(
     let (control_sender, mut workers) = control::start(policy_store.clone());
     let (evaluation_sender, evaluation_receiver) =
         sync_channel::<PendingRequest>(crate::evaluation_queue_capacity() - control::capacity());
-    let evaluation_policy_store = policy_store;
+    let evaluation_policy_store = policy_store.clone();
     let evaluation_control_sender = control_sender.clone();
     workers.extend(spawn_workers(
         crate::evaluation_workers() - control::WORKERS,
@@ -445,7 +454,12 @@ pub(crate) fn start_resident_workers(
                 Err(_) => return,
             };
             pending.payload_prefix.truncate(available);
-            dispatch_authenticated(pending, &control_sender, &evaluation_sender);
+            dispatch_authenticated(
+                pending,
+                &control_sender,
+                &evaluation_sender,
+                policy_store.as_ref(),
+            );
         },
     ));
     let overflow_primary = authentication_sender.clone();
