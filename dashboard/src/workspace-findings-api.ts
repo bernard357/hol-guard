@@ -22,7 +22,13 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime";
+export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime" | "skill" | "mcp";
+
+/** The fixed wording of the skill content rule that matched; never text from the skill. */
+export type WorkspaceSkillCheck = { title: string; reason: string; confidence: string; falsePositiveHint: string | null };
+
+/** The MCP launch rule that matched and the server it names; never the server's command or URL. */
+export type WorkspaceMcpCheck = WorkspaceSkillCheck & { server: string };
 
 /** An executable a configured tool would launch that matches a runtime advisory. */
 export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
@@ -41,8 +47,8 @@ export type WorkspaceFinding = {
   fixVersion: string | null;
   advisoryIds: string[];
   /**
-   * Root-relative file path of a secret finding, or the executable path of a
-   * runtime finding. Guard never receives the secret itself.
+   * Root-relative file path of a secret or skill finding, or the executable
+   * path of a runtime finding. Guard never receives the secret itself.
    */
   path: string | null;
   line: number | null;
@@ -50,6 +56,10 @@ export type WorkspaceFinding = {
   lines: number[];
   /** Set only for a runtime finding; observation only, so it has no fix. */
   runtime: WorkspaceRuntime | null;
+  /** Set only for an agent skill finding, a warning with no fix. */
+  skill: WorkspaceSkillCheck | null;
+  /** Set only for an MCP server configuration finding, a warning with no fix. */
+  mcp: WorkspaceMcpCheck | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -167,6 +177,60 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         return value !== null && value >= 1 ? [value] : [];
       }),
       runtime: null,
+      skill: null,
+      mcp: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
+    const path = text(item.path);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "skill",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: {
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
+      mcp: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
+    const path = text(item.path);
+    const server = text(item.server);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || server === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "mcp",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: {
+        server,
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
     };
   }
   if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
@@ -189,6 +253,8 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         title: text(item.title),
         knownExploited: item.known_exploited === true,
       },
+      skill: null,
+      mcp: null,
     };
   }
   const packageName = text(item.package_name);
@@ -204,6 +270,8 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     line: null,
     lines: [],
     runtime: null,
+    skill: null,
+    mcp: null,
   };
 }
 

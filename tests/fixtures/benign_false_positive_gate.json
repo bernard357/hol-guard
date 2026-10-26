@@ -988,6 +988,186 @@
       "expect": "allow"
     },
     {
+      "id": "pkgdir-pnpm-c-script-build",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -C dashboard build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-pnpm-dir-equals-script-build",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm --dir=dashboard build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-yarn-cwd-script-build",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --cwd dashboard build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-bun-cwd-script-build",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bun --cwd dashboard build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-pnpm-c-script-lint",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -C dashboard lint"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-pnpm-c-script-build-tail",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -C dashboard build 2>&1 | tail -20"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-npm-prefix-exec-vitest",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --prefix dashboard exec vitest run"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pkgdir-bun-cwd-x-vite-build",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bun --cwd dashboard x vite build"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-pkgdir-pnpm-c-install",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -C dashboard install"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-pkgdir-yarn-cwd-add-package",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "yarn --cwd dashboard add left-pad"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-pkgdir-npm-prefix-install-package",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npm --prefix dashboard install left-pad"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-pkgdir-pnpm-c-dlx-tool",
+      "fix_area": "package",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pnpm -C dashboard dlx cowsay hi"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "sibling-relative-bun-cwd-test",
       "fix_area": "package",
       "harnesses": [
@@ -1079,6 +1259,57 @@
       "tool": "shell",
       "tool_input": {
         "command": "cat .agents/skills/x/SKILL.md"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "find-project-agents-root",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents -maxdepth 3 -type f -print"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "find-project-skills-tree",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents/skills -type d"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "find-project-agents-root-then-listing",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "find .agents -maxdepth 3 -type f -print && ls .agents/skills"
       },
       "cwd": "worktree",
       "expect": "allow"

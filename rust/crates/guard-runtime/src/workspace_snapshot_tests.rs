@@ -15,6 +15,7 @@ fn request(root: &Path, mode: SnapshotMode) -> SnapshotRequest {
         max_visited_entries: 0,
         secrets: false,
         secret_key: None,
+        skills: false,
     }
 }
 

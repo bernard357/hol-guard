@@ -118,7 +118,9 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         guard_plugin_telemetry::FEATURE.into(),
         crate::workspace_snapshot::FEATURE.into(),
         crate::workspace_snapshot::SECRETS_FEATURE.into(),
+        crate::workspace_snapshot::SKILLS_FEATURE.into(),
         crate::workspace_fix::FEATURE.into(),
+        crate::workspace_mcp_config::FEATURE.into(),
         guard_plugin_telemetry::UPDATES_FEATURE.into(),
     ];
     features.extend(
@@ -259,7 +261,7 @@ pub(crate) enum ResidentOperationV1 {
     McpStdioSessionClose(McpStdioSessionCloseRequestV1),
     PackageAdvisoryIds(PackageAdvisoryIdsRequestV1),
     PackageEvaluationCompose(PackageEvaluationComposeRequestV1),
-    VerifiedNpm(guard_contracts::VerifiedNpmRequestV1),
+    PackageReviewPlan(guard_contracts::PackageReviewPlanRequestV1),
     PackageApprovalHash(PackageApprovalHashRequestV1),
     PackagePolicyResolve(PackagePolicyResolveRequestV1),
     PackageProtectFinalize(PackageProtectFinalizeRequestV1),

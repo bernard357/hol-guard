@@ -168,8 +168,10 @@ mod launch_identity_common;
 pub mod launch_identity_environment;
 #[cfg(windows)]
 mod launch_identity_windows;
+pub mod launch_screen;
 pub mod local_tool_eligibility;
 pub mod mcp_arguments;
+pub mod mcp_config_risk;
 pub mod mcp_launch_environment;
 pub mod mcp_runtime_evidence;
 pub mod mcp_skill_firewall;

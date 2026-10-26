@@ -635,6 +635,7 @@ mod package_policy_resolve_op;
 mod package_posture_op;
 mod package_protect_finalize_op;
 mod package_protect_projection_op;
+mod package_review_plan_op;
 mod persistence_action_class;
 #[path = "adapters/detection/pi_detect.rs"]
 mod pi_detect;
@@ -759,7 +760,6 @@ mod totp;
 #[cfg(test)]
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
-mod verified_npm_op;
 mod verified_read_decision_op;
 mod verified_read_plan_op;
 #[cfg(windows)]
@@ -774,6 +774,7 @@ mod workspace_fix_fs;
 mod workspace_fix_manifest;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
+mod workspace_mcp_config;
 mod workspace_scan_targets;
 mod workspace_snapshot;
 mod workspace_snapshot_file;

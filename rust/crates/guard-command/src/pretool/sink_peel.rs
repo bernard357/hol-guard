@@ -161,7 +161,7 @@ pub(super) fn peel(
             }
         }
     } else if exact {
-        if let Some((rewritten, resolved)) = package_directory(&tokens, base)? {
+        if let Some((rewritten, resolved)) = package_directory(&tokens, base) {
             let inside = std::fs::canonicalize(workspace)
                 .map_err(|_| "package directory outside the workspace")?;
             if !(resolved.starts_with(&inside) || sibling_root(&resolved, home_dir).is_some()) {
@@ -435,23 +435,22 @@ fn bounded_count(values: &[String]) -> Option<u32> {
     digits.parse().ok()
 }
 
-/// `bun --cwd <dir> run build` as `bun run build` in `<dir>`, as native
-/// authority reads it.
+/// `bun --cwd <dir> build` as `bun build` in `<dir>`, as native authority
+/// reads it.
 ///
-/// One directory flag, before the verb or right after `run`. The directory is
-/// joined to the physical working directory and normalized lexically, as the
-/// package manager's `path.resolve` does, then resolved on disk. Other
-/// spellings return `None` and keep the unwrapped path.
-fn package_directory(
-    tokens: &[Token],
-    base: &Path,
-) -> Result<Option<(Vec<Token>, PathBuf)>, &'static str> {
+/// One directory flag, before the verb or right after `run`. Whatever follows
+/// the flag is carried over whole, so an implicit script run such as
+/// `pnpm build` is read in `<dir>` the way `pnpm run build` already was. The
+/// directory is joined to the physical working directory and normalized
+/// lexically, as the package manager's `path.resolve` does, then resolved on
+/// disk. Other spellings return `None` and keep the unwrapped path.
+fn package_directory(tokens: &[Token], base: &Path) -> Option<(Vec<Token>, PathBuf)> {
     let Some(manager) = tokens.first().map(word) else {
-        return Ok(None);
+        return None;
     };
     let flags = directory_flags(manager);
     if flags.is_empty() {
-        return Ok(None);
+        return None;
     }
     let end = tokens
         .iter()
@@ -471,7 +470,7 @@ fn package_directory(
         .count()
         != 1
     {
-        return Ok(None);
+        return None;
     }
     let index = usize::from(words.first() == Some(&"run"));
     let flag = words.get(index).copied().unwrap_or_default();
@@ -480,7 +479,7 @@ fn package_directory(
     } else {
         match flag.split_once('=') {
             Some((name, value)) if flags.contains(&name) && name.starts_with("--") => (value, 1),
-            _ => return Ok(None),
+            _ => return None,
         }
     };
     let mut rest: Vec<&str> = words[..index].to_vec();
@@ -490,22 +489,22 @@ fn package_directory(
         || !plain_word(value)
         || rest.is_empty()
     {
-        return Ok(None);
+        return None;
     }
-    // Only scripts are projected; `bun x`, `npm exec` and other runners keep
-    // their own tool-runner path, as on the native side.
-    if !matches!(rest.first().copied(), Some("run" | "test")) {
-        return Ok(None);
-    }
-    let resolved = std::fs::canonicalize(base)
+    // A flag naming a directory that is not there keeps the unwrapped path:
+    // native authority reads that text unprojected too, and the package
+    // manager is the one that reports the missing directory.
+    let Some(resolved) = std::fs::canonicalize(base)
         .ok()
         .and_then(|root| std::fs::canonicalize(lexical(&root.join(value))).ok())
         .filter(|directory| directory.is_dir())
-        .ok_or("package directory is not a directory")?;
+    else {
+        return None;
+    };
     let mut rewritten = vec![tokens[0].clone()];
     rewritten.extend(rest.iter().map(|value| ((*value).to_owned(), false)));
     rewritten.extend_from_slice(&tokens[end..]);
-    Ok(Some((rewritten, resolved)))
+    Some((rewritten, resolved))
 }
 
 /// Any spelling of a directory flag: `--cwd`, `--cwd=x`, `-C`, `-Cx`.

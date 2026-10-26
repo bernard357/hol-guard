@@ -42,7 +42,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::PACKAGE_INTENT_EXTRACT_FEATURE,
     guard_contracts::PACKAGE_EVALUATION_COMPOSE_FEATURE,
     guard_contracts::PACKAGE_APPROVAL_HASH_FEATURE,
-    guard_contracts::VERIFIED_NPM_FEATURE,
+    guard_contracts::PACKAGE_REVIEW_PLAN_FEATURE,
     guard_contracts::PACKAGE_POLICY_RESOLVE_FEATURE,
     guard_contracts::PACKAGE_EVALUATION_VIEW_FEATURE,
     guard_contracts::PACKAGE_PROTECT_FINALIZE_FEATURE,

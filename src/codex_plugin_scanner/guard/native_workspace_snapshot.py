@@ -4,7 +4,9 @@ The snapshot runs out of process so hashing a large worktree can never hold a
 hook decision. It reads files without following symlinks, never runs Git and
 returns only digests, counts and the worktree's local keys. A request may also
 ask for the secret scan of the same bytes; the native side redacts every
-finding before it crosses this boundary.
+finding before it crosses this boundary. It may likewise ask for the skill
+content rules over the agent skills among those bytes; their findings carry
+fixed rule text and never quote the skill.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from typing import Literal
 
 WORKSPACE_SNAPSHOT_FEATURE = "workspace-snapshot-v1"
 WORKSPACE_SECRETS_FEATURE = "workspace-snapshot-secrets-v1"
+WORKSPACE_SKILLS_FEATURE = "workspace-snapshot-skills-v1"
 WORKSPACE_SNAPSHOT_COMMAND = "workspace-snapshot"
 WORKSPACE_SNAPSHOT_SCHEMA = "guard.workspace-snapshot.v1"
 
@@ -48,6 +51,7 @@ class WorkspaceSnapshot:
     entry_count: int
     summary: dict[str, object]
     secrets: dict[str, object] | None = None
+    skills: dict[str, object] | None = None
 
 
 def workspace_snapshot(
@@ -56,6 +60,7 @@ def workspace_snapshot(
     mode: Literal["content", "stat"] = "content",
     secrets: bool = False,
     secret_key: str | None = None,
+    skills: bool = False,
 ) -> WorkspaceSnapshot:
     """Snapshot ``root``; ``secrets`` also scans the hashed bytes for secrets.
 
@@ -64,7 +69,9 @@ def workspace_snapshot(
 
     A native runtime without the secret scan raises
     ``workspace_snapshot_secrets_unavailable`` so the caller can fall back to a
-    plain snapshot and report the detector as not run.
+    plain snapshot and report the detector as not run. ``skills`` runs the
+    skill content rules; a runtime without them raises
+    ``workspace_snapshot_skills_unavailable`` the same way.
     """
 
     request: dict[str, object] = {"root": str(root), "mode": mode}
@@ -72,14 +79,18 @@ def workspace_snapshot(
         request["secrets"] = True
         if secret_key is not None:
             request["secret_key"] = secret_key
-    reply = _native_request(request, needs_secrets=secrets)
+    if skills:
+        request["skills"] = True
+    reply = _native_request(request, needs_secrets=secrets, needs_skills=skills)
     if reply.get("ok") is not True:
         error = reply.get("error")
         raise WorkspaceSnapshotError(error if isinstance(error, str) and error else "workspace_snapshot_failed")
     return _parse_result(reply.get("result"))
 
 
-def _native_request(request: dict[str, object], *, needs_secrets: bool = False) -> dict[str, object]:
+def _native_request(
+    request: dict[str, object], *, needs_secrets: bool = False, needs_skills: bool = False
+) -> dict[str, object]:
     import os
 
     from .codex_hook_launch_runtime import run_isolated_hook_process
@@ -96,6 +107,8 @@ def _native_request(request: dict[str, object], *, needs_secrets: bool = False) 
         raise WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
     if needs_secrets and WORKSPACE_SECRETS_FEATURE not in status.capabilities.features:
         raise WorkspaceSnapshotError("workspace_snapshot_secrets_unavailable")
+    if needs_skills and WORKSPACE_SKILLS_FEATURE not in status.capabilities.features:
+        raise WorkspaceSnapshotError("workspace_snapshot_skills_unavailable")
     runtime = status.identity.path
     environment = {key: value for key in _CHILD_ENVIRONMENT_KEYS if (value := os.environ.get(key))}
     completed = run_isolated_hook_process(
@@ -144,6 +157,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
         for key in ("entry_count", "hashed_bytes", "excluded", "unreadable_count", "unstable_count", "limits")
     }
     secrets = result.get("secrets")
+    skills = result.get("skills")
     return WorkspaceSnapshot(
         mode=mode,  # type: ignore[arg-type]
         root=str(result["root"]),
@@ -157,6 +171,7 @@ def _parse_result(result: object) -> WorkspaceSnapshot:
         entry_count=int(result["entry_count"]),
         summary=summary,
         secrets=secrets if isinstance(secrets, dict) else None,
+        skills=skills if isinstance(skills, dict) else None,
     )
 
 
@@ -166,6 +181,7 @@ def _is_digest(value: object) -> bool:
 
 __all__ = [
     "WORKSPACE_SECRETS_FEATURE",
+    "WORKSPACE_SKILLS_FEATURE",
     "WORKSPACE_SNAPSHOT_FEATURE",
     "WorkspaceSnapshot",
     "WorkspaceSnapshotError",

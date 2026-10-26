@@ -439,6 +439,7 @@
       "src/pretool/omp_read_targets.rs",
       "src/pretool/open_quote.rs",
       "src/pretool/package_directory_flags.rs",
+      "src/pretool/package_directory_flags_tests.rs",
       "src/pretool/package_script_route.rs",
       "src/pretool/package_script_vite.rs",
       "src/pretool/package_scripts_disabled.rs",

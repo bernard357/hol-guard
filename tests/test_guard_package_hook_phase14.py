@@ -460,14 +460,8 @@ def test_phase14_package_hook_block_copy_stays_consistent_across_harnesses(
     hook_output = output["hookSpecificOutput"]
     assert isinstance(hook_output, dict)
     message = str(hook_output["permissionDecisionReason"])
-    if harness == "copilot":
-        # Copilot sends its command in `toolArgs`, which the daemon's package
-        # evaluator does not read, so the bundle's block reaches Copilot as an
-        # approvable package review instead of a terminal block.
-        assert output["policy_action"] == "review"
-        assert hook_output["permissionDecision"] == "ask"
-        assert store.count_approval_requests(status="pending") == 1
-        return
+    # Copilot sends its command in `toolArgs`; the resident's plan reads it,
+    # so the bundle's block reaches Copilot as a terminal block too.
     assert output["policy_action"] == "block"
     assert output["reason_code"] == "native_package_review"
     assert output["prompted"] is False

@@ -46,7 +46,17 @@ SECRETS_COMPLETE = {
     "truncation_reasons": [],
     "findings": [],
 }
-SCANNED = replace(SNAPSHOT, secrets=SECRETS_COMPLETE)
+SKILLS_COMPLETE = {
+    "schema": "guard.workspace-skills.v1",
+    "detector_version": "skill-content-v1",
+    "status": "complete",
+    "files_scanned": 0,
+    "bytes_scanned": 0,
+    "skipped": {"oversize": 0, "not_text": 0, "unread": 0, "linked": 0},
+    "truncation_reasons": [],
+    "findings": [],
+}
+SCANNED = replace(SNAPSHOT, secrets=SECRETS_COMPLETE, skills=SKILLS_COMPLETE)
 KEYS = assessments.WorktreeKeys(SNAPSHOT.codebase_key, SNAPSHOT.worktree_key)
 
 BLOCKED_PACKAGE = {
@@ -95,7 +105,7 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
     remaining = list(values)
 
     def fake(
-        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None
+        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None, skills: bool = False
     ) -> native.WorkspaceSnapshot:
         modes.append(mode)
         return remaining.pop(0) if len(remaining) > 1 else remaining[0]
@@ -119,6 +129,8 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
         "supply_chain": "complete",
         "secrets": "complete",
         "runtime_identity_v1": "no_inputs",
+        "skill_content_v1": "no_inputs",
+        "mcp_config_v1": "no_inputs",
     }
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
@@ -218,7 +230,9 @@ def test_detector_failure_is_reported_without_details(tmp_path: Path, monkeypatc
 def test_snapshot_failure_fails_the_run(tmp_path: Path, monkeypatch) -> None:
     store, claimed = queued_run(tmp_path)
 
-    def unavailable(root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None):
+    def unavailable(
+        root: Path, *, mode: str = "content", secrets: bool = False, secret_key: str | None = None, skills: bool = False
+    ):
         raise native.WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
 
     monkeypatch.setattr(runner, "workspace_snapshot", unavailable)
