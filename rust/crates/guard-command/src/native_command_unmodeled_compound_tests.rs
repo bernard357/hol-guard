@@ -115,6 +115,17 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
             "printf x && node \"$f\"",
         ),
         ("printf x > \"$out\" && node a.js", "printf x && node a.js"),
+        ("printf x > run.js && node run", "printf x && node run"),
+        (
+            "printf x > lib/index.js && node ./lib",
+            "printf x && node ./lib",
+        ),
+        ("printf x > index.js && node .", "printf x && node ."),
+        (
+            "printf x > run.py && python3 -m run",
+            "printf x && python3 -m run",
+        ),
+        ("printf x > run && node run", "printf x && node run"),
     ] {
         assert!(writes_a_named_file(text, bare), "{text}");
     }
@@ -132,6 +143,8 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
             "node server.js > /tmp/x.log 2>&1 & pid=$!; echo '$HOME *'",
             "node server.js & pid=$!; echo '$HOME *'",
         ),
+        ("npm run dev > /tmp/dev.log 2>&1 &", "npm run dev &"),
+        ("node . > /tmp/x.log 2>&1 &", "node . &"),
     ] {
         assert!(!writes_a_named_file(text, bare), "{text}");
     }

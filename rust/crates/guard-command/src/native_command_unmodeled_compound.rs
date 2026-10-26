@@ -37,13 +37,17 @@ pub(super) fn redirected_launch(command: &CanonicalCommandV1, context: PathConte
         && crate::pretool::models_exactly(&bare, context)
 }
 
-/// Whether a redirect in `text` writes a file whose name `bare`, the same
-/// text without its redirects, also spells. Names compare by their last path
+/// Whether a redirect in `text` writes a file that `bare`, the same text
+/// without its redirects, could name. Words compare by their last path
 /// component with every quote and escape removed, so `./run.js`,
-/// `/work/run.js`, `ru"n.js"` and `r\un.js` all match `run.js`. A word that
-/// could expand to the name, through a glob, a brace or a parameter outside
-/// single quotes, counts as naming it, as does a target the scan cannot pick
-/// out.
+/// `/work/run.js`, `ru"n.js"` and `r\un.js` all name `run.js`. An
+/// interpreter resolves a module without its exact file name, so the stem of
+/// the target, any directory on its path and `.` or `..` name it too: `node
+/// run` loads `run.js`, and `node ./lib` or `node .` load an `index.js`.
+/// Plain output such as `/tmp/x.log` is matched by its exact name only. A
+/// word that could expand to a name, through a glob, a brace or a parameter
+/// outside single quotes, counts as naming it, as does a target the scan
+/// cannot pick out.
 fn writes_a_named_file(text: &str, bare: &str) -> bool {
     let Some(words) = split_unquoted(text, char::is_whitespace) else {
         return true;
@@ -91,17 +95,56 @@ fn writes_a_named_file(text: &str, bare: &str) -> bool {
         return true;
     }
     let names: Vec<String> = spelled.iter().map(|word| file_name(word)).collect();
-    targets
-        .iter()
-        .any(|target| names.contains(&file_name(target)))
+    let dotted = names.iter().any(|name| matches!(name.as_str(), "." | ".."));
+    targets.iter().any(|target| {
+        let target = unquoted_word(target);
+        let written = target.rsplit('/').next().unwrap_or(&target);
+        if inert_output(written) {
+            return names.iter().any(|name| name == written);
+        }
+        dotted
+            || target
+                .split('/')
+                .filter(|part| !part.is_empty())
+                .any(|part| {
+                    names
+                        .iter()
+                        .filter(|name| !name.is_empty())
+                        .any(|name| name == part || stem(name) == stem(part))
+                })
+    })
+}
+
+/// Whether the written file is plain output, such as a log, that no
+/// interpreter resolves as a module when it is named without its extension.
+fn inert_output(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(stem, extension)| {
+        !stem.is_empty()
+            && matches!(
+                extension,
+                "log" | "txt" | "out" | "err" | "csv" | "tsv" | "md"
+            )
+    })
+}
+
+/// The word with its quotes and escapes removed.
+fn unquoted_word(word: &str) -> String {
+    word.chars()
+        .filter(|character| !matches!(character, '\'' | '"' | '\\'))
+        .collect()
+}
+
+/// A file name before its first `.`, or the whole name when that is empty.
+fn stem(name: &str) -> &str {
+    match name.split('.').next() {
+        Some(stem) if !stem.is_empty() => stem,
+        _ => name,
+    }
 }
 
 /// The last path component of a word with its quotes and escapes removed.
 fn file_name(word: &str) -> String {
-    let word: String = word
-        .chars()
-        .filter(|character| !matches!(character, '\'' | '"' | '\\'))
-        .collect();
+    let word = unquoted_word(word);
     word.rsplit('/').next().unwrap_or(&word).to_owned()
 }
 
