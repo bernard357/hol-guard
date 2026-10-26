@@ -17,7 +17,6 @@ from .base import (
     PreparedHarnessInstall,
     _command_available,
     _ensure_path_within_root,
-    _resolve_command,
     _shell_command,
     detection_request,
 )
@@ -73,8 +72,8 @@ class KimiHarnessAdapter(HarnessAdapter):
         request = {**detection_request(self.harness, context), "home": str(self._kimi_home_dir(context))}
         artifacts, found_paths, warnings = native_adapter_detection_with_warnings("kimi_detect", request)
         # Kimi Code's installer puts the CLI in ~/.kimi-code/bin, outside the Kimi config home.
-        command_available = _command_available(self.executable, context.home_dir) or (
-            _resolve_command(self.executable, (context.home_dir / ".kimi-code" / "bin" / self.executable,)) is not None
+        command_available = _command_available(
+            self.executable, context.home_dir, (context.home_dir / ".kimi-code" / "bin",)
         )
         detection = HarnessDetection(
             harness=self.harness,

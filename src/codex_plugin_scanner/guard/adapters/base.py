@@ -163,7 +163,8 @@ def _user_owned_executable(candidate: Path) -> bool:
         resolved = candidate.resolve(strict=True)
         file_stat = resolved.stat()
         directory_stats = (candidate.parent.stat(), resolved.parent.stat())
-    except OSError:
+    except (OSError, RuntimeError):
+        # Python before 3.13 raises RuntimeError for a symlink loop.
         return False
     owners = {0, os.getuid()}
     if file_stat.st_uid not in owners:
@@ -173,7 +174,9 @@ def _user_owned_executable(candidate: Path) -> bool:
     return resolved.is_file() and os.access(resolved, os.X_OK)
 
 
-def _which_from_user_directories(command: str, home: Path | None = None) -> str | None:
+def _which_from_user_directories(
+    command: str, home: Path | None = None, extra_directories: tuple[Path, ...] = ()
+) -> str | None:
     """Locate a CLI the user installed outside the bare desktop launch PATH.
 
     Only availability checks use this. Launch and probe commands keep resolving through
@@ -182,15 +185,18 @@ def _which_from_user_directories(command: str, home: Path | None = None) -> str 
 
     if os.name == "nt" or os.sep in command or not _system_only_path(os.environ.get("PATH")):
         return None
-    for directory in _user_command_directories(command, Path.home() if home is None else home):
+    directories = _user_command_directories(command, Path.home() if home is None else home)
+    for directory in (*directories, *extra_directories):
         candidate = directory / command
         if _user_owned_executable(candidate):
             return str(candidate)
     return None
 
 
-def _command_available(command: str, home: Path | None = None) -> bool:
-    return shutil.which(command) is not None or _which_from_user_directories(command, home) is not None
+def _command_available(command: str, home: Path | None = None, extra_directories: tuple[Path, ...] = ()) -> bool:
+    return (
+        shutil.which(command) is not None or _which_from_user_directories(command, home, extra_directories) is not None
+    )
 
 
 def _shell_command(command: tuple[str, ...], *, windows: bool | None = None) -> str:
