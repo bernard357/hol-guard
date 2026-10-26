@@ -337,7 +337,7 @@ fn direct_enabled(switch: &str) -> bool {
 /// tool or prompt hook it reviews, or a lifecycle hook it answers with the
 /// daemon's constant. Permission and notification hooks, and the `before*`
 /// hooks the daemon denies, go to the daemon without asking the resident;
-/// `direct_answer` asks it about Claude Code's `PermissionRequest` and
+/// `direct_answer_reporting` asks it about Claude Code's `PermissionRequest` and
 /// `Notification`, and Codex's `PermissionRequest`; `bounded_direct_answer`
 /// asks it about Copilot's, Devin's and ZCode's `PermissionRequest`.
 fn direct_event(event_name: &str) -> bool {
@@ -377,20 +377,8 @@ fn harness_event(harness: &DirectHarness, event_name: &str) -> bool {
         || (harness.name == CODEX.name && event_name == PERMISSION_REQUEST)
 }
 
-/// The harness response a live resident answered for this hook, or `None`
-/// to take the daemon path.
-pub(crate) fn direct_answer(
-    harness: DirectHarness,
-    guard_home: &Path,
-    query: &str,
-    event_name: &str,
-    data: &str,
-    rpc_deadline: Instant,
-) -> Option<String> {
-    direct_answer_reporting(harness, guard_home, query, event_name, data, rpc_deadline).ok()
-}
-
-/// [`direct_answer`], naming why the hook takes the daemon path.
+/// The harness response a live resident answered for this hook, or why the
+/// hook takes the daemon path.
 pub(crate) fn direct_answer_reporting(
     harness: DirectHarness,
     guard_home: &Path,
