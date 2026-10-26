@@ -541,26 +541,37 @@ def test_cloud_review_enable_reports_retained_capability_when_requeue_retry_fail
     assert exact_cloud_review_operations(store) == (EXACT_CLOUD_REVIEW_OPERATION,)
 
 
-def test_unavailable_replay_check_rejects_the_exact_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = _connected_store(tmp_path)
-    request = _request("exact-unavailable")
-    _add_request(store, request)
-    enable_exact_cloud_review(store)
-    request_row = store.get_approval_request(request.request_id)
-    assert isinstance(request_row, dict)
-    persisted_claim = build_local_review_request_claim(
-        request_row=request_row,
-        oauth=_oauth_metadata(store),
-        store=store,
+def test_unavailable_replay_check_rejects_the_exact_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    job = {
+        "operation": EXACT_CLOUD_REVIEW_OPERATION,
+        "protocolVersion": 2,
+        "id": "exact-job-1",
+        "deviceId": "device-1",
+        "workspaceId": "workspace-1",
+        "nonce": "nonce-1",
+        "expiresAt": "2026-10-26T18:00:00+00:00",
+        "idempotencyKey": "idem-1",
+        "payload": {"remoteApproval": {"grantId": "grant-1", "capabilityId": "cap-1"}},
+    }
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.native_workspace_review_queue.native_workspace_review_payload",
+        lambda _payload: None,
     )
-    job = _job(
-        store,
-        _remote_approval(
-            store,
-            request.request_id,
-            receipt_id="exact-unavailable-receipt",
-            source_claim=persisted_claim,
-        ),
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review.remote_approval_uses_workspace_admin_mfa",
+        lambda _approval: False,
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review._verified_capability",
+        lambda _store, now=None: {
+            "deviceId": "device-1",
+            "workspaceId": "workspace-1",
+            "grantId": "grant-1",
+        },
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review._capability_digest",
+        lambda _capability: "cap-1",
     )
     monkeypatch.setattr(
         "codex_plugin_scanner.guard.runtime.command_capability._command_job_seen",
@@ -568,7 +579,12 @@ def test_unavailable_replay_check_rejects_the_exact_job(tmp_path: Path, monkeypa
     )
 
     with pytest.raises(CommandCapabilityError, match="native_command_capability_unavailable"):
-        authorize_command_queue_job(store, job, schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS)
+        authorize_command_queue_job(
+            object(),
+            job,
+            schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS,
+            now="2026-10-26T12:00:00+00:00",
+        )
 
 
 def test_exact_cloud_review_queue_job_requires_no_generic_capability_or_local_approval(tmp_path: Path) -> None:
