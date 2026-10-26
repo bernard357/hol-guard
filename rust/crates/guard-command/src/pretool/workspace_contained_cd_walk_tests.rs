@@ -180,6 +180,7 @@ fn an_external_symlink_is_not_climbed_to_the_workspace_marker() {
 
     assert!(first_from(&workspace.join("link"), &workspace, marked).is_none());
     assert!(first_from(&workspace.join("link/deep"), &workspace, marked).is_none());
+    assert!(first_from(&workspace.join("link/missing"), &workspace, marked).is_none());
 }
 
 /// The nearer physical project wins over a marker at the workspace root.
@@ -200,6 +201,12 @@ fn an_internal_symlink_binds_the_nearer_physical_project() {
 
     assert_eq!(
         first_from(&workspace.join("link"), &workspace, marked).as_deref(),
+        Some(pkg.as_path())
+    );
+    // The directory does not exist yet. The first ancestor that does is the
+    // link, and the tool would climb from where that link resolves.
+    assert_eq!(
+        first_from(&workspace.join("link/missing"), &workspace, marked).as_deref(),
         Some(pkg.as_path())
     );
 }

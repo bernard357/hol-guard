@@ -60,9 +60,10 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
 /// rather than one at the workspace root the tool would not have reached
 /// yet. A symlink that lands outside the workspace ends the walk with
 /// nothing found, because the tool has already left the sandbox. A directory
-/// that does not exist yet is not resolved, so a `cd` into one still walks
-/// its lexical parents, and an existing ancestor that lands outside the
-/// workspace ends that walk too.
+/// that does not exist yet walks up to the first ancestor that does, and the
+/// walk continues from where that ancestor resolves. An ancestor outside the
+/// workspace ends the lookup. A plain missing directory below the workspace
+/// still reaches the project at the root.
 pub(super) fn first_from(
     directory: &Path,
     workspace: &Path,
@@ -94,12 +95,21 @@ pub(super) fn first_from(
     }
     let mut probe = directory;
     while probe != workspace {
-        let parent = probe.parent()?;
-        probe = parent;
-        match probe.canonicalize() {
-            Ok(resolved) if !resolved.starts_with(&root) => return None,
-            Ok(_) if found(probe) => return Some(probe.to_owned()),
-            _ => {}
+        probe = probe.parent()?;
+        if let Ok(resolved) = probe.canonicalize() {
+            if !resolved.starts_with(&root) {
+                return None;
+            }
+            let mut physical = resolved;
+            loop {
+                if found(&physical) {
+                    return Some(physical);
+                }
+                if physical.as_path() == root.as_path() {
+                    return None;
+                }
+                physical = physical.parent()?.to_owned();
+            }
         }
     }
     None
