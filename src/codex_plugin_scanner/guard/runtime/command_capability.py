@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
-import json
 import os
 import secrets
 from collections.abc import Mapping
@@ -17,9 +14,12 @@ from ..native_command_capability import (
     CommandCapabilityUnavailableError,
     native_command_capability,
 )
+from ..native_command_envelope import (
+    CommandEnvelopeUnavailableError,
+    native_command_envelope,
+)
 from ..portable_command import render_portable_command
 from ..review_contracts import GuardReviewContractError, guard_review_oauth_metadata
-from ..stable_digest import sha256_content_digest
 from ..store import GuardStore
 from .command_operation_classification import (
     LOCAL_CONFIRMATION_COMMAND_OPERATIONS,
@@ -80,10 +80,6 @@ def command_environment_allows_queue(environ: Mapping[str, str] | None = None) -
 _parse_timestamp = parse_utc_timestamp
 
 
-def _canonical_bytes(payload: Mapping[str, object]) -> bytes:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-
-
 def _state_items(payload: object) -> list[dict[str, object]]:
     if not isinstance(payload, dict):
         return []
@@ -93,34 +89,46 @@ def _state_items(payload: object) -> list[dict[str, object]]:
     return [{str(key): value for key, value in item.items()} for item in raw_items if isinstance(item, dict)]
 
 
-def _signing_material(store: GuardStore, *, create: bool) -> tuple[bytes, str]:
-    key, key_id = store._policy_integrity_secret_material(create=create)
-    if key is None or key_id is None:
-        raise CommandCapabilityError("local_signing_key_unavailable")
-    return key, key_id
+def _envelope(
+    store: GuardStore,
+    action: str,
+    payload: object,
+    *,
+    create_key: bool = False,
+) -> object:
+    """One signed-envelope answer from the runtime, or its refusal raised.
+
+    The HMAC, the canonical bytes it covers and every comparison against them
+    live in the resident. This side reads the key out of the secret store and
+    decides when one has to be minted, which is provisioning, not a verdict.
+    """
+
+    home = _resident_home(store)
+    key_b64, key_id = _signing_material_for_resident(store, create=create_key)
+    answer = native_command_envelope(
+        action=action,
+        payload=payload,
+        integrity_key_b64=key_b64,
+        integrity_key_id=key_id,
+        guard_home=home,
+    )
+    if not answer.get("accepted"):
+        raise CommandCapabilityError(str(answer.get("reason") or "signed_payload_missing"))
+    return answer.get("result")
 
 
 def _signed_payload(store: GuardStore, payload: dict[str, object], *, create_key: bool) -> dict[str, object]:
-    key, key_id = _signing_material(store, create=create_key)
-    unsigned = {**payload, "keyId": key_id}
-    signature = hmac.new(key, _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
-    return {**unsigned, "signature": signature}
+    signed = _envelope(store, "sign", payload, create_key=create_key)
+    if not isinstance(signed, dict):
+        raise CommandEnvelopeUnavailableError
+    return {str(key): value for key, value in signed.items()}
 
 
 def _verify_signed_payload(store: GuardStore, payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict):
-        raise CommandCapabilityError("signed_payload_missing")
-    signature = payload.get("signature")
-    if not isinstance(signature, str) or not signature:
-        raise CommandCapabilityError("signed_payload_missing_signature")
-    unsigned = {str(key): value for key, value in payload.items() if key != "signature"}
-    key, key_id = _signing_material(store, create=False)
-    if unsigned.get("keyId") != key_id:
-        raise CommandCapabilityError("signed_payload_key_mismatch")
-    expected = hmac.new(key, _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        raise CommandCapabilityError("signed_payload_invalid_signature")
-    return unsigned
+    unsigned = _envelope(store, "verify", payload)
+    if not isinstance(unsigned, dict):
+        raise CommandEnvelopeUnavailableError
+    return {str(key): value for key, value in unsigned.items()}
 
 
 def _oauth_target(store: GuardStore) -> tuple[str, str]:
@@ -211,15 +219,17 @@ def _resident_home(store: GuardStore) -> Path:
     return guard_home
 
 
-def _signing_material_for_resident(store: GuardStore) -> tuple[str | None, str | None]:
+def _signing_material_for_resident(store: GuardStore, *, create: bool = False) -> tuple[str | None, str | None]:
     """The local signing secret as the resident takes it, or a missing pair.
 
     A store with no key is not an error here: the resident answers
     ``local_signing_key_unavailable`` itself, in the same place it would have
-    refused a key that does not match the envelope.
+    refused a key that does not match the envelope. ``create`` mints the key
+    for the one caller that issues a capability; whether the envelope it goes
+    on is genuine is still the runtime's answer.
     """
 
-    key, key_id = store._policy_integrity_secret_material(create=False)
+    key, key_id = store._policy_integrity_secret_material(create=create)
     if not isinstance(key, bytes) or not isinstance(key_id, str):
         return None, None
     return base64.urlsafe_b64encode(key).rstrip(b"=").decode("ascii"), key_id
@@ -387,8 +397,17 @@ def authorize_command_job(
     )
 
 
-def _identity_digest(identity: Mapping[str, object]) -> str:
-    return sha256_content_digest(_canonical_bytes(identity))
+def _identity_digest(store: GuardStore, identity: Mapping[str, object]) -> str:
+    """The digest the replay rows and the approval grants name ``identity`` by.
+
+    It decides which stored grant answers for a job, so the runtime computes
+    it over its own canonical bytes rather than this side reproducing them.
+    """
+
+    digest = _envelope(store, "digest", dict(identity))
+    if not isinstance(digest, str) or not digest:
+        raise CommandEnvelopeUnavailableError
+    return digest
 
 
 def register_pending_command(
@@ -462,7 +481,7 @@ def approve_pending_command(
         {
             "version": 1,
             "identity": identity,
-            "identityDigest": _identity_digest(identity),
+            "identityDigest": _identity_digest(store, identity),
             "issuer": issuer,
             "approvedAt": approved_at.isoformat(),
         },
@@ -492,7 +511,7 @@ def consume_local_command_approval(
     if not authorized.requires_local_approval:
         return True
     items = _state_items(store.get_sync_payload(COMMAND_LOCAL_APPROVALS_STATE_KEY))
-    identity_digest = _identity_digest(authorized.identity)
+    identity_digest = _identity_digest(store, authorized.identity)
     matched_index: int | None = None
     for index, item in enumerate(items):
         if item.get("identityDigest") != identity_digest:
@@ -534,7 +553,7 @@ def mark_command_job_consumed(
     ]
     items.append(
         {
-            "identityDigest": _identity_digest(authorized.identity),
+            "identityDigest": _identity_digest(store, authorized.identity),
             "jobId": authorized.identity["id"],
             "idempotencyKey": authorized.identity["idempotencyKey"],
             "operation": authorized.operation,

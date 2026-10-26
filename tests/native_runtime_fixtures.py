@@ -396,26 +396,27 @@ def native_command_capability_runtime(
 ) -> Path:
     """Answer remote-command capability requests from the shared resident.
 
-    The ``command_capability`` op reads every input off the wire, so the Guard
-    home it is asked about only has to name a resident that is already keyed
-    and warm.  Tests keep their own store home for Guard's Python persistence
-    and borrow the session home for the runtime call, which avoids spawning a
-    resident per store.  Jobs that build no Rust artifact skip, like the other
-    compiled-runtime fixtures.
+    The ``command_capability`` and ``command_envelope`` ops read every input
+    off the wire, so the Guard home they are asked about only has to name a
+    resident that is already keyed and warm.  Tests keep their own store home
+    for Guard's Python persistence and borrow the session home for the runtime
+    calls, which avoids spawning a resident per store.  Jobs that build no Rust
+    artifact skip, like the other compiled-runtime fixtures.
     """
 
-    from codex_plugin_scanner.guard import native_command_capability
+    from codex_plugin_scanner.guard import native_command_capability, native_command_envelope
 
     binary = _context_digest_runtime_binary()
     if binary is None:
         pytest.skip("command capability tests require the compiled Rust runtime")
     monkeypatch.setenv("HOL_GUARD_NATIVE", "force")
     monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(binary.resolve()))
-    monkeypatch.setattr(
-        native_command_capability,
-        "_resolve_digest_home",
-        lambda guard_home=None: _native_context_home,
-    )
+    for module in (native_command_capability, native_command_envelope):
+        monkeypatch.setattr(
+            module,
+            "_resolve_digest_home",
+            lambda guard_home=None: _native_context_home,
+        )
     return _native_context_home
 
 

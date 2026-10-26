@@ -86,6 +86,8 @@ mod approval_resolution_eligibility;
 pub use approval_resolution_eligibility::*;
 mod command_capability;
 pub use command_capability::*;
+mod command_envelope;
+pub use command_envelope::*;
 mod approval_persist_select;
 pub use approval_persist_select::*;
 mod approval_scope_select;

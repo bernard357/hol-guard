@@ -198,6 +198,7 @@ def test_nonnative_operation_with_native_fields_keeps_generic_consumption_mark(
     assert marked == ["guard.packageShims.status"]
 
 
+@pytest.mark.usefixtures("native_command_capability_runtime")
 def test_native_authorization_uses_resident_readiness_and_skips_replay_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
