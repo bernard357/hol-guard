@@ -32,6 +32,11 @@ pub struct Links {
     pub install: Vec<Install>,
     pub hol: Option<HolLinks>,
     pub checklist: Vec<Step>,
+    /// The README install block, only when asked for (`--block`). Null when
+    /// Guard cannot install the plugin: no repository, or no Claude Code or
+    /// Codex marketplace entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block: Option<Option<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,17 +46,102 @@ pub struct HolLinks {
     pub submit: String,
 }
 
-pub fn links(detection: &Detection) -> Links {
+/// Where the README block sends readers to learn what Guard does.
+const INSTALL_DOCS: &str = "https://hol.org/guard/docs/plugin-scanner/install-with-hol-guard";
+
+/// `block` asks for the README install block; `slug` is the HOL listing it
+/// names (default: the repository).
+pub fn links(detection: &Detection, block: bool, slug: Option<&str>) -> Result<Links, String> {
+    if slug.is_some_and(|slug| !crate::install::valid_slug(slug)) {
+        return Err("plugin_kit_links_slug_invalid".to_owned());
+    }
+    let mut result = base_links(detection);
+    if block {
+        let slug = slug
+            .map(str::to_owned)
+            .or_else(|| result.repository.clone());
+        result.block = Some(slug.and_then(|slug| install_block(&slug, &result.install)));
+    }
+    Ok(result)
+}
+
+/// The same block the HOL plugin workspace offers, minus the badge (which
+/// needs a claimed listing). HOL detects it by the opening marker.
+fn install_block(slug: &str, install: &[Install]) -> Option<String> {
+    if !install
+        .iter()
+        .any(|entry| matches!(entry.runtime, Runtime::ClaudeCode | Runtime::Codex))
+    {
+        return None;
+    }
+    let rows: Vec<String> = install
+        .iter()
+        .map(|entry| {
+            let label = match entry.runtime {
+                Runtime::ClaudeCode => "Claude Code",
+                Runtime::Codex => "Codex",
+                Runtime::GeminiCli => "Gemini CLI",
+                _ => "Agent skills (Cursor, Gemini CLI, OpenCode and others)",
+            };
+            // The listing shows Claude Code's slash commands; a README reader
+            // may be in a terminal, so use the `claude plugin` CLI there.
+            let commands: Vec<String> = entry
+                .commands
+                .iter()
+                .map(|command| match command.strip_prefix('/') {
+                    Some(rest) if entry.runtime == Runtime::ClaudeCode => {
+                        format!("`claude {rest}`")
+                    }
+                    _ => format!("`{command}`"),
+                })
+                .collect();
+            format!("| {label} | {} |", commands.join("<br>"))
+        })
+        .collect();
+    let listing = format!(
+        "https://hol.org/registry/plugins/{}",
+        slug.replace('/', "%2F")
+    );
+    Some(
+        [
+            format!("<!-- hol-install-block:v1 slug={slug} -->"),
+            format!("Install with [HOL Guard]({INSTALL_DOCS}), which checks the [HOL listing]({listing}) and asks before each runtime:"),
+            String::new(),
+            "```sh".to_owned(),
+            format!("hol-guard plugin install {slug} --apply"),
+            "```".to_owned(),
+            String::new(),
+            "<details>".to_owned(),
+            "<summary>Install with each runtime's own CLI</summary>".to_owned(),
+            String::new(),
+            "| Runtime | Commands |".to_owned(),
+            "| --- | --- |".to_owned(),
+        ]
+        .into_iter()
+        .chain(rows)
+        .chain(
+            [String::new(), "</details>".to_owned(), "<!-- /hol-install-block -->".to_owned()],
+        )
+        .collect::<Vec<_>>()
+        .join("\n"),
+    )
+}
+
+fn base_links(detection: &Detection) -> Links {
     let plugin = &detection.plugin;
     let repository = plugin.github_repository();
     let mut install = Vec::new();
     if let Some(repository) = &repository {
         // Each runtime installs from its own marketplace, which can have a
-        // different name from the other.
+        // different name from the other. Names that `plugin install` would
+        // refuse get no commands, so none can break out of a README cell or a
+        // pasted command line.
         let listing = |kind: SourceKind| {
             let marketplace = plugin.marketplace(kind)?.name.clone()?;
             let name = plugin.name.clone().filter(|_| plugin.listed_in(kind))?;
-            Some((marketplace, name))
+            (crate::install::valid_identifier(&marketplace)
+                && crate::install::valid_identifier(&name))
+            .then_some((marketplace, name))
         };
         if let Some((marketplace, name)) = listing(SourceKind::ClaudeMarketplace) {
             install.push(Install {
@@ -104,6 +194,7 @@ pub fn links(detection: &Detection) -> Links {
         checklist: checklist(detection, plugin, repository.is_some()),
         repository,
         install,
+        block: None,
     }
 }
 

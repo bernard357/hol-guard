@@ -230,6 +230,8 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
   const [auditConnectGateActive, setAuditConnectGateActive] = useState(false);
   const [resumeAuditAfterConnect, setResumeAuditAfterConnect] = useState(false);
   const [auditRecoveryGate, setAuditRecoveryGate] = useState<SupplyChainAuditRecoveryGate | null>(null);
+  // Tracks the dialog on screen so a sync that finishes late can tell whether its own dialog is still open.
+  const auditRecoveryGateRef = useRef<SupplyChainAuditRecoveryGate | null>(null);
   const [auditRecoveryPhase, setAuditRecoveryPhase] = useState<AuditRecoveryModalPhase>("ready");
   const [auditRecoveryError, setAuditRecoveryError] = useState<string | null>(null);
   const [auditRecoveryErrorOp, setAuditRecoveryErrorOp] = useState<SupplyChainRecoveryOperation>("sync");
@@ -250,6 +252,10 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
     },
     [resolveApprovalGate],
   );
+
+  useEffect(() => {
+    auditRecoveryGateRef.current = auditRecoveryGate;
+  }, [auditRecoveryGate]);
 
   const closeAuditRecovery = useCallback(() => {
     setAuditRecoveryGate(null);
@@ -452,7 +458,11 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           await continueAuditAfterRecovery();
           return;
         }
-        setAuditRecoveryPhase("ready");
+        // Nothing follows a standalone sync, so close the modal and let the panel show the result.
+        // Leave it alone if the user closed this dialog during the sync and opened another one.
+        if (auditRecoveryGateRef.current === auditRecoveryGate) {
+          closeAuditRecovery();
+        }
       } catch (err) {
         if (isSupplyChainSyncConnectError(err)) {
           const connectGate = resolveSupplyChainSyncConnectRecoveryGate(err);
@@ -491,6 +501,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
     },
     [
       auditRecoveryGate,
+      closeAuditRecovery,
       continueAuditAfterRecovery,
       onStateChanged,
       openSyncApprovalRecovery,

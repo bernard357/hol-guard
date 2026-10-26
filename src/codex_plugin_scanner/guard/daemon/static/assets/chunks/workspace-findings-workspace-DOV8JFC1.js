@@ -82,7 +82,8 @@ function normalizeFinding(value) {
       }),
       runtime: null,
       skill: null,
-      mcp: null
+      mcp: null,
+      hook: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
@@ -107,7 +108,8 @@ function normalizeFinding(value) {
         confidence: text$1(item.confidence) ?? "likely",
         falsePositiveHint: text$1(item.false_positive_hint)
       },
-      mcp: null
+      mcp: null,
+      hook: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
@@ -130,6 +132,35 @@ function normalizeFinding(value) {
       skill: null,
       mcp: {
         server,
+        title,
+        reason,
+        confidence: text$1(item.confidence) ?? "likely",
+        falsePositiveHint: text$1(item.false_positive_hint)
+      },
+      hook: null
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "hook_config_v1") {
+    const path = text$1(item.path);
+    const event = text$1(item.event);
+    const title = text$1(item.title);
+    const reason = text$1(item.reason);
+    if (path === null || event === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "hook",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: {
+        event,
         title,
         reason,
         confidence: text$1(item.confidence) ?? "likely",
@@ -158,7 +189,8 @@ function normalizeFinding(value) {
         knownExploited: item.known_exploited === true
       },
       skill: null,
-      mcp: null
+      mcp: null,
+      hook: null
     };
   }
   const packageName = text$1(item.package_name);
@@ -175,7 +207,8 @@ function normalizeFinding(value) {
     lines: [],
     runtime: null,
     skill: null,
-    mcp: null
+    mcp: null,
+    hook: null
   };
 }
 function normalizeAssessment(value) {
@@ -354,6 +387,21 @@ function McpFindingsTable({ findings }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-mono text-xs text-slate-500", children: finding.path })
       ] }),
       check: (finding) => finding.mcp
+    }
+  );
+}
+function HookFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    RuleFindingsTable,
+    {
+      findings,
+      caption: "Project hooks with risky commands",
+      subjectLabel: "Hook",
+      subject: (finding) => /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-semibold text-slate-800", children: finding.hook?.event }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-mono text-xs text-slate-500", children: finding.path })
+      ] }),
+      check: (finding) => finding.hook
     }
   );
 }
@@ -888,7 +936,8 @@ const COVERAGE_REASONS = {
   runtime_advisories_unavailable: "Runtimes this workspace's tools launch were not checked: Guard has no runtime advisories cached.",
   runtimes_incomplete: "Some runtimes this workspace's tools launch could not be identified or checked.",
   skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked.",
-  mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked."
+  mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked.",
+  hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -904,7 +953,8 @@ const DETECTOR_LABELS = {
   secrets: "Secret scanning",
   runtime_identity_v1: "Runtime checking",
   skill_content_v1: "Skill checking",
-  mcp_config_v1: "MCP server checking"
+  mcp_config_v1: "MCP server checking",
+  hook_config_v1: "Project hook checking"
 };
 function sameWorktree(left, right) {
   return left.codebaseKey === right.codebaseKey && left.worktreeKey === right.worktreeKey;
@@ -1094,6 +1144,7 @@ function FindingsSections(props) {
   const runtimes = props.findings.filter((finding) => finding.kind === "runtime");
   const skills = props.findings.filter((finding) => finding.kind === "skill");
   const servers = props.findings.filter((finding) => finding.kind === "mcp");
+  const hooks = props.findings.filter((finding) => finding.kind === "hook");
   if (props.findings.length === 0) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked) });
   }
@@ -1102,7 +1153,8 @@ function FindingsSections(props) {
     secrets.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SecretFindingsTable, { findings: secrets }),
     runtimes.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(RuntimeFindingsTable, { findings: runtimes }),
     skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillFindingsTable, { findings: skills }),
-    servers.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(McpFindingsTable, { findings: servers })
+    servers.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(McpFindingsTable, { findings: servers }),
+    hooks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookFindingsTable, { findings: hooks })
   ] });
 }
 function FindingsTable({ findings, fixes }) {

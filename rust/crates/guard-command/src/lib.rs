@@ -155,6 +155,7 @@ mod home_path_text;
 #[cfg(test)]
 mod home_path_text_parity_tests;
 pub mod homebrew_intent;
+pub mod hook_config_risk;
 mod inline_shell_quoting;
 pub mod jsonc;
 #[cfg(unix)]

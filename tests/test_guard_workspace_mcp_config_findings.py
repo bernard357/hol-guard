@@ -20,6 +20,7 @@ from codex_plugin_scanner.guard.runtime import workspace_assessment_sync as sync
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_workspace_assessment_runner import (
     AUDIT,
+    HOOKS_COMPLETE,
     SECRETS_COMPLETE,
     SKILLS_COMPLETE,
     SNAPSHOT,
@@ -61,7 +62,7 @@ def mcp_result(*findings: dict[str, object], **overrides: object) -> dict[str, o
 
 def run_with(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: dict[str, object] | None):
     store, claimed = queued_run(tmp_path)
-    scanned = replace(SNAPSHOT, secrets=SECRETS_COMPLETE, skills=SKILLS_COMPLETE)
+    scanned = replace(SNAPSHOT, secrets=SECRETS_COMPLETE, skills=SKILLS_COMPLETE, hooks=HOOKS_COMPLETE)
     monkeypatch.setattr(runner, "workspace_snapshot", lambda root, **_: scanned)
     monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
     monkeypatch.setattr(runner, "assess_workspace_mcp_configs", lambda store, root: result)

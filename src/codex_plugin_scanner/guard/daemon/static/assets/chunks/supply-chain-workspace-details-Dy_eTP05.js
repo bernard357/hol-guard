@@ -1,8 +1,8 @@
 import { j as jsxRuntimeExports, r as reactExports, co as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dp as HiMiniBugAnt, a6 as Badge, T as Tag, f as formatRelativeTime, A as ActionButton, dH as fetchReceipts, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, c as HiMiniChevronDown, d as HiMiniArrowPath } from "../guard-dashboard.js";
-import { f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-DQ6eIpEh.js";
-import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-D3NJFvkk.js";
+import { m as missingBundleMessage, f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-B-0Rw-Sw.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CrISM3WV.js";
 import { s as supplyChainEvidenceHref, d as deriveSupplyChainEvidenceRail } from "./supply-chain-protection-stats-BbhzE3ad.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-Dymw2kL6.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-CVA2jjBv.js";
 import "./home-protection-module-DZsYd8li.js";
 function SupplyChainDetailSection({
   id,
@@ -71,7 +71,10 @@ function IntelSection({ action, children }) {
     }
   );
 }
-function SupplyChainBundlePanel({ refreshKey = "" }) {
+function SupplyChainBundlePanel({
+  refreshKey = "",
+  cloudState
+}) {
   const load = useSupplyChainBundle(refreshKey);
   const bundle = load.phase === "ready" ? load.bundle : null;
   const loading = load.phase === "loading";
@@ -119,7 +122,8 @@ function SupplyChainBundlePanel({ refreshKey = "" }) {
   if (!bundle) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(IntelSection, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-slate-600", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-brand-dark", children: "No intel available." }),
-      " Guard has not synced a supply chain bundle yet. Connect to Guard Cloud for live advisory data."
+      " ",
+      missingBundleMessage(cloudState)
     ] }) });
   }
   const nowMs = Date.now();
@@ -445,7 +449,7 @@ function SupplyChainWorkspaceDetails({
           onOpenAudit: onAuditNavigate
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainBundlePanel, { refreshKey: bundleRefreshKey(snapshot) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainBundlePanel, { refreshKey: bundleRefreshKey(snapshot), cloudState: snapshot.cloud_state }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         SupplyChainDetailSection,
         {

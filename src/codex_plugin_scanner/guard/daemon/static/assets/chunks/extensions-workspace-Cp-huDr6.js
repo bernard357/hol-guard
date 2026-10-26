@@ -446,6 +446,147 @@ function keepExtensionPolicyRebaseConflicts(result, latestEffective) {
   }
   return layers;
 }
+const KEPT = "Guard could not save this protection change, so your current protection is unchanged.";
+const UNCERTAIN = "Guard could not confirm this protection change, so it may or may not have been saved. Reload the page to see the settings Guard is holding now.";
+function preparationSentence(cause, recovery) {
+  switch (cause) {
+    case "offline":
+      return `${KEPT} It could not reach the protection release service. Check this machine's connection and try again.`;
+    case "release_unavailable":
+      return `${KEPT} The protection release it needs is not available yet. Try again shortly.`;
+    case "pack_authority_unavailable":
+      return `${KEPT} This install has no protection release it can verify yet. Update Guard, or reconnect this machine so it can fetch one, then try again.`;
+    case "installed_runtime_incomplete":
+      return `${KEPT} This Guard installation is missing part of its runtime, so it cannot read its own protection bundle. Reinstall or update Guard, then try again.`;
+    case "installed_runtime_unresponsive":
+      return `${KEPT} Guard's packaged compiler did not answer in time. Try again; if it keeps failing, restart Guard.`;
+    case "pack_revoked":
+      return `${KEPT} A protection pack it needs was withdrawn. Reload this page to pick up the current catalog, then try again.`;
+    case "local_storage":
+      return `${KEPT} Guard could not read its local protection cache. Try again; if it keeps failing, run \`${recovery.command}\` in ${recovery.terminal}.`;
+    // Not a broken install and not transient: the request is rebuilt from the
+    // same local data every time, so neither reinstalling nor retrying moves
+    // it. Saying "try again" here is what left operators in a loop, and so
+    // would naming a recovery command, because none of them prune the state
+    // the request is built from. The log is the one place that says what grew.
+    case "native_request_too_large":
+      return `${KEPT} Guard's local protection data has grown past what its runtime accepts in one request. Retrying sends the same request again and reinstalling Guard will not change it; the Guard daemon log records the request that grew and how far past the bound it got.`;
+    default:
+      return `${KEPT} Try again; if it keeps failing, the Guard daemon log records the exact cause.`;
+  }
+}
+function codeSentence(code, recovery) {
+  const repairAuthority = `Run \`${recovery.command}\` in ${recovery.terminal}, then try again.`;
+  switch (code) {
+    case "approval_required":
+      return `${KEPT} It needs your approval password before it can apply.`;
+    case "authority_apply_failed":
+      return `${UNCERTAIN} If the change is not there, ${repairAuthority}`;
+    case "authority_conflict":
+    case "revision_conflict":
+    case "invalid_previous_revision":
+      return `${KEPT} Your protection settings changed while this page was open. ${recovery.reloaded ? "This page now shows the current settings; make the change again." : "Reload the page and make the change again."}`;
+    case "authority_unavailable":
+    case "authority_unread":
+    case "authority_history_unavailable":
+      return `${KEPT} Guard could not open its local protection authority. ${repairAuthority}`;
+    case "authority_not_degraded":
+      return "This Guard install's protection authority is healthy, so there is nothing to recover.";
+    case "authority_not_recoverable":
+      return `Guard cannot recover this protection authority automatically. ${repairAuthority}`;
+    case "authority_recovery_failed":
+    case "authority_recovery_incomplete":
+      return `Guard could not finish recovering the protection authority. ${repairAuthority}`;
+    case "catalog_conflict":
+    case "catalog_payload_limit_exceeded":
+      return `${KEPT} Guard's protection catalog moved underneath this page. ${recovery.reloaded ? "This page now shows the current catalog; make the change again." : "Reload the page and make the change again."}`;
+    case "control_limit_exceeded":
+    case "layer_control_limit_exceeded":
+    case "layer_limit_exceeded":
+      return `${KEPT} It would take this install past the number of custom protection settings Guard keeps. Return some settings to Recommended, then try again.`;
+    case "duplicate_control_target":
+      return `${KEPT} The same setting was changed twice in one save. Reload the page and make the change once.`;
+    case "extension_control_stopped":
+      return `${KEPT} Guard is shutting down. Start Guard again, then make the change.`;
+    case "immutable_extension":
+    case "immutable_permission":
+    case "managed_layer_mutation":
+    case "managed_layer_conflict":
+      return `${KEPT} This setting is managed for you by your organization and cannot be changed here.`;
+    case "invalid_extension":
+    case "unknown_extension":
+    case "unknown_permission":
+      return `${KEPT} Guard no longer recognizes the setting this page asked to change. ${recovery.reloaded ? "This page now shows what Guard recognizes; try again." : "Reload the page and try again."}`;
+    case "invalid_layers":
+    case "invalid_mutation":
+      return `${KEPT} Guard rejected the change as malformed. Reload the page and make the change again; if it keeps failing, the Guard daemon log records the exact cause.`;
+    case "invalid_inspection_command":
+    case "invalid_test_command":
+      return "Guard could not read that command. Enter the command exactly as you would run it, then check it again.";
+    case "pack_preparation_unavailable":
+      return void 0;
+    // Refined by cause below.
+    case "prepared_preview_expired":
+      return `${KEPT} The review you approved has expired. Make the change again and apply it straight away.`;
+    case "proof_invalid":
+    case "proof_mismatch":
+    case "proof_not_found":
+      return `${KEPT} The approval for this change was no longer valid. Make the change again and re-enter your approval password.`;
+    default:
+      return void 0;
+  }
+}
+const RETRYABLE_PREPARATION_CAUSES = /* @__PURE__ */ new Set([
+  "installed_runtime_unresponsive",
+  "local_storage",
+  "offline",
+  "release_unavailable"
+]);
+const STALE_DATA_CODES = /* @__PURE__ */ new Set([
+  "authority_conflict",
+  "catalog_conflict",
+  "invalid_extension",
+  "invalid_previous_revision",
+  "revision_conflict",
+  "unknown_extension",
+  "unknown_permission"
+]);
+function isStaleProtectionDataError(error) {
+  return error instanceof ExtensionControlApiError && STALE_DATA_CODES.has(error.code ?? "");
+}
+function isRetryableProtectionChangeError(error) {
+  return error instanceof ExtensionControlApiError && error.code === "pack_preparation_unavailable" && RETRYABLE_PREPARATION_CAUSES.has(error.cause ?? "");
+}
+function recoveryFor(recoveryCommand, recoveryShell, reloaded) {
+  return {
+    command: recoveryCommand ?? "hol-guard command controls recover-authority",
+    terminal: recoveryShell === "powershell" ? "PowerShell" : "your terminal",
+    reloaded
+  };
+}
+function knownSentence(error, recovery) {
+  if (error.code === "pack_preparation_unavailable") return preparationSentence(error.cause, recovery);
+  return error.code ? codeSentence(error.code, recovery) : void 0;
+}
+const AUTHORITY_UNREADABLE_CODES = /* @__PURE__ */ new Set(["authority_unavailable", "authority_unread", "authority_history_unavailable"]);
+function knownProtectionChangeMessage(error, recoveryCommand, recoveryShell) {
+  if (!(error instanceof ExtensionControlApiError)) return void 0;
+  return knownSentence(error, recoveryFor(recoveryCommand, recoveryShell, false));
+}
+function authorityRecoverySentence(error, recoveryCommand, recoveryShell) {
+  if (!(error instanceof ExtensionControlApiError) || !AUTHORITY_UNREADABLE_CODES.has(error.code ?? "")) return void 0;
+  const recovery = recoveryFor(recoveryCommand, recoveryShell, false);
+  return `Guard could not open its local protection authority. Run \`${recovery.command}\` in ${recovery.terminal}, then try again.`;
+}
+function protectionChangeErrorMessage(error, recoveryCommand, recoveryShell, options = {}) {
+  const recovery = recoveryFor(recoveryCommand, recoveryShell, options.reloaded === true);
+  if (error instanceof ExtensionControlApiError) {
+    const sentence = knownSentence(error, recovery);
+    if (sentence) return sentence;
+    return `${UNCERTAIN} If it is not there, try again; the Guard daemon log records the exact cause.`;
+  }
+  return error instanceof Error && error.message ? error.message : "Protection change failed";
+}
 const POLICY_CONFLICT_CODES = ["revision_conflict", "catalog_conflict", "authority_conflict"];
 function isExtensionPolicyConflict(caught) {
   return caught instanceof ExtensionControlApiError && POLICY_CONFLICT_CODES.includes(caught.code ?? "");
@@ -554,14 +695,24 @@ function useExtensionPolicyDraft(props) {
     }
     return extensionPolicyRepairBase(base, latest);
   }, []);
-  const handleApiError = reactExports.useCallback((caught, fallback) => {
+  const terminalCommands = props.effective.terminal_commands;
+  const handleApiError = reactExports.useCallback((caught, fallback, phase) => {
     if (isExtensionPolicyConflict(caught)) {
       setStale(true);
       setError("The authoritative extension policy changed while this draft was open. Rebase the draft before applying; Guard will not silently overwrite security policy.");
       return;
     }
-    setError(caught instanceof Error ? caught.message : fallback);
-  }, []);
+    const command = terminalCommands?.recover_authority;
+    const shell = terminalCommands?.shell;
+    if (phase === "apply") {
+      setError(caught instanceof Error ? protectionChangeErrorMessage(caught, command, shell) : fallback);
+      return;
+    }
+    const known = phase === "preview" ? knownProtectionChangeMessage(caught, command, shell) : authorityRecoverySentence(caught, command, shell);
+    if (known) setError(phase === "rebase" ? `${fallback} ${known}` : known);
+    else if (caught instanceof ExtensionControlApiError && caught.code) setError(fallback);
+    else setError(caught instanceof Error && caught.message ? caught.message : fallback);
+  }, [terminalCommands]);
   const runPreview = reactExports.useCallback(async () => {
     if (!dirty) return;
     const generation = draftGeneration.current;
@@ -584,7 +735,7 @@ function useExtensionPolicyDraft(props) {
       setPreview(next);
       setReviewOpen(true);
     } catch (caught) {
-      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not preview this draft.");
+      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not preview this draft.", "preview");
     } finally {
       setPreviewBusy(false);
     }
@@ -644,7 +795,7 @@ function useExtensionPolicyDraft(props) {
         setError("The policy was applied, but Guard could not refresh the latest state. Refresh this page to confirm the committed policy.");
       }
     } catch (caught) {
-      handleApiError(caught, "Guard could not apply this draft.");
+      handleApiError(caught, "Guard could not apply this draft.", "apply");
     } finally {
       setApplyBusy(false);
     }
@@ -707,11 +858,11 @@ function useExtensionPolicyDraft(props) {
         setError(null);
       }
     } catch (caught) {
-      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not rebase this draft.");
+      if (isCurrentExtensionPolicyDraft(generation, draftGeneration.current)) handleApiError(caught, "Guard could not rebase this draft.", "rebase");
     } finally {
       setPreviewBusy(false);
     }
-  }, [baseEffective, draftLayers]);
+  }, [baseEffective, draftLayers, handleApiError]);
   const keepConflicts = reactExports.useCallback(() => {
     if (!pendingRebase) return;
     setDraftLayers(keepExtensionPolicyRebaseConflicts(pendingRebase.result, pendingRebase.latestEffective));
@@ -9679,131 +9830,6 @@ function ReviewModal(props) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "submit", disabled: submitDisabled, className: "min-h-11 rounded-xl bg-brand-blue px-5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60", children: props.busy ? "Verifying…" : "Confirm change" })
     ] })
   ] }) });
-}
-const KEPT = "Guard could not save this protection change, so your current protection is unchanged.";
-const UNCERTAIN = "Guard could not confirm this protection change, so it may or may not have been saved. Reload the page to see the settings Guard is holding now.";
-function preparationSentence(cause, recovery) {
-  switch (cause) {
-    case "offline":
-      return `${KEPT} It could not reach the protection release service. Check this machine's connection and try again.`;
-    case "release_unavailable":
-      return `${KEPT} The protection release it needs is not available yet. Try again shortly.`;
-    case "pack_authority_unavailable":
-      return `${KEPT} This install has no protection release it can verify yet. Update Guard, or reconnect this machine so it can fetch one, then try again.`;
-    case "installed_runtime_incomplete":
-      return `${KEPT} This Guard installation is missing part of its runtime, so it cannot read its own protection bundle. Reinstall or update Guard, then try again.`;
-    case "installed_runtime_unresponsive":
-      return `${KEPT} Guard's packaged compiler did not answer in time. Try again; if it keeps failing, restart Guard.`;
-    case "pack_revoked":
-      return `${KEPT} A protection pack it needs was withdrawn. Reload this page to pick up the current catalog, then try again.`;
-    case "local_storage":
-      return `${KEPT} Guard could not read its local protection cache. Try again; if it keeps failing, run \`${recovery.command}\` in ${recovery.terminal}.`;
-    // Not a broken install and not transient: the request is rebuilt from the
-    // same local data every time, so neither reinstalling nor retrying moves
-    // it. Saying "try again" here is what left operators in a loop, and so
-    // would naming a recovery command, because none of them prune the state
-    // the request is built from. The log is the one place that says what grew.
-    case "native_request_too_large":
-      return `${KEPT} Guard's local protection data has grown past what its runtime accepts in one request. Retrying sends the same request again and reinstalling Guard will not change it; the Guard daemon log records the request that grew and how far past the bound it got.`;
-    default:
-      return `${KEPT} Try again; if it keeps failing, the Guard daemon log records the exact cause.`;
-  }
-}
-function codeSentence(code, recovery) {
-  const repairAuthority = `Run \`${recovery.command}\` in ${recovery.terminal}, then try again.`;
-  switch (code) {
-    case "approval_required":
-      return `${KEPT} It needs your approval password before it can apply.`;
-    case "authority_apply_failed":
-      return `${UNCERTAIN} If the change is not there, ${repairAuthority}`;
-    case "authority_conflict":
-    case "revision_conflict":
-    case "invalid_previous_revision":
-      return `${KEPT} Your protection settings changed while this page was open. ${recovery.reloaded ? "This page now shows the current settings; make the change again." : "Reload the page and make the change again."}`;
-    case "authority_unavailable":
-    case "authority_unread":
-    case "authority_history_unavailable":
-      return `${KEPT} Guard could not open its local protection authority. ${repairAuthority}`;
-    case "authority_not_degraded":
-      return "This Guard install's protection authority is healthy, so there is nothing to recover.";
-    case "authority_not_recoverable":
-      return `Guard cannot recover this protection authority automatically. ${repairAuthority}`;
-    case "authority_recovery_failed":
-    case "authority_recovery_incomplete":
-      return `Guard could not finish recovering the protection authority. ${repairAuthority}`;
-    case "catalog_conflict":
-    case "catalog_payload_limit_exceeded":
-      return `${KEPT} Guard's protection catalog moved underneath this page. ${recovery.reloaded ? "This page now shows the current catalog; make the change again." : "Reload the page and make the change again."}`;
-    case "control_limit_exceeded":
-    case "layer_control_limit_exceeded":
-    case "layer_limit_exceeded":
-      return `${KEPT} It would take this install past the number of custom protection settings Guard keeps. Return some settings to Recommended, then try again.`;
-    case "duplicate_control_target":
-      return `${KEPT} The same setting was changed twice in one save. Reload the page and make the change once.`;
-    case "extension_control_stopped":
-      return `${KEPT} Guard is shutting down. Start Guard again, then make the change.`;
-    case "immutable_extension":
-    case "immutable_permission":
-    case "managed_layer_mutation":
-    case "managed_layer_conflict":
-      return `${KEPT} This setting is managed for you by your organization and cannot be changed here.`;
-    case "invalid_extension":
-    case "unknown_extension":
-    case "unknown_permission":
-      return `${KEPT} Guard no longer recognizes the setting this page asked to change. ${recovery.reloaded ? "This page now shows what Guard recognizes; try again." : "Reload the page and try again."}`;
-    case "invalid_layers":
-    case "invalid_mutation":
-      return `${KEPT} Guard rejected the change as malformed. Reload the page and make the change again; if it keeps failing, the Guard daemon log records the exact cause.`;
-    case "invalid_inspection_command":
-    case "invalid_test_command":
-      return "Guard could not read that command. Enter the command exactly as you would run it, then check it again.";
-    case "pack_preparation_unavailable":
-      return void 0;
-    // Refined by cause below.
-    case "prepared_preview_expired":
-      return `${KEPT} The review you approved has expired. Make the change again and apply it straight away.`;
-    case "proof_invalid":
-    case "proof_mismatch":
-    case "proof_not_found":
-      return `${KEPT} The approval for this change was no longer valid. Make the change again and re-enter your approval password.`;
-    default:
-      return void 0;
-  }
-}
-const RETRYABLE_PREPARATION_CAUSES = /* @__PURE__ */ new Set([
-  "installed_runtime_unresponsive",
-  "local_storage",
-  "offline",
-  "release_unavailable"
-]);
-const STALE_DATA_CODES = /* @__PURE__ */ new Set([
-  "authority_conflict",
-  "catalog_conflict",
-  "invalid_extension",
-  "invalid_previous_revision",
-  "revision_conflict",
-  "unknown_extension",
-  "unknown_permission"
-]);
-function isStaleProtectionDataError(error) {
-  return error instanceof ExtensionControlApiError && STALE_DATA_CODES.has(error.code ?? "");
-}
-function isRetryableProtectionChangeError(error) {
-  return error instanceof ExtensionControlApiError && error.code === "pack_preparation_unavailable" && RETRYABLE_PREPARATION_CAUSES.has(error.cause ?? "");
-}
-function protectionChangeErrorMessage(error, recoveryCommand, recoveryShell, options = {}) {
-  const recovery = {
-    command: recoveryCommand ?? "hol-guard command controls recover-authority",
-    terminal: recoveryShell === "powershell" ? "PowerShell" : "your terminal",
-    reloaded: options.reloaded === true
-  };
-  if (error instanceof ExtensionControlApiError) {
-    if (error.code === "pack_preparation_unavailable") return preparationSentence(error.cause, recovery);
-    const sentence = error.code ? codeSentence(error.code, recovery) : void 0;
-    if (sentence) return sentence;
-    return `${UNCERTAIN} If it is not there, try again; the Guard daemon log records the exact cause.`;
-  }
-  return error instanceof Error && error.message ? error.message : "Protection change failed";
 }
 const RETRY_PREPARATION_DELAY_MS = 1200;
 const DEFAULT_AUTHORITY_RECOVERY_COMMAND = "hol-guard command controls recover-authority";
