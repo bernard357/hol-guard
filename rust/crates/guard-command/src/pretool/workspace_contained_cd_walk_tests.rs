@@ -1,11 +1,15 @@
 use super::first_from;
 use std::path::{Path, PathBuf};
 
-fn scratch(name: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("hol-guard-cd-walk-{name}"));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::canonicalize(&root).unwrap()
+struct Scratch {
+    _hold: tempfile::TempDir,
+    root: PathBuf,
+}
+
+fn scratch() -> Scratch {
+    let hold = tempfile::tempdir().expect("walk scratch");
+    let root = std::fs::canonicalize(hold.path()).expect("canonical scratch");
+    Scratch { _hold: hold, root }
 }
 
 fn marked(directory: &Path) -> bool {
@@ -14,7 +18,8 @@ fn marked(directory: &Path) -> bool {
 
 #[test]
 fn a_marker_at_the_workspace_root_is_found_from_a_directory_below_it() {
-    let root = scratch("below");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let deep = workspace.join("packages/web/src");
     std::fs::create_dir_all(&deep).unwrap();
@@ -39,7 +44,8 @@ fn a_marker_at_the_workspace_root_is_found_from_a_directory_below_it() {
 
 #[test]
 fn the_nearest_marker_below_the_root_is_enough() {
-    let root = scratch("nearest");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let crate_directory = workspace.join("crates/engine");
     let deep = crate_directory.join("src");
@@ -54,7 +60,8 @@ fn the_nearest_marker_below_the_root_is_enough() {
 
 #[test]
 fn nothing_above_the_workspace_root_is_read() {
-    let root = scratch("bounded");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     std::fs::create_dir_all(workspace.join("packages/web")).unwrap();
     // The marker sits beside the workspace, where the walk must never reach.
@@ -66,7 +73,8 @@ fn nothing_above_the_workspace_root_is_read() {
 
 #[test]
 fn a_directory_outside_the_workspace_is_read_but_never_walked_from() {
-    let root = scratch("outside");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let sibling = root.join("sibling");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -85,7 +93,8 @@ fn a_directory_outside_the_workspace_is_read_but_never_walked_from() {
 
 #[test]
 fn a_parent_step_in_the_path_stops_the_walk() {
-    let root = scratch("parent-step");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     std::fs::create_dir_all(workspace.join("packages")).unwrap();
     std::fs::write(root.join("marker"), "").unwrap();
@@ -103,7 +112,8 @@ fn a_parent_step_in_the_path_stops_the_walk() {
 #[cfg(unix)]
 #[test]
 fn a_symlink_to_an_external_parent_is_not_walked_through() {
-    let root = scratch("external-link");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let outside = root.join("outside");
     std::fs::create_dir_all(workspace.join("packages")).unwrap();
@@ -115,21 +125,22 @@ fn a_symlink_to_an_external_parent_is_not_walked_through() {
 }
 
 /// A symlink that lands back inside the workspace names a directory the
-/// sandbox does bound, so the walk still reads the marker it holds.
+/// sandbox does bound. The walk reads the physical project that directory
+/// enters, which is the project the tool would bind.
 #[cfg(unix)]
 #[test]
 fn a_symlink_inside_the_workspace_is_still_walked_through() {
-    let root = scratch("internal-link");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let project = workspace.join("project");
     std::fs::create_dir_all(project.join("deep")).unwrap();
     std::fs::write(project.join("marker"), "").unwrap();
     std::os::unix::fs::symlink(&project, workspace.join("link")).unwrap();
 
-    let link = workspace.join("link");
     assert_eq!(
-        first_from(&link.join("deep"), &workspace, marked).as_deref(),
-        Some(link.as_path())
+        first_from(&workspace.join("link/deep"), &workspace, marked).as_deref(),
+        Some(project.as_path())
     );
 }
 
@@ -139,7 +150,8 @@ fn a_symlink_inside_the_workspace_is_still_walked_through() {
 #[cfg(unix)]
 #[test]
 fn an_external_symlink_stops_the_walk_when_the_root_also_has_a_marker() {
-    let root = scratch("external-link-and-root");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let outside = root.join("outside");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -157,7 +169,8 @@ fn an_external_symlink_stops_the_walk_when_the_root_also_has_a_marker() {
 #[cfg(unix)]
 #[test]
 fn an_external_symlink_is_not_climbed_to_the_workspace_marker() {
-    let root = scratch("external-link-only-root");
+    let held = scratch();
+    let root = held.root.clone();
     let workspace = root.join("workspace");
     let outside = root.join("outside");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -167,4 +180,26 @@ fn an_external_symlink_is_not_climbed_to_the_workspace_marker() {
 
     assert!(first_from(&workspace.join("link"), &workspace, marked).is_none());
     assert!(first_from(&workspace.join("link/deep"), &workspace, marked).is_none());
+}
+
+/// The nearer physical project wins over a marker at the workspace root.
+/// `uv` stops at the first `pyproject.toml` it climbs to, so a root environment
+/// must not admit a run that entered a nested project through a symlink.
+#[cfg(unix)]
+#[test]
+fn an_internal_symlink_binds_the_nearer_physical_project() {
+    let held = scratch();
+    let root = held.root.clone();
+    let workspace = root.join("workspace");
+    let pkg = workspace.join("projects/pkg");
+    let src = pkg.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(workspace.join("marker"), "").unwrap();
+    std::fs::write(pkg.join("marker"), "").unwrap();
+    std::os::unix::fs::symlink(&src, workspace.join("link")).unwrap();
+
+    assert_eq!(
+        first_from(&workspace.join("link"), &workspace, marked).as_deref(),
+        Some(pkg.as_path())
+    );
 }

@@ -54,13 +54,15 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
 /// `directory` itself is checked wherever it points, which is what the
 /// single-directory checks did and is left as it was. The parents the walk
 /// adds are not trusted by name. `npx`, `cargo` and `uv` climb the physical
-/// parents of where they run, and `workspace/link` may be a symlink to
-/// anywhere, so every existing directory on the walk is resolved. The first
-/// one that lands outside the resolved workspace ends the walk with nothing
-/// found: continuing to a lexical parent would admit a marker the tool itself
-/// never reads, including the one at the workspace root. A directory that
-/// does not exist yet is not resolved, so a `cd` into one still walks up to
-/// the project the workspace root holds, as the command itself would.
+/// parents of where they run. An existing directory is resolved first, and
+/// the walk then reads those physical parents, stopping at the resolved
+/// workspace: a symlink into a nested project finds that project's marker
+/// rather than one at the workspace root the tool would not have reached
+/// yet. A symlink that lands outside the workspace ends the walk with
+/// nothing found, because the tool has already left the sandbox. A directory
+/// that does not exist yet is not resolved, so a `cd` into one still walks
+/// its lexical parents, and an existing ancestor that lands outside the
+/// workspace ends that walk too.
 pub(super) fn first_from(
     directory: &Path,
     workspace: &Path,
@@ -77,10 +79,17 @@ pub(super) fn first_from(
         return None;
     }
     let root = workspace.canonicalize().ok()?;
-    if directory
-        .canonicalize()
-        .is_ok_and(|resolved| !resolved.starts_with(&root))
-    {
+    if let Ok(resolved) = directory.canonicalize() {
+        if !resolved.starts_with(&root) {
+            return None;
+        }
+        let mut probe = resolved;
+        while probe.as_path() != root.as_path() {
+            probe = probe.parent()?.to_owned();
+            if found(&probe) {
+                return Some(probe);
+            }
+        }
         return None;
     }
     let mut probe = directory;
