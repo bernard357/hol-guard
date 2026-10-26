@@ -190,7 +190,7 @@ fn decisions(
     };
     let mut rows = Vec::new();
     let mut offset: Option<u64> = None;
-    let mut total = None;
+    let mut total: Option<Value> = None;
     loop {
         let input = json!({
             "bundle_chunks": bundle_chunks,
@@ -205,7 +205,9 @@ fn decisions(
             return Some(Vec::new());
         };
         if !items.iter().all(Value::is_object)
-            || total.is_some_and(|total| page.get("total") != Some(total))
+            || total
+                .as_ref()
+                .is_some_and(|total| page.get("total") != Some(total))
         {
             return Some(Vec::new());
         }
@@ -287,15 +289,27 @@ fn generic_label(label: &str) -> bool {
     GENERIC_DEVICE_LABELS.contains(&py_strip(label).to_lowercase().as_str())
 }
 
-/// `platform.node()`: the node name, which Windows builds do not read here.
+/// `platform.node()`: the node name the device name is derived from.
 #[cfg(unix)]
 fn host_name() -> Option<String> {
     nix::unistd::gethostname().ok()?.into_string().ok()
 }
 
+/// Off Unix the node name comes from `COMPUTERNAME`, the convention
+/// `cloud_audit_sync::EnvCloudAuditWorkspaceContext` already reads the host
+/// by, so a Windows device is named after its host rather than falling back to
+/// the label every time.
 #[cfg(not(unix))]
 fn host_name() -> Option<String> {
-    None
+    host_name_from_env(std::env::var("COMPUTERNAME").ok())
+}
+
+/// The node name a host-name variable holds, or none when it is unset or
+/// blank, so an empty variable leaves the device on its label.
+#[cfg(any(not(unix), test))]
+fn host_name_from_env(value: Option<String>) -> Option<String> {
+    let name = value?;
+    (!name.trim().is_empty()).then_some(name)
 }
 
 /// One `sync_state` payload as `get_sync_payload` reads it: `Some(None)` when

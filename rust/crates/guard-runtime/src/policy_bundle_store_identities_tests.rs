@@ -177,3 +177,25 @@ fn the_ordering_view_keeps_only_the_ordering_keys() {
         json!({"bundleVersion": 2, "issuedAt": "t"})
     );
 }
+
+/// The Windows arm of `host_name` reads `COMPUTERNAME`, so prove the reading
+/// it does here rather than leaving it only to a Windows build.
+#[test]
+fn windows_host_name_reads_the_computer_name() {
+    assert_eq!(
+        host_name_from_env(Some("WORKSTATION.corp.example".to_owned())),
+        Some("WORKSTATION.corp.example".to_owned())
+    );
+    assert_eq!(host_name_from_env(Some("   ".to_owned())), None);
+    assert_eq!(host_name_from_env(None), None);
+}
+
+/// A blank host name leaves the device on its label, the same fallback an
+/// unreadable node name takes on Unix.
+#[test]
+fn a_blank_computer_name_leaves_the_device_on_its_label() {
+    assert_eq!(
+        host_name_from_env(Some(String::new())).and_then(|host| machine_display_name(&host)),
+        None
+    );
+}
