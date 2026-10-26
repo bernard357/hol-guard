@@ -26,6 +26,7 @@ import {
   type ExtensionPolicyRebaseConflict,
   type ExtensionPolicyRebaseResult,
 } from "./extension-policy-rebase";
+import { protectionChangeErrorMessage } from "./protection-center/protection-change-error";
 import {
   extensionPolicyRepairBase,
   isExtensionPolicyConflict,
@@ -189,8 +190,12 @@ export function useExtensionPolicyDraft(props: {
       setError("The authoritative extension policy changed while this draft was open. Rebase the draft before applying; Guard will not silently overwrite security policy.");
       return;
     }
-    setError(caught instanceof Error ? caught.message : fallback);
-  }, []);
+    // The daemon answers with protocol codes such as `authority_unavailable`;
+    // those are mapped to a sentence that says what happened and what to do,
+    // never printed at the operator as they are.
+    const commands = baseEffective.terminal_commands;
+    setError(caught instanceof Error ? protectionChangeErrorMessage(caught, commands?.recover_authority, commands?.shell) : fallback);
+  }, [baseEffective]);
 
   const runPreview = useCallback(async () => {
     if (!dirty) return;

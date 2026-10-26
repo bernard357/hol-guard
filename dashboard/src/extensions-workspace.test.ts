@@ -479,6 +479,12 @@ assert.match(extensionNavigationSource, /export function pushExtensionHistory/);
 assert.match(extensionNavigationSource, /export function replaceExtensionHistory/);
 assert.match(policyDetailSource, /id="extension-policy-tabpanel"[\s\S]*role="tabpanel"[\s\S]*aria-labelledby="extension-tab-policy"/);
 assert.match(policyDraftSource, /isCurrentExtensionPolicyDraft\(generation, draftGeneration\.current\)\) handleApiError/);
+assert.match(
+  policyDraftSource,
+  /protectionChangeErrorMessage\(caught, commands\?\.recover_authority, commands\?\.shell\)/,
+  "a failed preview or apply shows a sentence for the daemon's code, never the raw protocol token",
+);
+assert.doesNotMatch(policyDraftSource, /setError\(caught instanceof Error \? caught\.message/);
 assert.match(policyDraftSource, /isCurrentExtensionPolicyDraft\(generation, draftGeneration\.current\)[\s\S]*Guard could not rebase this draft/);
 assert.match(
   policyDraftSource,
