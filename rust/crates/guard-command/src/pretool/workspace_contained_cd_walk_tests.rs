@@ -88,3 +88,40 @@ fn a_parent_step_in_the_path_stops_the_walk() {
     let climbed = workspace.join("..").join("..");
     assert!(first_from(&climbed, &workspace, marked).is_none());
 }
+
+/// A name below the workspace is not a place below it. `workspace/link` may
+/// point anywhere, so a marker found through it has to resolve under the
+/// workspace before the walk counts it; otherwise a tool planted outside
+/// would admit a command the sandbox never bounds.
+#[cfg(unix)]
+#[test]
+fn a_symlink_to_an_external_parent_is_not_walked_through() {
+    let root = scratch("external-link");
+    let workspace = root.join("workspace");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(workspace.join("packages")).unwrap();
+    std::fs::create_dir_all(outside.join("deep")).unwrap();
+    std::fs::write(outside.join("marker"), "").unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("link")).unwrap();
+
+    assert!(first_from(&workspace.join("link/deep"), &workspace, marked).is_none());
+}
+
+/// A symlink that lands back inside the workspace names a directory the
+/// sandbox does bound, so the walk still reads the marker it holds.
+#[cfg(unix)]
+#[test]
+fn a_symlink_inside_the_workspace_is_still_walked_through() {
+    let root = scratch("internal-link");
+    let workspace = root.join("workspace");
+    let project = workspace.join("project");
+    std::fs::create_dir_all(project.join("deep")).unwrap();
+    std::fs::write(project.join("marker"), "").unwrap();
+    std::os::unix::fs::symlink(&project, workspace.join("link")).unwrap();
+
+    let link = workspace.join("link");
+    assert_eq!(
+        first_from(&link.join("deep"), &workspace, marked).as_deref(),
+        Some(link.as_path())
+    );
+}

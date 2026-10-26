@@ -44,13 +44,24 @@ pub(super) fn below(target: &str, workspace: &Path) -> bool {
 /// what the workspace itself holds, and every path the run then writes is one
 /// the sandbox already bounds.
 ///
-/// `directory` is checked wherever it points, which is what the single-
-/// directory checks did. The walk only starts when it stays below the
-/// workspace with no parent step in it, so a path that already climbed out
-/// cannot carry the ascent further out. A run whose own directory is the
-/// workspace has nowhere to climb, so a session rooted in the subdirectory
-/// itself is unchanged: its sandbox is that subdirectory, and a project above
-/// it would write outside what the sandbox bounds.
+/// The walk only starts when `directory` stays below the workspace with no
+/// parent step in it, so a path that already climbed out cannot carry the
+/// ascent further out. A run whose own directory is the workspace has nowhere
+/// to climb, so a session rooted in the subdirectory itself is unchanged: its
+/// sandbox is that subdirectory, and a project above it would write outside
+/// what the sandbox bounds.
+///
+/// `directory` itself is checked wherever it points, which is what the
+/// single-directory checks did and is left as it was. The parents the walk
+/// adds are not: a name below the workspace is not yet a place below it,
+/// since `workspace/link` may be a symlink to anywhere, so an ancestor a
+/// marker is found in is resolved and has to land under the resolved
+/// workspace before it counts. Without that, planting
+/// `link/node_modules/.bin/<tool>` outside the workspace would admit a
+/// command the entered directory itself held no marker for. Only an ancestor
+/// a marker was found in is resolved, so a `cd` into a directory that does
+/// not exist yet still walks up to the project the workspace root holds, as
+/// the command itself would.
 pub(super) fn first_from(
     directory: &Path,
     workspace: &Path,
@@ -66,11 +77,16 @@ pub(super) fn first_from(
     {
         return None;
     }
+    let root = workspace.canonicalize().ok()?;
     let mut probe = directory;
     while probe != workspace {
         let parent = probe.parent()?;
         probe = parent;
-        if found(probe) {
+        if found(probe)
+            && probe
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.starts_with(&root))
+        {
             return Some(probe.to_owned());
         }
     }
