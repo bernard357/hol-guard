@@ -500,6 +500,8 @@ events.
 Current material gaps include:
 
 - Copilot and Cursor event aliases are normalized by the Rust raw edge.
+- The Rust raw edge renders Guard's Claude Code notice on a reviewed
+  `UserPromptSubmit` outside Watch; the daemon returns the edge response as is.
 - Non-command PreToolUse and native `review` remain native decisions; the
   harness bridge renders an unsupported review as a conservative deny.
 - OpenCode, Grok, Hermes, OpenClaw, ZCode, Gemini, and Antigravity expose partial
@@ -527,6 +529,13 @@ Current material gaps include:
 - The CLI hook answers Claude Code's permission dialog through the daemon
   review path, as the bridge does. No Python caller asks the resident's
   `claude_permission_verdict` or `hook_route` any more.
+- The CLI hook reads the daemon's answer through the resident's
+  `hook_render` `cli_hook_emit` kind: a bridge-rendered harness gets its wire
+  output and exit status, any other the policy action its exit status
+  follows. When the resident cannot answer, the CLI prints the fixed
+  fail-closed bridge payload or exits with the harness's block status. The
+  Python bounded bridge still renders with `_daemon_response_to_native` when
+  the native bridge cannot run.
 
 ## No-environment production contract
 

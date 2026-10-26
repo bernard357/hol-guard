@@ -50,7 +50,8 @@
 use std::path::Path;
 
 use guard_contracts::{
-    GuardStoreRequestV1, McpToolCallArtifactV1, McpToolFactsV1, GUARD_STORE_REQUEST_SCHEMA,
+    GuardStoreRequestV1, McpToolCallArtifactV1, McpToolFactsV1, McpToolPolicyProxyInputV1,
+    GUARD_STORE_REQUEST_SCHEMA,
 };
 use serde_json::{json, Map, Value};
 
@@ -59,6 +60,7 @@ use super::{Admitted, McpRelayDecideRequestV1, Resolved, Routed};
 use crate::hook_direct::saved_decision::consume::{repair_store_permissions, storage_gate};
 use crate::local_mcp_grant_identity::composio_requires_action_review;
 use crate::local_store_read::STORE_FILE_NAME;
+use crate::mcp_tool_policy_decision::Decision;
 
 /// The decision source `_queue_approval_center_response` records for a call
 /// it blocks on a queued approval request.
@@ -74,6 +76,13 @@ pub(super) const REVIEWABLE: [&str; 2] = ["review", "require-reapproval"];
 /// The hosts `canonical_local_approval_url` treats as this machine.
 const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "::1", "localhost"];
 
+/// A package call the proxy would prompt for before its package lane runs.
+/// The prefix hands the call's server to the proxy.
+pub(super) const PACKAGE_PROMPT: &str = "mcp_relay_package_prompt";
+/// The fact the route names when the client's inline elicitation answers.
+const INLINE_APPROVAL: &str = "inline_approval";
+/// The source the route forwards a natively approved call under.
+const NATIVE_APPROVED: &str = "native-approved";
 const ASK_UNSUPPORTED: &str = "mcp_relay_ask_unsupported";
 const ASK_QUEUE_FAILED: &str = "mcp_relay_ask_queue_failed";
 const REMEMBER_UNSUPPORTED: &str = "mcp_relay_remember_unsupported";
@@ -87,6 +96,44 @@ const REMEMBER_UNSUPPORTED: &str = "mcp_relay_remember_unsupported";
 /// client's inline elicitation.
 pub(super) fn native_prompt_allows(harness: &str, tool: &McpToolFactsV1) -> bool {
     harness == OPENCODE && tool.source != "policy"
+}
+
+/// Whether the proxy prompts for a package call under `ask` before its package
+/// lane runs.
+///
+/// The proxy sends a package call through `_route_tool_call` before
+/// `_handle_package_request`, and that route raises the native prompt and the
+/// client's inline elicitation for a tool decision it would otherwise queue
+/// or observe. The package lane raises neither, so a call either prompt would
+/// answer defers with [`PACKAGE_PROMPT`], which hands its server to the proxy.
+/// A call no prompt answers falls through to the queue or the observed
+/// forward, which the lane takes itself.
+///
+/// The route is asked as for a plain call: a package call reaches the same
+/// prompts on the same decision, and only a saved package block, which skips
+/// them, comes first. Deferring that call too leaves its block to the proxy.
+pub(super) fn prompts_before_package(
+    catalog_state: &str,
+    mode: &str,
+    tool_name: &str,
+    harness: &str,
+    inline_available: bool,
+    decision: &Decision,
+) -> bool {
+    let input = McpToolPolicyProxyInputV1 {
+        catalog_state: catalog_state.to_owned(),
+        mode: mode.to_owned(),
+        package_present: false,
+        asks_for_approval: true,
+        inline_available: inline_available && harness != OPENCODE,
+        tool_name: tool_name.to_owned(),
+        inline_approval: None,
+    };
+    let payload = crate::mcp_tool_policy_proxy::proxy_payload(&input, decision, |tool| {
+        Some(native_prompt_allows(harness, tool))
+    });
+    let route = &payload["route"];
+    route["need"] == INLINE_APPROVAL || route["route"]["decision_source"] == NATIVE_APPROVED
 }
 
 /// Whether the allow a remembered inline approval saves would be refused, in
