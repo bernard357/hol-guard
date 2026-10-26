@@ -358,6 +358,13 @@ mod guard_store_local_cli_catalog;
 #[cfg(test)]
 mod guard_store_local_cli_grant_vectors_tests;
 mod guard_store_local_cli_grants;
+mod guard_store_local_cli_inventory;
+mod guard_store_local_cli_inventory_capabilities;
+mod guard_store_local_cli_inventory_rows;
+#[cfg(test)]
+mod guard_store_local_cli_inventory_rows_tests;
+#[cfg(test)]
+mod guard_store_local_cli_inventory_vectors_tests;
 mod guard_store_local_cli_mcp_snapshot;
 #[cfg(test)]
 mod guard_store_local_cli_vectors_tests;
