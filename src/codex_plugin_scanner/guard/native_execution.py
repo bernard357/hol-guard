@@ -1,4 +1,6 @@
-"""Resident bridge for contained-execution + shim-admin + MCP-probe ops (RTM-020).
+"""Resident bridge for contained-execution, MCP-probe and prompt ops (RTM-020).
+
+Package-shim administration lives in ``native_shim_admin``.
 
 Each helper sends a native request and decodes its response. A missing or
 malformed response returns ``None``; enforcement callers must treat that as
@@ -8,34 +10,31 @@ unavailable authority, not permission to substitute Python decisions.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, get_args
 
 from .models import GuardAction
-from .native_resident_client import native_resident_client_request
-from .native_runtime import _isolated_environment, native_runtime_status
+from .native_resident_client import native_resident_client_request, record_native_resident_error_frame
+from .native_runtime import NativeRuntimeStatus, _isolated_environment, native_runtime_status
 from .native_runtime_resilience import (
     native_record_resident_failure,
     native_record_resident_success,
 )
 
 if TYPE_CHECKING:
-    from .contained_node_execution import ContainedNodeResult
-    from .contained_package_script_execution import ContainedPackageScriptResult
-    from .contained_typescript_execution import ContainedTypeScriptResult
+    from .contained_runner_result import ContainedRunnerResult
     from .contained_workspace_write_execution import ContainedWorkspaceWriteResult
-    from .runtime.containment_contract import ContainmentAttestation
-    from .runtime.containment_outputs import ContainmentCapturedOutput
     from .runtime.effect_decision import DecisionReason, EffectDecision, PositiveProof
 
 _MAX_REQUEST_BYTES = 256 * 1024
 _RESIDENT_PROTOCOL_FEATURE = "resident-protocol-v2"
 _CONTAINED_EXECUTION_FEATURE = "contained-execution-v1"
-_SHIM_ADMIN_FEATURE = "shim-admin-v1"
 _MCP_STDIO_PROBE_FEATURE = "mcp-stdio-probe-v1"
 _MCP_STDIO_SESSION_FEATURE = "mcp-stdio-session-v1"
 _MCP_STDIO_SESSION_OPEN_SCHEMA = "guard-mcp-stdio-session-open-request.v1"
@@ -61,7 +60,7 @@ _MCP_SESSION_ACCEPTED_STATUS = {
     "mcp_stdio_session_close": frozenset({"closed", "error"}),
     "mcp_stdio_session_cancel": frozenset({"cancelled", "error"}),
 }
-_PROMPT_ANALYZE_FEATURE = "prompt-analyze-v1"
+_PROMPT_ANALYZE_FEATURE = "prompt-analyze-v2"
 
 
 def _request_id(prefix: str) -> str:
@@ -76,9 +75,26 @@ def _resident_request(
     timeout_seconds: float,
     required_feature: str,
     response_schema: str | None = None,
+    max_request_bytes: int = _MAX_REQUEST_BYTES,
+    record_success: bool = True,
+    record_resilience: bool = True,
+    status: NativeRuntimeStatus | None = None,
 ) -> dict[str, object] | None:
-    """Envelope + transport shared by all contained-execution ops."""
-    status = native_runtime_status()
+    """Envelope + transport shared by all contained-execution ops.
+
+    ``status`` is the caller's already-resolved runtime status; resolving it is
+    a stat-heavy walk that a caller recording resident health needs too, so it
+    is passed along instead of being resolved twice per request.
+
+    Pass ``record_success=False`` when the caller validates the reply further
+    and records success itself; otherwise a resident that keeps sending
+    unusable replies would reset the failure streak on every call. With
+    ``record_success=False`` every resident-originated ``None`` (transport,
+    malformed or non-object body, wrong schema, unaccepted status) records its
+    own failure here, so the caller must not record those again.
+    """
+    if status is None:
+        status = native_runtime_status()
     if not status.available or not status.compatible or status.identity is None or status.capabilities is None:
         return None
     features = set(status.capabilities.features)
@@ -94,7 +110,7 @@ def _resident_request(
         payload = json.dumps(envelope).encode("utf-8")
     except (TypeError, ValueError):
         return None
-    if len(payload) > _MAX_REQUEST_BYTES:
+    if len(payload) > max_request_bytes:
         return None
     environment = _isolated_environment()
     response = native_resident_client_request(
@@ -105,23 +121,53 @@ def _resident_request(
         timeout_seconds=timeout_seconds,
     )
     if response is None:
-        native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_transport")
+        if record_resilience:
+            native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_transport")
         return None
     try:
         decoded = json.loads(response.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_malformed")
+        if record_resilience:
+            native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_malformed")
         return None
     if not isinstance(decoded, dict):
+        if record_resilience and not record_success:
+            native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_malformed")
         return None
+    if "schema" not in decoded:
+        record_native_resident_error_frame(decoded)
     if response_schema is not None and decoded.get("schema") != response_schema:
-        native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_schema")
+        if record_resilience:
+            native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_schema")
         return None
     result_schema = {
         "prompt_analyze": "guard-prompt-analyze-result.v1",
         "mcp_stdio_probe": "guard-mcp-stdio-probe-result.v1",
+        "contained_node_execute": "guard-contained-node-execute-result.v1",
+        "contained_typescript_execute": "guard-contained-typescript-execute-result.v1",
+        "contained_package_script_execute": "guard-contained-package-script-execute-result.v1",
+        "contained_workspace_write_execute": "guard-contained-workspace-write-execute-result.v1",
+        "containment_health_probe": "guard-containment-health-probe-result.v1",
+        "contained_execute": "guard-contained-execute-result.v1",
     }.get(operation)
-    if result_schema is not None:
+    if operation == "cloud_catalog":
+        # Producer/completion replies use a strict payload/error union, with
+        # no status field. Keep native validation refusals intact.
+        if decoded.get("schema") != "guard-cloud-catalog-result.v2":
+            return None
+        if set(decoded) == {"schema", "payload"}:
+            if not isinstance(decoded["payload"], dict):
+                return None
+        elif set(decoded) == {"schema", "error"}:
+            if not isinstance(decoded["error"], str) or decoded["error"] not in {
+                "catalog_invalid",
+                "catalog_limit",
+                "catalog_unavailable",
+            }:
+                return None
+        else:
+            return None
+    elif result_schema is not None:
         # These versioned Rust replies have no status field. Do not discard
         # valid native results or reinterpret them through a Python fallback.
         if decoded.get("schema") != result_schema or set(decoded) != {"schema", "result"}:
@@ -132,14 +178,58 @@ def _resident_request(
         # ("opened") / recv ("event") / close ("closed") and forced a silent
         # Python fallback the resident should own.
         accepted = _MCP_SESSION_ACCEPTED_STATUS.get(operation)
-        if operation == "policy_decision_lookup":
+        if operation in {
+            "mcp_proxy_decide",
+            "policy_decision_lookup",
+            "local_cli_grant_decide",
+            "local_cli_hook",
+            "connector_setup_context",
+            "guard_store",
+            "hook_evidence_writer",
+            "local_mcp_grant_decide",
+            "contributed_mcp_decide",
+            "approval_proof_decide",
+            "hook_decide",
+            "hook_adapter",
+            "request_context_build",
+            "claim_approval_reuse_decisions",
+            "approval_reuse_diagnostic",
+            "approval_resolution_plan",
+            "approval_queue_identity",
+            "approval_bulk_eligibility",
+            "codex_request_resume",
+            "daemon_route",
+            "daemon_handler",
+            "extension_control",
+            "extension_allow_hint",
+            "approval_extension_recommendation",
+            "hook_authority_state",
+            "extension_control_authority",
+            "hook_render",
+            "protect_request",
+            "hook_artifact_compose",
+            "consumer_artifact_compose",
+            "mcp_tool_call_identity",
+            "package_context_build",
+            "policy_document_decide",
+            "command_policy_decide",
+            "command_expression_validate",
+            "reviewed_invocation_bindings_validate",
+            "tool_action_request_identity",
+            "verified_read_plan",
+        }:
             accepted = frozenset({"ok", "error"})
-        if accepted is not None:
-            if decoded.get("status") not in accepted:
-                return None
-        elif decoded.get("status") != "ok":
+        elif operation == "mcp_tool_policy_decide":
+            accepted = frozenset({"ok", "need", "error"})
+        elif operation == "native_bash_prepare":
+            accepted = frozenset({"ok", "error", "denied", "unavailable"})
+        accepted_statuses = accepted if accepted is not None else frozenset({"ok"})
+        if decoded.get("status") not in accepted_statuses:
+            if record_resilience and not record_success:
+                native_record_resident_failure(status.identity.sha256, guard_home, reason=f"native_{operation}_status")
             return None
-    native_record_resident_success(status.identity.sha256, guard_home)
+    if record_resilience and record_success:
+        native_record_resident_success(status.identity.sha256, guard_home)
     return decoded
 
 
@@ -167,8 +257,9 @@ def _contained_request(
         "manager": manager,
         "argv": list(argv),
         "guard_home": str(guard_home),
-        "evidence": evidence,
     }
+    if evidence is not None:
+        request["evidence"] = evidence
     if extra_fields:
         request.update(extra_fields)
     decoded = _resident_request(
@@ -184,90 +275,99 @@ def _contained_request(
     return result if isinstance(result, dict) else None
 
 
-def contained_node_execute_native(
+_CONTAINED_RUNNER_MAX_SECONDS = 600.0
+# The resident spends time outside the contained process: a pre-run health
+# probe (up to 5 s plus a 5 s kill wait), hashing and copying the workspace
+# snapshot (5 s discovery budget plus copy time) and up to 5 s reaping a
+# timed-out process. The slack must cover all of it so the resident, not the
+# client, reports a timeout and a finished run is never discarded.
+_CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS = 60.0
+
+
+def _contained_runner_request(
+    *,
+    op_prefix: str,
+    request_schema: str,
     workspace: Path,
     manager: str,
     argv: Sequence[str],
-    *,
     guard_home: Path,
-    evidence: dict[str, object] | None = None,
-    timeout_seconds: float = 30.0,
-) -> ContainedNodeResult | None:
-    result = _contained_request(
-        op_prefix="contained_node_execute",
-        request_schema="guard-contained-node-execute-request.v1",
+    shim_directory: Path,
+    environment: Mapping[str, str],
+    timeout_seconds: float,
+    evidence: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Send one contained local-runner request.
+
+    ``timeout_seconds`` is the contained process timeout. The transport budget
+    adds slack so the resident, not the client, reports a process timeout, and
+    the resident's per-operation ceiling is raised to match.
+    """
+
+    process_timeout = min(max(float(timeout_seconds), 0.1), _CONTAINED_RUNNER_MAX_SECONDS)
+    extra_fields: dict[str, object] = {
+        "shim_directory": str(shim_directory),
+        "environment": dict(environment),
+        "timeout_seconds": process_timeout,
+    }
+    return _contained_request(
+        op_prefix=op_prefix,
+        request_schema=request_schema,
         workspace=workspace,
         manager=manager,
         argv=argv,
         guard_home=guard_home,
         evidence=evidence,
-        timeout_seconds=timeout_seconds,
+        extra_fields=extra_fields,
+        timeout_seconds=process_timeout + _CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS,
     )
-    if result is None:
-        return None
-    try:
-        return _contained_node_result(result)
-    except (KeyError, TypeError, ValueError):
-        return None
 
 
-def contained_typescript_execute_native(
+_RUNNER_OPERATIONS = {
+    "node": "contained_node_execute",
+    "typescript": "contained_typescript_execute",
+    "package_script": "contained_package_script_execute",
+}
+
+
+def contained_runner_execute_native(
+    runner: str,
     workspace: Path,
     manager: str,
     argv: Sequence[str],
     *,
     guard_home: Path,
+    shim_directory: Path,
+    environment: Mapping[str, str],
     evidence: dict[str, object] | None = None,
-    timeout_seconds: float = 30.0,
-) -> ContainedTypeScriptResult | None:
-    result = _contained_request(
-        op_prefix="contained_typescript_execute",
-        request_schema="guard-contained-typescript-execute-request.v1",
+    timeout_seconds: float = 120.0,
+) -> ContainedRunnerResult | None:
+    """Run one exact local runner in the resident and decode its typed result."""
+
+    operation = _RUNNER_OPERATIONS[runner]
+    result = _contained_runner_request(
+        op_prefix=operation,
+        request_schema=f"guard-{operation.replace('_', '-')}-request.v1",
         workspace=workspace,
         manager=manager,
         argv=argv,
         guard_home=guard_home,
+        shim_directory=shim_directory,
+        environment=environment,
+        timeout_seconds=timeout_seconds,
         evidence=evidence,
-        timeout_seconds=timeout_seconds,
     )
     if result is None:
         return None
     try:
-        return _contained_typescript_result(result)
+        return _contained_runner_result(result)
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def contained_package_script_execute_native(
-    workspace: Path,
-    manager: str,
-    argv: Sequence[str],
-    *,
-    guard_home: Path,
-    shim_directory: Path | None = None,
-    environment: Mapping[str, str] | None = None,
-    timeout_seconds: float = 30.0,
-) -> ContainedPackageScriptResult | None:
-    result = _contained_request(
-        op_prefix="contained_package_script_execute",
-        request_schema="guard-contained-package-script-execute-request.v1",
-        workspace=workspace,
-        manager=manager,
-        argv=argv,
-        guard_home=guard_home,
-        extra_fields={
-            "shim_directory": str(shim_directory) if shim_directory else None,
-            "environment": dict(environment) if environment else None,
-            "timeout_seconds": timeout_seconds,
-        },
-        timeout_seconds=timeout_seconds,
-    )
-    if result is None:
-        return None
-    try:
-        return _contained_package_script_result(result)
-    except (KeyError, TypeError, ValueError):
-        return None
+contained_node_execute_native = partial(contained_runner_execute_native, "node")
+contained_typescript_execute_native = partial(contained_runner_execute_native, "typescript")
+contained_package_script_execute_native = partial(contained_runner_execute_native, "package_script")
 
 
 def contained_workspace_write_execute_native(
@@ -281,6 +381,8 @@ def contained_workspace_write_execute_native(
     target: str | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> ContainedWorkspaceWriteResult | None:
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        return None
     request: dict[str, object] = {
         "schema": "guard-contained-workspace-write-execute-request.v1",
         "request_id": _request_id("contained_workspace_write_execute"),
@@ -290,14 +392,20 @@ def contained_workspace_write_execute_native(
         "source": source,
         "target": target,
         "environment": dict(environment) if environment else None,
-        "timeout_seconds": int(timeout_seconds),
+        "timeout_seconds": max(1, math.ceil(timeout_seconds)),
         "guard_home": str(guard_home),
     }
     decoded = _resident_request(
         operation="contained_workspace_write_execute",
         request=request,
         guard_home=guard_home,
-        timeout_seconds=timeout_seconds,
+        # The request above already hands the write its full execution budget.
+        # Waiting for exactly that long leaves nothing for the resident to spawn
+        # the process, drain its output and frame a reply, so a write that uses
+        # its whole budget would come back as a transport failure and count
+        # toward the shared native-runtime circuit. The contained runners add
+        # the same slack for the same reason.
+        timeout_seconds=timeout_seconds + _CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS,
         required_feature=_CONTAINED_EXECUTION_FEATURE,
     )
     if decoded is None:
@@ -311,27 +419,47 @@ def contained_workspace_write_execute_native(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Contained execute op
+# ---------------------------------------------------------------------------
+
+# The resident spends time on sandbox setup and on reaping a timed-out child on
+# top of the contained process itself, so the transport waits longer than the
+# request's own timeout and the resident, not this client, reports a timeout.
+_CONTAINED_EXECUTE_TRANSPORT_SLACK_SECONDS = 30.0
+
+
 def contained_execute_native(
-    request_payload: dict[str, object],
-    policy_payload: dict[str, object],
+    request: Mapping[str, object],
+    policy: Mapping[str, object],
     *,
     guard_home: Path,
     run_id: str,
-    timeout_seconds: float = 60.0,
 ) -> dict[str, object] | None:
-    request: dict[str, object] = {
+    """Run one contained request in the resident and return its evidence.
+
+    ``request`` and ``policy`` are the canonical containment payloads the
+    resident validates; nothing here interprets or re-derives them. ``None``
+    means the resident did not run the request, which every caller must treat
+    as unavailable rather than as a clean run.
+    """
+
+    timeout_seconds = request.get("timeout_seconds")
+    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        return None
+    payload: dict[str, object] = {
         "schema": "guard-contained-execute-request.v1",
         "request_id": _request_id("contained_execute"),
-        "request": request_payload,
-        "policy": policy_payload,
+        "request": dict(request),
+        "policy": dict(policy),
         "guard_home": str(guard_home),
         "run_id": run_id,
     }
     decoded = _resident_request(
         operation="contained_execute",
-        request=request,
+        request=payload,
         guard_home=guard_home,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=float(timeout_seconds) + _CONTAINED_EXECUTE_TRANSPORT_SLACK_SECONDS,
         required_feature=_CONTAINED_EXECUTION_FEATURE,
     )
     if decoded is None:
@@ -340,73 +468,41 @@ def contained_execute_native(
     return result if isinstance(result, dict) else None
 
 
-def contained_test_hook_native(
-    workspace: Path,
-    command_text: str,
+# ---------------------------------------------------------------------------
+# Containment health probe op
+# ---------------------------------------------------------------------------
+
+# The resident runs a real contained process under a five second timeout and
+# may spend another five seconds reaping it, on top of resident start-up and
+# sandbox setup. This matches the resident's own ceiling for the operation
+# (CONTAINMENT_HEALTH_PROBE_TIMEOUT_CEILING_MS), which clamps anything larger.
+_CONTAINMENT_HEALTH_PROBE_SECONDS = 15.0
+
+
+def containment_health_probe_native(
     *,
+    daemon_fingerprint: str,
     guard_home: Path,
-    timeout_seconds: float = 10.0,
 ) -> dict[str, object] | None:
+    """Ask the resident for current containment health evidence."""
+
     request: dict[str, object] = {
-        "schema": "guard-contained-test-hook-request.v1",
-        "request_id": _request_id("contained_test_hook"),
-        "workspace": str(workspace),
-        "command_text": command_text,
+        "schema": "guard-containment-health-probe-request.v1",
+        "request_id": _request_id("containment_health_probe"),
+        "daemon_fingerprint": daemon_fingerprint,
         "guard_home": str(guard_home),
     }
     decoded = _resident_request(
-        operation="contained_test_hook",
+        operation="containment_health_probe",
         request=request,
         guard_home=guard_home,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=_CONTAINMENT_HEALTH_PROBE_SECONDS,
         required_feature=_CONTAINED_EXECUTION_FEATURE,
     )
     if decoded is None:
         return None
     result = decoded.get("result")
     return result if isinstance(result, dict) else None
-
-
-# ---------------------------------------------------------------------------
-# Shim admin op
-# ---------------------------------------------------------------------------
-
-
-def shim_admin_native(
-    subop: str,
-    *,
-    guard_home: Path,
-    managers: Sequence[str] | None = None,
-    workspace_dir: Path | None = None,
-    allow_inactive_path: bool = False,
-    timeout_seconds: int = 30,
-    path_env: str | None = None,
-    install_managers: Sequence[str] | None = None,
-    repair: bool = False,
-) -> dict[str, object] | list[object] | None:
-    request: dict[str, object] = {
-        "schema": "guard-shim-admin-request.v1",
-        "subop": subop,
-        "guard_home": str(guard_home),
-        "managers": list(managers) if managers else None,
-        "workspace_dir": str(workspace_dir) if workspace_dir else None,
-        "allow_inactive_path": allow_inactive_path,
-        "timeout_seconds": timeout_seconds,
-        "path_env": path_env,
-        "install_managers": list(install_managers) if install_managers else None,
-        "repair": repair,
-    }
-    decoded = _resident_request(
-        operation="shim_admin",
-        request=request,
-        guard_home=guard_home,
-        timeout_seconds=float(timeout_seconds) + 5.0,
-        required_feature=_SHIM_ADMIN_FEATURE,
-    )
-    if decoded is None:
-        return None
-    result = decoded.get("result")
-    return result if isinstance(result, (dict, list)) else None
 
 
 # ---------------------------------------------------------------------------
@@ -572,94 +668,22 @@ def _effect_decision(payload: dict[str, Any]) -> EffectDecision:
     )
 
 
-def _containment_attestation(payload: dict[str, Any]) -> ContainmentAttestation:
-    from .runtime.containment_contract import ContainmentAttestation, ContainmentBackend, ContainmentFailure
-
-    backend = _require_str(payload, "backend")
-    failure_raw = payload.get("failure")
-    return ContainmentAttestation(
-        backend=ContainmentBackend(backend),
-        backend_digest=_require_str(payload, "backend_digest"),
-        request_digest=_require_str(payload, "request_digest"),
-        policy_digest=_require_str(payload, "policy_digest"),
-        launch_digest=_require_str(payload, "launch_digest"),
-        executable_digest=_require_str(payload, "executable_digest"),
-        enforced=bool(payload.get("enforced", False)),
-        failure=ContainmentFailure(failure_raw) if isinstance(failure_raw, str) else None,
-    )
-
-
-def _captured_output(item: dict[str, Any]) -> ContainmentCapturedOutput:
-    from .runtime.containment_outputs import ContainmentCapturedOutput
-
-    return ContainmentCapturedOutput(
-        snapshot_path=_require_str(item, "snapshot_path"),
-        content=bytes.fromhex(_require_str(item, "content_hex")) if "content_hex" in item else b"",
-        content_digest=_require_str(item, "content_digest"),
-    )
-
-
-def _contained_node_result(payload: dict[str, Any]) -> ContainedNodeResult:
-    from .contained_node_execution import ContainedNodeResult
-
+def _common_result_fields(payload: dict[str, Any]) -> dict[str, Any]:
     attestation = _require_dict(payload, "attestation")
-    decision_raw = _require_dict(payload, "decision")
-    exit_code = _require_int(attestation, "exit_code")
-    stdout = _require_str(payload, "stdout")
-    stderr = _require_str(payload, "stderr")
-    proof = _positive_proof(_require_dict(payload, "proof"))
-    decision = _effect_decision(decision_raw)
-    operation_id = _require_str(payload, "operation_id")
-    return ContainedNodeResult(
-        exit_code=exit_code,
-        stdout=stdout,
-        stderr=stderr,
-        proof=proof,
-        decision=decision,
-        operation_id=operation_id,
-    )
+    return {
+        "exit_code": _require_int(attestation, "exit_code"),
+        "stdout": _require_str(payload, "stdout"),
+        "stderr": _require_str(payload, "stderr"),
+        "proof": _positive_proof(_require_dict(payload, "proof")),
+        "decision": _effect_decision(_require_dict(payload, "decision")),
+    }
 
 
-def _contained_typescript_result(payload: dict[str, Any]) -> ContainedTypeScriptResult:
-    from .contained_typescript_execution import ContainedTypeScriptResult
+def _contained_runner_result(payload: dict[str, Any]) -> ContainedRunnerResult:
+    from .contained_runner_result import ContainedRunnerResult
 
-    attestation = _require_dict(payload, "attestation")
-    decision_raw = _require_dict(payload, "decision")
-    exit_code = _require_int(attestation, "exit_code")
-    stdout = _require_str(payload, "stdout")
-    stderr = _require_str(payload, "stderr")
-    proof = _positive_proof(_require_dict(payload, "proof"))
-    decision = _effect_decision(decision_raw)
-    operation_id = _require_str(payload, "operation_id")
-    return ContainedTypeScriptResult(
-        exit_code=exit_code,
-        stdout=stdout,
-        stderr=stderr,
-        proof=proof,
-        decision=decision,
-        operation_id=operation_id,
-    )
-
-
-def _contained_package_script_result(payload: dict[str, Any]) -> ContainedPackageScriptResult:
-    from .contained_package_script_execution import ContainedPackageScriptResult
-
-    attestation = _require_dict(payload, "attestation")
-    decision_raw = _require_dict(payload, "decision")
-    exit_code = _require_int(attestation, "exit_code")
-    stdout = _require_str(payload, "stdout")
-    stderr = _require_str(payload, "stderr")
-    proof = _positive_proof(_require_dict(payload, "proof"))
-    decision = _effect_decision(decision_raw)
-    operation_id = _require_str(payload, "operation_id")
-    return ContainedPackageScriptResult(
-        exit_code=exit_code,
-        stdout=stdout,
-        stderr=stderr,
-        proof=proof,
-        decision=decision,
-        operation_id=operation_id,
-    )
+    fields = _common_result_fields(payload)
+    return ContainedRunnerResult(**fields, operation_id=_require_str(payload, "operation_id"))
 
 
 def _contained_workspace_write_result(payload: dict[str, Any]) -> ContainedWorkspaceWriteResult:
@@ -668,23 +692,13 @@ def _contained_workspace_write_result(payload: dict[str, Any]) -> ContainedWorks
         ContainedWriteOperation,
     )
 
-    attestation = _require_dict(payload, "attestation")
-    decision_raw = _require_dict(payload, "decision")
-    exit_code = _require_int(attestation, "exit_code")
-    stdout = _require_str(payload, "stdout")
-    stderr = _require_str(payload, "stderr")
-    proof = _positive_proof(_require_dict(payload, "proof"))
-    decision = _effect_decision(decision_raw)
+    fields = _common_result_fields(payload)
     op_raw = _require_str(payload, "operation_id")
     if op_raw not in get_args(ContainedWriteOperation):
         raise ValueError("invalid contained write operation")
     output_digest = payload.get("output_digest")
     return ContainedWorkspaceWriteResult(
-        exit_code=exit_code,
-        stdout=stdout,
-        stderr=stderr,
-        proof=proof,
-        decision=decision,
+        **fields,
         operation_id=cast(ContainedWriteOperation, op_raw),
         output_digest=output_digest if isinstance(output_digest, str) else None,
     )
@@ -705,6 +719,7 @@ def prompt_analyze_native(
     harness: str | None = None,
     config_path: str | None = None,
     requests: Sequence[Mapping[str, object]] | None = None,
+    artifacts: Sequence[Mapping[str, object]] | None = None,
     prior_policy_present: bool | None = None,
     approved_classes: Sequence[str] | None = None,
     timeout_seconds: float = 10.0,
@@ -719,6 +734,12 @@ def prompt_analyze_native(
         not isinstance(requests, Sequence)
         or isinstance(requests, (str, bytes, bytearray))
         or not all(isinstance(item, Mapping) for item in requests)
+    ):
+        return None
+    if artifacts is not None and (
+        not isinstance(artifacts, Sequence)
+        or isinstance(artifacts, (str, bytes, bytearray))
+        or not all(isinstance(item, Mapping) for item in artifacts)
     ):
         return None
     if approved_classes is not None and (
@@ -737,6 +758,7 @@ def prompt_analyze_native(
         "harness": harness,
         "config_path": config_path,
         "requests": [dict(r) for r in requests] if requests is not None else None,
+        "artifacts": [dict(a) for a in artifacts] if artifacts is not None else None,
         "prior_policy_present": prior_policy_present,
         "approved_classes": list(approved_classes) if approved_classes is not None else None,
         "guard_home": str(guard_home),
@@ -772,7 +794,7 @@ def mcp_stdio_session_open_native(
         "home_dir": str(home_dir) if home_dir else None,
         "cwd": str(cwd) if cwd else None,
     }
-    decoded = _resident_request(
+    return _resident_request(
         operation="mcp_stdio_session_open",
         request=request,
         guard_home=guard_home,
@@ -780,9 +802,6 @@ def mcp_stdio_session_open_native(
         required_feature=_MCP_STDIO_SESSION_FEATURE,
         response_schema=_MCP_STDIO_SESSION_RESULT_SCHEMA,
     )
-    if decoded is None:
-        return None
-    return decoded
 
 
 def mcp_stdio_session_send_native(

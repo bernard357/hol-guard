@@ -40,6 +40,8 @@ def test_generated_tool_call_awaits_exact_approval_without_replanning(
     script = f"""
 const harness = {json.dumps(harness)};
 const GUARD_CONFIG_PATH = '/fixture/settings.json';
+let approvalContinuationGeneration = 0;
+const GUARD_TIMEOUT_MS = 4250, GUARD_DEADLINE_RESERVE_MS = 250;
 const openedApprovalUrls = new Set();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let activeScenario;
@@ -82,6 +84,9 @@ function approvalContinuationActivity() {{
   return () => !activeScenario.hostAborted;
 }}
 function approvalRequestId(response) {{ return response.approval_request_id ?? null; }}
+function scheduleToolApprovalResume(_response, _ctx, _snapshot) {{
+  activeScenario.toolResumeCalls = (activeScenario.toolResumeCalls ?? 0) + 1;
+}}
 function approvalPollPath(response, requestId) {{ return response.resume_poll_path ?? `/v1/requests/${{requestId}}`; }}
 function approvalBlockedReason(_response, fallback, _kind, continuation = 'exact') {{
   return continuation === 'replan' ? `unsupported-${{fallback}}` : fallback;
@@ -132,6 +137,7 @@ async function runGuard(payload) {{
   )];
 }}
 async function ensureGuardWorkspaceReady() {{ return {{ ready: true }}; }}
+async function toolWorkspaceReadiness() {{ return {{ ready: true }}; }}
 function readinessFailureReason(readiness) {{ return `readiness-${{readiness.reasonCode}}`; }}
 
 {handler}
@@ -285,6 +291,9 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function contextCwd(ctx) {{ return ctx.sessionManager.getCwd(); }}
 function contextSessionId(ctx) {{ return ctx.sessionManager.getSessionId(); }}
 function approvalRequestId(response) {{ return response.approval_request_id ?? null; }}
+function scheduleToolApprovalResume(_response, _ctx, _snapshot) {{
+  activeScenario.toolResumeCalls = (activeScenario.toolResumeCalls ?? 0) + 1;
+}}
 function approvalPollPath(response, requestId) {{ return response.resume_poll_path ?? `/v1/requests/${{requestId}}`; }}
 function approvalBlockedReason(_response, fallback) {{ return fallback; }}
 function approvalResumeMessage(details) {{ return details.prompt ?? ''; }}

@@ -279,13 +279,61 @@ fn complete_nonmatches_use_default_without_weakening_intrinsic_secret_floors() {
 }
 
 #[test]
+fn workspace_local_paths_and_windows_shims_cannot_skip_business_context() {
+    let installed = snapshot(Some(binding("allow", "allow")), "enforce");
+    for command in [
+        "./gws gmail users messages send --json '{}'",
+        "./node_modules/.bin/gws gmail users messages send",
+        "/tmp/workspace/bin/gog gmail send",
+        "gws.cmd gmail users messages send",
+        "GOG.CMD gmail send",
+        "npx gws gmail users messages send",
+        "npx -y @example/gws@1.2.0 gmail users messages send",
+        "pnpm exec gog gmail send",
+        "bunx gws gmail users messages send",
+        "npx -c 'gws gmail users messages send'",
+        "npm exec --call='gws gmail users messages send'",
+        "pnpm exec sh -c 'gog gmail send'",
+        "yarn exec bash -c \"cd /tmp && gws gmail users messages send\"",
+        "npm install -c 'gws gmail users messages send'",
+        "npm --prefix install exec gws gmail users messages send",
+        "pnpm -C install exec gog gmail send",
+        "yarn --cwd install exec gws gmail users messages send",
+    ] {
+        let payload = json!({"tool_name":"bash","tool_input":{"command":command}});
+        let result = super::super::tests::generic_result("allow");
+        let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
+        assert_eq!(output.minimum_action, "block", "{command}");
+        assert_eq!(output.decision, "deny", "{command}");
+        assert_eq!(
+            output.reason_code, "native_business_context_unavailable",
+            "{command}"
+        );
+    }
+    for command in [
+        "npx prettier --check gws.md",
+        "./gwsync status",
+        "npm install gws",
+        "pnpm add -D @example/gws@1.2.0",
+        "yarn remove gog",
+    ] {
+        let payload = json!({"tool_name":"bash","tool_input":{"command":command}});
+        let result = super::super::tests::generic_result("allow");
+        let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
+        assert_ne!(
+            output.reason_code, "native_business_context_unavailable",
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn ordinary_hook_business_claims_and_google_cli_calls_require_native_context_even_in_observe() {
     for mode in ["enforce", "observe"] {
         let installed = snapshot(Some(binding("allow", "allow")), mode);
         for payload in [
             json!({"tool_name":"bash","tool_input":{"command":"gws gmail users messages send --json '{}'"}}),
             json!({"tool_name":"bash","tool_input":{"command":"env FIXTURE=1 gws gmail users messages send"}}),
-            json!({"tool_name":"bash","tool_input":{"command":"env FIXTURE=1 echo fixture"}}),
             json!({"tool_name":"bash","tool_input":{"command":"gog gmail send"}}),
             json!({"tool_name":"bash","tool_input":{"command":"echo fixture"},"business_action":facts()}),
             json!({"tool_call":{"tool_name":"bash","tool_input":{"command":"echo fixture"},"businessAction":null}}),
@@ -299,6 +347,18 @@ fn ordinary_hook_business_claims_and_google_cli_calls_require_native_context_eve
             assert_eq!(output.decision, "deny");
             assert!(!output.explicitly_benign);
             assert_eq!(output.reason_code, "native_business_context_unavailable");
+        }
+        // An `env` prefix names the same program the bare prefix names, so a
+        // command that runs no business CLI is not a business operation in
+        // either spelling and asks for no facts it has no reason to carry.
+        for command in ["env FIXTURE=1 echo fixture", "echo fixture"] {
+            let payload = json!({"tool_name":"bash","tool_input":{"command":command}});
+            let result = super::super::tests::generic_result("allow");
+            let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
+            assert_ne!(
+                output.reason_code, "native_business_context_unavailable",
+                "mode={mode}, command={command}"
+            );
         }
     }
 }
@@ -398,6 +458,32 @@ fn intrinsic_blocks_keep_their_reason_and_oversized_commands_fail_without_echo()
     let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
     assert_eq!(output.minimum_action, "block");
     assert_eq!(output.reason_code, "fixture_secret_floor");
+    for command in [
+        "sh -c 'gws gmail users messages send --upload outbound.eml'",
+        "bash -c \"gog gmail send\"",
+    ] {
+        let payload = json!({"tool_name":"bash","tool_input":{"command":command}});
+        let mut result = super::super::tests::generic_result("block");
+        result.reason_code = "native_command_extension_evaluation_failed".into();
+        let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
+        assert_eq!(output.minimum_action, "block", "{command}");
+        assert_eq!(output.decision, "deny", "{command}");
+        assert_eq!(
+            output.reason_code, "native_business_context_unavailable",
+            "{command}"
+        );
+    }
+    for command in ["sh -c 'echo hi'", "npx -c 'echo hello'"] {
+        let payload = json!({"tool_name":"bash","tool_input":{"command":command}});
+        let mut result = super::super::tests::generic_result("block");
+        result.reason_code = "native_command_extension_evaluation_failed".into();
+        let output = super::super::apply_pre_tool_policy(&installed, &payload, result).unwrap();
+        assert_eq!(output.minimum_action, "block", "{command}");
+        assert_eq!(
+            output.reason_code, "native_command_extension_evaluation_failed",
+            "{command}"
+        );
+    }
     let huge = json!({"tool_name":"bash","tool_input":{"command":"x".repeat(guard_command::MAX_COMMAND_BYTES+1)}});
     assert_eq!(
         requires_business_context(&huge, PreToolActionTypeV1::Command),

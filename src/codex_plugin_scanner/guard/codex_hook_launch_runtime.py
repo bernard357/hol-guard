@@ -35,10 +35,17 @@ _HOOK_ENVIRONMENT_KEYS = frozenset(
         "HOL_GUARD_HOOK_FAILURE_KIND",
         "HOL_GUARD_NATIVE",
         "HOL_GUARD_NATIVE_BINARY",
+        # A source checkout names its source compiler; the compiler refuses
+        # either override when a packaged compiler is present.
+        "HOL_GUARD_NATIVE_SOURCE_COMPILER",
+        "HOL_GUARD_NATIVE_TEST_SOURCE_COMPILER",
         # Test-mode and non-production diagnostic markers forwarded so a
         # contained hook process keeps the same boundary as its parent.
         "HOL_GUARD_TEST_MODE",
         "HOL_GUARD_NATIVE_DIAGNOSTIC",
+        # Dedicated opt-in for the resident's supply-chain test seams. Kept
+        # separate from diagnostics so diagnostics alone never enable them.
+        "HOL_GUARD_RESIDENT_TEST_SEAMS",
         "LANG",
         "PATH",
         "PATHEXT",

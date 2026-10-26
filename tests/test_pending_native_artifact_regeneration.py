@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -54,6 +55,45 @@ def test_clean_checkout_catalog_awaits_generation(detector, monkeypatch, tmp_pat
     """A missing generated catalog must remain distinguishable from a malformed file."""
     monkeypatch.setattr(detector, "CATALOG", tmp_path / "command-catalog.v1.json")
     assert detector.catalog_ids() == set()
+
+
+def test_staged_optional_inventory_does_not_remain_permanently_pending(detector, monkeypatch, tmp_path):
+    monkeypatch.setattr(detector, "ROOT", tmp_path)
+    catalog = tmp_path / "command-catalog.v1.json"
+    catalog.write_text(json.dumps({"catalog": [{"extension_id": "command.git"}]}))
+    monkeypatch.setattr(detector, "CATALOG", catalog)
+    directory = tmp_path / "docs/guard/extensions/catalog.v2.json"
+    directory.parent.mkdir(parents=True)
+    directory.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "guard.extension-directory.v2",
+                "entries": [{"runtimeExtensionId": "command.optional"}],
+            }
+        )
+    )
+    assert detector.catalog_ids() == {"command.git", "command.optional"}
+    canonical = {"command.git", "command.optional", "command.pending"}
+    assert canonical - detector.catalog_ids() == {"command.pending"}
+
+
+def test_malformed_optional_inventory_never_establishes_freshness(detector, monkeypatch, tmp_path):
+    monkeypatch.setattr(detector, "ROOT", tmp_path)
+    catalog = tmp_path / "command-catalog.v1.json"
+    catalog.write_text(json.dumps({"catalog": [{"extension_id": "command.git"}]}))
+    monkeypatch.setattr(detector, "CATALOG", catalog)
+    directory = tmp_path / "docs/guard/extensions/catalog.v2.json"
+    directory.parent.mkdir(parents=True)
+    directory.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "guard.extension-directory.v2",
+                "entries": [{"runtimeExtensionId": "../not-an-extension"}],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="directory identity"):
+        detector.catalog_ids()
 
 
 def test_malformed_staged_catalog_is_not_treated_as_missing(detector, monkeypatch, tmp_path):
@@ -129,7 +169,8 @@ def test_verifier_preserves_original_compiler_target_without_rebuilding(
     calls = []
     monkeypatch.setattr(verifier, "_run", calls.append)
     assert verifier.main() == 0
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert calls[0][-1] == "--check-public-descriptors"
     assert all(command[command.index("--compiler") + 1] == compiler for command in calls)
     assert all(command[0] != "cargo" for command in calls)
 
@@ -160,8 +201,9 @@ def test_preparation_retains_generated_outputs_and_checks_without_rebuild(verifi
     monkeypatch.setattr(verifier, "_run", commands.append)
     assert verifier.main() == 0
     assert commands[-1][-1] == "--check"
-    assert len(commands) == 2
-    assert "--check" not in commands[0]
+    assert len(commands) == 3
+    assert commands[0][-1] == "--check-public-descriptors"
+    assert "--check" not in commands[1]
     assert all(command[0] != "cargo" for command in commands)
     assert all(command[0] != "git" for command in commands)
 
@@ -170,7 +212,7 @@ def test_preparation_retains_generated_outputs_and_checks_without_rebuild(verifi
 def test_wheel_rebuild_preserves_identity_and_precedes_packaging(job_name):
     """Verify wheel rebuild preserves identity and precedes packaging."""
     root = Path(__file__).parents[1]
-    workflow = expand_ci_job_actions(yaml.safe_load((root / ".github/workflows/native-wheel-ci.yml").read_text()))
+    workflow = expand_ci_job_actions(yaml.safe_load((root / ".github/workflows/nightly-native.yml").read_text()))
     steps = workflow["jobs"][job_name]["steps"]
     verification = next(step for step in steps if "scripts/ci/verify_native_command_program.py" in step.get("run", ""))
     assert verification["env"]["HOL_GUARD_BUILD_SHA"] == "${{ github.sha }}"

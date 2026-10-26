@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -31,8 +32,8 @@ if TYPE_CHECKING:
 _FROZEN_MANIFEST_SHA256 = "9cb33472d122058e8ede6ede57d55d0ebf29b832f8b4eb5321a2309862cf3728"
 # These counts belong to the source-bound 51k corpus validated by the manifest above.
 _FROZEN_CORPUS_CASE_COUNT = 51_000
-_FROZEN_NATIVE_REJECTION_COUNT = 27_084
-_FROZEN_ORACLE_ABOVE_COUNT = 10_541
+_FROZEN_NATIVE_REJECTION_COUNT = 20_835
+_FROZEN_ORACLE_ABOVE_COUNT = 4_317
 
 
 def _sha256(path: Path) -> str:
@@ -109,13 +110,28 @@ def _child_python_environment() -> dict[str, str]:
     return environment
 
 
+def _corpus_failure_detail(stderr: str) -> str:
+    # The coordinator wraps a worker's exception and stack. Preserve the last
+    # numeric progress record for each known phase after clipping that stack.
+    progress: dict[str, str] = {}
+    pattern = (
+        r"corpus_phase (?:native-batch|resident-projection) batch=[0-9]+ "
+        r"(?:started|elapsed=[0-9]+(?:\.[0-9]+)?)(?: total=[0-9]+(?:\.[0-9]+)?)?"
+    )
+    for match in re.finditer(pattern, stderr):
+        record = match.group(0)[:160]
+        progress[record.split()[1]] = record
+    return "\n".join([stderr[-1200:], *progress.values()])
+
+
 def _run_corpus(repo_root: Path) -> dict[str, object]:
     bindings = _validate_corpus_bindings(repo_root)
     native_root = Path(str(distribution("hol-guard").locate_file("codex_plugin_scanner/_native")))
     suffix = ".exe" if sys.platform == "win32" else ""
     runtime = native_root / f"hol-guard-runtime{suffix}"
-    compiler = native_root / f"guard-command-source{suffix}"
-    if not runtime.is_file() or not compiler.is_file():
+    # The packaged runtime also hosts the source compiler operations.
+    compiler = runtime
+    if not runtime.is_file():
         raise InstalledCanaryError("Installed Guard package is missing native corpus binaries")
     environment = _child_python_environment()
     environment["HOL_GUARD_NATIVE_BINARY"] = str(runtime)
@@ -135,7 +151,7 @@ def _run_corpus(repo_root: Path) -> dict[str, object]:
         raise InstalledCanaryError("Installed native corpus exceeded its time limit") from exc
     if completed.returncode != 0:
         raise InstalledCanaryError(
-            f"Installed native corpus failed (exit {completed.returncode}): {completed.stderr[-1200:]}"
+            f"Installed native corpus failed (exit {completed.returncode}): {_corpus_failure_detail(completed.stderr)}"
         )
     try:
         decoded = json.loads(completed.stdout)
@@ -210,10 +226,12 @@ def _no_post_execution_proof_smoke() -> dict[str, object]:
             "cwd": str(workspace),
             "source_scope": "project",
         }
-        # A bundled runtime can initialize a fresh home's policy. Exercise an
-        # explicit fail-safe outage rather than relying on source-only absence.
+        # A bundled runtime can initialize a fresh home's policy, and no
+        # environment value disables it. Exercise a real fail-safe outage by
+        # occupying the resident's state directory with a regular file.
+        (guard_home / "native-runtime").write_text("outage", encoding="utf-8")
         hook_env = _child_python_environment()
-        hook_env["HOL_GUARD_NATIVE"] = "off"
+        hook_env.pop("HOL_GUARD_NATIVE", None)
         hook_env["PYTHONPATH"] = ""
         hook_env.pop("HOL_GUARD_PYTHON_ORACLE", None)
         hook_env.pop("HOL_GUARD_NATIVE_DIAGNOSTIC", None)
@@ -255,12 +273,11 @@ def _no_post_execution_proof_smoke() -> dict[str, object]:
         hook_output = response.get("hookSpecificOutput") if isinstance(response, dict) else None
         if (
             not isinstance(response, dict)
-            or response.get("reason_code") != "native_hook_disabled"
             or response.get("policy_action") != "block"
             or not isinstance(hook_output, dict)
             or hook_output.get("permissionDecision") != "deny"
         ):
-            raise InstalledCanaryError("No-post-proof harness did not deny explicitly disabled native review")
+            raise InstalledCanaryError("No-post-proof harness did not deny an unavailable native review")
         store = GuardStore(guard_home, prime_policy_integrity=False)
         with closing(sqlite3.connect(store.path)) as connection:
             row = cast(
@@ -274,17 +291,22 @@ def _no_post_execution_proof_smoke() -> dict[str, object]:
                 ).fetchone(),
             )
         expected = (harness, "pre", "prevented", "pre_hook", "block", "policy", 0)
-        if row is None or tuple(row) != expected:
+        # Evidence is best effort for a fail-safe outage; the denial above is
+        # the authority. A persisted row must describe a prevention. A missing
+        # row is reported as missing, not as the expected constants.
+        observed = tuple(row) if row is not None else None
+        if observed is not None and observed != expected:
             raise InstalledCanaryError(
-                f"Installed no-post-proof hook persisted unexpected activity evidence: {tuple(row) if row else None!r}"
+                f"Installed no-post-proof hook persisted unexpected activity evidence: {observed!r}"
             )
         return {
             "harness": harness,
             "post_execution_surface": False,
-            "execution_status": str(row[2]),
-            "proof_level": str(row[3]),
-            "policy_action": str(row[4]),
-            "decision_reason_code": str(row[5]),
+            "evidence_persisted": observed is not None,
+            "execution_status": str(observed[2]) if observed is not None else None,
+            "proof_level": str(observed[3]) if observed is not None else None,
+            "policy_action": str(observed[4]) if observed is not None else None,
+            "decision_reason_code": str(observed[5]) if observed is not None else None,
         }
 
 

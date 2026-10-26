@@ -28,12 +28,11 @@ from typing import Final, cast
 import codex_plugin_scanner
 
 from ...version import __version__
+from ..stable_guard_cli import guard_cli_launcher
 from .base import HarnessContext
 from .hook_python_probe_code import PROBE_CODE as _PROBE_CODE
 from .hook_python_subprocess import run_probe as _run_probe
 
-_WORKTREE_MARKERS = ("/.worktrees/", "/worktrees/")
-_WORKTREE_SEGMENT_PREFIXES = ("hol-guard-wt-",)
 _PROBE_SCHEMA: Final = 2
 _EXPECTED_ENTRY_POINT: Final = "codex_plugin_scanner.cli:main"
 _PREPARATION_PROBE: ContextVar[tuple[int, Path] | None] = ContextVar("guard_preparation_probe", default=None)
@@ -119,33 +118,6 @@ class _ParentExpectation:
             "version": __version__,
             "entry_point": _EXPECTED_ENTRY_POINT,
         }
-
-
-def _path_looks_like_worktree(path: Path) -> bool:
-    text = str(path.resolve()).replace("\\", "/")
-    if any(marker in text for marker in _WORKTREE_MARKERS):
-        return True
-    return any(segment.startswith(prefix) for segment in text.split("/") for prefix in _WORKTREE_SEGMENT_PREFIXES)
-
-
-def filter_worktree_path_entries(entries: list[str]) -> list[str]:
-    """Return stable, unique path entries for legacy callers."""
-
-    filtered: list[str] = []
-    for entry in entries:
-        trimmed = entry.strip()
-        if not trimmed or _path_looks_like_worktree(Path(trimmed)):
-            continue
-        if trimmed not in filtered:
-            filtered.append(trimmed)
-    return filtered
-
-
-def _guard_hook_python_candidates(context: HarnessContext) -> list[Path]:
-    """Compatibility seam returning only the Python already running Guard."""
-
-    del context
-    return [Path(sys.executable).absolute()]
 
 
 def _probe_environment(neutral_cwd: Path) -> dict[str, str]:
@@ -493,7 +465,7 @@ def resolve_guard_hook_python(context: HarnessContext) -> Path:
     """Return the invocation path for the attested running Guard Python."""
 
     if bool(getattr(sys, "frozen", False)):
-        return _executable_identity(Path(sys.executable).absolute()).invocation_path
+        return _executable_identity(Path(guard_cli_launcher()).absolute()).invocation_path
     try:
         return attest_guard_hook_python(context).executable
     except RuntimeError as error:
@@ -510,22 +482,9 @@ def guard_cli_command(context: HarnessContext, args: list[str]) -> list[str]:
     executable = str(resolve_guard_hook_python(context))
     if not bool(getattr(sys, "frozen", False)):
         return [executable, *args]
-    python_prefix = ["-m", "codex_plugin_scanner.cli", "guard"]
-    if args[:3] != python_prefix:
+    if args[:3] != ["-m", "codex_plugin_scanner.cli", "guard"]:
         raise RuntimeError("Frozen Guard CLI arguments do not match the managed launch contract.")
     return [executable, *args[3:]]
-
-
-def package_root_from_python(python: Path, context: HarnessContext) -> str:
-    """Return the active Guard root after re-attesting the running Python."""
-
-    return str(
-        _attest_python(
-            python,
-            neutral_cwd=_attestation_probe_cwd(context),
-            expected_package_root=_active_package_root(),
-        ).package_root
-    )
 
 
 __all__ = [
@@ -534,8 +493,6 @@ __all__ = [
     "HookPythonFileMetadata",
     "attest_guard_hook_python",
     "disposable_guard_hook_probe",
-    "filter_worktree_path_entries",
     "guard_cli_command",
-    "package_root_from_python",
     "resolve_guard_hook_python",
 ]

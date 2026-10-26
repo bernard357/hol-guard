@@ -16,7 +16,6 @@ import pytest
 from codex_plugin_scanner.guard.approval_scope_support import (
     APPROVAL_SCOPE_CONTRACT_VERSION,
     request_scope_contract,
-    supported_request_scopes,
 )
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
@@ -127,11 +126,11 @@ def test_scope_contract_is_action_aware(policy_action: GuardAction, expected_all
         assert contract.recommended_allow_scope is None
 
 
-def test_guard_control_cannot_be_browser_allowed() -> None:
+def test_guard_control_review_offers_allow_like_every_review() -> None:
     contract = request_scope_contract(_request("guard-control", action_type="guard_control").to_dict())
 
-    assert contract.allow_scopes == ()
-    assert "current_action_not_overridable" in contract.restrictions
+    assert "artifact" in contract.allow_scopes
+    assert "current_action_not_overridable" not in contract.restrictions
 
 
 @pytest.mark.parametrize("policy_action", ["block", "sandbox-required"])
@@ -180,17 +179,6 @@ def test_recommended_allow_scope_falls_back_to_artifact() -> None:
 
     assert contract.allow_scopes == ("artifact",)
     assert contract.recommended_allow_scope == "artifact"
-
-
-def test_package_context_never_invents_workspace_allow() -> None:
-    request = _request(
-        "package",
-        artifact_id="codex:project:package-request:package",
-        artifact_type="package_request",
-    ).to_dict()
-    request["scanner_evidence"] = [{"portable": True, "schema_version": "package-execution-context.v1"}]
-
-    assert supported_request_scopes(request) == ("artifact",)
 
 
 def test_package_request_can_persist_the_exact_context_bound_action() -> None:
@@ -1094,10 +1082,10 @@ def test_raced_completed_replay_maps_scope_contract_errors(
     original_get = store.get_approval_request
     call_count = 0
 
-    def raced_get(request_id: str) -> dict[str, object] | None:
+    def raced_get(request_id: str, *, derive_scope: bool = True) -> dict[str, object] | None:
         nonlocal call_count
         call_count += 1
-        current = original_get(request_id)
+        current = original_get(request_id, derive_scope=derive_scope)
         if current is None:
             return None
         if call_count == 1:

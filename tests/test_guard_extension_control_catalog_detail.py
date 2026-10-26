@@ -15,11 +15,15 @@ from codex_plugin_scanner.guard.runtime.extension_control_authority import (
     ExtensionControlAuthorityView,
 )
 from codex_plugin_scanner.guard.runtime.extension_control_contract import CONTROL_SCHEMA_VERSION
-from codex_plugin_scanner.guard.runtime.extension_control_limits import advertised_extension_control_limits
+from codex_plugin_scanner.guard.runtime.extension_control_limits import (
+    MAX_DAEMON_CATALOG_RESPONSE_BYTES,
+    advertised_extension_control_limits,
+)
 from codex_plugin_scanner.guard.runtime.extension_control_runtime import ExtensionControlRuntime
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import catalog_id_for_mcp_id
 from codex_plugin_scanner.guard.store import GuardStore
 from scripts.ci.check_extension_fixture_isolation import command_source_paths
+from tests.native_activation_support import compiled_lifecycle as compiled_lifecycle
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "extension-controls" / "catalog-baseline.v1.json"
 _API_SCHEMA = "guard.daemon.extension-controls.v1"
@@ -118,7 +122,7 @@ def test_catalog_exposes_deterministic_full_extension_permission_and_rule_contra
     limits = advertised_extension_control_limits()
     assert payload["limits"] == {
         **limits,
-        "max_body_bytes": limits["max_catalog_payload_bytes"],
+        "max_body_bytes": MAX_DAEMON_CATALOG_RESPONSE_BYTES,
         "max_controls": limits["max_controls_total"],
     }
 

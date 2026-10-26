@@ -513,7 +513,7 @@
       "publishers": {
         "hol": {
           "id": "hol",
-          "displayName": "Hashgraph Online"
+          "displayName": "HOL"
         },
         "hol-curated": {
           "id": "hol-curated",
@@ -757,7 +757,7 @@
         "command.xencode"
       ],
       "disabled_permissions": [],
-      "expected_action": "review",
+      "expected_action": "block",
       "rule_id": "command.xencode.worktree-remove",
       "expected_effective_segments": []
     },

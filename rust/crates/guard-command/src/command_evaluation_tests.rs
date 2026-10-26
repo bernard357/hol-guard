@@ -11,8 +11,8 @@
 use serde::Deserialize;
 
 use crate::canonical_command::CanonicalCommand;
-use crate::command_evaluation::evaluate_command;
-use crate::native_command_catalog::{packaged_command_catalog, CatalogExtension};
+use crate::command_evaluation_compose::{evaluate_command, CommandEvaluationInput};
+use crate::native_command_catalog::{CatalogExtension, CommandCatalog};
 use crate::{CanonicalCommandV1, CommandSegmentV1, CommandSpanV1};
 use guard_contracts::NativeCommandControlBindingV1;
 
@@ -165,11 +165,34 @@ fn to_read_factor(row: &ReadFactorRow) -> crate::effect_decision::DecisionFactor
     }
 }
 
+/// Names, labels and example commands are display text the catalog may reword
+/// without changing any decision, so the oracle pins semantics, not wording.
+/// Risk tiers and families stay compared: they drive the caution a
+/// recommendation shows.
+fn adopt_display_metadata(expected: &mut CatalogExtension, live: Option<&CatalogExtension>) {
+    let Some(live) = live else { return };
+    expected.name = live.name.clone();
+    for permission in &mut expected.permissions {
+        let Some(current) = live
+            .permissions
+            .iter()
+            .find(|current| current.permission_id == permission.permission_id)
+        else {
+            continue;
+        };
+        permission.label = current.label.clone();
+        permission.example_command = current.example_command.clone();
+    }
+}
+
 #[test]
 fn evaluate_command_matches_python_oracle() {
     let raw = include_str!("../testdata/evaluate_command_oracle.json");
     let mut fixture: Fixture = serde_json::from_str(raw).expect("oracle parses");
-    let catalog = packaged_command_catalog().expect("packaged catalog loads");
+    let catalog = CommandCatalog::from_authored_test_bytes(
+        &crate::native_command_program::authored_test_support::catalog_bytes(),
+    )
+    .expect("authored catalog loads");
     // New, unrelated extensions rotate the catalog digest without changing
     // any oracle input. Pin every original extension's typed semantics instead:
     // removed/changed rules, permissions, defaults, aliases and trust still fail.
@@ -177,12 +200,21 @@ fn evaluate_command_matches_python_oracle() {
         !fixture.catalog_extensions.is_empty(),
         "oracle catalog is empty"
     );
-    for expected in &fixture.catalog_extensions {
+    for expected in &mut fixture.catalog_extensions {
+        let live = catalog.get(&expected.extension_id);
+        adopt_display_metadata(expected, live);
         assert_eq!(
-            catalog.get(&expected.extension_id),
-            Some(expected),
+            live,
+            Some(&*expected),
             "oracle catalog semantics changed for {}; regenerate the Python oracle",
             expected.extension_id
+        );
+        // GeneratedCommandCatalog.get strips (str.strip, separators
+        // included) and lowercases its query.
+        let padded = format!("\u{1c} {}\n\u{1f}", expected.extension_id.to_uppercase());
+        assert_eq!(
+            catalog.get(&padded).map(|found| &found.extension_id),
+            Some(&expected.extension_id)
         );
     }
     // Bind observations to the live compiled identities. Full evaluation
@@ -209,31 +241,30 @@ fn evaluate_command_matches_python_oracle() {
         program_digest: catalog.program_digest.clone(),
         catalog_digest: catalog.catalog_digest.clone(),
         trust_digest: catalog.catalog_digest.clone(),
-        health: fixture.snapshot.health.clone(),
+        health: fixture.snapshot.health.to_lowercase().replace('_', "-"),
         revision: fixture.snapshot.revision,
         managed_revision: fixture.snapshot.managed_revision,
         effective_digest: fixture.snapshot.effective_digest.clone(),
         layers: Vec::new(),
         authority: None,
+        active_security_digest: None,
     };
 
     let mut mismatches = Vec::new();
     for row in &fixture.cases {
         let command = CanonicalCommand::from_v1(&to_v1(&row.v1));
         let read_factors: Vec<_> = row.read_factors.iter().map(to_read_factor).collect();
-        let evaluation = evaluate_command(
-            &command,
-            &row.native,
-            &catalog,
-            &snapshot,
-            &[],
-            None,
-            None,
-            None,
-            &read_factors,
-            false,
-        );
-        let payload = match evaluation {
+        let evaluation = evaluate_command(CommandEvaluationInput {
+            command: &command,
+            native_extension_evidence: &row.native,
+            registry: &catalog,
+            binding: &snapshot,
+            compatibility_action_class: None,
+            compatibility_reason: None,
+            workflow_authorization: None,
+            read_factors,
+        });
+        let mut payload = match evaluation {
             Ok(evaluation) => evaluation.to_payload(),
             Err(error) => {
                 mismatches.push(format!(
@@ -243,6 +274,19 @@ fn evaluate_command_matches_python_oracle() {
                 continue;
             }
         };
+        // The Python oracle predates `baseline_decision`: it must be present and
+        // well-formed, and every other field must still match the oracle.
+        let baseline = payload
+            .as_object_mut()
+            .and_then(|object| object.remove("baseline_decision"));
+        assert!(
+            baseline
+                .as_ref()
+                .and_then(|decision| decision.get("action"))
+                .is_some_and(serde_json::Value::is_string),
+            "{} -> missing baseline_decision",
+            row.command
+        );
         if payload != row.evaluation {
             let expected = serde_json::to_string_pretty(&row.evaluation).unwrap_or_default();
             let got = serde_json::to_string_pretty(&payload).unwrap_or_default();
@@ -258,4 +302,29 @@ fn evaluate_command_matches_python_oracle() {
         mismatches.len(),
         mismatches.join("\n---\n")
     );
+}
+
+#[test]
+fn catalog_lookup_resolves_padded_uppercase_aliases() {
+    let mut authored: serde_json::Value = serde_json::from_slice(
+        &crate::native_command_program::authored_test_support::catalog_bytes(),
+    )
+    .expect("authored catalog parses");
+    let extension = &mut authored["catalog"][0];
+    let owner = extension["extension_id"].as_str().unwrap().to_owned();
+    extension["aliases"] = serde_json::json!(["alias.example"]);
+    let catalog = CommandCatalog::from_authored_test_bytes(&serde_json::to_vec(&authored).unwrap())
+        .expect("aliased catalog loads");
+    for query in [
+        "alias.example",
+        " ALIAS.Example\n",
+        "\u{1c}alias.EXAMPLE\u{1f}",
+    ] {
+        assert_eq!(
+            catalog.get(query).map(|found| found.extension_id.as_str()),
+            Some(owner.as_str()),
+            "{query:?}"
+        );
+    }
+    assert!(catalog.get("alias.example.other").is_none());
 }

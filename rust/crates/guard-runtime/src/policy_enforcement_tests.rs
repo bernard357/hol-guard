@@ -22,7 +22,7 @@ fn test_containment_never_overrides_installed_policy_denies() {
         Some("/home/tester"),
         Some("/home/tester/project"),
     );
-    let expected_floor = if cfg!(target_os = "macos") {
+    let expected_floor = if cfg!(any(target_os = "macos", windows)) {
         "sandbox-required"
     } else {
         "review"
@@ -75,7 +75,7 @@ fn apply_post_tool_policy(
     )
 }
 
-pub(super) fn policy(default_action: &str) -> EffectiveNativePolicyV3 {
+pub(crate) fn policy(default_action: &str) -> EffectiveNativePolicyV3 {
     EffectiveNativePolicyV3 {
         protection_posture: "protected".into(),
         security_level: "balanced".into(),
@@ -97,7 +97,7 @@ pub(super) fn policy(default_action: &str) -> EffectiveNativePolicyV3 {
     }
 }
 
-pub(super) fn snapshot(policy: EffectiveNativePolicyV3) -> PolicySnapshotV3 {
+pub(crate) fn snapshot(policy: EffectiveNativePolicyV3) -> PolicySnapshotV3 {
     PolicySnapshotV3 {
         schema: POLICY_SNAPSHOT_SCHEMA.into(),
         version: 3,
@@ -244,6 +244,30 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
     .unwrap();
     assert_eq!(result.minimum_action, "require-reapproval");
     assert_eq!(result.decision, "deny");
+    assert!(
+        result.reason.contains("did not send this prompt"),
+        "{}",
+        result.reason
+    );
+    assert!(
+        result
+            .reason
+            .contains("asks to override trusted instructions"),
+        "{}",
+        result.reason
+    );
+    assert!(
+        result.reason.contains("Nothing is waiting for approval"),
+        "{}",
+        result.reason
+    );
+    assert!(
+        result
+            .reason
+            .contains("hol-guard settings set risk prompt_injection"),
+        "{}",
+        result.reason
+    );
 }
 
 #[test]
@@ -326,6 +350,7 @@ fn observe_pre_policy_floor_is_non_blocking_but_intrinsic_block_is_hard() {
     .unwrap();
     assert_eq!(policy_only.minimum_action, "warn");
     assert_eq!(policy_only.decision, "allow");
+    assert_eq!(policy_only.reason_code, "native_policy_observed_floor");
 
     let intrinsic = apply_pre_tool_policy(
         &observed_snapshot,
@@ -440,5 +465,19 @@ fn prompt_risk_classes_reject_non_prompt_duplicate_and_unordered_evidence() {
     );
 }
 
+#[path = "policy_enforcement_floor_cause_tests.rs"]
+mod floor_cause;
+#[path = "policy_enforcement_github_tests.rs"]
+mod github_tests;
+#[path = "policy_enforcement_observe_tests.rs"]
+mod observe_tests;
+#[path = "policy_enforcement_omp_eval_output_tests.rs"]
+mod omp_eval_output_tests;
+#[path = "policy_enforcement_omp_github_output_tests.rs"]
+mod omp_github_output_tests;
 #[path = "policy_enforcement_post_tool_tests.rs"]
 mod post_tool_tests;
+#[path = "policy_enforcement_task_schema_tests.rs"]
+mod task_schema_tests;
+#[path = "policy_enforcement_yield_result_tests.rs"]
+mod yield_result_tests;

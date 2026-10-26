@@ -8,7 +8,8 @@
 //! --stdin`.
 
 use crate::{BrowserMcpArtifactV1, BrowserMcpRequestV1, BrowserMcpResultV1};
-use crate::{McpToolPolicyRequestV1, McpToolPolicyResultV1};
+use crate::{LocalCliIdentitySourceV1, LocalCliIdentityV1, PackageJsonScriptsV1, UnlistedCliV1};
+use crate::{SuggestionToolV1, SuggestionVerdictV1};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -170,6 +171,18 @@ pub struct McpToolApprovalHashRequestV1 {
     pub extension_control_digest: Option<String>,
 }
 
+/// One previously authorized guard-run launch plan, as the caller holds it.
+/// Only the fields the prefix prelude reads cross the boundary — the launch
+/// identity and cwd stay with the caller.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GuardRunLaunchPlanV1 {
+    pub adapter_command: Vec<String>,
+    pub execution_command: Vec<String>,
+    pub environment_sha256: String,
+    pub reusable: bool,
+}
+
 /// Sub-operation carried by a single context-digest request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -184,11 +197,14 @@ pub enum ContextDigestKindV1 {
         saved_token: Value,
         current_token: Value,
     },
-    /// Build the current token from components and compare it against a
-    /// saved token in one round trip.
-    ValidateApprovalContext {
-        saved_token: Value,
-        components: ContextDigestComponentsV1,
+    /// Whether an opaque value is a well-formed v1 approval-context token.
+    ///
+    /// Callers that only need to tell a context token apart from a legacy
+    /// artifact hash ask this instead of decoding the token themselves: the
+    /// token's grammar has exactly one owner, and a second decoder could
+    /// disagree with it about what counts as a token.
+    ApprovalContextTokenWellFormed {
+        token: Value,
     },
     /// Domain-separated digest over a configured environment subset.
     ///
@@ -228,23 +244,16 @@ pub enum ContextDigestKindV1 {
     OpaqueMaterialDigest {
         material: String,
     },
-    /// MCP call-argument projection: `_safe_mcp_arguments` + the launch-target
-    /// digest + serialized display string, in one round-trip. `arguments` is
-    /// `None` when the JSON-RPC params carry no `arguments` key.
-    McpArgumentsProjection {
-        tool_name: String,
-        #[serde(default)]
-        arguments: Option<Value>,
-    },
     /// stdio `_redact_json` parity for remote/stdio traffic recording.
     McpRedactJson {
         material: Value,
     },
-    /// Select and hash package-manager policy environment values natively.
-    PackageEnvironmentPolicy {
-        manager: String,
-        environment: BTreeMap<String, String>,
-        referenced_names: Vec<String>,
+    /// Validate a Bash owner reply without moving its contract into adapters.
+    NativeBashReplyValidation {
+        reply_kind: String,
+        material: Value,
+        #[serde(default)]
+        request: Value,
     },
     McpLaunchEnvironment {
         inherited: BTreeMap<String, String>,
@@ -258,46 +267,83 @@ pub enum ContextDigestKindV1 {
     PackageExecutionContextFromScannerEvidence {
         material: Value,
     },
+    /// Plan signed custom-Extension continuity and answer the commit that
+    /// applies it, record a local override the same way, or project stored
+    /// continuity state. The request carries the store snapshot; the answer is
+    /// in `custom_extension_continuity`.
+    CustomExtensionContinuity {
+        request: Value,
+    },
+    /// Parse signed Managed Controls policy fields. The request carries the
+    /// policy document, negotiated capabilities and a catalog projection; the
+    /// answer is in `managed_controls_policy_fields`.
+    ManagedControlsPolicyFields {
+        request: Value,
+    },
+    /// Derive the grant identity of an unlisted local CLI.
+    LocalCliIdentity {
+        source: LocalCliIdentitySourceV1,
+    },
+    /// Recognize a package script run or project path; reads the filesystem.
+    PackageJsonScripts {
+        command_text: String,
+        cwd: String,
+        home_dir: String,
+    },
+    /// Identify the unlisted CLIs a command launches; reads the filesystem
+    /// and resolves launches in `env`.
+    LocalCliIdentify {
+        command_text: String,
+        cwd: String,
+        home_dir: Option<String>,
+        /// The caller's home, for `~/` paths when `home_dir` is absent.
+        user_home: String,
+        /// Also identify scripts and runners in each compound segment.
+        compound: bool,
+        env: BTreeMap<String, String>,
+        budget_ms: u64,
+    },
+    CustomExtensionSuggestion {
+        tools: Vec<SuggestionToolV1>,
+    },
+    /// Decide whether a Claude `AskUserQuestion` PostToolUse answers the
+    /// pending HOL Guard approval prompt, and map the chosen option to an
+    /// approval action.
+    ClaudeGuardQuestion {
+        /// Normalized hook event name.
+        event: Option<String>,
+        #[serde(default)]
+        tool_name: Value,
+        #[serde(default)]
+        tool_input: Value,
+        /// `tool_response` without its `answers` mapping.
+        #[serde(default)]
+        tool_response: Value,
+        /// `tool_response.answers` as ordered `[question, answer]` pairs, or
+        /// `None` when it was not a mapping.
+        response_answers: Option<Vec<Value>>,
+        /// The pending approval's prompt fields.
+        pending: Value,
+    },
+    /// Fingerprint a remembered decision's behavior and name the
+    /// exact-command and memory-pattern policy ids probed after the direct
+    /// artifact.
+    MemoryPattern {
+        command: Option<String>,
+        artifact_type: Option<String>,
+        artifact_id: Option<String>,
+        artifact_name: Option<String>,
+        /// The harness; lookups always carry one, decision events may not.
+        harness: Option<String>,
+    },
     McpServerIdentity {
         request: McpServerIdentityRequestV1,
     },
     McpToolIdentity {
         request: McpToolIdentityRequestV1,
     },
-    McpServerDescriptor {
-        request: McpServerDescriptorRequestV1,
-    },
-    McpToolDescriptor {
-        request: McpToolDescriptorRequestV1,
-    },
-    McpToolContentDigest {
-        request: McpToolContentDigestRequestV1,
-    },
     BrowserMcp {
         request: BrowserMcpRequestV1,
-    },
-    McpToolRisk {
-        artifact: BrowserMcpArtifactV1,
-        arguments: Value,
-    },
-    McpToolPolicy {
-        request: McpToolPolicyRequestV1,
-    },
-    /// Compose the full MCP tool-call approval hash in one request.
-    /// `config` absent → legacy `mcp_tool_approval_digest` row; present →
-    /// `guard-approval-context:v1:` token. `mcp_tool_risk` carries the
-    /// resolved risk categories.
-    BuildMcpToolApprovalHash {
-        request: McpToolApprovalHashRequestV1,
-    },
-    /// Legacy standalone digest row — recomputes `persisted_mcp_digest` for a
-    /// stored `mcp_tool_approval_digest` payload (no risk categories, no token).
-    McpToolApprovalDigest {
-        request: McpToolApprovalDigestRequestV1,
-    },
-    PackageLauncherToken {
-        command_name: String,
-        args: Vec<String>,
     },
     /// `build_runtime_executable_identity` — resolve + content-bind an
     /// executable with per-evaluation nonces for unverifiable cases.
@@ -337,6 +383,24 @@ pub enum ContextDigestKindV1 {
         #[serde(default)]
         launch_env: Option<BTreeMap<String, String>>,
     },
+    /// `guard_run_launch_plans` — content-bind every previewed adapter launch
+    /// argv in one call. Replaces the Python per-command loop in
+    /// `runtime/guard_run_launch.py`: resolve each launch identity against the
+    /// prepared environment and cwd, stamp reusability, hash the environment
+    /// once, and drop duplicate adapter commands in first-seen order.
+    GuardRunLaunchPlans {
+        adapter_commands: Vec<Vec<String>>,
+        environment: BTreeMap<String, String>,
+        launch_cwd: String,
+    },
+    /// `guard_run_authorized_prefixes` — the pure prelude of
+    /// `_guard_run_finalize_authorized_launch_plan`: require every authorized
+    /// plan reusable and bound to one environment, then recover the
+    /// executable-resolved argv prefixes in first-seen order. Null when no
+    /// prefix set binds; the adapter rebuild itself stays with the caller.
+    GuardRunAuthorizedPrefixes {
+        plans: Vec<GuardRunLaunchPlanV1>,
+    },
     /// Identity post-processors — `runtime_launch_identity_is_reusable`,
     /// `resolved_runtime_launch_executable`, `resolved_runtime_launch_argv`.
     /// `resolved_argv` re-probes shebang bytes, so it runs here where fs is
@@ -360,6 +424,17 @@ pub enum ContextDigestKindV1 {
         state: String,
         /// Catalog schema/version token baked into the fingerprint.
         version: String,
+    },
+    /// Compose a runtime hook's saved-approval context (paths, shell
+    /// execution context, configured environment, launch identity, nonces)
+    /// and return its token. `inputs` is the transport projection of one
+    /// evaluation; the worker owns every derived component.
+    RuntimeHookApprovalContext {
+        inputs: Value,
+    },
+    /// The generic fallback hook's saved-approval context and token.
+    GenericHookApprovalContext {
+        inputs: Value,
     },
 }
 
@@ -392,12 +467,6 @@ pub struct PackageContextEvidenceV1 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct PackageLauncherResultV1 {
-    pub package: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct ContextDigestResultV1 {
     pub schema: String,
     pub request_id: String,
@@ -416,8 +485,6 @@ pub struct ContextDigestResultV1 {
     #[serde(default)]
     pub validation_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_values: Option<BTreeMap<String, Option<String>>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_launch_environment: Option<BTreeMap<String, String>>,
     /// Explicit null means the supplied persisted evidence is invalid.
     #[serde(default)]
@@ -427,35 +494,25 @@ pub struct ContextDigestResultV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_tool_identity: Option<McpToolIdentityV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package_launcher: Option<PackageLauncherResultV1>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_descriptor: Option<Map<String, Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_mcp: Option<BrowserMcpResultV1>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_tool_risk: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_tool_policy: Option<McpToolPolicyResultV1>,
-    /// `_launch_target` output — `"{tool} {serialized} [arguments-sha256:X]"`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_launch_target: Option<String>,
-    /// `_safe_mcp_arguments` output. Explicit `null` when the request carried
-    /// no `arguments` — Python's `_safe_mcp_arguments(None)` returns `None`,
-    /// so the field must always be present for this kind.
-    #[serde(default)]
-    pub mcp_safe_arguments: Option<Value>,
-    /// Serialized display string for the launch target (canonical JSON of the
-    /// safe arguments, or `""` when arguments were absent).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_serialized_arguments: Option<String>,
     /// stdio `_redact_json` output for traffic recording.
     #[serde(default)]
     pub mcp_redacted_value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_bash_reply_valid: Option<bool>,
     /// `build_runtime_executable_identity` / `build_runtime_launch_identity`
     /// output — the full launch-identity object, verbatim Python dict shape.
     /// These kinds always produce it; `Option` keeps it absent on other kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_identity: Option<Value>,
+    /// `guard_run_launch_plans` / `guard_run_authorized_prefixes` output.
+    /// Plans kind: `{"plans": [...]}`. Prefixes kind: `{"prefixes": [[...]]}`
+    /// or explicit `null` when the authorized plans do not bind.
+    #[serde(default)]
+    pub guard_run_launch: Option<Value>,
+    /// `approval_context_token_well_formed` verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_context_token_well_formed: Option<bool>,
     /// `runtime_launch_identity_matches` verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_identity_match: Option<bool>,
@@ -475,4 +532,64 @@ pub struct ContextDigestResultV1 {
     /// duplicate name). Explicit `null` mirrors `_normalized_tools_catalog_page`.
     #[serde(default)]
     pub tool_catalog: Option<Map<String, Value>>,
+    /// `local_cli_identity` output; absent when the material does not name
+    /// an identifiable CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_cli_identity: Option<LocalCliIdentityV1>,
+    /// `custom_extension_continuity` answer: a commit (`writes`,
+    /// `requirements`, and the guards it carries), a refusal
+    /// (`{"error": message}`), a local override commit, or public state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_extension_continuity: Option<Value>,
+    /// `managed_controls_policy_fields` answer: `{"ok": projection}` or
+    /// `{"error": {"code", "message"}}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_controls_policy_fields: Option<Value>,
+    /// `package_json_scripts` output; absent when nothing is recognized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_json_scripts: Option<PackageJsonScriptsV1>,
+    /// `local_cli_identify` output, first-seen order, unique by `cli_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_cli_identities: Option<Vec<UnlistedCliV1>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_extension_suggestion: Option<Vec<SuggestionVerdictV1>>,
+    /// `claude_guard_question` answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_guard_question: Option<ClaudeGuardQuestionVerdictV1>,
+    /// `memory_pattern` answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_pattern: Option<MemoryPatternVerdictV1>,
+}
+
+/// A remembered decision's behavior fingerprint and lookup candidates.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryPatternVerdictV1 {
+    /// `None` when the signal is too generic to anchor memory.
+    pub pattern: Option<MemoryPatternFingerprintV1>,
+    /// Shell-domain exact-command policy ids, distinct and excluding the
+    /// direct artifact id.
+    pub exact_artifact_ids: Vec<String>,
+    /// `memory:<harness>:<kind>:<fingerprint>`; `None` without a harness or
+    /// pattern, or when it is the direct artifact id.
+    pub memory_artifact_id: Option<String>,
+}
+
+/// One memory pattern fingerprint and the dimensions that produced it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryPatternFingerprintV1 {
+    pub fingerprint: String,
+    pub kind: String,
+    /// `[name, value]` pairs in the order the builder added them.
+    pub components: Vec<[String; 2]>,
+}
+
+/// Whether a hook answers the pending HOL Guard approval prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ClaudeGuardQuestionVerdictV1 {
+    pub is_question: bool,
+    /// `allow` or `block`; `None` when the answer names no approval option.
+    pub action: Option<String>,
 }

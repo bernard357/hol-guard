@@ -45,7 +45,7 @@ fn is_mcp_tool(tool: &str) -> bool {
         || (tool.contains('/') && !tool.starts_with('/'))
 }
 
-fn is_package_tool(tool: &str) -> bool {
+pub(in crate::pretool) fn is_package_tool(tool: &str) -> bool {
     tool_matches(
         tool,
         &[
@@ -76,6 +76,8 @@ fn is_network_tool(tool: &str) -> bool {
         &[
             "web_fetch",
             "web_search",
+            "webfetch",
+            "websearch",
             "fetch_web",
             "http",
             "request",
@@ -153,11 +155,13 @@ fn is_harness_tool(tool: &str) -> bool {
 }
 
 fn is_file_write_tool(tool: &str) -> bool {
+    // `MultiEdit` is one token, so it never matches the `edit` term by itself.
     tool_matches(
         tool,
         &[
             "write",
             "edit",
+            "multiedit",
             "patch",
             "replace",
             "delete",
@@ -184,12 +188,33 @@ fn is_file_read_tool(tool: &str) -> bool {
     )
 }
 
+/// Claude Code's `PowerShell` tool always runs PowerShell, whatever the host,
+/// so its command is parsed as PowerShell rather than guessed from the host.
+/// A namespaced spelling such as `functions.PowerShell` names the same tool;
+/// an MCP server's tool does not.
+pub(super) fn command_dialect(tool: Option<&str>) -> &'static str {
+    let powershell = tool.is_some_and(|tool| {
+        let tool = tool.trim();
+        !is_mcp_tool(tool)
+            && tool
+                .rsplit('.')
+                .next()
+                .is_some_and(|leaf| leaf.eq_ignore_ascii_case("powershell"))
+    });
+    if powershell {
+        "powershell"
+    } else {
+        "posix"
+    }
+}
+
 fn is_command_tool(tool: &str) -> bool {
     // tool_matches also recognizes namespaced forms such as functions.exec_command.
     tool_matches(
         tool,
         &[
             "bash",
+            "powershell",
             "shell",
             "terminal",
             "run_command",
@@ -204,10 +229,42 @@ fn is_command_tool(tool: &str) -> bool {
 }
 
 pub(super) fn package_command(model: &CanonicalCommandV1) -> bool {
-    model
-        .segments
-        .iter()
-        .any(|segment| segment.executable.as_deref().is_some_and(is_package_tool))
+    model.segments.iter().any(|segment| {
+        segment.executable.as_deref().is_some_and(is_package_tool) && !inline_eval(segment)
+    })
+}
+
+/// `bun -e <code>` runs code, not a package operation; keep the command
+/// decision so the reason names what actually needs review.
+fn inline_eval(segment: &crate::CommandSegmentV1) -> bool {
+    segment
+        .executable
+        .as_deref()
+        .is_some_and(|executable| executable.rsplit(['/', '\\']).next() == Some("bun"))
+        && segment
+            .arguments
+            .first()
+            .is_some_and(|argument| matches!(argument.as_str(), "-e" | "--eval" | "-p" | "--print"))
+}
+
+/// Whether `infer_action_type` decides this call from the tool's name alone.
+/// A recognized name gives the action its type, so the prompt-text gates leave
+/// it to the proof that type carries. They cover what a prompt-typed action
+/// used to carry: an inline prompt, or a tool whose name Guard does not know.
+pub(super) fn tool_name_is_typed(tool: &str) -> bool {
+    !tool.is_empty()
+        && (is_mcp_tool(tool)
+            || is_prompt_tool(tool)
+            || tool == "yield"
+            || is_harness_tool(tool)
+            || is_browser_tool(tool)
+            || is_package_tool(tool)
+            || is_process_service_tool(tool)
+            || is_config_tool(tool)
+            || is_file_write_tool(tool)
+            || is_file_read_tool(tool)
+            || is_network_tool(tool)
+            || is_command_tool(tool))
 }
 
 pub(super) fn infer_action_type(
@@ -229,6 +286,11 @@ pub(super) fn infer_action_type(
     }
     if is_prompt_tool(tool) {
         return (PreToolActionTypeV1::Prompt, PreToolOperationV1::Submit);
+    }
+    // Result reports need an explicit harness proof; referenced paths do not
+    // turn an unproved report into an automatically allowed file read.
+    if tool == "yield" {
+        return (PreToolActionTypeV1::Harness, PreToolOperationV1::Set);
     }
     if is_harness_tool(tool) {
         let operation = if tool_matches(tool, &["stop", "end", "close"]) {
@@ -261,7 +323,14 @@ pub(super) fn infer_action_type(
     if is_file_read_tool(tool) {
         return (PreToolActionTypeV1::FileRead, PreToolOperationV1::Read);
     }
-    if signals.prompt_present {
+    if is_network_tool(tool) {
+        return (PreToolActionTypeV1::Network, PreToolOperationV1::Request);
+    }
+    // A named tool's `query` or `message` argument is that tool's input, not a
+    // model prompt. Tools that really carry a prompt are matched by name above,
+    // and an inline prompt arrives with no tool name at all. Typing every other
+    // tool call as a prompt made an ordinary search read as a prompt risk.
+    if signals.prompt_present && tool.is_empty() {
         return (PreToolActionTypeV1::Prompt, PreToolOperationV1::Submit);
     }
     if is_network_tool(tool) || !signals.url_values.is_empty() {
@@ -279,7 +348,11 @@ pub(super) fn infer_action_type(
     if event_compact.contains("beforewritefile") {
         return (PreToolActionTypeV1::FileWrite, PreToolOperationV1::Write);
     }
-    if !signals.path_values.is_empty() {
+    // A path alone types an unrecognized tool as a file read, which the generic
+    // safe-path proof can allow. Text that reads like an instruction is not
+    // covered by that proof, so a call carrying both stays unknown and keeps
+    // its review rather than borrowing a read's allow.
+    if !signals.path_values.is_empty() && !signals.prompt_present {
         return (PreToolActionTypeV1::FileRead, PreToolOperationV1::Read);
     }
     if signals.command.is_some() && tool.is_empty() {
@@ -293,3 +366,7 @@ pub(super) fn infer_action_type(
     }
     (PreToolActionTypeV1::Unknown, PreToolOperationV1::Unknown)
 }
+
+#[cfg(test)]
+#[path = "generic_tools_tests.rs"]
+mod tests;

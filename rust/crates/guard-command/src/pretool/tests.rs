@@ -91,6 +91,11 @@ fn bounded_find_listings_do_not_admit_actions_or_sensitive_targets() {
     );
 }
 
+/// `[[ -f NAME ]]` is read as the `[ -f NAME ]` it asks: inside `[[ ]]` the
+/// shell splits no word and expands no glob, so the modeled form stands for
+/// at least the work the command does. Only a closed pair is read that way;
+/// an unclosed `[[`, a pair `&&` has already split, and an unmodeled
+/// predicate each keep their review.
 #[test]
 fn bounded_file_predicates_preserve_compound_path_and_command_risks() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -102,6 +107,12 @@ fn bounded_file_predicates_preserve_compound_path_and_command_risks() {
         "test -d src && ls src",
         "test -e src/lib.rs; echo done",
         "test -r src/lib.rs && head -1 src/lib.rs",
+        "test -x src && echo searchable || echo closed",
+        "test -s src/lib.rs && echo non-empty",
+        "[ -f src/lib.rs ] && echo present || echo missing",
+        "[[ -f src/lib.rs ]] && echo present || echo missing",
+        "[[ -d src ]] && ls src",
+        "if [[ -f src/lib.rs ]]; then cat src/lib.rs; fi",
     ] {
         let decision =
             evaluate_pre_tool_with_context(&request(command), Some(root), Some(root)).unwrap();
@@ -117,7 +128,15 @@ fn bounded_file_predicates_preserve_compound_path_and_command_risks() {
         "test -f src/lib.rs && rm -rf src",
         "test -f src/lib.rs -o -f .env",
         "test -f $(echo src/lib.rs)",
-        "test -x src/lib.rs",
+        "test -x ~/.ssh/id_rsa",
+        "test -s .env && echo set",
+        "test -w src/lib.rs",
+        "[ -f .env ] && echo set",
+        "[ -f src/lib.rs",
+        "[[ -f .env ]] && echo set",
+        "[[ -f src/lib.rs",
+        "[[ -f src/lib.rs && -f .env ]]",
+        "[[ -w src/lib.rs ]]",
     ] {
         let decision = evaluate_pre_tool_with_context(&request(command), Some(root), Some(root));
         assert!(
@@ -181,6 +200,14 @@ fn read_only_github_predecessor_counts_as_benign_for_git_context() {
             PathContext {
                 home_dir: Some("/tmp"),
                 cwd: Some("/tmp"),
+                cdpath_unset: false,
+                rustup_override_absent: false,
+                npm_config_inert: false,
+                pip_config_inert: false,
+                shell_home_matches: false,
+                ripgrep_config_absent: false,
+                psql_environment: Default::default(),
+                creates_nothing: false,
             },
         ),
         vec![0, 1]
@@ -283,10 +310,7 @@ fn git_c_rejects_external_gitfile_pointers() {
     let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/gitfile-pointer-fixtures");
     std::fs::create_dir_all(&base).unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let fixture = base.join(format!("fixture-{}-{nonce}", std::process::id()));
     let workspace = fixture.join("workspace");
     let external = fixture.join("external-admin");
@@ -314,10 +338,7 @@ fn git_c_rejects_forged_external_linked_worktree_metadata() {
     let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/gitfile-pointer-fixtures");
     std::fs::create_dir_all(&base).unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let fixture = base.join(format!("linked-fixture-{}-{nonce}", std::process::id()));
     let workspace = fixture.join("workspace");
     let common = fixture.join("external-common/.git");
@@ -391,6 +412,37 @@ fn reviews_dotenv_family_shell_reads() {
 }
 
 #[test]
+fn windows_aliases_of_secret_paths_get_the_plain_path_decision() {
+    // Win32 drops trailing dots and spaces from each name and reads
+    // `name::$DATA` as the file's default stream.
+    for (alias, plain) in [
+        ("cat '.env::$DATA'", "cat .env"),
+        ("cat '.env::$DATA.'", "cat .env"),
+        ("cat '.ENV. '", "cat .env"),
+        ("cat ~/.npmrc.", "cat ~/.npmrc"),
+        ("cat ~/.ssh./id_rsa.", "cat ~/.ssh/id_rsa"),
+        ("cat '.aws\\credentials::$DATA'", "cat .aws/credentials"),
+        ("cat notes.md.", "cat notes.md"),
+    ] {
+        let alias_decision = evaluate_pre_tool(&request(alias)).unwrap();
+        let plain_decision = evaluate_pre_tool(&request(plain)).unwrap();
+        assert_eq!(
+            (
+                alias_decision.decision,
+                alias_decision.minimum_action,
+                alias_decision.reason_code
+            ),
+            (
+                plain_decision.decision,
+                plain_decision.minimum_action,
+                plain_decision.reason_code
+            ),
+            "{alias}"
+        );
+    }
+}
+
+#[test]
 fn allows_bounded_exact_commands() {
     for command in [
         "pwd",
@@ -411,6 +463,8 @@ fn allows_bounded_exact_commands() {
         "rg -n authority src",
         "rg -g*.ts authority src",
         "rg --glob '*.{ts,tsx}' authority src",
+        "rg --files -g '!**/.git/**'",
+        "rg --glob='!*.lock' authority src",
         "rg --line-number --color=never authority src",
         "grep -n authority README.md",
         "grep --line-number --color=never authority README.md",
@@ -446,6 +500,9 @@ fn allows_bounded_pipeline_consumers() {
         "git status --short | tail -n 2",
         "cat README.md | head -2 | tail -n 1",
         "git status --short | head",
+        // `|&` is the same pipe with stderr merged into it, so the bounded
+        // consumer on its right keeps the allow the plain `|` form gets.
+        "git status --short |& head -2",
     ] {
         let decision = evaluate_pre_tool(&request(command)).unwrap();
         assert_eq!(decision.minimum_action, "allow", "{command}");
@@ -458,7 +515,6 @@ fn allows_bounded_pipeline_consumers() {
     for command in [
         "head -2",
         "git status --short && head -2",
-        "git status --short |& head -2",
         "git status --short | head -2; tail -n 1",
         "git status --short | head -2 || tail -n 1",
         "cat ~/.ssh/id_ed25519 | head -2",
@@ -467,6 +523,13 @@ fn allows_bounded_pipeline_consumers() {
         "git status --short | tail -f",
         "git status --short | head -n",
         "git status --short | head -n $(whoami)",
+        // The Korn shell reads `|&` as a coprocess rather than as a pipe with
+        // standard error merged into it. Naming a shell keeps the command out
+        // of this allow either way: the text it is handed is not the text this
+        // scan read, so no spelling of the pipe inside it is benign here.
+        "ksh -c 'git status --short |& head -2'",
+        "ksh -c 'git status --short 2>&1 | head -2'",
+        "ksh ./build.sh |& head -2",
     ] {
         let decision = evaluate_pre_tool(&request(command)).unwrap();
         assert!(!decision.explicitly_benign, "{command}");
@@ -506,7 +569,6 @@ fn reviews_date_mutations_and_unbounded_file_reads() {
         "cat //etc/passwd",
         "cat /proc//self/environ",
         "cat /var/../etc/passwd",
-        "cat README.md Cargo.toml",
         "head -n 10 README.md Cargo.toml",
         "ls /",
         "cat /root/secret",
@@ -526,6 +588,12 @@ fn reviews_only_materially_risky_variants_of_safe_commands() {
     let inert_pattern = evaluate_pre_tool(&request("rg -e '.env.local' src")).unwrap();
     assert_eq!(inert_pattern.decision, "allow");
     assert_eq!(inert_pattern.minimum_action, "allow");
+    // An ordinary project setting in front of a proven read is a value that
+    // read takes for itself. Every name that could steer lookup, loading,
+    // configuration, a home, a credential, the trust anchor or an endpoint
+    // keeps its review, and the cases below still cover those families.
+    let ordinary_setting = evaluate_pre_tool(&request("FOO=bar git status --short")).unwrap();
+    assert_eq!(ordinary_setting.decision, "allow");
     for command in [
             "rg --pre /opt/guard-test/payload authority src",
             "rg --hostname-bin=/opt/guard-test/payload --hyperlink-format='file://{host}{path}' TOKEN src",
@@ -534,6 +602,7 @@ fn reviews_only_materially_risky_variants_of_safe_commands() {
             "rg -L authority .",
             "rg --no-ignore-files authority .",
             "rg --glob '*.env' TOKEN .",
+            "rg --glob '!*.md' --glob '*.env' TOKEN .",
             "rg --glob '*.{env,ts}' TOKEN .",
             "rg --glob 'nested/*.env' TOKEN .",
             "rg --glob 'nested/[.]env' TOKEN .",
@@ -567,7 +636,6 @@ fn reviews_only_materially_risky_variants_of_safe_commands() {
             "rg --hidd TOKEN .",
             "rg --globx '*.ts' TOKEN .",
             "/opt/guard-test/rg authority src",
-            "FOO=bar git status --short",
             "GIT_EXTERNAL_DIFF=/opt/guard-test/payload git diff --ext-diff README.md",
             "git diff --output=/opt/guard-test/diff README.md",
             "git log -1 --output=/opt/guard-test/log",
@@ -613,5 +681,116 @@ fn denies_uncertain_or_networked_commands_but_allows_proven_constant_expression(
         let decision = evaluate_pre_tool(&request(command)).unwrap();
         assert_eq!(decision.decision == "allow", permitted, "{command}");
         assert_eq!(decision.minimum_action == "allow", permitted, "{command}");
+    }
+}
+
+#[test]
+fn guard_control_floors_block_natively_instead_of_queueing_review() {
+    for command in [
+        "hol-guard uninstall",
+        "hol-guard uninstall --all",
+        "hol-guard hooks remove --all",
+        "hol-guard hooks remove",
+        "/usr/local/bin/hol-guard hooks remove --all",
+        "HOL-GUARD Hooks Remove --all",
+        "hol-guard policy disable",
+        "hol-guard capability consume token",
+        "hol-guard clear --all",
+        "sudo hol-guard hooks remove --all",
+        "echo ok && hol-guard hooks remove --all",
+        "echo x | xargs hol-guard uninstall",
+        "find . -exec hol-guard hooks remove --all \\;",
+    ] {
+        let decision = evaluate_pre_tool(&request(command)).unwrap();
+        assert_eq!(decision.minimum_action, "block", "{command}");
+        assert_eq!(
+            decision.reason_code, "native_guard_self_protection",
+            "{command}"
+        );
+        assert!(!decision.explicitly_benign, "{command}");
+    }
+}
+
+#[test]
+fn guard_control_help_and_other_subcommands_keep_review() {
+    for command in [
+        "hol-guard hooks remove --help",
+        "hol-guard uninstall --help",
+        "hol-guard hooks list",
+        "hol-guard repair",
+        "echo x | xargs echo",
+        "find . -name '*.py' -exec echo {} \\;",
+    ] {
+        let decision = evaluate_pre_tool(&request(command)).unwrap();
+        assert_ne!(decision.minimum_action, "block", "{command}");
+        assert_ne!(
+            decision.reason_code, "native_guard_self_protection",
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn magic_pathspecs_are_screened_by_the_path_they_name() {
+    for selecting in [":(top).en*", ":(top,glob).en*", ":/!.en?", ":(top).env"] {
+        assert!(sensitive_read_path_argument(selecting), "{selecting}");
+    }
+    for ordinary in [":(top)src/*.ts", ":!readme.md", ":(exclude)src"] {
+        assert!(!sensitive_read_path_argument(ordinary), "{ordinary}");
+    }
+}
+
+#[test]
+fn secret_selecting_globs_are_a_fixed_floor() {
+    let model = |command: &str| {
+        crate::parse_command(
+            &serde_json::from_value(serde_json::json!({"command": command})).unwrap(),
+        )
+        .unwrap()
+    };
+    for command in [
+        "git diff --no-index .en? README.md",
+        "git log -p -1 -- ':(top).en*'",
+        "dd if=.en{v..v} of=copy",
+        "dd if=.e{n..n}{v..v} of=copy",
+        "dd if={.env,x} of=copy",
+        // An `=` or whitespace inside a pattern can still match `.env`.
+        "git diff --no-index [=.]env README.md",
+        "git diff --no-index {=,.}env README.md",
+        "git log -p -1 -- '[ .]env'",
+        "git log -p -1 -- '{ ,.}env'",
+        "git log -p -1 -- 'my dir/.en?'",
+        // A leading `]`, a backslash or a `[:name:]` keeps the class whole.
+        "git log -p -1 -- '[] .]env'",
+        "git log -p -1 -- '[\\] .]env'",
+        "git log -p -1 -- '[!]a]env'",
+        "git log -p -1 -- '[[:space:].]env'",
+        "git log -p -1 -- '[[=.=]]env'",
+        // A brace value is screened per alternative, whatever else it holds.
+        "dd if={safe:dummy,.env} of=copy",
+        "dd if={x\\\"y,.env} of=copy",
+        // An unterminated quote leaves no proven segment to screen.
+        "dd if='{x,.env} of=copy",
+        // A `/` makes the word a path, whatever its first component holds.
+        "git log -p -1 -- 'x=y/../.en*'",
+        "git diff --no-index a=b/{.env,x} README.md",
+    ] {
+        assert!(fixed_command_floor(&model(command)), "{command}");
+    }
+    for command in [
+        "git log -p -1 -- 'src/*.ts'",
+        "git commit -m 'ignore *.env files'",
+        "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"x\"}){thread{id,isResolved}}}'",
+        "gh api graphql -f query='{viewer{login}}'",
+        "gh pr comment 1 --body 'see *.env and .en{v..v}'",
+        "dd if=out.* of=copy",
+        "gh pr comment 1 --body 'fix the [.]env loader'",
+        "gh api graphql -f query='query { viewer { login } }'",
+        "gh pr comment 1 --body 'use arr[] and fix ]'",
+        "gh api repos/o/r/issues -f 'labels[]=bug'",
+        "dd if=out/*.ts of=copy",
+        "git log -p -1 -- '[[:digit:]].ts'",
+    ] {
+        assert!(!fixed_command_floor(&model(command)), "{command}");
     }
 }

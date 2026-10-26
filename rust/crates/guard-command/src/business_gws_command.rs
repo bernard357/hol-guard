@@ -98,7 +98,11 @@ impl GwsGmailSendCommandInputV1 {
             extraction_provenance: "business-gws-inline-v1".to_owned(),
         };
         let parsed = parse_command(&request).map_err(|_| Error::InvalidCommand)?;
+        // A send is committed to the exact words it was read from, so a
+        // spelling the model no longer stands for word for word - a shell
+        // carrying the whole send as its script, say - is not one of them.
         if parsed.confidence != "exact"
+            || !parsed.exact_raw_text
             || parsed.uncertainty_reason.is_some()
             || parsed.segments.len() != 1
             || !parsed.wrapper_chain.is_empty()
@@ -107,7 +111,11 @@ impl GwsGmailSendCommandInputV1 {
             return Err(Error::UnsupportedContext);
         }
         let segment = &parsed.segments[0];
-        if !segment.environment_names.is_empty()
+        // `command`, `time` and inert `env` prefixes are removed before the
+        // executable is recorded. The original first token still has to be
+        // `gws`, or a wrapper would prepare the send.
+        if segment.tokens.first().map(String::as_str) != Some("gws")
+            || !segment.environment_names.is_empty()
             || !segment.wrapper_chain.is_empty()
             || segment.pipeline_index != 0
             || segment.execution_context != "top:0"

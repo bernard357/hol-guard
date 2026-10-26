@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hol-guard"
-version = "3.29.0"
+version = "3.57.0"
 description = "Open-source antivirus and runtime protection for AI agents, tools, MCP servers, plugins, skills, and package installs."
 readme = "README.md"
 license = "Apache-2.0"
@@ -46,6 +46,7 @@ classifiers = [
 dependencies = [
     "rich>=14.0,<15",
     "cryptography>=50.0.0",
+    "sigstore>=4.5,<5",
     "keyring>=25.0",
     "packaging>=24.0",
     "idna==3.15",
@@ -55,7 +56,7 @@ dependencies = [
     "requests>=2.32,<3",
     "tomli>=2.0; python_version < '3.11'",
     "typing_extensions>=4.15.0",
-    "mcp>=1.28.1,<2; python_version >= '3.10'",
+    "mcp>=1.30.0,<2; python_version >= '3.10'",
     "tomlkit>=0.13.3,<1",
 ]
 
@@ -83,6 +84,8 @@ ci-test = [
     "build>=1.5.0",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "pytest-rerunfailures>=14.0",
     "ruff>=0.15.15",
 ]
 cisco-mcp = [
@@ -94,19 +97,23 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    "aiohttp==3.14.3",
+    "aiohttp==3.14.4",
     "anyio==4.14.2",
     "click==8.4.1",
     "cisco-ai-skill-scanner==2.0.12",
     "fastapi==0.137.1",
+    "filelock==3.20.3; python_version < '3.11'",
+    "filelock>=4.2.1; python_version >= '3.11'",
     "importlib-metadata==8.9.0",
     "jsonschema==4.26.0",
     "litellm==1.93.2",
     "magika==1.0.3",
+    "multidict>=6.9.1",
     "openai==2.41.1",
-    "pyjwt==2.14.0",
+    "pyjwt==2.15.0",
     "python-dotenv==1.2.2",
     "python-multipart==0.0.32",
+    "setuptools>=84.1.0",
     "starlette==1.3.1",
     "tokenizers==0.23.1",
     "urllib3==2.8.0",
@@ -139,17 +146,24 @@ packages = ["src/codex_plugin_scanner"]
 
 [tool.hatch.build.targets.sdist]
 # Keep all inputs needed to rebuild the wheel and verify frozen projections.
-# Dashboard assets are already bundled under src; contributor tests live in Git.
+# Dashboard assets are already bundled under src; contributor tests live in Git,
+# as do the Rust integration tests and their fixtures.
 only-include = [
     "src",
     "scripts",
     "rust",
     "contracts",
     "contributions",
+    "tests/fixtures",
     "docs/guard/contracts/guard-cloud-review.md",
     "README.md",
     "LICENSE",
 ]
+# The packaged source-compiler build slurps these two vector files into its
+# command-extension build envelope; they are build inputs, not test data.
+[tool.hatch.build.targets.sdist.force-include]
+"rust/crates/guard-command/tests/fixtures/command-source-example.v1.json" = "rust/crates/guard-command/tests/fixtures/command-source-example.v1.json"
+"rust/crates/guard-command/tests/fixtures/command-source-behavior.v1.json" = "rust/crates/guard-command/tests/fixtures/command-source-behavior.v1.json"
 
 [tool.hatch.build.hooks.custom]
 path = "scripts/build_command_projection_hook.py"
@@ -170,6 +184,10 @@ artifacts = [
     "src/codex_plugin_scanner/guard/schemas/**",
 ]
 exclude = [
+    # Rust integration tests and their fixtures stay in Git; the wheel selects
+    # only src/codex_plugin_scanner, so these patterns only shrink the sdist.
+    "rust/crates/*/tests/**",
+    "rust/crates/*/testdata/**",
     "contributions/extensions/**",
     "contracts/extensions/trust-class-map.v1.json",
     "src/codex_plugin_scanner/_native/guard-command-source",
@@ -177,6 +195,9 @@ exclude = [
     "src/codex_plugin_scanner/guard/contracts/data/extensions/native-command-program.v1.json",
     "src/codex_plugin_scanner/guard/contracts/data/extensions/command-catalog.v1.json",
     "src/codex_plugin_scanner/guard/contracts/data/extensions/trust-class-map.v1.json",
+    "src/codex_plugin_scanner/guard/contracts/data/extensions/contributions/**",
+    "src/codex_plugin_scanner/guard/contracts/data/extensions/command-sources/**",
+    "src/codex_plugin_scanner/guard/contracts/data/mcp_servers/contributions/**",
     ".guard-live/**",
     ".guard-package-venv/**",
     ".guard-e2e/**",
@@ -207,10 +228,14 @@ markers = [
   "daemon_bundle_refresh: enables the daemon supply-chain bundle refresh worker for focused tests",
   "daemon_headless_queue: enables request-triggered daemon cloud sync for focused tests",
   "daemon_headless_refresh: enables the daemon headless cloud sync worker for focused tests",
+  "daemon_plugin_telemetry: enables the daemon opt-in plugin install report worker for focused tests",
   "daemon_service_workers: enables command queue and live request sync workers for focused tests",
   "fault_injection: destructive store fault tests; only run with GUARD_FAULT_INJECTION=1",
   "installed: requires verification through an installed package artifact",
   "integration: verifies multiple Guard subsystems together",
+  "native_codex_hook_bridge: installs Codex hooks through the native runtime bridge when it is available",
+  "native_bounded_hook_bridge: installs bounded CLI hooks through the native runtime bridge when it is available",
+  "native_pi_hook_bridge: generates Pi and Oh My Pi extensions that use the native runtime hook bridge when it is available",
   "parser: verifies parsing or normalization security semantics",
   "policy: verifies policy composition or enforcement semantics",
   "regression: protects a previously observed defect or security finding",
@@ -223,6 +248,9 @@ markers = [
 
 [tool.coverage.run]
 source_pkgs = ["codex_plugin_scanner"]
+# Test fixtures compiled into a package-named scope are traced as package code.
+# They are inputs to the suite, not shipped source, so keep them out of the report.
+omit = ["tests/fixtures/*", "*/tests/fixtures/*"]
 branch = true
 # SonarQube Cloud requires repo-relative paths so CI-generated reports match checked-out sources.
 relative_files = true

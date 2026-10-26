@@ -6,13 +6,24 @@ import hashlib
 import json
 import re
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from .catalog import load_catalog, load_catalog_data, retain_trusted_cases
+from .case_retry import retryable as retry_eligible
+from .catalog import Scenario, load_catalog, load_catalog_data, retain_trusted_cases
+from .contained_core import contained_wrapper_argv as _contained_wrapper_argv
 from .evidence import assess_case, reconcile
 from .fixtures import digest_file
 from .input_evidence import input_digest
+from .interruptions import (
+    KNOWN_GAPS,
+    known_gap_report,
+    load_known_gaps,
+    observation_interruptions,
+    stale_gaps,
+    summarize_interruptions,
+)
 from .latency import summarize_hook_latency
 from .source_identity import source_identity, validate_identity
 from .transport import reconcile_rounds
@@ -48,43 +59,28 @@ def _read_json(path: Path, limit: int) -> dict[str, Any]:
     return data
 
 
-def _contained_public_path(value: object) -> bool:
-    return isinstance(value, str) and (
-        value.startswith("/")
-        or value.startswith(("{{fixture}}/", "{{workspace}}/", "{{home}}/", "{{contained_project}}/"))
-    )
+_CONTAINMENT_REASON = "native_vitest_readonly_containment_required"
 
 
-def _contained_wrapper_argv(command: object, expected_workspace: str) -> tuple[list[str] | None, str | None]:
-    if not isinstance(command, str):
-        return None, "contained wrapper command is missing"
-    try:
-        argv = shlex.split(command)
-    except ValueError:
-        return None, "contained wrapper command is not valid shell argv"
-    canonical = " ".join("'" + value.replace("'", "'\\''") + "'" for value in argv)
-    if command != canonical:
-        return None, "contained wrapper command is not canonical"
-    if len(argv) != 12 or not _contained_public_path(argv[0]):
-        return None, "contained wrapper is not an approved path"
-    if argv[1] != "execute-contained-test" or argv[2] != "--guard-home" or not _contained_public_path(argv[3]):
-        return None, "contained wrapper guard-home binding is malformed"
-    if argv[4:6] != ["--workspace", expected_workspace]:
-        return None, "contained wrapper workspace binding differs from the reviewed caller"
-    if argv[6] != "--request-file":
-        return None, "contained wrapper request-file flag is missing"
-    request = Path(argv[7])
-    if (
-        not request.is_absolute()
-        or request.name != "request.json"
-        or not request.parent.name.startswith("hol-guard-contained-test-")
-    ):
-        return None, "contained wrapper request path is not adapter-owned"
-    if argv[8] != "--request-sha256" or re.fullmatch(r"[0-9a-f]{64}", argv[9]) is None:
-        return None, "contained wrapper request digest is malformed"
-    if argv[10] != "--home" or not _contained_public_path(argv[11]):
-        return None, "contained wrapper home binding is malformed"
-    return argv, None
+def _contained_interruptions(observations: list[Any]) -> list[dict[str, Any]]:
+    """Recompute interruptions from raw observations; only the by-design containment deny is exempt."""
+    found: list[dict[str, Any]] = []
+    for item in observations:
+        if not isinstance(item, dict):
+            found.append({"kind": "unproven", "why": "malformed observation"})
+            continue
+        by_design = (
+            item.get("event") == "PreToolUse"
+            and item.get("decision") == "deny"
+            and item.get("reason_code") == _CONTAINMENT_REASON
+            and item.get("policy_action") == "sandbox-required"
+        )
+        found.extend(
+            interruption
+            for interruption in observation_interruptions(item, "omp")
+            if not (by_design and interruption.get("kind") == "decision")
+        )
+    return found
 
 
 def _verify_contained_case(case: dict[str, Any], row: dict[str, Any], expected_id: str) -> None:
@@ -174,6 +170,8 @@ def _verify_contained_case(case: dict[str, Any], row: dict[str, Any], expected_i
         or not receipt["decision_id"]
     ):
         raise ValueError("contained native observation lacks the authoritative Rust denial")
+    if _contained_interruptions(observations):
+        raise ValueError("contained case shows Guard interrupting work beyond the by-design containment deny")
     if post[0].get("decision") != "allow" or post[0].get("input", {}).get("command") != wrapper:
         raise ValueError("contained post observation is not bound to the executed wrapper")
     result = call.get("result")
@@ -303,6 +301,44 @@ def verify_contained_report(
     }
 
 
+def _reconcile_case_retries(report: dict[str, Any], directory: Path, expected: Sequence[Scenario]) -> None:
+    """Judge every superseded attempt the report declares, with this verifier's own judge.
+
+    The runner that decided to grant a re-run is candidate code. A reader that only
+    checked digests would accept whatever that runner chose to bury: let a regression
+    re-run a false negative until it passed, and the failure ships in ``superseded/``,
+    digested and unread, behind a pass. So each banked attempt is read back, judged
+    here, and required to be one of the outcomes a re-run is allowed for — the rule
+    ``case_retry.retryable`` applies, enforced by the side that does not trust the
+    runner. The file name binds to its own entry, so one case's history cannot point
+    at another case's evidence, and the digest still binds the bytes. The outcome and
+    reason the history row shows readers must be the ones judged here.
+    """
+    by_id = {scenario.id: scenario for scenario in expected}
+    for entry in report.get("case_retries") or []:
+        if not isinstance(entry, dict) or entry.get("id") not in by_id:
+            raise ValueError("a superseded attempt names a scenario outside this profile")
+        name = entry.get("evidence")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,79}\.attempt-[1-9]\.json", name):
+            raise ValueError("a superseded attempt does not name its evidence")
+        if name != f"{entry['id']}.attempt-{entry.get('attempt')}.json":
+            raise ValueError("a superseded attempt names another case's evidence")
+        path = directory / "superseded" / name
+        if not path.is_file() or digest_file(path) != entry.get("evidence_sha256"):
+            raise ValueError("superseded attempt evidence is missing or changed")
+        case = _read_json(path, 8_000_000)
+        scenario = by_id[entry["id"]]
+        if case.get("id") != scenario.id or case.get("expectation") != scenario.expectation:
+            raise ValueError("a superseded attempt holds another case's evidence")
+        result = assess_case(scenario, case)
+        if result != case.get("assessment"):
+            raise ValueError("a superseded attempt's claimed result does not match observed evidence")
+        if (entry.get("outcome"), entry.get("reason")) != (result["outcome"], result["reason"]):
+            raise ValueError("a superseded attempt's declared outcome does not match its evidence")
+        if not retry_eligible(result):
+            raise ValueError("a superseded attempt was never eligible for a re-run")
+
+
 def verify_report(
     directory: Path,
     *,
@@ -406,13 +442,33 @@ def verify_report(
         if result["outcome"] != "pass":
             raise ValueError("a required scenario did not pass")
         results.append(result)
+    _reconcile_case_retries(report, directory, expected)
     latency = summarize_hook_latency(observations)
     if "hook_latency" in report and report["hook_latency"] != latency:
         raise ValueError("claimed aggregate hook latency does not match observed evidence")
+    interruptions = summarize_interruptions(results)
+    if report.get("interruptions") != interruptions or interruptions["benign_interruptions"]:
+        raise ValueError("claimed interruption metrics do not match observed evidence or show interrupted work")
+    if not interruptions["benign_cases"]:
+        raise ValueError("no ordinary-work case was judged, so silence is unproven")
+    gap_report: list[dict[str, Any]] = []
+    # Gaps bind to the candidate checkout when one is given, so a fixed gap the candidate removed is not stale.
+    # Every required scenario already had to pass, so this only enforces gap-file hygiene; it cannot excuse a failure.
+    gaps_path = repo / "ci/gauntlet/known_gaps.json" if manifest is None else KNOWN_GAPS
+    if gaps_path.is_file():
+        gap_report = known_gap_report(
+            [{"id": s.id, **r} for s, r in zip(expected, results, strict=True)],
+            load_known_gaps(gaps_path, {s.id for s in expected}),
+        )
+        stale = stale_gaps(gap_report)
+        if stale:
+            raise ValueError("known gaps now pass and must be removed: " + ", ".join(stale))
     return {
         "verified": True,
         "candidate_sha": expected_sha,
         "scenarios": len(results),
+        "interruptions": interruptions,
+        "known_gaps": gap_report,
         "actual_tool_calls": sum(result["tool_calls"] for result in results),
         "merge_qualified": report["merge_qualified"],
         "hook_latency": latency,

@@ -191,6 +191,34 @@
                           ]
                         },
                         "op": "executable.v1"
+                      },
+                      {
+                        "op": "executable.v1",
+                        "config": {
+                          "executables": [
+                            "agentbridge",
+                            "agentbridge.cmd",
+                            "agentbridge.exe"
+                          ],
+                          "subcommands": [
+                            "run"
+                          ],
+                          "required_flags": [
+                            "--tool-registry",
+                            "-h"
+                          ],
+                          "required_flags_in_all_arguments": true,
+                          "options_with_values": [
+                            "--backend",
+                            "--framework",
+                            "--input",
+                            "--manifest",
+                            "--session-id",
+                            "--tool-registry"
+                          ],
+                          "allow_leading_options": false,
+                          "fail_secure_unknown_options": true
+                        }
                       }
                     ],
                     "op": "any.v1"
@@ -291,6 +319,31 @@
                           ]
                         },
                         "op": "executable.v1"
+                      },
+                      {
+                        "op": "executable.v1",
+                        "config": {
+                          "executables": [
+                            "agentbridge",
+                            "agentbridge.cmd",
+                            "agentbridge.exe"
+                          ],
+                          "subcommands": [
+                            "scaffold-plugin"
+                          ],
+                          "required_flags": [
+                            "--force",
+                            "-h"
+                          ],
+                          "required_flags_in_all_arguments": true,
+                          "options_with_values": [
+                            "--backend",
+                            "--distribution-name",
+                            "--package-name"
+                          ],
+                          "allow_leading_options": false,
+                          "fail_secure_unknown_options": true
+                        }
                       }
                     ],
                     "op": "any.v1"
@@ -441,7 +494,7 @@
       },
       "publishers": {
         "hol": {
-          "displayName": "Hashgraph Online",
+          "displayName": "HOL",
           "id": "hol"
         },
         "hol-curated": {
@@ -533,8 +586,10 @@
       "enabled_extensions": [
         "command.agentbridge"
       ],
-      "expected_action": "block",
-      "expected_effective_segments": [],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
       "id": "exec-scaffold-force",
       "rule_id": "command.agentbridge.scaffold-plugin-force"
     },
@@ -577,8 +632,10 @@
       "enabled_extensions": [
         "command.agentbridge"
       ],
-      "expected_action": "block",
-      "expected_effective_segments": [],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
       "id": "exec-exe-scaffold-force",
       "rule_id": "command.agentbridge.scaffold-plugin-force"
     },
@@ -599,8 +656,10 @@
       "enabled_extensions": [
         "command.agentbridge"
       ],
-      "expected_action": "block",
-      "expected_effective_segments": [],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
       "id": "exec-run-tool-registry",
       "rule_id": "command.agentbridge.run-tool-registry"
     },

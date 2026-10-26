@@ -1,4 +1,4 @@
-"""The shard entry point must never regenerate or restore tracked fixtures."""
+"""Source preparation failures must stop shard execution."""
 
 from __future__ import annotations
 
@@ -10,27 +10,20 @@ import pytest
 from scripts.ci import run_projection_shard as runner
 
 
-@pytest.mark.parametrize("node", [runner.FRESHNESS_NODE, "tests/test_other.py::test_case"])
-@pytest.mark.parametrize("exit_code", [0, 1, 2, 3, 4, 5])
-def test_shard_runs_once_and_preserves_fixture_bytes(tmp_path: Path, monkeypatch, node, exit_code):
-    """Verify shard runs once and preserves fixture bytes."""
-    report = tmp_path / "decision-diff-report.json"
-    report.write_bytes(b"historical bytes are not today's expected implementation")
+def test_source_preparation_failure_stops_shard(tmp_path: Path, monkeypatch, capsys):
+    """Never run directory consumers against incomplete or invalid projections."""
     shard = tmp_path / "shard.txt"
-    shard.write_text(node + "\n")
-    calls = []
+    shard.write_text("tests/test_other.py::test_case\n")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_SOURCE_COMPILER", "/native/guard-command-source")
 
     def execute(command, **kwargs):
-        """Capture invoked commands and simulate the subprocess outcome required by this case."""
-        calls.append(command)
-        assert kwargs == {"cwd": runner.ROOT, "check": False}
-        return subprocess.CompletedProcess(command, exit_code)
+        if "-m" in command:
+            pytest.fail("pytest must not execute after source preparation fails")
+        return subprocess.CompletedProcess(command, 2)
 
     monkeypatch.setattr(runner.subprocess, "run", execute)
-    assert runner.main([str(shard), "--", "@" + str(shard), "--cov-branch"]) == exit_code
-    assert len(calls) == 1
-    assert calls[0][1:] == ["-m", "pytest", "@" + str(shard), "--cov-branch"]
-    assert report.read_bytes() == b"historical bytes are not today's expected implementation"
+    assert runner.main([str(shard), "--", "@" + str(shard)]) == 2
+    assert "Starting pytest" not in capsys.readouterr().out
 
 
 def test_missing_shard_is_not_treated_as_success(tmp_path: Path, monkeypatch):
@@ -38,3 +31,59 @@ def test_missing_shard_is_not_treated_as_success(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: pytest.fail("missing plan must not execute"))
     with pytest.raises(FileNotFoundError):
         runner.main([str(tmp_path / "missing.txt")])
+
+
+def test_combined_preparation_timeout_stops_shard(tmp_path, monkeypatch, capsys):
+    shard = tmp_path / "shard.txt"
+    shard.write_text("tests/test_other.py::test_case\n")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_SOURCE_COMPILER", "/native/guard-command-source")
+
+    def execute(command, **kwargs):
+        assert "-m" not in command, "pytest must not execute after preparation times out"
+        assert command[-1] == "--prepare-directory"
+        assert kwargs["timeout"] == 300
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(runner.subprocess, "run", execute)
+    assert runner.main([str(shard)]) == 124
+    output = capsys.readouterr()
+    assert "Projection preparation timed out after 300s" in output.err
+    assert "Starting pytest" not in output.out
+
+
+def test_pytest_start_marker_is_flushed_before_launch(tmp_path, monkeypatch, capsys):
+    shard = tmp_path / "shard.txt"
+    shard.write_text("tests/test_other.py::test_case\n")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_SOURCE_COMPILER", "/native/guard-command-source")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        if "-m" in command:
+            assert capsys.readouterr().out == "Starting pytest\n"
+        else:
+            assert "Starting pytest" not in capsys.readouterr().out
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", execute)
+    assert runner.main([str(shard), "--", "@" + str(shard)]) == 0
+    assert len(calls) == 2
+
+
+def test_preparation_pins_the_runtime_binary_in_force_mode(tmp_path, monkeypatch):
+    shard = tmp_path / "shard.txt"
+    shard.write_text("tests/test_other.py::test_case\n")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_SOURCE_COMPILER", "/native/guard-command-source")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", "/native/hol-guard-runtime")
+    monkeypatch.delenv("HOL_GUARD_NATIVE", raising=False)
+    environments = []
+
+    def execute(command, **kwargs):
+        if "-m" not in command:
+            environments.append(kwargs["env"])
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", execute)
+    assert runner.main([str(shard)]) == 0
+    assert environments[0]["HOL_GUARD_NATIVE"] == "force"
+    assert environments[0]["HOL_GUARD_NATIVE_BINARY"] == "/native/hol-guard-runtime"

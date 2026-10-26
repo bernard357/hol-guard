@@ -24,6 +24,37 @@ pub(crate) fn is_lock_contention(error: &std::io::Error) -> bool {
     false
 }
 
+// A process that forks without exec keeps a copy of every descriptor until it
+// closes them, so a lock another thread just released can still read as held
+// for a few milliseconds. Contention that outlasts this wait is real.
+const LOCK_CONTENTION_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+const LOCK_CONTENTION_POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
+pub(crate) fn lock_contention_deadline() -> std::time::Instant {
+    std::time::Instant::now() + LOCK_CONTENTION_WAIT
+}
+
+/// Sleep briefly before another attempt, or return false once the wait is over.
+pub(crate) fn pause_for_lock_contention(deadline: std::time::Instant) -> bool {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return false;
+    }
+    std::thread::sleep(remaining.min(LOCK_CONTENTION_POLL));
+    true
+}
+
+/// Take an exclusive advisory lock, waiting out momentary contention.
+pub(crate) fn try_lock_exclusive_briefly(file: &File) -> std::io::Result<()> {
+    let deadline = lock_contention_deadline();
+    loop {
+        match fs2::FileExt::try_lock_exclusive(file) {
+            Err(error) if is_lock_contention(&error) && pause_for_lock_contention(deadline) => {}
+            result => return result,
+        }
+    }
+}
+
 #[cfg(windows)]
 fn windows_bind_target(path: &Path, directory: bool) -> &Path {
     if directory {
@@ -85,6 +116,15 @@ pub(crate) fn replace_windows_private_file(
     private_root: &Path,
 ) -> Result<(), String> {
     windows_security::replace_private_file(temporary, path, private_root)
+}
+
+#[cfg(windows)]
+pub(crate) fn publish_new_windows_private_file(
+    temporary: &Path,
+    path: &Path,
+    private_root: &Path,
+) -> Result<bool, String> {
+    windows_security::publish_new_private_file(temporary, path, private_root)
 }
 
 #[cfg(windows)]
@@ -299,6 +339,21 @@ pub(crate) fn ensure_private_directory(
     ensure_private_directory_under(path, &private_root, protect_windows)
 }
 
+/// A state directory whose ancestors were never created is an unprovisioned
+/// home, the same answer Unix gives when `create_dir` fails for a missing
+/// parent. Windows names the missing ancestor kind instead, so fold both into
+/// the code the clients already treat as "no resident provisioned here".
+#[cfg(any(windows, test))]
+fn unprovisioned_state_dir_error(code: String) -> String {
+    match code.as_str() {
+        "native_resident_windows_private_ancestry_missing"
+        | "native_resident_windows_trusted_ancestry_missing" => {
+            "native_resident_state_dir_create_failed".to_owned()
+        }
+        _ => code,
+    }
+}
+
 pub(crate) fn ensure_private_directory_under(
     path: &Path,
     private_root: &Path,
@@ -307,7 +362,8 @@ pub(crate) fn ensure_private_directory_under(
     #[cfg(windows)]
     {
         let resolved =
-            windows_security::ensure_private_directory_path(path, private_root, protect_windows)?;
+            windows_security::ensure_private_directory_path(path, private_root, protect_windows)
+                .map_err(unprovisioned_state_dir_error)?;
         let canonical_root = private_root
             .canonicalize()
             .map_err(|_| "native_resident_state_dir_outside_user_profile".to_owned())?;
@@ -353,7 +409,47 @@ pub(crate) fn ensure_private_directory_under(
 
 #[cfg(test)]
 mod tests {
-    use super::is_lock_contention;
+    use super::{is_lock_contention, unprovisioned_state_dir_error};
+
+    #[test]
+    fn missing_windows_ancestry_reads_as_an_unprovisioned_state_dir() {
+        for code in [
+            "native_resident_windows_private_ancestry_missing",
+            "native_resident_windows_trusted_ancestry_missing",
+        ] {
+            assert_eq!(
+                unprovisioned_state_dir_error(code.to_owned()),
+                "native_resident_state_dir_create_failed"
+            );
+        }
+    }
+
+    #[test]
+    fn other_state_dir_failures_keep_their_code() {
+        for code in [
+            "native_resident_windows_access_denied",
+            "native_resident_windows_acl_not_private",
+            "native_resident_windows_boundary_mismatch",
+            "native_resident_windows_bind_failed",
+            "native_resident_state_dir_outside_user_profile",
+        ] {
+            assert_eq!(unprovisioned_state_dir_error(code.to_owned()), code);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_guard_home_is_an_unprovisioned_state_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "hol-guard-missing-home-{}-{}",
+            std::process::id(),
+            crate::unique_nanos::unique_nanos()
+        ));
+        let state_base = root.join("native-runtime");
+        let error = super::ensure_private_directory_under(&state_base, &root, false).unwrap_err();
+        assert_eq!(error, "native_resident_state_dir_create_failed");
+        assert!(!root.exists());
+    }
 
     #[test]
     fn would_block_is_lock_contention() {

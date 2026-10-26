@@ -1,17 +1,13 @@
 use serde_json::json;
 
-#[path = "support/git_helper_fixture.rs"]
-pub mod fixture;
+use crate::git_helper_fixture as fixture;
 
 #[test]
 fn forged_worktree_metadata_cannot_hide_external_execution_configuration() {
     let root = std::env::temp_dir().join(format!(
         "guard-forged-worktree-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     let _cleanup = fixture::FixtureCleanup(root.clone());
     let home = root.join("home");

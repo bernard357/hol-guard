@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 from pathlib import Path
+from typing import Any
 
 NAMES = ("command-catalog.v1.json", "native-command-program.v1.json", "trust-class-map.v1.json")
 MANIFEST = "contracts/extensions/command-projection-build.v1.json"
@@ -31,21 +32,32 @@ def _generator(root: Path):
     spec = importlib.util.spec_from_file_location(
         "command_projection_generator", root / "scripts/build_native_command_program.py"
     )
+    if spec is None or spec.loader is None:
+        raise ValueError("source archive generator unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def projection_manifest(root: Path, *, descriptors: Path | None = None, trust_map: Path | None = None) -> dict:
+def _trust_artifact(root: Path) -> Path:
+    """Use the archive resource only inside a source distribution."""
+    name = "trust-class-map.v1.json" if (root / "PKG-INFO").is_file() else "build-trust-class-map.v1.json"
+    return root / "contracts/extensions" / name
+
+
+def projection_manifest(
+    root: Path, *, descriptors: Path | None = None, trust_map: Path | None = None
+) -> dict[str, Any]:
     """Fingerprint canonical sources, native implementation, and packaged outputs."""
     generator = _generator(root)
-    trust_map = trust_map or root / "contracts/extensions/trust-class-map.v1.json"
+    trust_map = trust_map or _trust_artifact(root)
     paths = {
         name: trust_map if name == "trust-class-map.v1.json" else root / "contracts/extensions" / name for name in NAMES
     }
     for name in NAMES:
         generator.read_object(paths[name])
-    request = generator.build_request()
+    core = root / "contracts/extensions/core-defaults.v1.json"
+    request = generator.build_request(core_only=True) if core.exists() else generator.build_request()
     if generator.read_object(trust_map) != generator.packaged_trust_map(request):
         raise ValueError("source-distribution trust map does not match authored bindings")
     result = {
@@ -55,6 +67,10 @@ def projection_manifest(root: Path, *, descriptors: Path | None = None, trust_ma
         "implementation_digest": generator.implementation_digest(),
         "artifacts": {name: hashlib.sha256(paths[name].read_bytes()).hexdigest() for name in NAMES},
     }
+    if core.exists():
+        if core.is_symlink() or not core.is_file():
+            raise ValueError("invalid core projection input")
+        result["core_defaults_sha256"] = hashlib.sha256(core.read_bytes()).hexdigest()
     if descriptors is not None:
         if descriptors.is_symlink():
             raise ValueError("descriptor directory cannot be a symlink")
@@ -87,6 +103,6 @@ def verify_projection_manifest(root: Path) -> None:
     generator = _generator(root)
     saved = generator.read_object(root / MANIFEST)
     descriptors = root / "contributions/extensions" if "descriptors" in saved else None
-    trust_map = root / "contracts/extensions/trust-class-map.v1.json" if "trust_map_sha256" in saved else None
+    trust_map = _trust_artifact(root) if "trust_map_sha256" in saved else None
     if saved != projection_manifest(root, descriptors=descriptors, trust_map=trust_map):
         raise ValueError("source-distribution command projections do not match their build inputs")
