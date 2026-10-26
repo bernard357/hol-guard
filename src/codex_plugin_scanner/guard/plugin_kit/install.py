@@ -241,7 +241,11 @@ def apply_plan(
     confirm: Callable[[str, str], bool] = _confirm,
     which: Callable[[str], str | None] | None = None,
 ) -> int:
-    """Run each automatic step the user confirms, then ``record`` its runtime. Returns the exit code."""
+    """Run each automatic step the user confirms, then ``record`` its runtime.
+
+    ``expected_commit`` is on the step for the caller that checks the
+    installed checkout. This function does not compare commits.
+    """
 
     which = which or shutil.which
     action = str(plan.get("action"))

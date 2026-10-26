@@ -776,6 +776,20 @@ fn the_gate_checks_the_pin_against_the_scanned_commit_and_the_scan_date() {
     let mut leap = spec_v2();
     leap["security"]["scannedAt"] = json!("2024-02-29");
     assert_eq!(gate(leap).0, "confirm");
+
+    // A scan result without a date is asked about, like a missing scan.
+    let mut undated = spec_v2();
+    undated["security"]
+        .as_object_mut()
+        .expect("security")
+        .remove("scannedAt");
+    assert_eq!(
+        gate(undated),
+        (
+            "confirm".to_owned(),
+            vec!["HOL did not say when it scanned this plugin.".to_owned()]
+        )
+    );
 }
 
 #[test]

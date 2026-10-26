@@ -150,8 +150,10 @@ pub struct Step {
     pub plugin_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub marketplace: Option<String>,
-    /// The commit HOL scanned. Codex is pinned to it; for Claude Code the
-    /// CLI checks the installed commit afterwards.
+    /// The commit HOL scanned. Codex is pinned with `--ref` when the
+    /// marketplace is added. Claude Code cannot take a commit on that
+    /// command, so the step records it here. This plan does not compare
+    /// an installed checkout with it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_commit: Option<String>,
 }
@@ -542,7 +544,7 @@ fn plural(count: u32, one: &str) -> String {
 
 /// HOL's result and Guard's decision (RD1). Refuse: HOL marked the listing
 /// not installable, its scan blocked the plugin, or found a critical issue.
-/// Ask first: no scan, a warning, a scan older than 30 days, a trust score
+/// Ask first: no scan, a warning, a scan older than 30 days or with no date, a trust score
 /// below 60, a high-severity finding, or a runtime Guard cannot pin to the
 /// scanned commit.
 fn security(spec: &Spec, today: i64) -> Security {
@@ -590,6 +592,9 @@ fn security(spec: &Spec, today: i64) -> Security {
         Some(age) if age < -1 => confirm.push("HOL's scan date is in the future.".to_owned()),
         Some(age) if age > STALE_SCAN_DAYS => {
             confirm.push(format!("HOL's last scan is {age} days old."));
+        }
+        None if verdict != "unscanned" => {
+            confirm.push("HOL did not say when it scanned this plugin.".to_owned());
         }
         _ => {}
     }
@@ -664,8 +669,9 @@ fn step(
         let market = target.marketplace.as_ref().expect("validated");
         let plugin = target.plugin.as_deref().expect("validated");
         let id = format!("{plugin}@{}", market.name);
-        // Only Codex takes a commit when adding a marketplace; Claude Code
-        // clones a branch, so its commit is checked after the install.
+        // Only Codex takes a commit when adding a marketplace. Claude Code
+        // clones a branch. `expected_commit` records the scanned commit;
+        // this plan does not compare the checkout.
         let pin = (program == "codex")
             .then_some(market.commit.as_deref())
             .flatten();
