@@ -292,22 +292,23 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
             // A remote Root is kept over an installed bundle that reports the
             // same authority and revocations: the published one is the fresher
             // observation of the same security state. That only holds while the
-            // retained Root describes an engine this runtime can serve. A Root
-            // admitted under another engine proves nothing about this engine's
-            // extensions, so `complete` denies every one of them and the whole
-            // pack is quarantined with nothing actually revoked. Guard homes are
+            // retained Root describes the engine the active activation names.
+            // `complete` quarantines every extension whose Root engine differs
+            // from that header, so a Root admitted under another engine denies
+            // the whole pack with nothing actually revoked. Guard homes are
             // shared between runtimes built from different sources -- a Desktop
             // core beside a CLI install, or a development build that ran once --
-            // so this is reachable without an attacker. Let the installed bundle,
-            // which carries this runtime's engine and is authenticated by the
-            // same authority, take the Root back. The revocation check below
-            // still refuses any bundle that would drop a revocation at this
-            // epoch, so the exchange cannot weaken the retained security state.
+            // so this is reachable without an attacker. Let the installed bundle
+            // take the Root back in exactly that case: the retained Root does
+            // not match the authenticated activation's engine and the candidate
+            // does. The revocation check below still refuses any bundle that
+            // would drop a revocation at this epoch, so the exchange cannot
+            // weaken the retained security state.
             if input["profile"] == "installed"
                 && old.identity["profile"] == "remote"
                 && epoch == old.epoch
                 && authority == old.authority
-                && old.root["engine"] == root["engine"]
+                && (old.root["engine"] == header["engine"] || root["engine"] != header["engine"])
             {
                 return Ok(json!({"ignored":true}));
             }
@@ -390,9 +391,16 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
                     && header["root_digest"] == root_digest
                     && header["authority_epoch"] == authority
                     && header["revocation_epoch"] == epoch
+                    // The predecessor's profile is deliberately not required.
+                    // Once an installed bundle may take the Root back from a
+                    // remote one, a restored release can meet this arm with a
+                    // remote predecessor, and refusing it there would abandon
+                    // the whole observation instead of refreshing it. The header
+                    // equalities above already pin the restored bundle to the
+                    // authenticated activation, and the revocations must still
+                    // match, so the predecessor's profile adds no trust.
                     && old.as_ref().is_some_and(|old| {
-                        old.identity["profile"] == "installed"
-                            && old.authority == authority
+                        old.authority == authority
                             && old.epoch == epoch
                             && old.root["policy"]["revocations"] == root["policy"]["revocations"]
                     }) =>

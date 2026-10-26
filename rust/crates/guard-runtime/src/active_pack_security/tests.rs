@@ -280,3 +280,50 @@ fn an_installed_bundle_does_not_displace_a_root_of_its_own_engine() {
     let ignored = begin(&key, published["record"].as_str(), &floor, &release);
     assert_eq!(ignored, json!({"ignored":true}));
 }
+
+#[test]
+fn an_installed_bundle_does_not_displace_a_root_the_activation_can_serve() {
+    let key = [7; 32];
+    let release = installed('a', "3.55.1", 3);
+    let floor = crate::pack_lifecycle::enrolled_floor(&release.1, &key);
+
+    // The admitted activation and the published Root name the same engine, so
+    // every extension stays applicable. A bundle built from a different engine
+    // is not the one this activation runs, and taking the Root for it would
+    // quarantine the pack it was meant to rescue.
+    let published = begin_remote(&key, None, &floor, &remote('a', "900.1", 3), &release);
+    let other = installed('b', "3.56.0a3", 3);
+    let ignored = begin_under(&key, published["record"].as_str(), &floor, &other, &release);
+    assert_eq!(ignored, json!({"ignored":true}));
+}
+
+#[test]
+fn a_restored_release_replaces_a_published_root_of_the_upgrade_engine() {
+    let key = [7; 32];
+    let previous = installed('a', "3.55.1", 3);
+    let upgrade = installed('b', "3.56.0a3", 3);
+    let floor = crate::pack_lifecycle::enrolled_floor(&previous.1, &key);
+    let upgraded = begin(&key, None, &floor, &upgrade);
+
+    // While the upgrade ran, a published Root describing its engine was
+    // admitted, so the retained identity is a remote one.
+    let published = begin_remote(
+        &key,
+        upgraded["record"].as_str(),
+        &floor,
+        &remote('b', "900.1", 3),
+        &upgrade,
+    );
+    let state = Security::decode(published["record"].as_str().unwrap(), &key).unwrap();
+    assert_eq!(state.identity["profile"], "remote");
+
+    // Desktop restored the previous runtime, whose own bundle is the activation
+    // it admits. It takes the Root back rather than abandoning the observation
+    // over the lineage rollback, and the floor stays where the upgrade put it.
+    let restored = begin(&key, published["record"].as_str(), &floor, &previous);
+    assert_eq!(restored["pending"], true, "{restored}");
+    let state = Security::decode(restored["record"].as_str().unwrap(), &key).unwrap();
+    assert_eq!(state.root["engine"], "a".repeat(64));
+    assert_eq!(state.identity["profile"], "installed");
+    assert_eq!(floor_version(&key, &restored), "3.56.0a3");
+}
