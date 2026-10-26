@@ -17,6 +17,7 @@ from codex_plugin_scanner.guard.cli import commands_dispatch_cloud_review as clo
 from codex_plugin_scanner.guard.daemon import command_queue_worker as queue_worker_module
 from codex_plugin_scanner.guard.daemon import server as daemon_server_module
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
+from codex_plugin_scanner.guard.native_command_capability import CommandCapabilityUnavailableError
 from codex_plugin_scanner.guard.review_contracts import (
     GuardReviewContractError,
     _anchored_review_verification_keys,
@@ -538,6 +539,36 @@ def test_cloud_review_enable_reports_retained_capability_when_requeue_retry_fail
     assert payload["retained_existing_capability"] is True
     assert payload["activation_status"] == "enabled_requeue_retry_required"
     assert exact_cloud_review_operations(store) == (EXACT_CLOUD_REVIEW_OPERATION,)
+
+
+def test_unavailable_replay_check_rejects_the_exact_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _connected_store(tmp_path)
+    request = _request("exact-unavailable")
+    _add_request(store, request)
+    enable_exact_cloud_review(store)
+    request_row = store.get_approval_request(request.request_id)
+    assert isinstance(request_row, dict)
+    persisted_claim = build_local_review_request_claim(
+        request_row=request_row,
+        oauth=_oauth_metadata(store),
+        store=store,
+    )
+    job = _job(
+        store,
+        _remote_approval(
+            store,
+            request.request_id,
+            receipt_id="exact-unavailable-receipt",
+            source_claim=persisted_claim,
+        ),
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.command_capability._command_job_seen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(CommandCapabilityUnavailableError()),
+    )
+
+    with pytest.raises(CommandCapabilityError, match="native_command_capability_unavailable"):
+        authorize_command_queue_job(store, job, schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS)
 
 
 def test_exact_cloud_review_queue_job_requires_no_generic_capability_or_local_approval(tmp_path: Path) -> None:

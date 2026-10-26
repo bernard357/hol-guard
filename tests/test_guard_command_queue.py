@@ -984,6 +984,52 @@ def test_poll_once_clears_active_job_when_heartbeat_fails(tmp_path: Path, monkey
     assert "active_job" not in state
 
 
+def test_poll_once_posts_rejection_when_capability_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.native_command_capability import CommandCapabilityUnavailableError
+
+    store = FakeStore(tmp_path / "guard-home")
+    result_payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        command_queue,
+        "_resolve_guard_sync_auth_context",
+        lambda current_store: {"sync_url": "https://hol.test/api/guard/receipts/sync", "access_token": "token"},
+    )
+
+    def fake_json_request(
+        auth_context: dict[str, object],
+        *,
+        method: str,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        if path == "/lease":
+            return {
+                "item": {
+                    "id": "job-unavailable",
+                    "leaseId": "lease-unavailable",
+                    "operation": "guard.packageShims.status",
+                }
+            }
+        if path.endswith("/result"):
+            result_payloads.append(payload)
+        return {"ok": True}
+
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise CommandCapabilityUnavailableError
+
+    monkeypatch.setattr(command_queue, "_json_request", fake_json_request)
+    monkeypatch.setattr(command_queue, "authorize_command_queue_job", unavailable)
+
+    status = command_queue.poll_command_queue_once(store, _context(tmp_path))
+
+    assert status["state"] == "idle"
+    assert status["active_job"] is None
+    assert result_payloads[0]["status"] == "failed"
+    assert result_payloads[0]["failureCode"] == "native_command_capability_unavailable"
+
+
 def test_poll_once_posts_failed_result_when_execution_raises(tmp_path: Path, monkeypatch) -> None:
     store = FakeStore(tmp_path / "guard-home")
     result_payloads: list[dict[str, object]] = []
