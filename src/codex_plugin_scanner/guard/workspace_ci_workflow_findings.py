@@ -134,6 +134,7 @@ def _finding(item: object) -> dict[str, object] | None:
     if (
         not isinstance(finding_id, str)
         or not _FINDING_ID.fullmatch(finding_id)
+        or not isinstance(rule_id, str)
         or rule_id not in _RULE_IDS
         or not isinstance(path, str)
         or len(path.encode("utf-8", "surrogatepass")) > _MAX_PATH_BYTES
