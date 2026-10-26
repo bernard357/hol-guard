@@ -671,6 +671,26 @@ def _effective_risk_actions(config: GuardConfig) -> dict[str, GuardAction]:
     return {**_posture_or_level_defaults(config), **dict(config.risk_actions or {})}
 
 
+def risk_action_config_facts(config: GuardConfig) -> dict[str, object]:
+    """The configuration fields the resident resolves a risk class under.
+
+    Sent instead of a resolved action so the resident owns the verdict. The
+    maps go over as they were loaded: ``harness_risk_actions`` keyed the way
+    the caller spells its harness and ``harness_postures`` canonically, which
+    is how :func:`resolve_risk_action` reads each of them.
+    """
+
+    return {
+        "security_level": config.security_level,
+        "protection_posture": config.protection_posture,
+        "protection_posture_explicit": bool(config.protection_posture_explicit),
+        "managed_locked_settings": list(config.managed_locked_settings),
+        "risk_actions": dict(config.risk_actions or {}),
+        "harness_risk_actions": {name: dict(actions) for name, actions in (config.harness_risk_actions or {}).items()},
+        "harness_postures": dict(config.harness_postures or {}),
+    }
+
+
 def resolve_risk_action(config: GuardConfig, risk_class: str | None, *, harness: str | None) -> GuardAction | None:
     """Resolve the configured action for a concrete runtime risk class."""
 
