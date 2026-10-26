@@ -481,7 +481,7 @@ fn rebuild_tool_authority(
 
 /// `_decode_snapshot`: stored text is evidence only when it still parses as a
 /// bounded inventory.
-fn decode_snapshot(raw: Option<&Value>) -> Option<Value> {
+pub(crate) fn decode_snapshot(raw: Option<&Value>) -> Option<Value> {
     let Some(Value::String(raw)) = raw else {
         return None;
     };
