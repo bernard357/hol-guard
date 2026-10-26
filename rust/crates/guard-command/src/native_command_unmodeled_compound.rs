@@ -59,13 +59,13 @@ fn writes_a_named_file(text: &str, bare: &str) -> bool {
     };
     let words: Vec<&str> = words.into_iter().filter(|word| !word.is_empty()).collect();
     let mut targets = Vec::new();
-    for (index, word) in words.iter().enumerate() {
-        // A `>` inside a quoted argument is text, not a redirect.
-        let Some((before, rest)) = word.rsplit_once('>') else {
-            continue;
-        };
+    for (index, rest) in words.iter().enumerate().flat_map(|(index, word)| {
+        redirects_in(word)
+            .into_iter()
+            .map(move |rest| (index, rest))
+    }) {
         let rest = rest.trim_start_matches('|');
-        if before.contains(['\'', '"']) || rest.starts_with('&') {
+        if rest.starts_with('&') {
             continue;
         }
         let target = match rest {
@@ -148,6 +148,39 @@ fn stem(name: &str) -> &str {
         Some(stem) if !stem.is_empty() => stem,
         _ => name,
     }
+}
+
+/// The text after each redirect operator in one word, up to the next one: a
+/// `>` that stands outside quotes and escapes, with `>>` read as one
+/// operator. `'x'>run.js` writes `run.js`, while `'a>b'` and `a\>b` redirect
+/// nothing, and `2>&1>log` yields `&1` and `log`.
+fn redirects_in(word: &str) -> Vec<&str> {
+    let mut operators = Vec::new();
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    for (index, character) in word.char_indices() {
+        if single {
+            single = character != '\'';
+        } else if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '\'' && !double {
+            single = true;
+        } else if character == '"' {
+            double = !double;
+        } else if character == '>' && !double {
+            operators.push(index);
+        }
+    }
+    operators
+        .iter()
+        .enumerate()
+        .filter(|(position, at)| operators.get(position + 1) != Some(&(**at + 1)))
+        .map(|(position, at)| {
+            let end = operators.get(position + 1).copied().unwrap_or(word.len());
+            &word[at + 1..end]
+        })
+        .collect()
 }
 
 /// The last non-empty path component of a word with its quotes and escapes

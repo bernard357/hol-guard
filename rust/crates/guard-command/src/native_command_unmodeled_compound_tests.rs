@@ -130,6 +130,14 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
         ("printf x >run.js&&node run.js", "printf x&&node run.js"),
         ("node server.js > >(sh) &", "node server.js &"),
         (
+            "printf 'require(1)'>run.js && node run.js",
+            "printf 'require(1)' && node run.js",
+        ),
+        (
+            "printf x 2>&1>>run.js; node run.js",
+            "printf x; node run.js",
+        ),
+        (
             "printf x > lib/index.js && node lib/",
             "printf x && node lib/",
         ),
@@ -156,6 +164,10 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
         ),
         ("npm run dev > /tmp/dev.log 2>&1 &", "npm run dev &"),
         ("node . > /tmp/x.log 2>&1 &", "node . &"),
+        (
+            "echo 'a>run.js' \"b>run.js\" a\\>run.js; node run.js",
+            "echo 'a>run.js' \"b>run.js\" a\\>run.js; node run.js",
+        ),
     ] {
         assert!(!writes_a_named_file(text, bare), "{text}");
     }
