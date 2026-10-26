@@ -85,8 +85,7 @@ def _quote_home(home: str, windows: bool) -> str:
     if not windows:
         return shlex.quote(home)
     plain = home != "" and all(
-        character.isascii() and (character.isalnum() or character in "_-.:\\/")
-        for character in home
+        character.isascii() and (character.isalnum() or character in "_-.:\\/") for character in home
     )
     return home if plain else f'"{home}"'
 
