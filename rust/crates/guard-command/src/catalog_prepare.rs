@@ -351,14 +351,19 @@ fn execute(request: Request) -> Result<Value> {
         Action::Begin { authority } | Action::BeginBatched { authority } => {
             // Several clients of one resident can prepare the same home at
             // once (the daemon and a CLI read at startup). Keep each live
-            // session; only a full budget gives up this home's oldest one,
-            // which is how a client that died mid-preparation is reclaimed.
+            // session; a full budget gives up this home's oldest one, which
+            // is how a client that died mid-preparation is reclaimed. A home
+            // with none to give up takes the oldest session of a home that
+            // holds more than one, so one home's abandoned preparations
+            // cannot keep every other home out.
             if state.sessions.len() >= MAX_SESSIONS {
+                let held =
+                    |owner: &PathBuf| state.sessions.values().filter(|s| &s.home == owner).count();
                 let oldest = state
                     .sessions
                     .iter()
-                    .filter(|(_, s)| s.home == home)
-                    .min_by_key(|(_, s)| s.started)
+                    .filter(|(_, s)| s.home == home || held(&s.home) > 1)
+                    .min_by_key(|(_, s)| (s.home != home, s.started))
                     .map(|(token, _)| token.clone())
                     .ok_or("catalog_prepare_session_budget")?;
                 state.sessions.remove(&oldest);

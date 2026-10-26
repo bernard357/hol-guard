@@ -94,7 +94,7 @@ fn regression_two_clients_preparing_one_home_both_complete() {
 fn a_full_session_budget_gives_up_only_this_homes_oldest_session() {
     let fixture = fixture(2, "");
     state().lock().unwrap().sessions.clear();
-    let other = fixture_home_session(&fixture);
+    let other = fixture_home_session(&fixture, "other-home");
     let results: Vec<_> = (0..MAX_SESSIONS).map(|_| begin(&fixture)).collect();
     assert_eq!(state().lock().unwrap().sessions.len(), MAX_SESSIONS);
     assert!(state().lock().unwrap().sessions.contains_key(&other));
@@ -109,11 +109,11 @@ fn a_full_session_budget_gives_up_only_this_homes_oldest_session() {
 }
 
 #[test]
-fn a_full_budget_held_by_other_homes_refuses_a_new_session() {
+fn a_full_budget_held_one_each_by_other_homes_refuses_a_new_session() {
     let fixture = fixture(2, "");
     state().lock().unwrap().sessions.clear();
-    for _ in 0..MAX_SESSIONS {
-        fixture_home_session(&fixture);
+    for index in 0..MAX_SESSIONS {
+        fixture_home_session(&fixture, &format!("other-home-{index}"));
     }
     assert_eq!(
         begin(&fixture)["error_code"],
@@ -122,9 +122,31 @@ fn a_full_budget_held_by_other_homes_refuses_a_new_session() {
     state().lock().unwrap().sessions.clear();
 }
 
-/// Starts a session for a second home and returns its token.
-fn fixture_home_session(fixture: &Fixture) -> String {
-    let home = fixture.origin.path().join("other-home");
+#[test]
+fn regression_one_home_holding_the_whole_budget_cannot_keep_another_home_out() {
+    let fixture = fixture(2, "");
+    state().lock().unwrap().sessions.clear();
+    let held: Vec<_> = (0..MAX_SESSIONS)
+        .map(|_| fixture_home_session(&fixture, "other-home"))
+        .collect();
+    let result = begin(&fixture);
+    assert!(result["session"].is_string(), "{result}");
+    let guard = state().lock().unwrap();
+    assert_eq!(guard.sessions.len(), MAX_SESSIONS);
+    assert!(!guard.sessions.contains_key(&held[0]));
+    assert!(held
+        .iter()
+        .skip(1)
+        .all(|token| guard.sessions.contains_key(token)));
+    drop(guard);
+    finish(&fixture, result).unwrap();
+    state().lock().unwrap().sessions.clear();
+}
+
+/// Starts a session for the home `name` beside the fixture's and returns
+/// its token.
+fn fixture_home_session(fixture: &Fixture, name: &str) -> String {
+    let home = fixture.origin.path().join(name);
     fs::create_dir_all(&home).unwrap();
     #[cfg(unix)]
     {
