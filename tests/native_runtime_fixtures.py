@@ -69,16 +69,13 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
 
     guard_home = tmp_path_factory.mktemp("native-context-guard-home")
     (guard_home / "native-runtime").mkdir(mode=0o700, parents=True)
-    # The managed resident refuses to serve until the policy verifier key the
-    # publisher would normally provision exists; seed a test key once.
-    provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
     from .mcp_policy_native_fixture import _FIXTURE_KEYS
 
-    _FIXTURE_KEYS[guard_home] = b"\x07" * 32
-    # Pre-warm the capabilities cache and the persistent resident client pool
-    # at session scope.  Tests that patch subprocess.Popen globally would
-    # otherwise intercept the first probe/pool spawn mid-test and break the
-    # digest path (the pool spawns once and is then reused).
+    # Seed the verifier key and pre-warm the capabilities cache and the
+    # persistent resident client pool at session scope.  Tests that patch
+    # subprocess.Popen globally would otherwise intercept the first probe/pool
+    # spawn mid-test and break the digest path (the pool spawns once and is
+    # then reused).
     binary = _context_digest_runtime_binary()
     if binary is not None:
         from codex_plugin_scanner.guard import native_context
@@ -95,6 +92,11 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
         os.environ["HOL_GUARD_NATIVE_DIAGNOSTIC"] = "1"
         os.environ["HOL_GUARD_RESIDENT_TEST_SEAMS"] = "1"
         try:
+            # The managed resident refuses to serve until the policy verifier
+            # key exists, and only the runtime can write it. With no runtime
+            # there is no resident to key, so the no-binary suite is unchanged.
+            provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
+            _FIXTURE_KEYS[guard_home] = b"\x07" * 32
             native_context.native_context_digest(
                 "launch_argv_digest",
                 {"argv": ["guard-context-warmup"]},
