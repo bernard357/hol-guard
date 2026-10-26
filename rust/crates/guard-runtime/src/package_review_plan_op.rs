@@ -14,7 +14,6 @@
 use std::path::Path;
 use std::sync::LazyLock;
 
-use guard_command::contained_execution::shlex_split;
 use guard_command::package_intent_common::build_package_request_artifact;
 use guard_command::package_intent_parser::parse_package_intent;
 use guard_command::verified_npm;
@@ -26,6 +25,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::hook_direct::EXECUTION_ENVIRONMENT_FIELD;
+use crate::local_mcp_grant_identity::shlex_split;
 use crate::package_authority_op::request_digest;
 
 /// The review reason a package evaluation may settle before it is queued.

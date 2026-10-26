@@ -255,8 +255,18 @@ def test_guard_hook_blocks_js_exec_flows_before_subprocess(
     assert rc == 0
     assert captured.err == ""
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    # Installs and exec flows alike consult the package bundle, so a flagged
-    # package is blocked before anything is queued.
+    if command.startswith(("npx ", "bunx ")):
+        # The native edge reads these as a launch of the package's own CLI, not
+        # as a package review, so the bundle is not consulted and the user
+        # reviews them.
+        pending = store.list_approval_requests(limit=5)
+        assert payload["reason_code"] == "native_command_review_required"
+        assert payload["policy_action"] == "review"
+        assert [item["request_id"] for item in payload["approval_requests"]] == [pending[0]["request_id"]]
+        assert pending[0]["action_envelope_json"]["command"] == command
+        return
+    # Installs and the other exec flows consult the package bundle, so a
+    # flagged package is blocked before anything is queued.
     assert payload["policy_action"] == "block"
     assert "blocked" in payload["hookSpecificOutput"]["permissionDecisionReason"].lower()
     assert store.list_approval_requests(limit=5) == []
