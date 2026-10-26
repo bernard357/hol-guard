@@ -85,8 +85,8 @@ def _quote_home(home: str, windows: bool) -> str | None:
     ``$name`` inside them and reads a backtick as an escape, and ``cmd.exe``
     expands ``%VAR%`` and, with delayed expansion, ``!name!``. A Windows path
     may legally hold all four. Single quotes would hold them in PowerShell but
-    become part of the path in
-    ``cmd.exe``, so no one rendering reaches such a store, and naming it
+    become part of the path in ``cmd.exe``, so no one rendering reaches such a
+    store, and naming it
     anyway would send the person to repair a path the shell rewrote while this
     install stays blocked. ``windows`` is passed rather than read from
     ``os.name``, so both renderings are reachable from a test on either
