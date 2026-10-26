@@ -23,7 +23,7 @@ fn the_default_home_keeps_the_short_command() {
 fn another_home_is_named_on_the_command() {
     assert_eq!(
         remediation_for_home(Some(Path::new("/opt/guards/ci")), Some(&home())),
-        " Run `hol-guard command --home /opt/guards/ci controls recover-authority` in a terminal to restore the protected control floor."
+        " Run `hol-guard command --guard-home /opt/guards/ci controls recover-authority` in a terminal to restore the protected control floor."
     );
 }
 
@@ -32,7 +32,7 @@ fn another_home_is_named_on_the_command() {
 fn a_named_home_is_quoted_for_the_shell() {
     assert_eq!(
         remediation_for_home(Some(Path::new("/opt/shared guards/.hol-guard")), Some(&home())),
-        " Run `hol-guard command --home '/opt/shared guards/.hol-guard' controls recover-authority` in a terminal to restore the protected control floor."
+        " Run `hol-guard command --guard-home '/opt/shared guards/.hol-guard' controls recover-authority` in a terminal to restore the protected control floor."
     );
 }
 

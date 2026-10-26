@@ -513,7 +513,7 @@ fn an_authority_block_names_the_home_the_bridge_read() {
         panic!("the bridge did not answer: {route:?}");
     };
     let named = format!(
-        "hol-guard command --home {} controls recover-authority",
+        "hol-guard command --guard-home {} controls recover-authority",
         crate::mcp_proxy_shlex::quote(&home.home.to_string_lossy())
     );
     assert!(stderr.contains(&named), "{stderr}");

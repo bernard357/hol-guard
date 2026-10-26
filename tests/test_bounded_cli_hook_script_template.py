@@ -460,7 +460,7 @@ def test_generated_zcode_authority_block_stderr_names_the_home_it_reads(tmp_path
 
     assert code == 2
     named = shlex.quote(module.GUARD_HOME)
-    assert f"hol-guard command --home {named} controls recover-authority" in stderr
+    assert f"hol-guard command --guard-home {named} controls recover-authority" in stderr
 
 
 def test_generated_zcode_authority_block_keeps_the_short_command_for_the_default_home(
@@ -475,7 +475,7 @@ def test_generated_zcode_authority_block_keeps_the_short_command_for_the_default
 
     assert code == 2
     assert "hol-guard command controls recover-authority" in stderr
-    assert "--home" not in stderr
+    assert "--guard-home" not in stderr
 
 
 def test_generated_zcode_authority_block_keeps_the_short_command_without_a_home(
@@ -493,7 +493,7 @@ def test_generated_zcode_authority_block_keeps_the_short_command_without_a_home(
 
     assert code == 2
     assert "hol-guard command controls recover-authority" in stderr
-    assert "--home" not in stderr
+    assert "--guard-home" not in stderr
 
 
 def test_generated_zcode_sandbox_required_denies_with_exit_two(tmp_path: Path) -> None:

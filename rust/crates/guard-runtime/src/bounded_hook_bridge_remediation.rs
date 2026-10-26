@@ -34,14 +34,16 @@ pub(crate) fn zcode_authority_block_reason(reason: &str, guard_home: Option<&Pat
 /// who pastes the bare command into a shell pointing somewhere else recovers a
 /// different install while this one stays blocked. So the home is named
 /// whenever it is not `<home>/.hol-guard`, quoted for the shell it is pasted
-/// into, exactly as [`crate::blocked_request_mode::approval_wait_hint_for_home`]
+/// into, the way [`crate::blocked_request_mode::approval_wait_hint_for_home`]
 /// names it on the approval hint. The default home is left out: the short
 /// command is the one almost everyone needs, and a path that adds nothing only
 /// invites editing.
 ///
-/// The flag goes on `command`, which is the parser that carries it; after
-/// `recover-authority` argparse hands it to the leaf, which takes no options
-/// and would reject the whole line.
+/// `--guard-home` is the flag that names a store and nothing else; `--home`
+/// reaches the same store but also moves the home directory, to a directory
+/// nobody lives in. It goes on `command`, which is the parser that carries it;
+/// after `recover-authority` argparse hands it to the leaf, which takes no
+/// options and would reject the whole line.
 fn authority_block_remediation(guard_home: Option<&Path>) -> String {
     remediation_for_home(
         guard_home,
@@ -68,7 +70,7 @@ fn remediation_for_home(guard_home: Option<&Path>, home_dir: Option<&Path>) -> S
     let quoted = crate::mcp_proxy_shlex::quote(&guard_home.to_string_lossy());
     AUTHORITY_BLOCK_REMEDIATION.replace(
         "command controls recover-authority",
-        &format!("command --home {quoted} controls recover-authority"),
+        &format!("command --guard-home {quoted} controls recover-authority"),
     )
 }
 

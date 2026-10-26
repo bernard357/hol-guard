@@ -105,8 +105,10 @@ def _git_config_no_system_enabled(value: str | None) -> bool:
 # command into a shell pointing elsewhere recovers a different install while
 # this one stays blocked, so a home the command would not find on its own is
 # named, shell-quoted for the terminal it is pasted into. The default home is
-# left out: the short command is the one almost everyone needs. `--home` goes
-# on `command`; the `recover-authority` leaf takes no options.
+# left out: the short command is the one almost everyone needs. `--guard-home`
+# is the flag that names a store: `--home` also reaches it, but it moves the
+# home directory too, to a directory nobody lives in. It goes on `command`;
+# the `recover-authority` leaf takes no options.
 def _authority_remediation() -> str:
     try:
         home_dir = Path.home()
@@ -117,7 +119,7 @@ def _authority_remediation() -> str:
         return _AUTHORITY_REMEDIATION
     return _AUTHORITY_REMEDIATION.replace(
         "command controls recover-authority",
-        f"command --home {shlex.quote(str(guard_home))} controls recover-authority",
+        f"command --guard-home {shlex.quote(str(guard_home))} controls recover-authority",
     )
 
 

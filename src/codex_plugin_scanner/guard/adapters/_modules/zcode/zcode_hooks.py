@@ -80,9 +80,11 @@ def _authority_block_remediation(guard_home: Path | None) -> str:
     command, because a runtime that cannot tell the two apart has nothing to
     add.
 
-    ``--home`` goes on ``command``, the parser that carries it; after
-    ``recover-authority`` argparse hands it to the leaf, which takes no options
-    and would reject the whole line.
+    ``--guard-home`` is the flag that names a store and nothing else;
+    ``--home`` reaches the same store but also moves the home directory, to a
+    directory nobody lives in. It goes on ``command``, the parser that carries
+    it; after ``recover-authority`` argparse hands it to the leaf, which takes
+    no options and would reject the whole line.
     """
 
     if guard_home is None:
@@ -95,7 +97,7 @@ def _authority_block_remediation(guard_home: Path | None) -> str:
         return _AUTHORITY_BLOCK_REMEDIATION
     return _AUTHORITY_BLOCK_REMEDIATION.replace(
         "command controls recover-authority",
-        f"command --home {shlex.quote(str(guard_home))} controls recover-authority",
+        f"command --guard-home {shlex.quote(str(guard_home))} controls recover-authority",
     )
 
 
