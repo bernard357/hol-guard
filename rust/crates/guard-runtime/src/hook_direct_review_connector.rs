@@ -7,9 +7,10 @@
 //! and then queues the row differently:
 //!
 //! - the row is grouped under the connector's `queue_group_id`, and its
-//!   `extension_allow_hint` is the connector setup hint
-//!   (`connector_setup_hint`, `extension_allow_hint.py`) instead of the
-//!   extension hints;
+//!   `extension_allow_hint` is the connector setup hint instead of the
+//!   extension hints. Both lanes build it here: the direct lane through
+//!   `setup_hint`, and a review the daemon queues itself through
+//!   `queued_setup_hint`, which `extension_review_hint` answers;
 //! - the agent is told the CLI is not set up on this device
 //!   (`connector_agent_reason`), in the silent block and in the pause;
 //! - once the row is stored, the review's context is recorded with the
