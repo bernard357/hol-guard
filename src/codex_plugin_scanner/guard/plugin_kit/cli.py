@@ -430,9 +430,18 @@ def _install(args: argparse.Namespace) -> int:
     if not args.apply:
         return 0
     # Refuse before anything runs when the install record cannot be read,
-    # rather than installing and then failing to record it.
-    if _call({"command": "installs", "guard_home": str(guard_home)}) is None:
+    # rather than installing and then failing to record it. An install moves
+    # a record that no longer parses aside and starts a new one; uninstall
+    # needs the record, so it stops instead.
+    installs = _call({"command": "installs", "guard_home": str(guard_home), "recover": installing})
+    if installs is None:
         return 2
+    if installs.get("recovered"):
+        print(
+            f"Guard's install record could not be read. It was moved to plugin-kit/{installs['recovered']} "
+            "and a new one started.",
+            file=sys.stderr,
+        )
 
     def record(runtime: str) -> None:
         install.record(guard_home, slug, runtime, installed=installing, spec=spec, listing_origin=listing_origin)

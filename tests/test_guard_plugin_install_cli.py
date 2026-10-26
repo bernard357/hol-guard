@@ -208,16 +208,35 @@ def test_uninstall_only_removes_what_guard_installed(
 def test_an_unreadable_record_stops_apply_before_anything_runs(
     spec_file: Path, programs: list[list[str]], guard_home: Path
 ) -> None:
-    (guard_home / "plugin-kit").mkdir()
-    (guard_home / "plugin-kit" / "installs.json").write_text("{not json", encoding="utf-8")
+    # Not a regular file, so Guard cannot tell whether it is corrupt and leaves it alone.
+    (guard_home / "plugin-kit" / "installs.json").mkdir(parents=True)
     argv = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--runtime", "codex"]
     exit_code, output, error = _run([*argv, "--apply", "--yes"])
     assert (exit_code, programs) == (2, [])
     assert "installed" not in output
     assert "could not be read" in error
-    assert (guard_home / "plugin-kit" / "installs.json").read_text(encoding="utf-8") == "{not json"
+    assert (guard_home / "plugin-kit" / "installs.json").is_dir()
     # A plan alone never reads the record.
     assert _run(argv)[0] == 0
+
+
+def test_install_moves_a_corrupt_record_aside_and_uninstall_does_not(
+    spec_file: Path, programs: list[list[str]], guard_home: Path
+) -> None:
+    folder = guard_home / "plugin-kit"
+    folder.mkdir()
+    (folder / "installs.json").write_text("{not json", encoding="utf-8")
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert (exit_code, programs) == (2, [])
+    assert "could not be read" in error
+
+    argv = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--runtime", "codex"]
+    exit_code, _output, error = _run([*argv, "--apply", "--yes"])
+    assert exit_code == 0, error
+    moved = [path.name for path in folder.iterdir() if path.name.startswith("installs.json.corrupt-")]
+    assert len(moved) == 1
+    assert (folder / moved[0]).read_text(encoding="utf-8") == "{not json"
+    assert f"It was moved to plugin-kit/{moved[0]} and a new one started." in error
 
 
 def test_a_record_that_cannot_be_written_fails_the_install(
