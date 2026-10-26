@@ -588,3 +588,34 @@ fn card_declares_without_claiming_verification_or_echoing_secrets() {
     let response = guard_plugin_kit::run_request(refused.to_string().as_bytes());
     assert_eq!(response["error"], json!("plugin_kit_card_slug_invalid"));
 }
+
+#[test]
+fn card_lists_unnamed_skills_arg_and_url_variables_and_uppercase_hosts() {
+    let mcp = json!({"mcpServers": {
+        "local": {
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/server.js", "--token", "${GITHUB_TOKEN}"],
+        },
+        "remote": {"type": "http", "url": "HTTPS://MCP.Example/mcp"},
+        "templated": {"type": "http", "url": "https://${MCP_HOST}/mcp"},
+    }});
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (".mcp.json", &mcp.to_string()),
+        (
+            "skills/helper/SKILL.md",
+            "---\ndescription: Helps.\n---\n# Helper\n",
+        ),
+    ]);
+    let card = ok(json!({"command": "card", "root": root_str(&root)}));
+    assert_eq!(card["capabilities"]["skills"], json!(["helper"]));
+    assert_eq!(card["permissions"]["networkHosts"], json!(["mcp.example"]));
+    assert_eq!(
+        card["permissions"]["environment"],
+        json!(["GITHUB_TOKEN", "MCP_HOST"])
+    );
+    assert_eq!(
+        error(json!({"command": "card", "root": root_str(&root), "slug": "acme/"})),
+        "plugin_kit_card_slug_invalid"
+    );
+}

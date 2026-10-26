@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::check;
 use crate::detect::Detection;
 use crate::emit::Runtime;
+use crate::model::ROOT_PLACEHOLDERS;
 
 pub const SCHEMA: &str = "hol.plugin-card.v0-draft";
 
@@ -86,7 +87,7 @@ pub struct CardLinks {
 }
 
 pub fn card(detection: &Detection, slug: Option<&str>) -> Result<Card, String> {
-    if slug.is_some_and(|slug| !crate::install::valid_slug(slug)) {
+    if slug.is_some_and(|slug| !listing_slug(slug)) {
         return Err("plugin_kit_card_slug_invalid".to_owned());
     }
     let plugin = &detection.plugin;
@@ -94,7 +95,12 @@ pub fn card(detection: &Detection, slug: Option<&str>) -> Result<Card, String> {
     let mut skills: Vec<String> = plugin
         .skills
         .iter()
-        .filter_map(|skill| skill.name.clone())
+        .filter_map(|skill| {
+            skill
+                .name
+                .clone()
+                .or_else(|| crate::emit::skill_slug(skill))
+        })
         .collect();
     skills.sort();
     skills.dedup();
@@ -118,6 +124,19 @@ pub fn card(detection: &Detection, slug: Option<&str>) -> Result<Card, String> {
             hosts.insert(host);
         }
         environment.extend(server.referenced_variables());
+        // Runtimes expand `${NAME}` in args and remote URLs too; the
+        // plugin-root placeholders are paths, not user variables.
+        for value in server.args.iter().chain(server.url.as_ref()) {
+            environment.extend(
+                crate::reference::template_variables(value)
+                    .into_iter()
+                    .filter(|name| {
+                        !ROOT_PLACEHOLDERS
+                            .iter()
+                            .any(|placeholder| placeholder[2..placeholder.len() - 1] == **name)
+                    }),
+            );
+        }
         servers.push(CardServer {
             name: name.clone(),
             transport,
@@ -169,6 +188,14 @@ pub fn card(detection: &Detection, slug: Option<&str>) -> Result<Card, String> {
     })
 }
 
+/// `owner/name`, or a longer path for a plugin inside a repository, with no
+/// empty segment.
+fn listing_slug(slug: &str) -> bool {
+    crate::install::valid_slug(slug)
+        && slug.split('/').count() >= 2
+        && slug.split('/').all(|segment| !segment.is_empty())
+}
+
 /// The program's file name, without any directory a manifest put in front.
 fn program_name(command: &str) -> Option<String> {
     let first = command.split_whitespace().next()?;
@@ -178,9 +205,10 @@ fn program_name(command: &str) -> Option<String> {
 
 /// The host of an `http(s)` URL, unless it is templated.
 fn host(url: &str) -> Option<String> {
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
+    let (scheme, rest) = url.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return None;
+    }
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority.rsplit('@').next()?;
     let host = match authority.strip_prefix('[') {
@@ -192,7 +220,7 @@ fn host(url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{host, program_name};
+    use super::{host, listing_slug, program_name};
 
     #[test]
     fn program_names_drop_directories_and_templates() {
@@ -215,5 +243,18 @@ mod tests {
         assert_eq!(host("http://[::1]:3000/sse").as_deref(), Some("::1"));
         assert_eq!(host("https://${HOST}/mcp"), None);
         assert_eq!(host("ftp://example.com"), None);
+        assert_eq!(
+            host("HTTPS://MCP.example/mcp").as_deref(),
+            Some("mcp.example")
+        );
+    }
+
+    #[test]
+    fn listing_slugs_need_an_owner_and_a_name() {
+        assert!(listing_slug("acme/tools"));
+        assert!(listing_slug("acme/tools/search"));
+        for slug in ["acme", "acme/", "acme//tools", "acme/tools/", "/acme/tools"] {
+            assert!(!listing_slug(slug), "{slug}");
+        }
     }
 }
