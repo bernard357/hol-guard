@@ -173,13 +173,21 @@ fn registered_worktrees(repository: &Path) -> Option<Vec<PathBuf>> {
         }
         let pointer = entry.ok()?.path().join("gitdir");
         // A registration too large to be a path is a registry this route does
-        // not understand, so it stops reading rather than ignoring the entry.
-        let gitdir = fs::read_to_string(&pointer)
-            .ok()
-            .filter(|text| text.len() <= 4096)?;
+        // not understand, so it stops reading rather than ignoring the entry,
+        // and it stops at the bound rather than after taking the whole file in.
+        let gitdir = super::git_routes::bounded_git_metadata(&pointer)?;
+        let gitdir = Path::new(gitdir.trim_end());
+        // Git 2.48 writes the backlink relative to the registration under
+        // `worktree.useRelativePaths`, and resolves it against that directory
+        // before it matches a removal's argument. This route compares the
+        // registration as it stands, so a relative pointer names a path it
+        // cannot compare and leaves the registry unread.
+        if !gitdir.is_absolute() {
+            return None;
+        }
         // The file points at the worktree's own `.git`; the worktree is its
         // parent.
-        paths.push(Path::new(gitdir.trim_end()).parent()?.to_path_buf());
+        paths.push(gitdir.parent()?.to_path_buf());
     }
     Some(paths)
 }

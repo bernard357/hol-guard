@@ -106,3 +106,23 @@ fn a_windows_registration_matches_at_its_own_separator() {
     assert!(git_reads_as_suffix(registered, "app-portal-fix"));
     assert!(!git_reads_as_suffix(registered, "portal-fix"));
 }
+
+#[test]
+fn a_relative_backlink_is_a_registry_this_route_cannot_read() {
+    let root = tempfile::tempdir().unwrap();
+    let repository = root.path().join("org").join("app");
+    let entry = repository.join(".git").join("worktrees").join("portal-fix");
+    fs::create_dir_all(&entry).unwrap();
+    // Git 2.48 writes the backlink in this form under
+    // `worktree.useRelativePaths`, and resolves it against the registration
+    // before it matches a removal's argument. Read as text the registration
+    // stands for no part of `org/app-portal-fix`, so comparing it would let a
+    // removal of that absent-looking target through and Git would then take
+    // away the registered checkout it resolves to.
+    fs::write(entry.join("gitdir"), "../../../../app-portal-fix/.git\n").unwrap();
+    assert!(!git_reads_as_suffix(
+        Path::new("../../../../app-portal-fix"),
+        "org/app-portal-fix"
+    ));
+    assert!(registered_worktrees(&repository).is_none());
+}
