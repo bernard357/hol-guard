@@ -76,4 +76,21 @@ fn fail_secure_unknown_options_rejects_only_unnamed_options() {
         &["--dry-run", "auto-review", "enable"]
     ));
     assert!(!matched(Some(true), &["auto-review", "enable", "-x"]));
+    assert!(!matched(Some(true), &["auto-review", "enable", "-h:bogus"]));
+    assert!(matched(Some(true), &["auto-review", "enable", "-f:demo"]));
+    let required = json!({
+        "executables": ["givi"],
+        "subcommands": ["auto-review", "enable"],
+        "required_flags_anywhere": ["-X"],
+        "fail_secure_unknown_options": true
+    });
+    let require = |arguments: &[&str]| {
+        DatabaseMatcher::from_config("leading-subcommand.v1", required.clone())
+            .unwrap()
+            .match_segments(&command(arguments))
+            .unwrap()
+            == vec![0]
+    };
+    assert!(require(&["auto-review", "enable", "-X"]));
+    assert!(!require(&["auto-review", "enable", "-Y"]));
 }

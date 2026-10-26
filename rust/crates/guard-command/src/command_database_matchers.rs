@@ -341,8 +341,10 @@ impl LeadingSubcommandConfig {
         self.options_with_values.contains(name)
             || self.interleaved_options_with_values.contains(name)
             || self.forbidden_flags.contains(name)
-            || self.required_flags_anywhere.contains(name)
             || self.forbidden_flags_before_delimiter.contains(name)
+            || self
+                .required_flags_anywhere
+                .contains(&name.to_ascii_lowercase())
     }
 
     fn option_takes_value(&self, name: &str) -> bool {
@@ -371,22 +373,31 @@ impl LeadingSubcommandConfig {
             let has_cluster = !argument.starts_with("--") && argument.chars().nth(2).is_some();
             let mut names = Vec::new();
             let mut takes_value = false;
-            let mut attached = argument.contains('=');
+            let mut attached = false;
             if has_cluster {
+                let mut consumed = 1usize;
                 for (offset, character) in argument.char_indices().skip(1) {
                     if !python_is_alphanumeric(character) {
                         break;
                     }
                     let flag = format!("-{character}");
                     names.push(flag.clone());
+                    consumed = offset + character.len_utf8();
                     if self.option_takes_value(&flag) {
                         takes_value = true;
-                        attached = attached || argument[offset..].chars().nth(1).is_some();
+                        attached = consumed < argument.len();
+                        consumed = argument.len();
                         break;
                     }
                 }
+                // A suffix after a non-value short flag, such as `-h:bogus`, is
+                // not one of the named options.
+                if consumed < argument.len() {
+                    return Ok(true);
+                }
             } else {
                 takes_value = self.option_takes_value(&option_name);
+                attached = argument.contains('=');
                 names.push(option_name);
             }
             if names.is_empty() || names.iter().any(|name| !self.known_option(name)) {
