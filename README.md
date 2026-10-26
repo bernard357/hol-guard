@@ -31,7 +31,7 @@ Run it locally without an account. Use the CLI and local dashboard to manage pro
 
 ## Install HOL Guard
 
-Requires Python 3.10 or newer and [pipx](https://pipx.pypa.io/stable/installation/).
+Requires Python 3.10 or newer, [pipx](https://pipx.pypa.io/stable/installation/), and a matching native runtime. Check the [platform support and Windows ARM64 setup notes](docs/guard/get-started.md#platform-support) before installing.
 
 ```bash
 pipx install hol-guard
@@ -554,7 +554,7 @@ For optional Cisco coverage, use the dependency group command above. See [CONTRI
 
 ## Community
 
-Maintained by [Hashgraph Online](https://github.com/hashgraph-online).
+Maintained by [HOL](https://github.com/hashgraph-online).
 
 - [Report a bug or request a feature](https://github.com/hashgraph-online/hol-guard/issues)
 - [Browse release notes](https://hol.org/guard/releases)

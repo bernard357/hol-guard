@@ -16,9 +16,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from .action_lattice import most_restrictive_guard_action
 from .adapters.contracts import HARNESS_CONTRACTS, contract_for
-from .models import GuardAction
 from .protection_posture import (
     VALID_PROTECTION_POSTURES,
     coerce_protection_posture,
@@ -196,14 +194,6 @@ def harness_watch_auto_revert_due(
         if current - entered >= timedelta(hours=config.watch_auto_revert_hours):
             due.append(harness)
     return tuple(sorted(due))
-
-
-def stricter_risk_action(base: GuardAction | None, floor: GuardAction | None) -> GuardAction | None:
-    if base is None:
-        return floor
-    if floor is None:
-        return base
-    return most_restrictive_guard_action(base, floor, unknown_action="block")
 
 
 def harness_posture_summary(config: GuardConfig) -> dict[str, object]:

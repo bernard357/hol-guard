@@ -211,7 +211,7 @@ export function SupplyChainWorkspaceDetails({
           onOpenAudit={onAuditNavigate}
         />
 
-        <SupplyChainBundlePanel refreshKey={bundleRefreshKey(snapshot)} />
+        <SupplyChainBundlePanel refreshKey={bundleRefreshKey(snapshot)} cloudState={snapshot.cloud_state} />
 
         <SupplyChainDetailSection
           id="supply-chain-apps-heading"
