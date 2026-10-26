@@ -4,6 +4,7 @@
 mod active_pack_security;
 #[path = "adapters/adapter_inventory.rs"]
 mod adapter_inventory;
+mod adapter_state_integrity_op;
 #[cfg(all(test, unix))]
 #[path = "adapters/adapter_vectors_tests.rs"]
 mod adapter_vectors_tests;

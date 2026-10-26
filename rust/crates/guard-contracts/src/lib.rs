@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod adapter_state_integrity;
+pub use adapter_state_integrity::*;
 mod aibom_report_summaries;
 pub use aibom_report_summaries::*;
 mod approval_contracts;

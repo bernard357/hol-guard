@@ -36,7 +36,11 @@ def _authentication(payload: dict[str, object]) -> dict[str, object]:
     return cast(dict[str, object], payload["state_authentication"])
 
 
-def test_authentication_rejects_malformed_metadata_and_paths(tmp_path: Path) -> None:
+def test_authentication_rejects_malformed_metadata_and_paths(
+    tmp_path: Path,
+    native_adapter_state_integrity_runtime: Path,
+) -> None:
+    del native_adapter_state_integrity_runtime
     guard_home = tmp_path / "guard-home"
     payload: dict[str, object] = {"path": str(tmp_path / "target.txt"), "scope": "workspace"}
     authenticated = authenticate_adapter_state(guard_home, harness="copilot", payload=payload)
@@ -61,7 +65,7 @@ def test_authentication_rejects_malformed_metadata_and_paths(tmp_path: Path) -> 
     malformed_mac = dict(authenticated)
     malformed_mac["state_authentication"] = {
         **_authentication(authenticated),
-        "mac": b"not-text",
+        "mac": 17,
     }
     assert not adapter_state_is_authenticated(guard_home, harness="copilot", payload=malformed_mac)
 
@@ -96,7 +100,7 @@ def test_authentication_rejects_malformed_metadata_and_paths(tmp_path: Path) -> 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor-backed key handling")
 def test_posix_key_creation_reuses_racing_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     guard_home = tmp_path / "guard-home"
-    first = authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 1})
+    first_key_id, _ = integrity._load_or_create_key(guard_home)
     real_open = integrity.os.open
     raced = False
 
@@ -112,10 +116,10 @@ def test_posix_key_creation_reuses_racing_key(tmp_path: Path, monkeypatch: pytes
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(integrity.os, "open", raise_file_exists)
-    second = authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 2})
+    second_key_id, _ = integrity._load_or_create_key(guard_home)
 
     assert raced
-    assert _authentication(first)["key_id"] == _authentication(second)["key_id"]
+    assert first_key_id == second_key_id
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor-backed key handling")
@@ -127,7 +131,7 @@ def test_posix_key_write_failure_removes_partial_key(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(integrity.os, "fsync", fail_fsync)
     with pytest.raises(OSError, match="fsync"):
-        authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 1})
+        integrity._load_or_create_key(guard_home)
 
     assert not _key_path(guard_home).exists()
 
@@ -261,10 +265,10 @@ def test_non_posix_key_creation_and_existing_key_loading(
 ) -> None:
     monkeypatch.setattr(integrity.os, "name", platform_name)
     guard_home = tmp_path / f"guard-{platform_name}"
-    first = authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 1})
-    second = authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 2})
+    first_key_id, _ = integrity._load_or_create_key(guard_home)
+    second_key_id, _ = integrity._load_or_create_key(guard_home)
 
-    assert _authentication(first)["key_id"] == _authentication(second)["key_id"]
+    assert first_key_id == second_key_id
     assert _key_path(guard_home).is_file()
     if platform_name == "darwin":
         assert stat.S_IMODE(_key_path(guard_home).parent.stat().st_mode) == 0o700
@@ -291,9 +295,9 @@ def test_non_posix_key_creation_race_and_write_failure_cleanup(
         return real_open(path, flags, mode)
 
     monkeypatch.setattr(integrity.os, "open", create_then_report_exists)
-    authenticated = authenticate_adapter_state(guard_home, harness="copilot", payload={"generation": 1})
+    key_id, _ = integrity._load_or_create_key(guard_home)
     assert raced
-    assert _authentication(authenticated)["key_id"] == "race-key"
+    assert key_id == "race-key"
 
     failing_home = tmp_path / "failing-home"
 
@@ -302,7 +306,7 @@ def test_non_posix_key_creation_race_and_write_failure_cleanup(
 
     monkeypatch.setattr(integrity.os, "fsync", fail_fsync)
     with pytest.raises(OSError, match="fsync"):
-        authenticate_adapter_state(failing_home, harness="copilot", payload={"generation": 2})
+        integrity._load_or_create_key(failing_home)
     assert not _key_path(failing_home).exists()
 
 

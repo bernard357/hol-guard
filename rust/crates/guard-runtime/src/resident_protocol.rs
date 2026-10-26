@@ -349,6 +349,7 @@ pub(crate) enum ResidentOperationV1 {
     VerifiedReadPlan(guard_contracts::VerifiedReadPlanRequestV1),
     AibomReportSummaries(guard_contracts::AibomReportSummariesRequestV1),
     RetryLineageCapture(guard_contracts::RetryLineageCaptureRequestV1),
+    AdapterStateIntegrity(guard_contracts::AdapterStateIntegrityRequestV1),
     Health(Value),
     Shutdown(Value),
 }

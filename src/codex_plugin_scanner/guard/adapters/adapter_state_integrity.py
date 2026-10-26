@@ -1,11 +1,17 @@
-"""Authentication for adapter lifecycle state containing filesystem paths."""
+"""Authentication for adapter lifecycle state containing filesystem paths.
+
+An adapter's manifest records the configuration file Guard took over and the
+backup it will restore, so a manifest an attacker can edit names a file Guard
+overwrites during install, repair or uninstall. The MAC that stops that is
+computed and compared in the native runtime; this module resolves the key file
+the runtime signs with, and applies the verdict it returns. Without the
+runtime there is no verdict, so nothing authenticates.
+"""
 
 from __future__ import annotations
 
 import base64
 import contextlib
-import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -13,6 +19,10 @@ import stat
 from pathlib import Path
 
 from ...path_support import read_text_file_within_root
+from ..native_adapter_state_integrity import (
+    AdapterStateIntegrityUnavailableError,
+    native_adapter_state_integrity,
+)
 from .base import _ensure_path_within_root
 
 _SCHEMA_VERSION = 1
@@ -27,15 +37,17 @@ def authenticate_adapter_state(
     payload: dict[str, object],
     create_key: bool = True,
 ) -> dict[str, object]:
+    """Return ``payload`` with the authentication block the runtime computed."""
+
     key_id, key = _load_or_create_key(guard_home) if create_key else _load_key(guard_home)
-    authenticated = dict(payload)
-    authenticated["state_authentication"] = {
-        "algorithm": "hmac-sha256",
-        "key_id": key_id,
-        "mac": hmac.new(key, _message(harness, payload), hashlib.sha256).hexdigest(),
-        "schema_version": _SCHEMA_VERSION,
-    }
-    return authenticated
+    return native_adapter_state_integrity(
+        action="authenticate",
+        harness=harness,
+        payload=payload,
+        integrity_key_b64=_wire_key(key),
+        integrity_key_id=key_id,
+        guard_home=guard_home,
+    )
 
 
 def adapter_state_is_authenticated(
@@ -44,25 +56,9 @@ def adapter_state_is_authenticated(
     harness: str,
     payload: dict[str, object],
 ) -> bool:
-    authentication = payload.get("state_authentication")
-    if not isinstance(authentication, dict):
-        return False
-    unsigned = dict(payload)
-    unsigned.pop("state_authentication", None)
-    try:
-        key_id, key = _load_key(guard_home)
-    except (OSError, ValueError):
-        return False
-    supplied_key_id = authentication.get("key_id")
-    supplied_mac = authentication.get("mac")
-    if authentication.get("algorithm") != "hmac-sha256" or authentication.get("schema_version") != _SCHEMA_VERSION:
-        return False
-    if not isinstance(supplied_key_id, str) or not hmac.compare_digest(supplied_key_id, key_id):
-        return False
-    if not isinstance(supplied_mac, str):
-        return False
-    expected = hmac.new(key, _message(harness, unsigned), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(supplied_mac, expected)
+    """Whether the runtime recomputes the manifest's own authentication block."""
+
+    return _answer(guard_home, action="verify", harness=harness, payload=payload) is not None
 
 
 def authenticated_adapter_path(
@@ -74,22 +70,55 @@ def authenticated_adapter_path(
 ) -> Path | None:
     """Return a canonical path only when its complete state payload authenticates."""
 
-    if not adapter_state_is_authenticated(guard_home, harness=harness, payload=payload):
+    answer = _answer(guard_home, action="authenticated_field", harness=harness, payload=payload, field=field)
+    if answer is None:
         return None
-    value = payload.get(field)
-    if not isinstance(value, str) or not value or "\x00" in value:
+    value = answer.get("value")
+    if not isinstance(value, str):
         return None
-    path = Path(value)
-    if not path.is_absolute():
-        return None
-    # The HMAC above authenticates this complete payload before the stored path
-    # is resolved; Sonar cannot model that application-level sanitizer.
-    return path.resolve()  # NOSONAR
+    # The runtime authenticated this complete payload, and rejected a relative
+    # path or one carrying a NUL, before the stored path is resolved here.
+    # Sonar cannot model that application-level sanitizer.
+    return Path(value).resolve()  # NOSONAR
 
 
-def _message(harness: str, payload: dict[str, object]) -> bytes:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return f"hol-guard.adapter-state.v1\0{harness}\0{canonical}".encode()
+def _answer(
+    guard_home: Path,
+    *,
+    action: str,
+    harness: str,
+    payload: dict[str, object],
+    field: str | None = None,
+) -> dict[str, object] | None:
+    """The runtime's answer, or ``None`` when it did not authenticate the state.
+
+    A missing key file, an unusable one and an unavailable runtime are all the
+    same answer here: the stored state is not Guard's own.
+    """
+
+    try:
+        key_id, key = _load_key(guard_home)
+    except (OSError, ValueError):
+        return None
+    try:
+        answer = native_adapter_state_integrity(
+            action=action,
+            harness=harness,
+            payload=payload,
+            field=field,
+            integrity_key_b64=_wire_key(key),
+            integrity_key_id=key_id,
+            guard_home=guard_home,
+        )
+    except AdapterStateIntegrityUnavailableError:
+        return None
+    return answer if answer.get("authenticated") is True else None
+
+
+def _wire_key(key: bytes) -> str:
+    """The key as the runtime decodes it: unpadded URL-safe base64."""
+
+    return base64.urlsafe_b64encode(key).decode("ascii").rstrip("=")
 
 
 def _key_path(guard_home: Path) -> Path:

@@ -420,6 +420,35 @@ def native_command_capability_runtime(
 
 
 @pytest.fixture
+def native_adapter_state_integrity_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    _native_context_home: Path,
+) -> Path:
+    """Answer adapter-state authentication requests from the shared resident.
+
+    The ``adapter_state_integrity`` op reads the manifest and the key off the
+    wire, so the Guard home it is asked about only has to name a resident that
+    is already keyed and warm.  Tests keep their own ``tmp_path`` guard home
+    for the adapter state key file, which stays Python-side, and borrow the
+    session home for the runtime call.
+    """
+
+    from codex_plugin_scanner.guard import native_adapter_state_integrity
+
+    binary = _context_digest_runtime_binary()
+    if binary is None:
+        pytest.skip("adapter state integrity tests require the compiled Rust runtime")
+    monkeypatch.setenv("HOL_GUARD_NATIVE", "force")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(binary.resolve()))
+    monkeypatch.setattr(
+        native_adapter_state_integrity,
+        "_resolve_digest_home",
+        lambda guard_home=None: _native_context_home,
+    )
+    return _native_context_home
+
+
+@pytest.fixture
 def package_intent_native(
     monkeypatch: pytest.MonkeyPatch,
     _native_context_home: Path,

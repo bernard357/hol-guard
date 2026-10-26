@@ -746,6 +746,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::RetryLineageCapture(request) => {
                 crate::retry_lineage_capture_op::evaluate_retry_lineage_capture(&request)
             }
+            ResidentOperationV1::AdapterStateIntegrity(request) => {
+                crate::adapter_state_integrity_op::evaluate_adapter_state_integrity_request(
+                    &request,
+                )
+            }
             #[cfg(not(unix))]
             ResidentOperationV1::ContainedNodeExecute(_)
             | ResidentOperationV1::ContainedTypescriptExecute(_)
