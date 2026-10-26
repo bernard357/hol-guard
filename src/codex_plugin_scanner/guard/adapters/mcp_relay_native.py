@@ -22,6 +22,7 @@ defers are still refused.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -57,12 +58,29 @@ def _relays(python_args: Sequence[str]) -> bool:
 def mcp_proxy_launch(python: str, python_args: Sequence[str]) -> tuple[str, list[str]]:
     """``(command, args)`` launching a Python proxy argv, through the relay when selected."""
 
-    if not _relays(python_args):
+    relayed = _relay_argv(python_args)
+    if relayed is None:
         return python, list(python_args)
-    relay = native_mcp_relay(_guard_home(python_args))
+    relay = native_mcp_relay(_guard_home(relayed))
     if relay is None:
         return python, list(python_args)
-    return str(relay), [NATIVE_MCP_RELAY_COMMAND, python, *python_args]
+    return str(relay), [NATIVE_MCP_RELAY_COMMAND, python, *relayed]
+
+
+def _relay_argv(python_args: Sequence[str]) -> tuple[str, ...] | None:
+    """The module-form proxy argv the relay parses, or None when it does not relay.
+
+    A frozen build's CLI argv names the proxy command directly, as OpenCode
+    writes it; the relay gets it back in module form, which the frozen
+    launcher also runs.
+    """
+
+    values = tuple(python_args)
+    if _relays(values):
+        return values
+    if getattr(sys, "frozen", False) and values and values[0] in RELAY_PROXY_COMMANDS:
+        return (*_PYTHON_PROXY_PREFIX, *values)
+    return None
 
 
 def _guard_home(python_args: Sequence[str]) -> Path | None:

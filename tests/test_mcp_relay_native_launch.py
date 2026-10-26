@@ -237,3 +237,31 @@ def test_inventory_recovers_the_original_launch_behind_the_relay(tmp_path: Path)
     servers = discover_harness_mcp_servers(home_dir=tmp_path, guard_home=tmp_path / "guard", detections=(detection,))
     assert len(servers) == 1
     assert servers[0].launch_command == "python fixture_server.py --stdio"
+
+
+def test_a_frozen_opencode_argv_relays_in_module_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, advertised: set[str]
+) -> None:
+    from codex_plugin_scanner.guard.adapters import mcp_relay_native
+
+    advertised.add(NATIVE_MCP_RELAY_FEATURE)
+    module_args = _python_args(tmp_path, "opencode-mcp-proxy", "opencode")
+    frozen_args = module_args[3:]
+    launcher = str(tmp_path / "hol-guard")
+    assert mcp_proxy_launch(launcher, frozen_args) == (launcher, frozen_args)
+
+    monkeypatch.setattr(mcp_relay_native.sys, "frozen", True, raising=False)
+    relayed = mcp_proxy_launch(launcher, frozen_args)
+    assert relayed == (str(_RUNTIME), [NATIVE_MCP_RELAY_COMMAND, launcher, *module_args])
+    assert python_proxy_launch(*relayed) == (launcher, tuple(module_args))
+    assert mcp_proxy_launch(launcher, ["scan", "--guard-home", "x"]) == (launcher, ["scan", "--guard-home", "x"])
+
+
+def test_a_frozen_cli_runs_the_module_argv_the_relay_hands_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner import cli
+
+    module_argv = ["-m", "codex_plugin_scanner.cli", "guard", "opencode-mcp-proxy", "--guard-home", "g"]
+    assert cli._frozen_module_argv(module_argv) == module_argv  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(cli.sys, "frozen", True, raising=False)
+    assert cli._frozen_module_argv(module_argv) == module_argv[2:]  # pyright: ignore[reportPrivateUsage]
+    assert cli._frozen_module_argv(["-m", "pip"]) == ["-m", "pip"]  # pyright: ignore[reportPrivateUsage]
