@@ -14,6 +14,7 @@ import argparse
 import contextlib
 import os
 import select
+import shlex
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -66,18 +67,36 @@ def terminal_status_fd(env: Mapping[str, str] | None = None) -> int | None:
         return None
 
 
+def _terminal_safe(text: str) -> str:
+    """Show control characters from request text as ``?`` so they cannot restyle the prompt."""
+
+    return "".join(character if character.isprintable() else "?" for character in text)
+
+
 def protect_command_text(payload: Mapping[str, object]) -> str:
+    """The install as a person would type it again, quoted for a POSIX shell.
+
+    The manager is named by its basename: an external-archive shim sends the
+    resolved real manager's path, and typing that would skip the shim.
+    """
+
     request = payload.get("request")
     command = request.get("command") if isinstance(request, Mapping) else None
-    if isinstance(command, list):
-        return " ".join(str(part) for part in command if isinstance(part, str))
-    return command.strip() if isinstance(command, str) else ""
+    if isinstance(command, str):
+        return _terminal_safe(command.strip())
+    if not isinstance(command, list):
+        return ""
+    argv = [part for part in command if isinstance(part, str)]
+    if not argv:
+        return ""
+    argv[0] = os.path.basename(argv[0]) or argv[0]
+    return _terminal_safe(shlex.join(argv))
 
 
 def _reason(payload: Mapping[str, object]) -> str:
     verdict = payload.get("verdict")
     reason = verdict.get("reason") if isinstance(verdict, Mapping) else None
-    return reason.strip() if isinstance(reason, str) else ""
+    return _terminal_safe(reason.strip()) if isinstance(reason, str) else ""
 
 
 def _prompt_text(payload: Mapping[str, object], *, emphasis: bool) -> str:
@@ -163,6 +182,14 @@ def _kept_blocked(request_id: str) -> dict[str, object]:
     return {"resolved": False, "items": [{"request_id": request_id, "resolution_action": "pending"}]}
 
 
+def _resolved_elsewhere(descriptor: int, request_id: str, resolution: str) -> dict[str, object]:
+    if resolution == "block":
+        _write(descriptor, "\nBlocked in HOL Guard.\n")
+        return _kept_blocked(request_id)
+    _write(descriptor, "\nApproved in HOL Guard. Running the install.\n")
+    return {"resolved": True, "items": [{"request_id": request_id, "resolution_action": resolution or "allow"}]}
+
+
 def inline_package_approval(
     payload: Mapping[str, object],
     *,
@@ -205,11 +232,7 @@ def inline_package_approval(
         clock=clock,
     )
     if outcome == "elsewhere":
-        if value == "block":
-            _write(descriptor, "\nBlocked in HOL Guard.\n")
-            return _kept_blocked(request_id)
-        _write(descriptor, "\nApproved in HOL Guard. Running the install.\n")
-        return {"resolved": True, "items": [{"request_id": request_id, "resolution_action": value or "allow"}]}
+        return _resolved_elsewhere(descriptor, request_id, value or "")
     if outcome != "typed":
         _write(descriptor, "\nNo answer, so the install stays blocked.\n")
         return _kept_blocked(request_id)
@@ -224,6 +247,10 @@ def inline_package_approval(
     label, remember = choice
     result = _approve(request_id, remember=remember, store=store, workspace=workspace)
     if result.get("resolved") is not True:
+        current = store.get_approval_request(request_id)
+        if isinstance(current, Mapping) and str(current.get("status") or "") == "resolved":
+            # Someone decided in the approval center between the last check and this answer.
+            return _resolved_elsewhere(descriptor, request_id, str(current.get("resolution_action") or ""))
         detail = result.get("message") or result.get("error") or "unknown error"
         _write(descriptor, f"Guard could not record the approval ({detail}). The install stays blocked.\n")
         return _kept_blocked(request_id)

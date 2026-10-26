@@ -179,12 +179,44 @@ def test_agent_output_keeps_the_agent_guidance(monkeypatch: pytest.MonkeyPatch) 
     assert "hol-guard approvals approve" not in _plain_text_protect(_paused_payload())
 
 
-def test_package_shim_runs_the_install_after_an_approval_at_the_terminal(
-    tmp_path: Path,
-    terminal: _Terminal,
-    approvals: list[argparse.Namespace],
-    monkeypatch: pytest.MonkeyPatch,
+def test_request_text_cannot_restyle_the_prompt(
+    tmp_path: Path, terminal: _Terminal, approvals: list[argparse.Namespace]
 ) -> None:
+    payload = _paused_payload()
+    payload["request"] = {"command": ["bun", "add", "pkg\x1b[2Jcleared"]}
+    terminal.type("n\n")
+    inline.inline_package_approval(
+        payload, store=_Store(tmp_path), workspace=tmp_path, env=terminal.env(), stdin=terminal.stdin, timeout_seconds=5
+    )
+    shown = terminal.shown()
+    assert "\x1b[2J" not in shown
+    assert "pkg?[2Jcleared" in shown
+
+
+def test_retry_line_is_quoted_and_names_the_manager_the_shim_wraps() -> None:
+    payload = _paused_payload()
+    payload["request"] = {"command": ["/opt/real/bin/bun", "add", "left-pad; rm -rf ~"]}
+    assert inline.protect_command_text(payload) == "bun add 'left-pad; rm -rf ~'"
+
+
+def test_approval_made_elsewhere_while_answering_still_runs_the_install(
+    tmp_path: Path, terminal: _Terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _Store(tmp_path)
+
+    def approve_after_center(args: argparse.Namespace, **_kwargs: object) -> dict[str, object]:
+        store.status, store.resolution = "resolved", "allow"
+        return {"resolved": False, "error": "already_resolved", "request_id": args.request_id}
+
+    monkeypatch.setattr(approval_commands, "run_approval_command", approve_after_center)
+    terminal.type("y\n")
+    result = _ask(terminal, store)
+    assert result is not None and result["resolved"] is True
+
+
+def _run_shim_protect(
+    tmp_path: Path, terminal: _Terminal, monkeypatch: pytest.MonkeyPatch, *, timeout_seconds: int
+) -> tuple[int, int]:
     builds: list[int] = []
 
     def build(**_kwargs: object) -> tuple[dict[str, object], int]:
@@ -198,6 +230,8 @@ def test_package_shim_runs_the_install_after_an_approval_at_the_terminal(
         "load_guard_config": lambda *_args, **_kwargs: argparse.Namespace(),
         "overlay_synced_guard_policy": lambda local, _synced: local,
         "_synced_policy_payload": lambda _store: None,
+        "_emit": lambda *_args, **_kwargs: None,
+        "_protect_payload_for_human_output": lambda payload, **_kwargs: payload,
     }.items():
         monkeypatch.setattr(dispatch, name, value)
     monkeypatch.setattr(inline, "approval_resolution_invoked_from_agent", lambda _env: False)
@@ -205,7 +239,6 @@ def test_package_shim_runs_the_install_after_an_approval_at_the_terminal(
     for key, value in terminal.env().items():
         monkeypatch.setenv(key, value)
     terminal.type("y\n")
-
     exit_code = dispatch._run_guard_protect_command(
         argparse.Namespace(
             protect_command=["bun", "install", "-g", "@openai/codex"],
@@ -216,9 +249,27 @@ def test_package_shim_runs_the_install_after_an_approval_at_the_terminal(
         guard_home=tmp_path,
         workspace=tmp_path,
         store=_Store(tmp_path),
-        config=argparse.Namespace(mode="enforce", approval_wait_timeout_seconds=0),
+        config=argparse.Namespace(mode="enforce", approval_wait_timeout_seconds=timeout_seconds),
     )
+    return exit_code, len(builds)
 
-    assert exit_code == 0
-    assert len(builds) == 2
+
+def test_package_shim_runs_the_install_after_an_approval_at_the_terminal(
+    tmp_path: Path,
+    terminal: _Terminal,
+    approvals: list[argparse.Namespace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _run_shim_protect(tmp_path, terminal, monkeypatch, timeout_seconds=120) == (0, 2)
     assert [item.request_id for item in approvals] == [_REQUEST_ID]
+
+
+def test_a_zero_approval_wait_never_holds_the_install_at_a_prompt(
+    tmp_path: Path,
+    terminal: _Terminal,
+    approvals: list[argparse.Namespace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _run_shim_protect(tmp_path, terminal, monkeypatch, timeout_seconds=0) == (1, 1)
+    assert approvals == []
+    assert terminal.shown() == ""
