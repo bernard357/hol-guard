@@ -20,6 +20,10 @@ use crate::CanonicalCommandV1;
 /// input redirect or a heredoc can feed the interpreter its program, and a
 /// target the text does not spell could be anything, so both keep the
 /// failure, as does a pipe a background job feeds.
+///
+/// A redirect that writes a file the rest of the text names is not a log:
+/// `printf '...' > run.js && node run.js` writes the program it then runs, so
+/// the launch runs text this scan never saw and keeps the failure.
 pub(super) fn redirected_launch(command: &CanonicalCommandV1, context: PathContext<'_>) -> bool {
     let text = command.normalized_text.as_str();
     let bare = without_redirections(text);
@@ -29,7 +33,55 @@ pub(super) fn redirected_launch(command: &CanonicalCommandV1, context: PathConte
         && !unquoted_literal(text).contains('<')
         && literal_redirects_only(text)
         && !background_pipeline(&bare)
+        && !writes_a_named_file(text, &bare)
         && crate::pretool::models_exactly(&bare, context)
+}
+
+/// Whether a redirect in `text` writes a file whose name `bare`, the same
+/// text without its redirects, also spells. Names compare by their last path
+/// component, so `./run.js` and `/work/run.js` both match `run.js`. A target
+/// the scan cannot pick out counts as named.
+fn writes_a_named_file(text: &str, bare: &str) -> bool {
+    let Some(words) = split_unquoted(text, char::is_whitespace) else {
+        return true;
+    };
+    let Some(spelled) = split_unquoted(bare, |character| {
+        character.is_whitespace() || matches!(character, ';' | '&' | '|' | '(' | ')' | '=')
+    }) else {
+        return true;
+    };
+    let file_name = |word: &str| {
+        let word = word.trim_matches(['\'', '"']);
+        word.rsplit('/').next().unwrap_or(word).to_owned()
+    };
+    let spelled: Vec<String> = spelled
+        .into_iter()
+        .filter(|word| !word.is_empty())
+        .map(file_name)
+        .collect();
+    let words: Vec<&str> = words.into_iter().filter(|word| !word.is_empty()).collect();
+    words.iter().enumerate().any(|(index, word)| {
+        // A `>` inside a quoted argument is text, not a redirect.
+        let Some((before, rest)) = word.rsplit_once('>') else {
+            return false;
+        };
+        if before.contains(['\'', '"']) {
+            return false;
+        }
+        let rest = rest.trim_start_matches('|');
+        if rest.starts_with('&') {
+            return false;
+        }
+        let target = match rest {
+            "" => match words.get(index + 1) {
+                Some(next) => *next,
+                None => return true,
+            },
+            rest => rest,
+        };
+        let target = target.trim_end_matches([';', '&', '|']);
+        target != "/dev/null" && spelled.contains(&file_name(target))
+    })
 }
 
 /// The inline program of every interpreter launch in a list or a loop, read
@@ -117,19 +169,33 @@ fn past_reserved_words(piece: &str) -> Option<&str> {
     (!rest.is_empty()).then_some(rest)
 }
 
-/// Whether the command, past the variables it sets, is one that moves the
-/// shell to another directory, or a word that could expand to one.
+/// Whether the command, past the variables it sets and the shell prefixes
+/// that run the word after them (`builtin cd`, `command cd`, `time cd`), is
+/// one that moves the shell to another directory, a word that hands its
+/// arguments back to the shell, or a word that could expand to either.
 fn changes_directory(command: &str) -> bool {
     let Some(words) = split_unquoted(command, char::is_whitespace) else {
         return true;
     };
+    let mut prefixed = false;
     words
         .into_iter()
         .filter(|word| !word.is_empty())
-        .find(|word| !sets_a_variable(word))
+        .find(|word| {
+            if sets_a_variable(word) {
+                return false;
+            }
+            if matches!(*word, "builtin" | "command" | "time" | "nohup" | "exec") {
+                prefixed = true;
+                return false;
+            }
+            !(prefixed && word.starts_with('-'))
+        })
         .is_some_and(|word| {
-            matches!(word.trim_matches(['\'', '"']), "cd" | "pushd" | "popd")
-                || word.contains(['$', '\\'])
+            matches!(
+                word.trim_matches(['\'', '"']),
+                "cd" | "pushd" | "popd" | "eval" | "source" | "."
+            ) || word.contains(['$', '\\', '\'', '"'])
         })
 }
 
@@ -211,13 +277,15 @@ fn rooted_parameter_end(chars: &[char], start: usize) -> Option<usize> {
 /// A lowercase name is not one the programs a command runs read from their
 /// environment, and `ordinary_name` refuses the ones a shell ties to its own
 /// state (zsh's `path`, `cdpath` and `fpath`) or that name a proxy, a package
-/// manager setting or a credential. Any substitution in the value is still
-/// data movement, and a command word built from the variable is refused
-/// wherever it stands, so the text still names every program it runs.
+/// manager setting or a credential. The value may expand a parameter only as
+/// the quoted root of a path, so `x=$SECRET` still moves data, as does any
+/// substitution. A command word built from the variable is refused wherever
+/// it stands, so the text still names every program it runs.
 pub(super) fn binds_a_shell_variable(word: &str) -> bool {
-    word.split_once('=').is_some_and(|(name, _)| {
+    word.split_once('=').is_some_and(|(name, value)| {
         name.chars().any(|character| character.is_ascii_lowercase())
             && crate::pretool::generic::chain_literals::ordinary_name(name)
+            && (!value.contains('$') || parameters_only_root_paths(value))
     })
 }
 

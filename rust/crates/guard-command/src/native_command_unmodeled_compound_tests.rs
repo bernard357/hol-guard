@@ -54,3 +54,63 @@ fn a_loop_piece_is_split_outside_quotes_and_past_its_assignments() {
     assert!(changes_directory("pushd /tmp"));
     assert!(changes_directory("$step /tmp"));
 }
+
+#[test]
+fn a_prefixed_or_computed_directory_change_is_still_seen() {
+    for command in [
+        "builtin cd /tmp",
+        "command cd /tmp",
+        "time -p cd /tmp",
+        "exec pushd /tmp",
+        "eval \"$step\"",
+        ". ./env.sh",
+        "'c'd /tmp",
+    ] {
+        assert!(changes_directory(command), "{command}");
+    }
+    for command in ["command -v node", "time node -e 'console.log(1)' x"] {
+        assert!(!changes_directory(command), "{command}");
+    }
+}
+
+#[test]
+fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
+    for (text, bare) in [
+        (
+            "printf x > run.js && node run.js",
+            "printf x && node run.js",
+        ),
+        (
+            "printf x >./run.js; node /w/run.js",
+            "printf x; node /w/run.js",
+        ),
+        (
+            "echo x >> \"run.js\" && node ./run.js",
+            "echo x && node ./run.js",
+        ),
+        ("echo x &>run.js; node run.js", "echo x; node run.js"),
+    ] {
+        assert!(writes_a_named_file(text, bare), "{text}");
+    }
+    for (text, bare) in [
+        (
+            "node server.js > /tmp/x.log 2>&1 & echo started",
+            "node server.js & echo started",
+        ),
+        (
+            "node server.js > /tmp/x.log 2>&1 & trap 'kill \"$p\" 2>/dev/null' EXIT",
+            "node server.js & trap 'kill \"$p\" 2>/dev/null' EXIT",
+        ),
+        ("node server.js 2>/dev/null &", "node server.js &"),
+    ] {
+        assert!(!writes_a_named_file(text, bare), "{text}");
+    }
+}
+
+#[test]
+fn a_shell_variable_may_expand_only_a_quoted_path_root() {
+    for word in ["x=$SECRET", "x=\"$SECRET\"", "x=${HOME}", "x=\"$1/a\""] {
+        assert!(!binds_a_shell_variable(word), "{word}");
+    }
+    assert!(binds_a_shell_variable("x=\"${HOME}/a\""));
+}

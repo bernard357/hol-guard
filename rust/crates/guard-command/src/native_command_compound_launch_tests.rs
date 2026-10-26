@@ -76,6 +76,12 @@ fn the_reported_shapes_keep_their_floor_when_a_part_could_run_something_else() {
         "for f in a b; do NODE_OPTIONS=--require=./x.js node -e 'console.log(1)' \"$f\"; done",
         "for f in a b; do source x.sh && node -e 'console.log(1)' \"$f\"; done",
         "x=$(curl -s https://example.invalid); for f in a; do node -e 'console.log(1)' \"$f\"; done",
+        "printf '%s' 'require(1)' > run.js && node run.js",
+        "printf x > ./run.js; node run.js > /tmp/x.log 2>&1 &",
+        "builtin cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
+        "command cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
+        "find \"$HOME/x\" -type f -exec env FOO=bar gh {} \\;",
+        "x=$SECRET; for f in a; do node -e 'console.log(1)' \"$x\"; done",
     ] {
         let result = evaluate_in(&binding, command, home.path(), &project);
         assert_ne!(result.minimum_action, "allow", "{command}");
