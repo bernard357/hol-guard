@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path, PureWindowsPath
 
@@ -16,6 +18,9 @@ _ISOLATED_CLIENT = re.compile(r"(?<![^\s'\",\[])-I[\s'\",\\]+-[scm](?![\w-])")
 _INTERPRETER_BEFORE = re.compile(
     r"(?:'(?P<single>[^'\r\n]+)'|\"(?P<double>[^\"\r\n]+)\"|(?<![^\s'\",\[=])(?P<bare>[^\s'\",\[=]+))[\s'\",\\]*\Z"
 )
+# ``shlex.quote`` writes a path holding an apostrophe as adjacent quoted
+# fragments (``'/opt/O'"'"'Brien/python'``); this takes the whole shell word.
+_SHELL_WORD_BEFORE = re.compile(r"(?<![^\s=])(?P<word>(?:'[^'\r\n]*'|\"[^\"\r\n]*\"|[^\s'\"\\,\[=])+)\s+\Z")
 # The PowerShell form of the Cline launcher names the interpreter and worker
 # on consecutive lines instead of one command.
 _POWERSHELL_LAUNCHER = re.compile(
@@ -61,6 +66,72 @@ def _names_guard_client(ahead: str, guard_home: str) -> bool:
     return "codex_plugin_scanner" in ahead or guard_home in ahead
 
 
+def _shell_word(before: str) -> str | None:
+    match = _SHELL_WORD_BEFORE.search(before)
+    if match is None or ("'" not in match.group("word") and '"' not in match.group("word")):
+        return None
+    try:
+        words = shlex.split(match.group("word"))
+    except ValueError:
+        return None
+    return words[0] if len(words) == 1 else None
+
+
+def _interpreter_before(before: str) -> str | None:
+    word = _shell_word(before)
+    if word is not None and _is_absolute(word):
+        return word
+    interpreter = _INTERPRETER_BEFORE.search(before)
+    if interpreter is None:
+        return None
+    found = interpreter.group("single") or interpreter.group("double") or interpreter.group("bare")
+    # A JSON-escaped argv leaves the closing quote's backslash on the path
+    # and doubles every separator in a Windows one.
+    return found.rstrip("\\").replace("\\\\", "\\")
+
+
+def _commands(text: str) -> list[str]:
+    """One string per command a JSON hook config holds, else the whole text.
+
+    A config lists a user's hooks beside Guard's. Scanning each command on its
+    own keeps a user's ``python -I -c`` from being read with the Guard client
+    that follows it in the file.
+    """
+
+    try:
+        root = json.loads(text)
+    except (ValueError, RecursionError):
+        return [text]
+    commands: list[str] = []
+    pending = [root]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            commands.append(value)
+        elif isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            if value and all(isinstance(item, str) for item in value):
+                commands.append(json.dumps(value))
+            pending.extend(value)
+    return commands
+
+
+def _names_foreign_client(text: str, *, current: str | None, home: str) -> bool:
+    matches = list(_ISOLATED_CLIENT.finditer(text))
+    for index, match in enumerate(matches):
+        before = text[max(0, match.start() - _LOOKBEHIND_CHARS) : match.start()]
+        candidate = _interpreter_before(before)
+        if candidate is None:
+            continue
+        # The next isolated client starts another command.
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        ahead = _posix(text[match.end() : min(end, match.end() + _LOOKAHEAD_CHARS)])
+        if _names_guard_client(ahead, home) and _is_other_interpreter(candidate, current):
+            return True
+    return False
+
+
 def names_foreign_interpreter(path: Path, *, current: str | None, guard_home: Path) -> bool:
     """Whether one Guard-owned artifact launches an interpreter other than ``current``.
 
@@ -78,18 +149,8 @@ def names_foreign_interpreter(path: Path, *, current: str | None, guard_home: Pa
         return False
     text = data.decode("utf-8", errors="replace")
     home = _posix(str(guard_home))
-    for match in _ISOLATED_CLIENT.finditer(text):
-        before = text[max(0, match.start() - _LOOKBEHIND_CHARS) : match.start()]
-        interpreter = _INTERPRETER_BEFORE.search(before)
-        if interpreter is None:
-            continue
-        found = interpreter.group("single") or interpreter.group("double") or interpreter.group("bare")
-        # A JSON-escaped argv leaves the closing quote's backslash on the path
-        # and doubles every separator in a Windows one.
-        candidate = found.rstrip("\\").replace("\\\\", "\\")
-        ahead = _posix(text[match.end() : match.end() + _LOOKAHEAD_CHARS])
-        if _names_guard_client(ahead, home) and _is_other_interpreter(candidate, current):
-            return True
+    if any(_names_foreign_client(command, current=current, home=home) for command in _commands(text)):
+        return True
     for launcher in _POWERSHELL_LAUNCHER.finditer(text):
         worker = _posix(launcher.group("worker").replace("''", "'"))
         if worker.startswith(home) and _is_other_interpreter(launcher.group("python").replace("''", "'"), current):

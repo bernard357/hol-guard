@@ -191,6 +191,29 @@ def test_the_source_cli_form_names_its_interpreter(tmp_path: Path) -> None:
     assert _scan(tmp_path, config)
 
 
+def test_a_user_hook_before_guards_entry_is_not_read_with_it(tmp_path: Path) -> None:
+    guard = tmp_path / "guard"
+    user = {"type": "command", "command": "/usr/bin/python3 -I -c 'print(1)'"}
+    managed = [
+        f"{_current()} -I -c '{_bootstrap('/site')}'",
+        f"{guard}/native-runtime/{'a' * 64}/hol-guard-runtime bounded-hook-bridge",
+    ]
+    for command in managed:
+        handler = {"type": "command", "command": command}
+        config = json.dumps({"hooks": {"events": {"PreToolUse": [{"hooks": [user, handler]}]}}}, indent=2)
+
+        assert not _scan(tmp_path, config)
+
+
+def test_a_posix_launcher_for_an_interpreter_path_with_an_apostrophe_is_read(tmp_path: Path) -> None:
+    interpreter = "/opt/O'Brien/venv/bin/python"
+    worker = tmp_path / "guard" / "managed" / "cline" / "hook-workers" / "PreToolUse.py"
+    launcher = _posix_wrapper(worker=worker, python=interpreter)
+
+    assert _scan(tmp_path, launcher)
+    assert not _scan(tmp_path, launcher, current=interpreter)
+
+
 def test_a_windows_launcher_names_its_interpreter(tmp_path: Path) -> None:
     guard_home = tmp_path / "guard"
     worker = guard_home / "managed" / "cline" / "hook-workers" / "PreToolUse.py"
