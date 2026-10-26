@@ -102,12 +102,18 @@ def test_stats_says_unknown_rather_than_zero() -> None:
         {
             **STATS,
             "listing": {**STATS["listing"], "measured": False, "views": None},
-            "attestedInstalls": {**STATS["attestedInstalls"], "machines": None, "viaGuard": None, "byRuntime": []},
+            "attestedInstalls": {
+                **STATS["attestedInstalls"],
+                "machines": None,
+                "viaGuard": None,
+                "byRuntime": [{"runtime": "codex", "machines": None}],
+            },
         }
     )
     assert "  not measured yet" in lines
     assert "  machines         under 5" in lines
-    assert not any("via hol-guard" in line for line in lines)
+    assert "  via hol-guard    under 5" in lines
+    assert "  codex            under 5" in lines
     assert stats.render_stats({**STATS, "attestedInstalls": None})[-1] == "Attested installs: none reported yet"
 
 
@@ -148,3 +154,13 @@ def test_stats_rejects_an_unexpected_answer(monkeypatch: pytest.MonkeyPatch) -> 
     code, _, err = run(["plugin", "stats", "acme/toolgate"], monkeypatch)
     assert code == 2
     assert "expected shape" in err
+
+
+def test_stats_tolerates_a_malformed_runtime_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = json.dumps({**STATS, "attestedInstalls": {**STATS["attestedInstalls"], "byRuntime": 1}}).encode()
+    monkeypatch.setattr(stats, "managed_urlopen", lambda *args, **kwargs: Reply(body))
+    monkeypatch.setenv("HOL_API_KEY", "holp_abc.secret")
+    code, out, err = run(["plugin", "stats", "acme/toolgate"], monkeypatch)
+    assert code == 0
+    assert "machines" in out
+    assert "Traceback" not in err

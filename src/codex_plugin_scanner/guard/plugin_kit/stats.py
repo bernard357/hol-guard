@@ -73,8 +73,17 @@ def fetch_stats(slug: str, key: str) -> dict[str, Any]:
     return stats
 
 
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _count(value: object) -> str:
-    return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else "not measured"
+    return f"{value:,}" if _is_count(value) else "not measured"
+
+
+def _install_count(value: object, minimum: object) -> str:
+    # HOL sends null for an install count it withholds under its minimum.
+    return f"{value:,}" if _is_count(value) else f"under {minimum}"
 
 
 def render_stats(stats: Mapping[str, Any]) -> list[str]:
@@ -100,13 +109,11 @@ def render_stats(stats: Mapping[str, Any]) -> list[str]:
         return lines
     minimum = installs.get("minMachines")
     lines.append(f"Attested installs, week {installs.get('week')} (counts under {minimum} machines are withheld)")
-    machines = installs.get("machines")
-    lines.append(f"  machines         {_count(machines) if machines is not None else f'under {minimum}'}")
-    via_guard = installs.get("viaGuard")
-    if isinstance(via_guard, int) and not isinstance(via_guard, bool):
-        lines.append(f"  via hol-guard    {via_guard:,}")
+    lines.append(f"  machines         {_install_count(installs.get('machines'), minimum)}")
+    if "viaGuard" in installs:
+        lines.append(f"  via hol-guard    {_install_count(installs.get('viaGuard'), minimum)}")
     by_runtime = installs.get("byRuntime")
     for cell in by_runtime if isinstance(by_runtime, list) else []:
         if isinstance(cell, Mapping):
-            lines.append(f"  {cell.get('runtime')!s:<16} {_count(cell.get('machines'))}")
+            lines.append(f"  {cell.get('runtime')!s:<16} {_install_count(cell.get('machines'), minimum)}")
     return lines
