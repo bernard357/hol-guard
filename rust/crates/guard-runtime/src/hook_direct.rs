@@ -375,10 +375,6 @@ fn answer(
         Some(posture) => posture == "watch",
         None => snapshot.mode == "observe",
     };
-    // Outside Watch the daemon may add Guard's notice to a Claude Code
-    // prompt response.
-    let prompt_notice =
-        event == USER_PROMPT_SUBMIT && !recording_only && request.harness == CLAUDE_CODE;
     if binding.evidence_drain != Some(true) {
         return Err(HookDirectDefer::EvidenceUndrained);
     }
@@ -475,7 +471,7 @@ fn answer(
             }
         },
         POST_TOOL_USE => post_tool_answer(&edge)?,
-        _ => prompt_answer(&edge, prompt_notice)?,
+        _ => prompt_answer(&edge)?,
     };
     // Not part of the hook's answer: the drain raises it with the evidence.
     let connector_notice = answered
@@ -565,7 +561,7 @@ fn answer(
 #[path = "hook_direct_claude_permission_text.rs"]
 pub(crate) mod claude_permission_text;
 #[path = "hook_direct_claude_prompt_text.rs"]
-mod claude_prompt_text;
+pub(crate) mod claude_prompt_text;
 #[path = "hook_direct_contained.rs"]
 pub(crate) mod contained;
 #[path = "hook_direct_cursor.rs"]
