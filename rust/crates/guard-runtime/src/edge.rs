@@ -444,6 +444,7 @@ fn evaluate_validated_envelope(
                 .and_then(|snapshot| snapshot.command_extensions.as_ref())
                 .map(guard_command::native_command_controls::CompiledNativeCommandControls::health),
             std::path::Path::new(&envelope.source.guard_home),
+            &envelope.source.home_dir,
         );
     }
     let harness_response = guard_command::hook_responses::render_edge_response(

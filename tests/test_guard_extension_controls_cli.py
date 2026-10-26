@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.cli import main
+from codex_plugin_scanner.cli import _build_parser, main
 from codex_plugin_scanner.guard.cli import extension_controls_commands
 from codex_plugin_scanner.guard.cli.extension_controls_commands import (
     GuardDaemonRequestError,
@@ -328,3 +328,24 @@ def test_patterns_filters_by_query_and_tool_and_reports_local_state(capsys: pyte
     assert "gh pr merge 123 --merge" in out
     assert "block" in out
     assert "gh pr view 123" not in out
+
+
+def test_recover_authority_accepts_the_home_the_block_names(tmp_path: Path) -> None:
+    """The home goes on `command`, which is the parser that carries it.
+
+    `command_policy_repair.rs` prints this line to a person whose every
+    command is blocked, and the recovery verb takes no options of its own, so
+    a `--home` after it would be handed to the leaf and rejected. That failure
+    would only show up on an install whose Guard home is not the default one,
+    which is the install the line exists for.
+    """
+
+    guard_home = tmp_path / "elsewhere" / ".hol-guard"
+    parser = _build_parser("hol-guard", program_mode="hol-guard")
+
+    parsed = parser.parse_args(
+        ["command", "--home", str(guard_home), "controls", "recover-authority"]
+    )
+
+    assert parsed.home == str(guard_home)
+    assert parsed.controls_command == "recover-authority"
