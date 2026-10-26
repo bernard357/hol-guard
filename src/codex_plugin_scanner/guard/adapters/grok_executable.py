@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from .base import HarnessContext
+from .base import HarnessContext, _which_from_user_directories
 
 _REGISTRATION_SCHEMA_VERSION = 1
 _REGISTRATION_FILE = "trusted-executable.json"
@@ -170,7 +170,7 @@ def sanitized_grok_launch_environment(
 
 def _which_grok() -> str | None:
     for name in grok_executable_names():
-        candidate = shutil.which(name)
+        candidate = shutil.which(name) or _which_from_user_directories(name)
         if candidate is not None:
             return candidate
     return None
