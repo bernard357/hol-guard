@@ -2181,6 +2181,33 @@ def test_exchange_guard_device_code_does_not_poll_after_backoff_crosses_deadline
     assert sleeps == [7.0]
 
 
+def test_exchange_guard_device_code_backoff_keeps_server_interval_above_cap() -> None:
+    attempts: list[int] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: int):
+        del request, timeout
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise TimeoutError("timed out")
+        return _device_token_success_response()
+
+    result = connect_flow.exchange_guard_device_code(
+        token_endpoint="https://hol.org/api/guard/oauth/token",
+        client_id="guard-local-daemon",
+        device_code="device-code-123",
+        dpop_key_material=generate_dpop_key_pair(),
+        interval_seconds=90,
+        expires_in_seconds=600,
+        urlopen=fake_urlopen,
+        sleep=sleeps.append,
+        now=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    assert result.access_token == "access-123"
+    assert sleeps == [90.0]
+
+
 def test_exchange_guard_device_code_does_not_retry_non_transient_url_errors() -> None:
     attempts: list[int] = []
 

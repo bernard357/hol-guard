@@ -799,7 +799,11 @@ def exchange_guard_device_code(
             remaining_seconds = deadline - time.monotonic()
             if remaining_seconds <= 0:
                 raise _unanswered_device_poll_error() from error
-            current_interval = min(current_interval * 2, DEVICE_CODE_TRANSIENT_MAX_INTERVAL_SECONDS)
+            # Back off, but never below the interval Guard Cloud asked for.
+            current_interval = max(
+                current_interval,
+                min(current_interval * 2, DEVICE_CODE_TRANSIENT_MAX_INTERVAL_SECONDS),
+            )
             sleep(float(min(current_interval, remaining_seconds)))
             # Never start a poll after the wait window closes, even when the
             # backoff sleep ran up to the deadline.
