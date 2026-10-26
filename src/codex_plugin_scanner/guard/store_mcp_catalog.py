@@ -12,20 +12,6 @@ _MAX_SNAPSHOT_BYTES = 2_000_000
 _MAX_SNAPSHOT_TOOLS = 10_000
 
 
-def load_mcp_catalogs(connection: sqlite3.Connection) -> dict[str, tuple[str, dict[str, object]]]:
-    catalogs: dict[str, tuple[str, dict[str, object]]] = {}
-    rows = connection.execute(
-        "select cli_id, identity_hash, catalog_json, revision, updated_at, last_complete_at from local_mcp_catalog"
-    ).fetchall()
-    for cli_id, identity_hash, raw, revision, updated_at, last_complete_at in rows:
-        payload = _decode_snapshot(raw)
-        if payload is None:
-            continue
-        payload.update(revision=revision, updated_at=updated_at, last_complete_at=last_complete_at)
-        catalogs[str(cli_id)] = (str(identity_hash), payload)
-    return catalogs
-
-
 def tool_definition_authority_hash(definition: object) -> str | None:
     if not isinstance(definition, dict) or not isinstance(definition.get("inputSchema"), dict):
         return None
