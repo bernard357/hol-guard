@@ -425,6 +425,7 @@
     "src/codex_plugin_scanner/guard/native_package_audit_projection.py",
     "src/codex_plugin_scanner/guard/native_workspace_inventory.py",
     "src/codex_plugin_scanner/guard/native_workspace_snapshot.py",
+    "src/codex_plugin_scanner/guard/native_workspace_mcp_config.py",
     "src/codex_plugin_scanner/guard/native_workspace_fix.py",
     "src/codex_plugin_scanner/guard/native_codex_hook_identity.py",
     "src/codex_plugin_scanner/guard/native_inventory_source_evidence.py",
