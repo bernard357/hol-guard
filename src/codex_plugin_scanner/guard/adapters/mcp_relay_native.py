@@ -9,7 +9,9 @@ selecting it never widens what a call may do.
 
 Installers select the relay when the validated runtime advertises
 ``mcp-stdio-relay-v1``; otherwise they keep launching the
-Python proxy. A session whose calls the resident cannot decide is handed to the
+Python proxy. A frozen build launches the verified runtime copy under the
+proxy's ``--guard-home``, as its hooks do, because its bundled runtime can
+live in a per-launch extraction directory. A session whose calls the resident cannot decide is handed to the
 Python proxy by the relay at startup. ``HOL_GUARD_MCP_RELAY=python`` keeps the
 Python proxy, like the hook bridge overrides. ``HOL_GUARD_MCP_RELAY=native``
 selects the relay from any validated runtime that serves the resident's relay
@@ -20,7 +22,6 @@ defers are still refused.
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -33,21 +34,19 @@ RELAY_PROXY_COMMANDS = frozenset({"codex-mcp-proxy", "copilot-mcp-proxy", "curso
 _PYTHON_PROXY_PREFIX = ("-m", "codex_plugin_scanner.cli", "guard")
 
 
-def native_mcp_relay() -> Path | None:
-    """The validated native runtime that should launch MCP proxies, or None."""
+def native_mcp_relay(guard_home: Path | None = None) -> Path | None:
+    """The validated native runtime that should launch MCP proxies, or None.
+
+    A frozen build needs ``guard_home`` to name its durable runtime copy.
+    """
 
     selection = os.environ.get(MCP_RELAY_SELECTION_ENV)
-    if selection == "python" or getattr(sys, "frozen", False):
+    if selection == "python":
         return None
-    if selection == "native":
-        return _validated_runtime(NATIVE_MCP_RELAY_DECIDE_FEATURE)
-    return _validated_runtime(NATIVE_MCP_RELAY_FEATURE)
-
-
-def _validated_runtime(feature: str) -> Path | None:
+    feature = NATIVE_MCP_RELAY_DECIDE_FEATURE if selection == "native" else NATIVE_MCP_RELAY_FEATURE
     from .native_hook_bridge import native_hook_bridge_executable
 
-    return native_hook_bridge_executable(feature)
+    return native_hook_bridge_executable(feature, guard_home=guard_home)
 
 
 def _relays(python_args: Sequence[str]) -> bool:
@@ -60,10 +59,27 @@ def mcp_proxy_launch(python: str, python_args: Sequence[str]) -> tuple[str, list
 
     if not _relays(python_args):
         return python, list(python_args)
-    relay = native_mcp_relay()
+    relay = native_mcp_relay(_guard_home(python_args))
     if relay is None:
         return python, list(python_args)
     return str(relay), [NATIVE_MCP_RELAY_COMMAND, python, *python_args]
+
+
+def _guard_home(python_args: Sequence[str]) -> Path | None:
+    """The proxy argv's ``--guard-home``, read as the relay parses it.
+
+    Tokens after the proxy command are ``--flag value`` or ``--flag=value``
+    pairs, and a repeated flag keeps its last value.
+    """
+
+    guard_home: str | None = None
+    rest = iter(tuple(python_args)[len(_PYTHON_PROXY_PREFIX) + 1 :])
+    for token in rest:
+        flag, separator, inline = token.partition("=")
+        value = inline if separator else next(rest, None)
+        if flag == "--guard-home" and value:
+            guard_home = value
+    return Path(guard_home) if guard_home else None
 
 
 def mcp_proxy_command(command: Sequence[str]) -> list[str]:
