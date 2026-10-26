@@ -86,6 +86,14 @@ _ERRORS = {
         "Guard has no record of installing this listing for the runtimes named, so it will not remove it. "
         "Use the runtime's own CLI instead."
     ),
+    "plugin_kit_install_endpoint_invalid": (
+        "HOL_GUARD_PLUGIN_SPEC_URL must be an https URL, or http on localhost or host.docker.internal, "
+        "with no credentials, query or fragment."
+    ),
+    "plugin_kit_install_recorded_elsewhere": (
+        "Guard recorded this listing through a different install-spec URL. Set HOL_GUARD_PLUGIN_SPEC_URL "
+        "as it was when you installed it, or unset it if you installed from hol.org."
+    ),
     "plugin_kit_ledger_invalid": (
         "Guard's install record (plugin-kit/installs.json in the Guard home) could not be read, so nothing will run."
     ),
@@ -233,7 +241,15 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         ("install", "Install a HOL listing with each runtime's own CLI. Prints the plan unless --apply."),
         ("uninstall", "Remove a listing that plugin install added. Prints the plan unless --apply."),
     ):
-        command = commands.add_parser(name, help=help_text, description=help_text)
+        command = commands.add_parser(
+            name,
+            help=help_text,
+            description=help_text,
+            epilog=(
+                "To test against your own portal, set HOL_GUARD_PLUGIN_SPEC_URL to its install-spec URL "
+                "(https, or http on localhost). Guard warns on every run while it is set."
+            ),
+        )
         command.add_argument(
             "target",
             help="HOL listing, such as owner/plugin"
@@ -381,9 +397,15 @@ def _install(args: argparse.Namespace) -> int:
         slug, version = install.parse_target(args.target)
         if not installing and version:
             raise install.PluginInstallError("Name the listing without a version, such as owner/plugin.")
+        endpoint, listing_origin = install.spec_endpoint()
+        if listing_origin:
+            print(
+                f"Warning: {install.SPEC_URL_ENV} is set. Install details come from {endpoint}, not hol.org.",
+                file=sys.stderr,
+            )
         spec: dict[str, Any] | None = None
         if installing:
-            spec = install.read_spec_file(args.spec_file) if args.spec_file else install.fetch_spec(slug)
+            spec = install.read_spec_file(args.spec_file) if args.spec_file else install.fetch_spec(slug, endpoint)
     except install.PluginInstallError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2
@@ -396,6 +418,8 @@ def _install(args: argparse.Namespace) -> int:
         if installing
         else {"command": "uninstall", "guard_home": str(guard_home), "slug": slug}
     )
+    if listing_origin:
+        request["listing_origin"] = listing_origin
     plan = _call({**request, "available": available, "runtimes": runtimes})
     if plan is None:
         return 2
@@ -411,7 +435,7 @@ def _install(args: argparse.Namespace) -> int:
         return 2
 
     def record(runtime: str) -> None:
-        install.record(guard_home, slug, runtime, installed=installing, spec=spec)
+        install.record(guard_home, slug, runtime, installed=installing, spec=spec, listing_origin=listing_origin)
 
     try:
         return install.apply_plan(plan, assume_yes=args.yes, record=record)

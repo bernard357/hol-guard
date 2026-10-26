@@ -89,12 +89,14 @@ pub(crate) fn daemon_target(guard_home: &Path, harness: &str) -> Option<DaemonTa
 impl DaemonTarget {
     /// The daemon's status and body for a hook posted to `path`, or `None`
     /// when no complete answer of at most `MAX_DAEMON_RESPONSE_BYTES`
-    /// arrived in time. A refusal is returned as the daemon gave it.
+    /// arrived in time. A refusal is returned as the daemon gave it. `miss`
+    /// names why the resident did not answer the hook.
     pub(crate) fn post_status(
         &self,
         path: &str,
         data: &str,
         deadline: Instant,
+        miss: DirectMiss,
     ) -> Option<(u16, Vec<u8>)> {
         let mut connection = LoopbackConnection::new(&self.host, self.port);
         let head = connection
@@ -104,6 +106,7 @@ impl DaemonTarget {
                     ("Content-Type", "application/json"),
                     ("Connection", "close"),
                     ("X-Guard-Token", self.token.as_str()),
+                    (DIRECT_MISS_HEADER, miss.code()),
                 ],
                 data.as_bytes(),
                 deadline,
@@ -155,18 +158,9 @@ impl PostFailure {
 }
 
 /// The daemon's `200` body for a hook posted to `path`, as UTF-8 text
-/// without a BOM, or why there is none.
-pub(crate) fn post_hook_reply(
-    target: &DaemonTarget,
-    path: &str,
-    data: &str,
-    deadline: Instant,
-) -> Result<String, PostFailure> {
-    post_hook_reply_missed(target, path, data, deadline, None)
-}
-
-/// [`post_hook_reply`], naming why the resident did not answer the hook.
-fn post_hook_reply_missed(
+/// without a BOM, or why there is none. `miss`, when set, names why the
+/// resident did not answer the hook.
+pub(crate) fn post_hook_reply_missed(
     target: &DaemonTarget,
     path: &str,
     data: &str,

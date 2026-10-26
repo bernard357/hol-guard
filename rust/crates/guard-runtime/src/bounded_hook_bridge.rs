@@ -25,6 +25,7 @@
 //! it.
 
 use std::io::{self, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::bounded_hook_bridge_render::{
@@ -48,7 +49,7 @@ pub(crate) use input::read_hook_input;
 mod daemon;
 use daemon::post_hook;
 pub(crate) use daemon::{
-    daemon_target, post_hook_reply, transport_deadline, DaemonTarget, PostFailure,
+    daemon_target, post_hook_reply_missed, transport_deadline, DaemonTarget, PostFailure,
 };
 
 pub(crate) const BRIDGE_COMMAND: &str = "bounded-hook-bridge";
@@ -100,7 +101,15 @@ impl Prepared {
 
     /// `_daemon_response_to_native` for `answer`, `None` for an answer that
     /// is not an object or whose lone surrogates cannot be told apart.
-    fn render(&self, harness: &str, answer: &SurrogateMapped) -> Option<Rendered> {
+    ///
+    /// `guard_home` is the home this bridge was launched against, which an
+    /// authority block names in the recovery command it offers.
+    fn render(
+        &self,
+        harness: &str,
+        answer: &SurrogateMapped,
+        guard_home: &Path,
+    ) -> Option<Rendered> {
         let PyVal::Dict(entries) = &answer.value else {
             return None;
         };
@@ -108,7 +117,7 @@ impl Prepared {
         if unmap && (self.collision || answer.collision) {
             return None;
         }
-        daemon_response_to_native(entries, harness, &self.event_name, unmap)
+        daemon_response_to_native(entries, harness, &self.event_name, unmap, Some(guard_home))
     }
 }
 
@@ -219,7 +228,7 @@ pub(crate) fn route_hook(config: &BridgeConfig, raw: &[u8], deadline: Instant) -
                 Some(miss),
             ) {
                 Some(answer) => {
-                    let rendered = prepared.render(&config.harness, &answer);
+                    let rendered = prepared.render(&config.harness, &answer, &config.guard_home);
                     return answered_route(rendered, &prepared, deadline);
                 }
                 None => Some(target),
@@ -267,7 +276,7 @@ fn restarted_route(
     let Some(answer) = answer else {
         return prepared.failed();
     };
-    let rendered = prepared.render(&config.harness, &answer);
+    let rendered = prepared.render(&config.harness, &answer, &config.guard_home);
     answered_route(rendered, &prepared, deadline)
 }
 
@@ -305,7 +314,7 @@ fn direct_route(
     // never reaches the daemon.
     let rendered = pyjson::parse_mapping_lone_surrogates(&answer)
         .ok()
-        .and_then(|parsed| prepared.render(&config.harness, &parsed));
+        .and_then(|parsed| prepared.render(&config.harness, &parsed, &config.guard_home));
     Ok(answered_route(rendered, prepared, deadline))
 }
 

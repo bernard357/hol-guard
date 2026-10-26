@@ -383,3 +383,171 @@ fn spec_shape_is_strict() {
         "plugin_kit_install_spec_unsupported"
     );
 }
+
+#[test]
+fn listing_urls_follow_an_overridden_endpoint_origin_and_nothing_else() {
+    let local = "http://127.0.0.1:3000/";
+    let mut fixture = spec();
+    fixture["listingUrl"] = json!("http://127.0.0.1:3000/registry/plugins/acme%2Ftoolgate");
+
+    // Without an override only hol.org listings plan.
+    assert_eq!(
+        error("install", fixture.clone(), &[]),
+        "plugin_kit_install_spec_invalid"
+    );
+    let with_origin = |spec: Value, origin: &str| {
+        call(json!({"command": "install", "spec": spec, "listing_origin": origin}))
+    };
+    let planned = with_origin(fixture.clone(), local);
+    assert_eq!(planned["ok"], json!(true), "{planned}");
+    assert_eq!(
+        planned["result"]["listing_url"],
+        json!("http://127.0.0.1:3000/registry/plugins/acme%2Ftoolgate")
+    );
+
+    // An override replaces hol.org rather than adding to it, and a lookalike
+    // host or a port change is a different origin.
+    for (origin, listing) in [
+        (local, "https://hol.org/registry/plugins/acme%2Ftoolgate"),
+        (local, "http://127.0.0.1:3001/registry/plugins/x"),
+        (local, "http://127.0.0.1:3000.evil.example/x"),
+        (
+            "https://fixtures.test/",
+            "https://fixtures.test.evil.example/x",
+        ),
+    ] {
+        let mut other = spec();
+        other["listingUrl"] = json!(listing);
+        let response = with_origin(other, origin);
+        assert_eq!(
+            response["error"],
+            json!("plugin_kit_install_spec_invalid"),
+            "{origin} {listing}"
+        );
+    }
+
+    // The origin itself must be a bare scheme, host and port.
+    for origin in [
+        "ftp://127.0.0.1/",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3000/api/",
+        "http://user@127.0.0.1/",
+        "http://127.0.0.1 /",
+        "",
+    ] {
+        let response = with_origin(fixture.clone(), origin);
+        assert_eq!(
+            response["error"],
+            json!("plugin_kit_request_invalid"),
+            "{origin:?}"
+        );
+    }
+
+    // The record and uninstall accept the same origin, so a fixture install
+    // can be undone through the same endpoint.
+    let home = guard_home();
+    let recorded = call(json!({
+        "command": "record",
+        "guard_home": home_str(&home),
+        "slug": "acme/toolgate",
+        "runtime": "codex",
+        "installed": true,
+        "spec": fixture,
+        "listing_origin": local,
+    }));
+    assert_eq!(recorded["ok"], json!(true), "{recorded}");
+    let removed = call(json!({
+        "command": "uninstall",
+        "guard_home": home_str(&home),
+        "slug": "acme/toolgate",
+        "available": ["codex"],
+        "listing_origin": local,
+    }));
+    assert_eq!(removed["ok"], json!(true), "{removed}");
+    // Removing it without the override names the mismatch rather than
+    // calling a readable record unreadable.
+    let recorded = call(json!({
+        "command": "record",
+        "guard_home": home_str(&home),
+        "slug": "acme/toolgate",
+        "runtime": "codex",
+        "installed": true,
+        "spec": fixture,
+        "listing_origin": local,
+    }));
+    assert_eq!(recorded["ok"], json!(true), "{recorded}");
+    assert_eq!(
+        uninstall(&home, "acme/toolgate", &[])["error"],
+        json!("plugin_kit_install_recorded_elsewhere")
+    );
+}
+
+#[test]
+fn the_kit_checks_an_endpoint_override_and_normalizes_its_origin() {
+    let endpoint = |value: &str| call(json!({"command": "endpoint", "value": value}));
+    for (value, origin) in [
+        (
+            "https://staging.example/api/guard/plugins/install-spec",
+            "https://staging.example/",
+        ),
+        (
+            "https://Staging.Example:443/spec",
+            "https://staging.example/",
+        ),
+        (
+            "https://staging.example:0443/spec",
+            "https://staging.example/",
+        ),
+        (
+            "https://staging.example:8443/spec",
+            "https://staging.example:8443/",
+        ),
+        (
+            "http://localhost:3000/api/guard/plugins/install-spec",
+            "http://localhost:3000/",
+        ),
+        ("http://127.0.0.1/spec", "http://127.0.0.1/"),
+        ("http://[::1]:3000/spec", "http://[::1]:3000/"),
+        (
+            "http://host.docker.internal:3000/spec",
+            "http://host.docker.internal:3000/",
+        ),
+    ] {
+        let response = endpoint(value);
+        assert_eq!(
+            response["result"]["origin"],
+            json!(origin),
+            "{value} {response}"
+        );
+    }
+    for value in [
+        "http://registry.example/spec",
+        "http://10.0.0.5:3000/spec",
+        "ftp://127.0.0.1/spec",
+        "https://user:pass@registry.example/spec",
+        "https://@registry.example/spec",
+        "https://:@registry.example/spec",
+        "https://registry.example/spec?slug=other",
+        "https://registry.example/spec?",
+        "https://registry.example/spec#x",
+        "https://registry.example/spec#",
+        "https://registry.example:/spec",
+        "http://localhost:0/spec",
+        "http://127.0.0.1:99999/spec",
+        "https://my_portal.example/spec",
+        "https://registry%2eexample/spec",
+        "https://registry..example/spec",
+        "https:///spec",
+        "http://[bad/spec",
+        "https://registry.example\\@evil.example/spec",
+        "not a url",
+        "",
+    ] {
+        let response = endpoint(value);
+        assert_eq!(
+            response["error"],
+            json!("plugin_kit_install_endpoint_invalid"),
+            "{value:?} {response}"
+        );
+    }
+}

@@ -136,14 +136,105 @@ fn valid_text(value: &str, max: usize) -> bool {
 
 const INVALID: &str = "plugin_kit_install_spec_invalid";
 
-fn parse(spec: Value) -> Result<Spec, String> {
+/// Where listing pages live. HOL's own site unless the user pointed Guard at
+/// another install-spec endpoint (a local portal in tests), in which case the
+/// CLI passes that endpoint's origin and listings must live there instead.
+pub const HOL_ORIGIN: &str = "https://hol.org/";
+
+/// An origin the CLI may pass: `http(s)://host[:port]/`, nothing after it.
+pub(crate) fn valid_origin(value: &str) -> bool {
+    let Some(rest) = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let Some(authority) = rest.strip_suffix('/') else {
+        return false;
+    };
+    (1..=255).contains(&authority.len())
+        && authority
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'))
+}
+
+/// Hosts an install-spec override may reach over plain http: this machine,
+/// or the host a container runs on.
+const LOCAL_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "[::1]", "host.docker.internal"];
+
+/// Checks an `HOL_GUARD_PLUGIN_SPEC_URL` override and returns the origin its
+/// listings must use: `scheme://host[:port]/`, lowercase, with a default port
+/// left out so `:443` and no port compare equal. The CLI appends `?slug=` to
+/// the value, so it may carry no query, fragment or credentials, and only
+/// https leaves the machine.
+pub(crate) fn endpoint_origin(value: &str) -> Option<String> {
+    let printable = value
+        .bytes()
+        .all(|b| (0x21..=0x7e).contains(&b) && !matches!(b, b'?' | b'#' | b'@' | b'\\'));
+    if value.len() > 2048 || !printable {
+        return None;
+    }
+    let (scheme, rest) = value.split_once("://")?;
+    let default_port = match scheme {
+        "https" => 443,
+        "http" => 80,
+        _ => return None,
+    };
+    let authority = rest
+        .split_once('/')
+        .map_or(rest, |(authority, _)| authority);
+    let (host, port) = if let Some(inner) = authority.strip_prefix('[') {
+        let (literal, after) = inner.split_once(']')?;
+        if literal.is_empty() || !literal.bytes().all(|b| b.is_ascii_hexdigit() || b == b':') {
+            return None;
+        }
+        (format!("[{}]", literal.to_ascii_lowercase()), after)
+    } else {
+        let end = authority.find(':').unwrap_or(authority.len());
+        let host = &authority[..end];
+        let labels_ok = host.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+        if !labels_ok {
+            return None;
+        }
+        (host.to_ascii_lowercase(), &authority[end..])
+    };
+    let port = match port {
+        "" => default_port,
+        port => {
+            let digits = port.strip_prefix(':')?;
+            if !(1..=5).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let number: u32 = digits.parse().ok()?;
+            if !(1..=65535).contains(&number) {
+                return None;
+            }
+            number
+        }
+    };
+    if scheme == "http" && !LOCAL_HOSTS.contains(&host.as_str()) {
+        return None;
+    }
+    Some(if port == default_port {
+        format!("{scheme}://{host}/")
+    } else {
+        format!("{scheme}://{host}:{port}/")
+    })
+}
+
+fn parse(spec: Value, origin: &str) -> Result<Spec, String> {
     let spec: Spec = serde_json::from_value(spec).map_err(|_| INVALID.to_owned())?;
     if spec.schema != SPEC_SCHEMA {
         return Err("plugin_kit_install_spec_unsupported".to_owned());
     }
     let listing_ok = spec
         .listing_url
-        .strip_prefix("https://hol.org/")
+        .strip_prefix(origin)
         .is_some_and(|rest| valid_text(rest, 300) && !rest.contains(char::is_whitespace));
     let version_ok = spec.version.as_deref().is_none_or(|v| valid_text(v, 64));
     let repository_ok = spec.repository.as_deref().is_none_or(valid_repository);
@@ -186,8 +277,8 @@ fn parse(spec: Value) -> Result<Spec, String> {
 }
 
 /// Check a spec with the same rules as a plan, without building one.
-pub(crate) fn validate(spec: &Value) -> Result<(), String> {
-    parse(spec.clone()).map(|_| ())
+pub(crate) fn validate(spec: &Value, origin: &str) -> Result<(), String> {
+    parse(spec.clone(), origin).map(|_| ())
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {
@@ -254,14 +345,16 @@ fn step(target: &Target, action: Action, available: &BTreeSet<String>) -> Step {
 }
 
 /// Build the plan. `available` names the programs found on PATH and
-/// `requested` limits it to some runtimes (empty means every target).
+/// `requested` limits it to some runtimes (empty means every target), and
+/// `origin` is where listing pages must live (see [`HOL_ORIGIN`]).
 pub fn plan(
     spec: Value,
     action: Action,
     available: &[String],
     requested: &[String],
+    origin: &str,
 ) -> Result<Plan, String> {
-    let spec = parse(spec)?;
+    let spec = parse(spec, origin)?;
     if requested.iter().any(|r| !RUNTIMES.contains(&r.as_str())) {
         return Err("plugin_kit_install_runtime_unknown".to_owned());
     }

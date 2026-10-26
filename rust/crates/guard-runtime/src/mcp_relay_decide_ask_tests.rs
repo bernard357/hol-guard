@@ -153,9 +153,15 @@ fn a_package_call_the_proxy_would_prompt_for_first_defers() {
         assert!(prompts(mode, "codex", true, &reviewed), "{mode}");
         // Without one the route falls through to the leg the lane takes.
         assert!(!prompts(mode, "codex", false, &reviewed), "{mode}");
-        // The opencode proxy prompts natively and never elicits inline.
+        // The opencode proxy never elicits inline. Its native prompt raises
+        // nothing, and the package handler it leads to composes the lane from
+        // a fresh tool authority, so the lane answers the call either way.
         assert!(
-            prompts(mode, OPENCODE, false, &decision("approval-gate")),
+            !prompts(mode, OPENCODE, false, &decision("approval-gate")),
+            "{mode}"
+        );
+        assert!(
+            !prompts(mode, OPENCODE, true, &decision("approval-gate")),
             "{mode}"
         );
         assert!(!prompts(mode, OPENCODE, true, &reviewed), "{mode}");

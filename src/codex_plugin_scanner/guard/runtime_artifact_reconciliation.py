@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .adapters import get_adapter
 from .adapters.base import HarnessContext
 from .approvals import _live_hook_verification
 from .cli.install_commands import apply_managed_install
 from .cursor_hook_rebind import rebind_stale_cursor_hooks
+from .foreign_hook_interpreter import current_guard_python, names_foreign_interpreter
 from .shim_refresh import refresh_stale_harness_shims
 from .shims import package_shim_dashboard_status, package_shim_status, repair_package_shims
 from .store import GuardStore
@@ -106,7 +108,9 @@ def _manifest_file_paths(manifest: object) -> tuple[Path, ...]:
     of written files, OpenCode names ``managed_config_path`` and Hermes points
     ``config_path`` at its YAML while its hook lives in ``pretool_hook_path``.
     Reading every string the manifest holds covers all of them without a
-    per-harness table that would silently miss the next adapter.
+    per-harness table that would silently miss the next adapter. Paths come
+    back in manifest order, so the bound drops the last artifacts, never the
+    hook launchers an adapter lists first.
     """
 
     found: list[Path] = []
@@ -117,10 +121,10 @@ def _manifest_file_paths(manifest: object) -> tuple[Path, ...]:
         node = pending.pop()
         nodes += 1
         if isinstance(node, Mapping):
-            pending.extend(node.values())
+            pending.extend(reversed(list(node.values())))
             continue
         if isinstance(node, (list, tuple)):
-            pending.extend(node)
+            pending.extend(reversed(node))
             continue
         if not isinstance(node, str) or not node or node in seen:
             continue
@@ -156,7 +160,45 @@ def _names_stale_runtime(path: Path, current_digest: str) -> bool:
     return bool(pinned) and pinned != {current_digest}
 
 
-def _pins_stale_native_runtime(install: Mapping[str, object], current_digest: str | None) -> bool:
+def _planned_artifact_paths(harness: str, context: HarnessContext) -> tuple[Path, ...]:
+    """Existing files a fresh install would rewrite that the stored manifest may not name.
+
+    A manifest records what the adapter chose to; ZCode writes the CLI's
+    ``setting.json`` beside the Desktop ``config.json`` and names only the
+    latter, so a hook pinned to an older runtime there was never read. The
+    adapter's own install plan lists everything it publishes. A file the plan
+    would leave byte-identical cannot be stale, which also keeps preserved
+    backups of the user's earlier config out of the scan. Adapters that write
+    without a plan fall back to their manifest alone.
+    """
+
+    try:
+        plan = get_adapter(harness).prepare_install(context)
+    except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+        return ()
+    paths: list[Path] = []
+    for change in plan.files:
+        if change.after is None or change.after == change.before:
+            continue
+        try:
+            if change.path.is_file():
+                paths.append(change.path)
+        except (OSError, ValueError):
+            continue
+    return tuple(paths[:_MANIFEST_SCAN_MAX_PATHS])
+
+
+def _scanned_paths(install: Mapping[str, object], extra_paths: tuple[Path, ...]) -> tuple[Path, ...]:
+    manifest = install.get("manifest")
+    named = _manifest_file_paths(manifest) if isinstance(manifest, Mapping) else ()
+    return (*named, *(path for path in extra_paths if path not in named))
+
+
+def _pins_stale_native_runtime(
+    install: Mapping[str, object],
+    current_digest: str | None,
+    extra_paths: tuple[Path, ...] = (),
+) -> bool:
     """Whether the install's harness artifacts still launch an older runtime.
 
     The resident refuses a hook bridge whose runtime digest differs from its
@@ -165,10 +207,39 @@ def _pins_stale_native_runtime(install: Mapping[str, object], current_digest: st
 
     if current_digest is None:
         return False
-    manifest = install.get("manifest")
-    if not isinstance(manifest, Mapping):
-        return False
-    return any(_names_stale_runtime(path, current_digest) for path in _manifest_file_paths(manifest))
+    return any(_names_stale_runtime(path, current_digest) for path in _scanned_paths(install, extra_paths))
+
+
+def _launches_foreign_interpreter(
+    install: Mapping[str, object],
+    context: HarnessContext,
+    extra_paths: tuple[Path, ...] = (),
+) -> bool:
+    """Whether the install's hook artifacts still run another Guard install's Python.
+
+    The install-time file proof only hashes what it recorded, and the runtime
+    pin above only knows a frozen build's own copy. A launcher left by a
+    different Guard install keeps both of them satisfied while every hook
+    reaches a client the resident no longer serves.
+    """
+
+    current = current_guard_python()
+    return any(
+        names_foreign_interpreter(path, current=current, guard_home=context.guard_home)
+        for path in _scanned_paths(install, extra_paths)
+    )
+
+
+def _launches_stale_client(
+    harness: str,
+    install: Mapping[str, object],
+    context: HarnessContext,
+    current_digest: str | None,
+) -> bool:
+    extra_paths = _planned_artifact_paths(harness, context)
+    return _pins_stale_native_runtime(install, current_digest, extra_paths) or _launches_foreign_interpreter(
+        install, context, extra_paths
+    )
 
 
 def _managed_install_needs_artifact_repair(
@@ -179,7 +250,7 @@ def _managed_install_needs_artifact_repair(
     install: Mapping[str, object],
     current_digest: str | None,
 ) -> bool:
-    if _pins_stale_native_runtime(install, current_digest):
+    if _launches_stale_client(harness, install, context, current_digest):
         return True
     if harness == "grok":
         from .cli.install_commands import grok_hooks_protection_ready
@@ -196,7 +267,7 @@ def _managed_install_artifacts_ready(
     store: GuardStore,
     current_digest: str | None,
 ) -> bool:
-    if _pins_stale_native_runtime(install, current_digest):
+    if _launches_stale_client(harness, install, context, current_digest):
         return False
     if harness == "grok":
         from .cli.install_commands import grok_hooks_protection_ready

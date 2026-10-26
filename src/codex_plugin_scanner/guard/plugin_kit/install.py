@@ -10,6 +10,7 @@ fixed programs, and this module prints that plan. Nothing runs unless
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,10 @@ from ...version import __version__
 from ..mdm.network import ManagedNetworkError, managed_urlopen
 
 SPEC_URL = "https://hol.org/api/guard/plugins/install-spec"
+#: Points Guard at another install-spec endpoint, such as a local portal with
+#: test listings. https anywhere; plain http only on this machine or the
+#: Docker host. Listing pages must then live on the same origin.
+SPEC_URL_ENV = "HOL_GUARD_PLUGIN_SPEC_URL"
 VIA_GUARD = "hol-guard"
 #: The only programs a plan may start. Each is the runtime's own CLI.
 PROGRAMS = ("claude", "codex", "npx")
@@ -45,15 +50,41 @@ def parse_target(value: str) -> tuple[str, str | None]:
     return slug, version or None
 
 
-def fetch_spec(slug: str) -> dict[str, Any]:
-    url = f"{SPEC_URL}?{urllib.parse.urlencode({'slug': slug})}"
+def spec_endpoint(environ: Mapping[str, str] | None = None) -> tuple[str, str | None]:
+    """The install-spec URL, and its origin when the user overrode it.
+
+    The native Kit decides whether an override is allowed and what its origin
+    is, so the CLI and the plan check listings against the same rules.
+    """
+
+    value = (os.environ if environ is None else environ).get(SPEC_URL_ENV, "").strip()
+    if not value:
+        return SPEC_URL, None
+    from .cli import PluginKitNativeError, kit_request
+
+    try:
+        origin = kit_request({"command": "endpoint", "value": value}).get("origin")
+    except PluginKitNativeError as error:
+        raise PluginInstallError(str(error)) from None
+    if not isinstance(origin, str):
+        raise PluginInstallError(f"{SPEC_URL_ENV} could not be checked. Reinstall hol-guard.")
+    return value, origin
+
+
+def fetch_spec(slug: str, endpoint: str = SPEC_URL) -> dict[str, Any]:
+    url = f"{endpoint}?{urllib.parse.urlencode({'slug': slug})}"
     request = urllib.request.Request(
         url, headers={"User-Agent": f"hol-guard/{__version__}", "Accept": "application/json"}
     )
     try:
-        with managed_urlopen(request, timeout=_SPEC_TIMEOUT_SECONDS) as response:
+        # An override was checked as given; a redirect would leave those checks behind.
+        with managed_urlopen(request, timeout=_SPEC_TIMEOUT_SECONDS, allow_redirects=endpoint == SPEC_URL) as response:
             raw = response.read(_SPEC_LIMIT_BYTES + 1)
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            raise PluginInstallError(
+                f"{SPEC_URL_ENV} answered with a redirect. Set it to the final install-spec URL."
+            ) from error
         if error.code == 404:
             raise PluginInstallError(f"No plugin {slug} is listed on HOL.") from error
         if error.code == 400:
@@ -108,7 +139,13 @@ def recorded_installs(guard_home: Path) -> dict[str, list[str]]:
 
 
 def record(
-    guard_home: Path, slug: str, runtime: str, *, installed: bool, spec: Mapping[str, Any] | None = None
+    guard_home: Path,
+    slug: str,
+    runtime: str,
+    *,
+    installed: bool,
+    spec: Mapping[str, Any] | None = None,
+    listing_origin: str | None = None,
 ) -> None:
     """Add a runtime to Guard's install record (``spec`` is the one installed) or drop it."""
 
@@ -121,6 +158,8 @@ def record(
         "runtime": runtime,
         "installed": installed,
     }
+    if listing_origin:
+        request["listing_origin"] = listing_origin
     if installed:
         request["spec"] = dict(spec or {})
     try:

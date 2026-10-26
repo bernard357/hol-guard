@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 import sys
 import threading
 import time
@@ -14,26 +13,13 @@ from codex_plugin_scanner.guard.daemon import recovery_worker
 from codex_plugin_scanner.guard.daemon import server as server_module
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.native_runtime_fixtures import patch_popen_past_native_runtime
 
 
 def _patch_worker_popen(monkeypatch: pytest.MonkeyPatch, replacement: Callable[..., object]) -> None:
-    """Replace recovery-worker spawns while every other subprocess still runs.
+    """Replace worker spawns while Guard's own native runtime calls still run."""
 
-    Both recovery routes name the worker in their command: the frozen build
-    passes its own flag and the source build passes the worker module. Matching
-    on that leaves the native runtime calls these paths make on the real
-    ``Popen``, however many subcommands they use.
-    """
-
-    real_popen = subprocess.Popen
-    markers = ("--_hol-guard-codex-daemon-recovery-worker", "codex_plugin_scanner.guard.daemon.recovery_worker")
-
-    def popen(command: object, *args: object, **kwargs: object) -> object:
-        if isinstance(command, (list, tuple)) and any(str(part) in markers for part in command):
-            return replacement(command, *args, **kwargs)
-        return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
-
-    monkeypatch.setattr(subprocess, "Popen", popen)
+    patch_popen_past_native_runtime(monkeypatch, replacement)
 
 
 def test_invalid_remaining_seconds_falls_back_to_valid_milliseconds() -> None:
@@ -168,7 +154,7 @@ def test_recovery_scheduler_contains_worker_when_reservation_bind_raises(
     process = FakeProcess()
     monkeypatch.setattr(daemon_manager, "_isolated_python_module_command", lambda *_args: ["python", "worker"])
     monkeypatch.setattr(daemon_manager, "_daemon_launcher_env", lambda **_kwargs: {})
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    patch_popen_past_native_runtime(monkeypatch, lambda *_args, **_kwargs: process)
     monkeypatch.setattr(
         daemon_manager,
         "_bind_guard_daemon_recovery_reservation",
