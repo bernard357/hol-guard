@@ -12,6 +12,7 @@ from .temporary_mcp_approvals import TemporaryMcpGrantSelection, temporary_mcp_g
 
 
 class StoreTemporaryMcpMixin:
+    @serialize_policy_integrity_generation
     def apply_temporary_mcp_grant_resolution(
         self,
         *,

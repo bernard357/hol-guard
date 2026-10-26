@@ -311,7 +311,24 @@ class StorePolicyMixin:
         secret_material = (None, None) if remote else self._policy_integrity_secret_material(create=True)
         # The refresh reads the local rows and writes only the integrity status
         # row, so it commits on its own connection before the resident takes
-        # the write lock for the decision itself.
+        # the write lock for the decision itself. The generation lock spans both,
+        # because the control state no longer rides that one transaction.
+        with self.hold_policy_integrity_generation_lock():
+            self._upsert_policy_native(
+                decision,
+                now=now,
+                remote=remote,
+                secret_material=secret_material,
+            )
+
+    def _upsert_policy_native(
+        self,
+        decision: PolicyDecision,
+        *,
+        now: str,
+        remote: bool,
+        secret_material: tuple[bytes | None, str | None],
+    ) -> None:
         with self._connect() as connection:
             state = self._refresh_policy_integrity_state(
                 connection,
