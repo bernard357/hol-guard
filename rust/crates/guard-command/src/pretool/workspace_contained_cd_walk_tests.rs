@@ -24,6 +24,13 @@ fn a_marker_at_the_workspace_root_is_found_from_a_directory_below_it() {
         first_from(&deep, &workspace, marked).as_deref(),
         Some(workspace.as_path())
     );
+    // A directory the command has not created yet still resolves to the
+    // project above it. Nothing on that path exists to resolve, so the walk
+    // is the lexical one the tool would make once `cd` had created it.
+    assert_eq!(
+        first_from(&workspace.join("missing/deep"), &workspace, marked).as_deref(),
+        Some(workspace.as_path())
+    );
     assert_eq!(
         first_from(&workspace, &workspace, marked).as_deref(),
         Some(workspace.as_path())
@@ -124,4 +131,40 @@ fn a_symlink_inside_the_workspace_is_still_walked_through() {
         first_from(&link.join("deep"), &workspace, marked).as_deref(),
         Some(link.as_path())
     );
+}
+
+/// A symlink that leaves the workspace ends the walk even when the workspace
+/// root also holds a marker. The tool climbs the physical parents of the
+/// entered directory, so the lexical root is not a place it would read.
+#[cfg(unix)]
+#[test]
+fn an_external_symlink_stops_the_walk_when_the_root_also_has_a_marker() {
+    let root = scratch("external-link-and-root");
+    let workspace = root.join("workspace");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(outside.join("deep")).unwrap();
+    std::fs::write(workspace.join("marker"), "").unwrap();
+    std::fs::write(outside.join("marker"), "").unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("link")).unwrap();
+
+    assert!(first_from(&workspace.join("link/deep"), &workspace, marked).is_none());
+}
+
+/// The entered directory is the symlink, and the marker is only at the
+/// workspace root. The tool has already landed outside, so that root marker
+/// is not one it would read.
+#[cfg(unix)]
+#[test]
+fn an_external_symlink_is_not_climbed_to_the_workspace_marker() {
+    let root = scratch("external-link-only-root");
+    let workspace = root.join("workspace");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(outside.join("deep")).unwrap();
+    std::fs::write(workspace.join("marker"), "").unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("link")).unwrap();
+
+    assert!(first_from(&workspace.join("link"), &workspace, marked).is_none());
+    assert!(first_from(&workspace.join("link/deep"), &workspace, marked).is_none());
 }
