@@ -373,11 +373,10 @@ fn retry_overflow_admissions(
 /// challenge, and that caller gives up after `AUTH_TIMEOUT` and falls back to
 /// the daemon. Concurrent hooks then miss the direct lane in bursts.
 ///
-/// A full evaluation queue is the one case left on the auth worker: the
-/// request is read and evaluated, or routed to the control lane, right here.
-/// Answering `native_overloaded` instead would turn saturation into a hook
-/// failure, and a fragmented control request could not reach its reserved
-/// lane while complete evaluation jobs held every queue slot.
+/// A full evaluation queue leaves a fully buffered request on the auth
+/// worker, as before the hand-off: answering `native_overloaded` would turn
+/// saturation into a hook failure. A fragmented request is still answered
+/// with overload so no auth worker ever waits on a client's payload.
 fn dispatch_authenticated(
     pending: PendingRequest,
     control_sender: &SyncSender<PendingRequest>,
@@ -392,9 +391,14 @@ fn dispatch_authenticated(
     }
     match evaluation_sender.try_send(pending) {
         Ok(()) => {}
-        Err(TrySendError::Full(returned)) => {
+        // A fully buffered request needs no further reads, so the auth worker
+        // evaluates it as it did before the hand-off existed. A fragmented one
+        // would hold the auth worker in a payload read, so it is answered with
+        // retryable overload instead.
+        Err(TrySendError::Full(returned)) if returned.payload_prefix.len() == returned.length => {
             handle_pending_request(returned, policy_store.cloned(), Some(control_sender));
         }
+        Err(TrySendError::Full(mut returned)) => write_overload(&mut returned),
         Err(TrySendError::Disconnected(returned)) => {
             resident_diagnostics::finish_since(
                 Phase::ResidentDispatchWait,

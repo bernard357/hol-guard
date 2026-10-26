@@ -201,71 +201,29 @@ fn regression_auth_worker_evaluates_inline_when_the_evaluation_queue_is_full() {
     assert!(control_rx.try_recv().is_err());
 }
 
-#[derive(Clone, Default)]
-struct FeedingStream {
-    remainder: Arc<std::sync::Mutex<io::Cursor<Vec<u8>>>>,
-    written: Arc<std::sync::Mutex<Vec<u8>>>,
-}
-
-impl Read for FeedingStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.remainder.lock().unwrap().read(buf)
-    }
-}
-
-impl Write for FeedingStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.written.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl ResidentStream for FeedingStream {
-    fn set_resident_read_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn set_resident_write_timeout(&self, _timeout: Option<Duration>) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn set_resident_nonblocking(&self, _nonblocking: bool) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 #[test]
-fn regression_fragmented_control_request_reaches_the_control_lane_when_evaluation_is_full() {
-    // Complete evaluation jobs holding every queue slot must not keep a
-    // fragmented catalog read away from the control lane reserved for it.
+fn auth_worker_answers_overloaded_for_a_fragmented_request_when_the_evaluation_queue_is_full() {
+    // Reading the rest of the payload would hold the auth worker on a slow
+    // client, so a fragmented request is answered with retryable overload.
     let (control_sender, control_rx) = sync_channel(1);
     let (evaluation_sender, _evaluation_rx) = sync_channel(1);
+    let body = br#"{"operation":"pre_tool_decide"}"#;
     evaluation_sender
-        .try_send(complete_request(
-            Box::new(NullStream),
-            br#"{"operation":"pre_tool_decide"}"#,
-        ))
+        .try_send(complete_request(Box::new(NullStream), body))
         .expect("seed occupancy");
-    let body = br#"{"operation":"catalog_read"}"#;
-    let split = 10;
-    let stream = FeedingStream::default();
-    *stream.remainder.lock().unwrap() = io::Cursor::new(body[split..].to_vec());
-    let written = Arc::clone(&stream.written);
+    let stream = RecordingStream::default();
+    let written = Arc::clone(&stream.0);
     let mut pending = complete_request(Box::new(stream), body);
-    pending.payload_prefix.truncate(split);
+    pending.payload_prefix.truncate(10);
     dispatch_authenticated(pending, &control_sender, &evaluation_sender, None);
-    let routed = control_rx
-        .try_recv()
-        .expect("the completed control frame must reach the control lane");
-    assert_eq!(routed.payload_prefix, body.to_vec());
+    let written = written.lock().unwrap();
     assert!(
-        written.lock().unwrap().is_empty(),
-        "the auth worker must not answer a control request itself"
+        written
+            .windows(b"native_overloaded".len())
+            .any(|window| window == b"native_overloaded"),
+        "a fragmented request on a full queue must answer retryable overload"
     );
+    assert!(control_rx.try_recv().is_err());
 }
 
 #[test]
