@@ -84,7 +84,9 @@ def read_spec_file(path: str) -> dict[str, Any]:
     return spec
 
 
-def available_programs(which: Callable[[str], str | None] = shutil.which) -> list[str]:
+def available_programs(which: Callable[[str], str | None] | None = None) -> list[str]:
+    # Look ``shutil.which`` up per call, not as a default bound at import.
+    which = which or shutil.which
     return [program for program in PROGRAMS if which(program)]
 
 
@@ -202,10 +204,11 @@ def apply_plan(
     *,
     assume_yes: bool,
     confirm: Callable[[str, str], bool] = _confirm,
-    which: Callable[[str], str | None] = shutil.which,
+    which: Callable[[str], str | None] | None = None,
 ) -> int:
     """Run each automatic step the user confirms. Returns the exit code."""
 
+    which = which or shutil.which
     action = str(plan.get("action"))
     slug = str(plan.get("slug"))
     failed = False
