@@ -147,10 +147,19 @@ fn fold_parents(path: &Path) -> std::path::PathBuf {
 /// `recursive` says the lister descends. The rules below screen the operand's
 /// own components: a hidden folder or a credential store named as the root is
 /// refused. A descending lister prints those same names from inside the tree,
-/// so it must clear the bounded metadata walk as well, exactly as `ls -R` of
-/// the `.agent` root does. `find` prints every hidden entry it reaches, so it
-/// asks for the walk whatever depth its expression bounds; `ls` without `-R`
-/// prints no hidden name and descends nowhere, so it does not.
+/// so a project's own tree must clear the bounded metadata walk as well,
+/// exactly as `ls -R` of the `.agent` root does. `find` prints every hidden
+/// entry it reaches, so it asks for the walk whatever depth its expression
+/// bounds; `ls` without `-R` prints no hidden name and descends nowhere, so
+/// it does not.
+///
+/// The home trees keep the listing they had. Their roots are fixed locations
+/// that hold skill material by construction, and a skill directory carrying
+/// an ordinary hidden folder — a `.cache`, a `.venv` — is the common case
+/// there; the walk refuses a hidden descendant on its name alone, which would
+/// send those listings to review. A hidden folder a *home* tree reaches is a
+/// pre-existing gap in what that listing prints, worth closing with a screen
+/// that reads the names it finds rather than refusing every hidden one.
 pub(in crate::pretool) fn skill_listing_root(
     value: &str,
     context: ReadContext<'_>,
@@ -175,8 +184,8 @@ pub(in crate::pretool) fn skill_listing_root(
                     &canonical,
                     context.home_dir,
                 ) || home_tool_skill_tree(&canonical, context.home_dir)
-                    || project_skill_tree(&canonical, context))
-                && (!recursive || walk(canonical, &[], &[], false, false))
+                    || (project_skill_tree(&canonical, context)
+                        && (!recursive || walk(canonical, &[], &[], false, false))))
         })
 }
 
