@@ -10,9 +10,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::guard_store_args::Args;
-use crate::guard_store_db::{
-    exec, query_all, query_one, runtime_error, text, value_error, StoreError, StoreResult,
-};
+use crate::guard_store_db::{exec, query_all, query_one, runtime_error, value_error, StoreResult};
 use crate::guard_store_json::{py_str, py_strip};
 use crate::guard_store_observed_mcp::is_local_cli_id;
 use crate::policy_bundle_time::{from_isoformat, micros_to_utc_isoformat};
