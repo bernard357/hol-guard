@@ -18,8 +18,11 @@ from ..workflow_capabilities import (
     sign_workflow_capability,
 )
 from .effect_decision import PositiveProof
-from .github_capability_interaction import GITHUB_MAINTENANCE_ACTION_CLASS
 
+# The `maintain_remote` action class in the Rust GitHub capability contract
+# (guard-command/src/github_capability_contract.rs), the only capability a
+# workflow authorization can cover.
+GITHUB_MAINTENANCE_ACTION_CLASS: Final = "maintenance"
 _AUTHORIZATION_SEAL: Final = object()
 
 
