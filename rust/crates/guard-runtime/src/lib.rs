@@ -786,6 +786,7 @@ mod supply_chain_eval_seams;
 mod supply_chain_eval_transport;
 mod tool_action_identity_op;
 mod totp;
+mod trust_attestation_verify_op;
 #[cfg(test)]
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
