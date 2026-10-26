@@ -24,6 +24,7 @@ _TIMEOUT_SECONDS = 120.0
 _OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 _NATIVE_UNAVAILABLE = "The HOL Guard Plugin Kit requires the Guard native runtime. Run: pip install -U hol-guard"
 _NATIVE_FAILED = "The HOL Guard Plugin Kit did not complete."
+INSTALL_DOCUMENT = "hol-guard.plugin-install/1"
 
 _ERRORS = {
     "plugin_kit_root_invalid": "The path is not a readable folder.",
@@ -105,7 +106,12 @@ _ERRORS = {
 
 
 class PluginKitNativeError(RuntimeError):
-    """The native runtime was unavailable or returned no usable response."""
+    """The native runtime was unavailable, returned no usable response, or
+    refused the request; ``code`` is the Kit's error code when it refused."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
@@ -154,7 +160,7 @@ def kit_request(request: Mapping[str, object]) -> dict[str, Any]:
     response = _native_request(request)
     if not response["ok"]:
         code = str(response.get("error") or "")
-        raise PluginKitNativeError(_ERRORS.get(code, code or _NATIVE_FAILED))
+        raise PluginKitNativeError(_ERRORS.get(code, code or _NATIVE_FAILED), code or None)
     result = response.get("result")
     return result if isinstance(result, dict) else {}
 
@@ -167,6 +173,12 @@ def _call(request: Mapping[str, object]) -> dict[str, Any] | None:
     except PluginKitNativeError as error:
         print(f"Error: {error}", file=sys.stderr)
         return None
+
+
+def _sha256(value: str) -> str:
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise argparse.ArgumentTypeError("use the 64-character lowercase sha256 Guard printed")
+    return value
 
 
 def _runtime_list(value: str) -> list[str]:
@@ -246,9 +258,14 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
             help=help_text,
             description=help_text,
             epilog=(
+                "Exit codes: 0 done or plan shown; 1 a runtime command or check failed; 2 usage, or no "
+                "terminal to confirm in; 3 nothing Guard can install here; 4 stopped by HOL's scan result, "
+                "a commit other than the scanned one, or a declared command not accepted; 5 this Guard is "
+                "too old; 6 HOL unreachable; 130 interrupted. "
                 "To test against your own portal, set HOL_GUARD_PLUGIN_SPEC_URL to its install-spec URL "
                 "(https, or http on localhost). Guard warns on every run while it is set."
             ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         command.add_argument(
             "target",
@@ -258,7 +275,23 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         mode = command.add_mutually_exclusive_group()
         mode.add_argument("--apply", action="store_true", help="Run the commands, confirming each runtime.")
         mode.add_argument("--dry-run", action="store_true", help="Only print the plan (the default).")
-        command.add_argument("--yes", action="store_true", help="With --apply, skip the confirmations (for CI).")
+        command.add_argument(
+            "--yes",
+            action="store_true",
+            help="With --apply, skip the confirmations (for CI). Never accepts a risk or a declared command.",
+        )
+        if name == "install":
+            command.add_argument(
+                "--accept-risk",
+                action="store_true",
+                help="Install even though HOL's scan result asks for your OK (unscanned, warnings, an old scan).",
+            )
+            command.add_argument(
+                "--accept-command",
+                type=_sha256,
+                metavar="SHA256",
+                help="Let Claude Code run the install command the plugin declares, if its sha256 matches.",
+            )
         command.add_argument(
             "--runtime",
             dest="runtimes",
@@ -267,7 +300,11 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         )
         if name == "install":
             command.add_argument("--spec-file", help="Read the install spec from a file instead of HOL (offline, CI).")
-        command.add_argument("--json", action="store_true", help="Print the plan as JSON.")
+        command.add_argument(
+            "--json",
+            action="store_true",
+            help=f"Print one {INSTALL_DOCUMENT} document on stdout; everything else goes to stderr.",
+        )
     stats = commands.add_parser(
         "stats",
         help="Print a listing you own's views and attested installs from HOL (needs HOL_API_KEY).",
@@ -387,7 +424,62 @@ def _offer_guard_once() -> None:
     print("  hol-guard install claude-code   (or codex, cursor, gemini, opencode)")
 
 
+#: Exit code for each Kit error ``plugin install|uninstall`` can get back.
+_INSTALL_EXITS = {
+    "plugin_kit_install_spec_unsupported": 5,
+    "plugin_kit_install_spec_invalid": 4,
+    "plugin_kit_install_spec_mismatch": 4,
+    "plugin_kit_install_version_unavailable": 2,
+    "plugin_kit_install_runtime_unknown": 2,
+    "plugin_kit_install_runtime_not_offered": 2,
+    "plugin_kit_install_not_recorded": 2,
+    "plugin_kit_request_invalid": 2,
+}
+_NO_TERMINAL = "No terminal to confirm in. Run it in a terminal, or add --yes to install without prompts."
+
+
+class _InstallStopError(Exception):
+    def __init__(self, exit_code: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.code = code
+
+
+def _kit(request: Mapping[str, object]) -> dict[str, Any]:
+    try:
+        return kit_request(request)
+    except PluginKitNativeError as error:
+        raise _InstallStopError(
+            _INSTALL_EXITS.get(error.code or "", 1), error.code or "native_unavailable", str(error)
+        ) from error
+
+
 def _install(args: argparse.Namespace) -> int:
+    document: dict[str, Any] = {
+        "schema": INSTALL_DOCUMENT,
+        "action": args.command,
+        "apply": bool(args.apply),
+        "plan": None,
+        "runtimes": [],
+        "error": None,
+    }
+    try:
+        exit_code = _install_flow(args, document)
+    except _InstallStopError as stop:
+        print(f"Error: {stop}", file=sys.stderr)
+        document["error"] = {"code": stop.code, "message": str(stop)}
+        exit_code = stop.exit_code
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        document["error"] = {"code": "interrupted", "message": "Interrupted."}
+        exit_code = 130
+    document["exit_code"] = exit_code
+    if args.json:
+        print(json.dumps(document, indent=2, sort_keys=True))
+    return exit_code
+
+
+def _install_flow(args: argparse.Namespace, document: dict[str, Any]) -> int:
     from ..config import resolve_guard_home
     from . import install
 
@@ -406,11 +498,12 @@ def _install(args: argparse.Namespace) -> int:
         spec: dict[str, Any] | None = None
         if installing:
             spec = install.read_spec_file(args.spec_file) if args.spec_file else install.fetch_spec(slug, endpoint)
+            install.check_guard_version(spec)
     except install.PluginInstallError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 2
-    available = install.available_programs()
-    runtimes = args.runtimes or []
+        raise _InstallStopError(error.exit_code, error.code, str(error)) from error
+    lookup = install.find_programs()
+    for line in lookup.ignored:
+        print(f"Warning: {line}", file=sys.stderr)
     # Uninstall plans from Guard's own record, so it only removes what
     # install added and still works once a listing leaves HOL.
     request: dict[str, object] = (
@@ -420,22 +513,49 @@ def _install(args: argparse.Namespace) -> int:
     )
     if listing_origin:
         request["listing_origin"] = listing_origin
-    plan = _call({**request, "available": available, "runtimes": runtimes})
-    if plan is None:
-        return 2
-    if args.json:
-        print(json.dumps(plan, indent=2, sort_keys=True))
-    else:
-        install.write_plan(plan, apply=args.apply)
+    plan = _kit({**request, "available": sorted(lookup.programs), "runtimes": args.runtimes or []})
+    document["plan"] = plan
+    outcomes = install.planned(plan, lookup)
+    document["runtimes"] = [outcome.as_json() for outcome in outcomes]
+    if not args.json:
+        install.write_plan(plan, lookup, apply=args.apply)
+    gate = (plan.get("security") or {}).get("gate")
+    if gate == "block":
+        for outcome in outcomes:
+            if outcome.status == "planned":
+                outcome.status = "blocked"
+        document["runtimes"] = [outcome.as_json() for outcome in outcomes]
+        raise _InstallStopError(4, "blocked", "HOL's scan result stops this install, so nothing ran.")
+    steps = plan.get("steps") or []
+    if not any(step.get("automatic") for step in steps):
+        raise _InstallStopError(3, "nothing_to_install", "Guard cannot install this listing for any runtime it runs.")
     if not args.apply:
         return 0
+    if not any(outcome.status == "planned" for outcome in outcomes):
+        raise _InstallStopError(
+            3, "nothing_to_install", "None of the runtimes Guard installs for (Claude Code, Codex) is on this machine."
+        )
+    interactive = install.runner.stdin_is_terminal()
+    if not args.yes and not interactive:
+        raise _InstallStopError(2, "no_terminal", _NO_TERMINAL)
+    if gate == "confirm" and not getattr(args, "accept_risk", False):
+        if args.json:
+            for reason in (plan.get("security") or {}).get("reasons") or []:
+                print(f"  {reason}", file=sys.stderr)
+        if args.yes:
+            raise _InstallStopError(
+                4,
+                "risk_not_accepted",
+                "HOL's scan result needs your OK before Guard installs this. "
+                "To install anyway, add --accept-risk with --yes.",
+            )
+        if not install.confirm("Install anyway?"):
+            raise _InstallStopError(4, "risk_declined", "Not installed.")
     # Refuse before anything runs when the install record cannot be read,
     # rather than installing and then failing to record it. An install moves
     # a record that no longer parses aside and starts a new one; uninstall
     # needs the record, so it stops instead.
-    installs = _call({"command": "installs", "guard_home": str(guard_home), "recover": installing})
-    if installs is None:
-        return 2
+    installs = _kit({"command": "installs", "guard_home": str(guard_home), "recover": installing})
     if installs.get("recovered"):
         print(
             f"Guard's install record could not be read. It was moved to plugin-kit/{installs['recovered']} "
@@ -447,10 +567,18 @@ def _install(args: argparse.Namespace) -> int:
         install.record(guard_home, slug, runtime, installed=installing, spec=spec, listing_origin=listing_origin)
 
     try:
-        return install.apply_plan(plan, assume_yes=args.yes, record=record)
+        outcomes = install.apply_plan(
+            plan,
+            lookup=lookup,
+            assume_yes=args.yes,
+            record=record,
+            accept_command=getattr(args, "accept_command", None),
+            json_output=args.json,
+        )
     except install.PluginInstallError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 2
+        raise _InstallStopError(error.exit_code, error.code, str(error)) from error
+    document["runtimes"] = [outcome.as_json() for outcome in outcomes]
+    return install.exit_code_for(outcomes)
 
 
 def _stats(args: argparse.Namespace) -> int:

