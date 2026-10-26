@@ -158,6 +158,75 @@ pub(crate) fn valid_origin(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'))
 }
 
+/// Hosts an install-spec override may reach over plain http: this machine,
+/// or the host a container runs on.
+const LOCAL_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "[::1]", "host.docker.internal"];
+
+/// Checks an `HOL_GUARD_PLUGIN_SPEC_URL` override and returns the origin its
+/// listings must use: `scheme://host[:port]/`, lowercase, with a default port
+/// left out so `:443` and no port compare equal. The CLI appends `?slug=` to
+/// the value, so it may carry no query, fragment or credentials, and only
+/// https leaves the machine.
+pub(crate) fn endpoint_origin(value: &str) -> Option<String> {
+    let printable = value
+        .bytes()
+        .all(|b| (0x21..=0x7e).contains(&b) && !matches!(b, b'?' | b'#' | b'@' | b'\\'));
+    if value.len() > 2048 || !printable {
+        return None;
+    }
+    let (scheme, rest) = value.split_once("://")?;
+    let default_port = match scheme {
+        "https" => 443,
+        "http" => 80,
+        _ => return None,
+    };
+    let authority = rest
+        .split_once('/')
+        .map_or(rest, |(authority, _)| authority);
+    let (host, port) = if let Some(inner) = authority.strip_prefix('[') {
+        let (literal, after) = inner.split_once(']')?;
+        if literal.is_empty() || !literal.bytes().all(|b| b.is_ascii_hexdigit() || b == b':') {
+            return None;
+        }
+        (format!("[{}]", literal.to_ascii_lowercase()), after)
+    } else {
+        let end = authority.find(':').unwrap_or(authority.len());
+        let host = &authority[..end];
+        let labels_ok = host.split('.').all(|label| {
+            !label.is_empty()
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+        if !labels_ok {
+            return None;
+        }
+        (host.to_ascii_lowercase(), &authority[end..])
+    };
+    let port = match port {
+        "" => default_port,
+        port => {
+            let digits = port.strip_prefix(':')?;
+            if !(1..=5).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let number: u32 = digits.parse().ok()?;
+            if !(1..=65535).contains(&number) {
+                return None;
+            }
+            number
+        }
+    };
+    if scheme == "http" && !LOCAL_HOSTS.contains(&host.as_str()) {
+        return None;
+    }
+    Some(if port == default_port {
+        format!("{scheme}://{host}/")
+    } else {
+        format!("{scheme}://{host}:{port}/")
+    })
+}
+
 fn parse(spec: Value, origin: &str) -> Result<Spec, String> {
     let spec: Spec = serde_json::from_value(spec).map_err(|_| INVALID.to_owned())?;
     if spec.schema != SPEC_SCHEMA {

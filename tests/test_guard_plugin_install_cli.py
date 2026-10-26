@@ -272,6 +272,12 @@ def local_portal() -> Iterator[tuple[str, list[str]]]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             requests.append(self.path)
+            if self.path.startswith("/moved"):
+                self.send_response(302)
+                self.send_header("Location", f"{holder['origin']}api/guard/plugins/install-spec")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             body = json.dumps({**SPEC, "listingUrl": f"{holder['origin']}registry/plugins/acme%2Ftoolgate"}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -325,6 +331,31 @@ def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
     assert "failed Guard's checks" in error
 
 
+def test_an_overridden_endpoint_does_not_follow_redirects(
+    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    endpoint, requests = local_portal
+    moved = endpoint.replace("api/guard/plugins/install-spec", "moved")
+    monkeypatch.setenv(install.SPEC_URL_ENV, moved)
+    exit_code, _output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes", "--runtime", "codex"])
+    assert (exit_code, programs, requests) == (2, [], ["/moved?slug=acme%2Ftoolgate"])
+    assert f"{install.SPEC_URL_ENV} answered with a redirect" in error
+
+
+def test_uninstall_through_another_endpoint_names_the_mismatch(
+    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    endpoint, _requests = local_portal
+    monkeypatch.setenv(install.SPEC_URL_ENV, endpoint)
+    exit_code, _output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes", "--runtime", "codex"])
+    assert exit_code == 0, error
+    monkeypatch.delenv(install.SPEC_URL_ENV)
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 2
+    assert "recorded this listing through a different install-spec URL" in error
+    assert "could not be read" not in error
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -334,6 +365,11 @@ def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
         "https://user:pass@registry.example/spec",
         "https://registry.example/spec?slug=other",
         "https://registry.example/spec#x",
+        "https://registry.example/spec#",
+        "https://@registry.example/spec",
+        "https://registry.example:/spec",
+        "http://localhost:0/spec",
+        "https://my_portal.example/spec",
         "http://127.0.0.1:99999/spec",
         "http://[bad/spec",
         "not a url",
@@ -355,6 +391,7 @@ def test_an_unsafe_spec_endpoint_override_is_refused_before_any_request(
         ("https://staging.example/api/guard/plugins/install-spec", "https://staging.example/"),
         ("http://localhost:3000/api/guard/plugins/install-spec", "http://localhost:3000/"),
         ("http://[::1]:3000/spec", "http://[::1]:3000/"),
+        ("https://Staging.Example:443/spec", "https://staging.example/"),
         ("http://host.docker.internal:3000/spec", "http://host.docker.internal:3000/"),
         ("", None),
     ],

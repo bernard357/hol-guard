@@ -86,6 +86,14 @@ _ERRORS = {
         "Guard has no record of installing this listing for the runtimes named, so it will not remove it. "
         "Use the runtime's own CLI instead."
     ),
+    "plugin_kit_install_endpoint_invalid": (
+        "HOL_GUARD_PLUGIN_SPEC_URL must be an https URL, or http on localhost or host.docker.internal, "
+        "with no credentials, query or fragment."
+    ),
+    "plugin_kit_install_recorded_elsewhere": (
+        "Guard recorded this listing through a different install-spec URL. Set HOL_GUARD_PLUGIN_SPEC_URL "
+        "as it was when you installed it, or unset it if you installed from hol.org."
+    ),
     "plugin_kit_ledger_invalid": (
         "Guard's install record (plugin-kit/installs.json in the Guard home) could not be read, so nothing will run."
     ),

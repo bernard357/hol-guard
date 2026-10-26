@@ -29,7 +29,6 @@ SPEC_URL = "https://hol.org/api/guard/plugins/install-spec"
 #: test listings. https anywhere; plain http only on this machine or the
 #: Docker host. Listing pages must then live on the same origin.
 SPEC_URL_ENV = "HOL_GUARD_PLUGIN_SPEC_URL"
-_HTTP_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
 VIA_GUARD = "hol-guard"
 #: The only programs a plan may start. Each is the runtime's own CLI.
 PROGRAMS = ("claude", "codex", "npx")
@@ -52,25 +51,24 @@ def parse_target(value: str) -> tuple[str, str | None]:
 
 
 def spec_endpoint(environ: Mapping[str, str] | None = None) -> tuple[str, str | None]:
-    """The install-spec URL, and its origin when the user overrode it."""
+    """The install-spec URL, and its origin when the user overrode it.
+
+    The native Kit decides whether an override is allowed and what its origin
+    is, so the CLI and the plan check listings against the same rules.
+    """
 
     value = (os.environ if environ is None else environ).get(SPEC_URL_ENV, "").strip()
     if not value:
         return SPEC_URL, None
-    problem = PluginInstallError(
-        f"{SPEC_URL_ENV} must be an https URL, or http on localhost or host.docker.internal, "
-        "with no credentials, query or fragment."
-    )
+    from .cli import PluginKitNativeError, kit_request
+
     try:
-        parts = urllib.parse.urlsplit(value)
-        host = (parts.hostname or "").lower()
-        parts.port  # noqa: B018 - raises on a malformed port
-    except ValueError:
-        raise problem from None
-    allowed = parts.scheme == "https" or (parts.scheme == "http" and host in _HTTP_HOSTS)
-    if not host or not allowed or parts.username or parts.password or parts.query or parts.fragment:
-        raise problem
-    return value, f"{parts.scheme}://{parts.netloc.lower()}/"
+        origin = kit_request({"command": "endpoint", "value": value}).get("origin")
+    except PluginKitNativeError as error:
+        raise PluginInstallError(str(error)) from None
+    if not isinstance(origin, str):
+        raise PluginInstallError(f"{SPEC_URL_ENV} could not be checked. Reinstall hol-guard.")
+    return value, origin
 
 
 def fetch_spec(slug: str, endpoint: str = SPEC_URL) -> dict[str, Any]:
@@ -79,9 +77,14 @@ def fetch_spec(slug: str, endpoint: str = SPEC_URL) -> dict[str, Any]:
         url, headers={"User-Agent": f"hol-guard/{__version__}", "Accept": "application/json"}
     )
     try:
-        with managed_urlopen(request, timeout=_SPEC_TIMEOUT_SECONDS) as response:
+        # An override was checked as given; a redirect would leave those checks behind.
+        with managed_urlopen(request, timeout=_SPEC_TIMEOUT_SECONDS, allow_redirects=endpoint == SPEC_URL) as response:
             raw = response.read(_SPEC_LIMIT_BYTES + 1)
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            raise PluginInstallError(
+                f"{SPEC_URL_ENV} answered with a redirect. Set it to the final install-spec URL."
+            ) from error
         if error.code == 404:
             raise PluginInstallError(f"No plugin {slug} is listed on HOL.") from error
         if error.code == 400:

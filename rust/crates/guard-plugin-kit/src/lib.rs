@@ -119,6 +119,10 @@ enum Request {
     Installs {
         guard_home: String,
     },
+    /// Checks an install-spec endpoint override; see `install::endpoint_origin`.
+    Endpoint {
+        value: String,
+    },
 }
 
 /// Runs one request and wraps the outcome in the native response envelope.
@@ -197,6 +201,12 @@ fn handle(request: Request) -> Result<Value, String> {
         } => {
             let origin = origin(listing_origin.as_deref())?;
             let spec = ledger::spec(&guard_home, &slug)?;
+            // A listing recorded through another install-spec endpoint is
+            // readable, just not removable from this one; say which.
+            let listing = spec.get("listingUrl").and_then(Value::as_str);
+            if listing.is_some_and(|url| !url.starts_with(origin)) {
+                return Err("plugin_kit_install_recorded_elsewhere".to_owned());
+            }
             let plan = install::plan(
                 spec,
                 install::Action::Uninstall,
@@ -223,6 +233,9 @@ fn handle(request: Request) -> Result<Value, String> {
             ledger::record(&guard_home, &slug, &runtime, installed, spec, origin)
         }
         Request::Installs { guard_home } => ledger::installs(&guard_home),
+        Request::Endpoint { value } => install::endpoint_origin(&value)
+            .map(|origin| json!({ "origin": origin }))
+            .ok_or_else(|| "plugin_kit_install_endpoint_invalid".to_owned()),
         Request::Package {
             root,
             out_dir,
