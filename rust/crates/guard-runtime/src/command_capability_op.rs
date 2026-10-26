@@ -326,14 +326,15 @@ fn authorize(
     let operation = identity
         .get("operation")
         .and_then(Value::as_str)
-        .ok_or("command_operation_unsupported")?;
+        .ok_or("command_operation_unsupported")?
+        .to_owned();
     let granted = capability
         .get("operations")
         .and_then(Value::as_array)
         .is_some_and(|operations| {
             operations
                 .iter()
-                .any(|value| value.as_str() == Some(operation))
+                .any(|value| value.as_str() == Some(operation.as_str()))
         });
     if !granted {
         return Err("command_operation_not_granted");
@@ -361,7 +362,7 @@ fn authorize(
         "reason": Value::Null,
         "identity": Value::Object(identity),
         "operation": operation,
-        "requires_local_approval": command_operation_requires_local_approval(operation),
+        "requires_local_approval": command_operation_requires_local_approval(&operation),
     }))
 }
 
