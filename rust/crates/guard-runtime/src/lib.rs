@@ -354,9 +354,11 @@ mod guard_store_inventory_vectors_tests;
 mod guard_store_json;
 mod guard_store_lineage;
 mod guard_store_local_cli;
+mod guard_store_local_cli_catalog;
 #[cfg(test)]
 mod guard_store_local_cli_grant_vectors_tests;
 mod guard_store_local_cli_grants;
+mod guard_store_local_cli_mcp_snapshot;
 #[cfg(test)]
 mod guard_store_local_cli_vectors_tests;
 mod guard_store_local_mcp_declarations;
