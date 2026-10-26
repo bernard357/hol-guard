@@ -204,14 +204,23 @@ def test_plugin_fails_closed_without_native_runtime(
             "(or uv tool install --force hol-guard)",
         ),
         (
+            {"version": "3.58.0a6", "system": "Linux", "machine": "aarch64"},
+            "HOL Guard 3.58.0a6 is a pre-release, and pre-releases on PyPI do not include the native runtime "
+            "the Plugin Kit needs. Install the latest release: hol-guard update",
+        ),
+        (
             {"version": "3.58.0", "system": "FreeBSD", "machine": "amd64"},
             "The Plugin Kit needs HOL Guard's native runtime, which is not built for FreeBSD amd64. "
             "It is built for macOS, Linux and Windows on x86_64 and arm64.",
         ),
         (
-            {"outdated": True},
+            {"outdated": True, "system": "Linux", "machine": "x86_64"},
             "This HOL Guard's native runtime is too old for the Plugin Kit. "
             "Update it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+        ),
+        (
+            {"outdated": True, "system": "Darwin", "machine": "x86_64"},
+            "This HOL Guard's native runtime is too old for the Plugin Kit. Update it: hol-guard update",
         ),
     ],
 )

@@ -160,11 +160,14 @@ def native_unavailable_message(
     machine = machine or platform.machine()
     where = f"{_SYSTEM_NAMES.get(system, system)} {machine}"
     if outdated:
-        return f"This HOL Guard's native runtime is too old for the Plugin Kit. Update it: {_REINSTALL}"
-    if incompatible:
-        command = _native_install_command(system, machine)
         return (
-            f"HOL Guard found a native runtime for {where}, but it does not match this install. Update it: {command}"
+            "This HOL Guard's native runtime is too old for the Plugin Kit. "
+            f"Update it: {_native_install_command(system, machine)}"
+        )
+    if incompatible:
+        return (
+            f"HOL Guard found a native runtime for {where}, but it does not match this install. "
+            f"Update it: {_native_install_command(system, machine)}"
         )
     if (system, machine) not in _NATIVE_PLATFORMS:
         return (
@@ -174,7 +177,7 @@ def native_unavailable_message(
     if re.search(r"(a|b|rc|dev)\d*$", version):
         return (
             f"HOL Guard {version} is a pre-release, and pre-releases on PyPI do not include the native "
-            f"runtime the Plugin Kit needs. Install the latest release: {_REINSTALL}"
+            f"runtime the Plugin Kit needs. Install the latest release: {_native_install_command(system, machine)}"
         )
     if (system, machine) in _GITHUB_ONLY_PLATFORMS:
         return (
