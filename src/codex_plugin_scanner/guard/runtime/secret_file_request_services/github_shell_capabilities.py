@@ -11,6 +11,32 @@ from ...native_runner_authority import NativeRunnerAuthorityError
 from ...native_shell_request_authority import shell_request_authority
 
 _GUARD_ACTIONS = frozenset(get_args(GuardAction))
+# The names ``GitHubCapability::as_str`` emits. A name outside this set means
+# the resident and this carrier disagree, so the answer is rejected.
+_CAPABILITY_NAMES = frozenset(
+    {
+        "read_local",
+        "read_remote",
+        "propose_remote",
+        "create_private_remote",
+        "routine_merge_remote",
+        "routine_review_thread_remote",
+        "routine_workflow_remote",
+        "write_local",
+        "maintain_remote",
+        "content_remote",
+        "merge_remote",
+        "admin_merge_remote",
+        "publish_remote",
+        "workflow_remote",
+        "force_remote",
+        "delete_remote",
+        "secret_remote",
+        "access_remote",
+        "mutate_remote",
+        "unknown",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +74,11 @@ def classify_github_shell_capabilities(command_text: str, *, home_dir: Path | No
     classified = tuple(cast(list[object], capabilities))
     if (
         not isinstance(capability, str)
-        or not all(isinstance(item, str) for item in classified)
+        or not all(isinstance(item, str) and item in _CAPABILITY_NAMES for item in classified)
         or capability not in classified
         or not isinstance(reason_code, str)
         or not isinstance(detail, str)
+        or not isinstance(action_floor, str)
         or action_floor not in _GUARD_ACTIONS
         or not isinstance(workflow_authorizable, bool)
     ):

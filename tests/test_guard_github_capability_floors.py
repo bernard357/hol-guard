@@ -382,6 +382,10 @@ _NATIVE_SHELL_ASSESSMENT = {
     (
         {"action_floor": "permit"},
         {"action_floor": None},
+        {"action_floor": ["block"]},
+        {"action_floor": {"action": "block"}},
+        {"capability": "steal_remote", "capabilities": ["steal_remote"]},
+        {"capabilities": ["write_local", "secret_remote", "steal_remote"]},
         {"workflow_authorizable": "false"},
         {"capability": "read_remote"},
         {"capabilities": "secret_remote"},
