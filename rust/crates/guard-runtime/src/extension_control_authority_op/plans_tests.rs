@@ -270,6 +270,25 @@ fn commit_plan_rereads_once_before_giving_up_on_recovery() {
 }
 
 #[test]
+fn a_commit_waits_rather_than_take_another_requests_prepared_revision() {
+    let home = Home::new();
+    let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
+    home.commit(2, &catalog('a'), &[local(&catalog('a'))], "prepared");
+    // The read serves the committed view while that row waits, so the health
+    // this request was handed says nothing about the revision above it. The
+    // slot itself is what holds the commit back: a read that may roll the row
+    // back runs first, and once one has, the row is a live transition this
+    // request must not take.
+    let mut request = commit_request(&home, &head, view("protected", 1), commit(3, 1));
+    assert_eq!(run(&request)["plan"]["outcome"], json!("reread"));
+    request.rollback_attempted = true;
+    assert_eq!(
+        refusal(&run(&request)),
+        "extension control authority unavailable"
+    );
+}
+
+#[test]
 fn a_retry_resumes_its_own_prepared_transition() {
     let home = Home::new();
     let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
@@ -418,6 +437,39 @@ fn rollback_abandons_only_a_stale_unanchored_prepared_row() {
         run(&rollback_request(&home, &moved, LATER))["plan"]["outcome"],
         json!("keep")
     );
+}
+
+/// A commit that failed before anchoring its own prepared row names it, so
+/// the row goes at once instead of refusing every save for the retry window.
+#[test]
+fn rollback_abandons_the_callers_own_failed_row_without_waiting() {
+    let home = Home::new();
+    let head = home.commit(1, &catalog('a'), &[local(&catalog('a'))], "committed");
+    home.commit(2, &catalog('a'), &[local(&catalog('a'))], "prepared");
+    let own: String = home
+        .db
+        .query_row(
+            "select transition_digest from extension_control_authority_transition where revision = 2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let outcome = |digest: &str, pin: &str| {
+        run(&ExtensionControlAuthorityRequestV1 {
+            own_transition_digest: Some(digest.to_owned()),
+            ..rollback_request(&home, pin, SOON)
+        })["plan"]["outcome"]
+            .clone()
+    };
+    assert_eq!(outcome(own.as_str(), head.as_str()), json!("abandon"));
+    // Another request's row is still kept for its own retry.
+    assert_eq!(
+        outcome("0".repeat(64).as_str(), head.as_str()),
+        json!("keep")
+    );
+    // Naming the row never abandons one the anchor already moved onto.
+    let moved = anchor(1, &snapshot_digest(&home, 1), "anchored");
+    assert_eq!(outcome(own.as_str(), moved.as_str()), json!("keep"));
 }
 
 #[test]

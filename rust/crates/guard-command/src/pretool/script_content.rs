@@ -138,6 +138,20 @@ fn structure(
     if model.confidence == "exact" {
         return Some((model.normalized_text.clone(), model.segments.clone()));
     }
+    text_structure(&model.normalized_text, context)
+}
+
+/// Whether `text`, read the way an uncertain command is read above, is
+/// commands this scan models exactly.
+pub(crate) fn models_exactly(text: &str, context: PathContext<'_>) -> bool {
+    read_paths::verified_path_context(context.home_dir, context.cwd)
+        && text_structure(text, context).is_some()
+}
+
+fn text_structure(
+    text: &str,
+    context: PathContext<'_>,
+) -> Option<(String, Vec<crate::CommandSegmentV1>)> {
     let parse = |text: &str| {
         let structured = crate::critical_floor_context::parse_floor_command(
             text,
@@ -147,17 +161,12 @@ fn structure(
         (structured.confidence == "exact" && structured.wrapper_chain.is_empty())
             .then_some((structured.normalized_text, structured.segments))
     };
-    parse(&model.normalized_text)
+    parse(text)
         .or_else(|| {
-            let text = &model.normalized_text;
             (!background_moves_shell(text)).then_some(())?;
             parse(&sequential_jobs(text)?)
         })
-        .or_else(|| {
-            parse(crate::native_command_controls::launcher_body(
-                &model.normalized_text,
-            )?)
-        })
+        .or_else(|| parse(crate::native_command_controls::launcher_body(text)?))
 }
 
 /// The text of a command whose only unreadable part is the `&` that

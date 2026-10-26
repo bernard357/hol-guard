@@ -167,10 +167,11 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
     names lockfiles Guard cannot check. v3: coverage names dependency files
     below audit discovery. v4: a lockfile without packages leaves the
     supply-chain detector incomplete rather than reporting no inputs. v5:
-    runs check agent skill content.
+    runs check agent skill content. v6: runs check MCP server configuration.
+    v7: runs check project hook commands.
     """
 
-    encoded = f"guard.workspace-context.v5\0{feed_digest}\0{runtime_digest or 'unknown'}"
+    encoded = f"guard.workspace-context.v7\0{feed_digest}\0{runtime_digest or 'unknown'}"
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 

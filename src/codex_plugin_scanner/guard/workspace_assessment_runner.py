@@ -1,7 +1,7 @@
 """Run one claimed workspace assessment.
 
 The run is bound to a content snapshot taken before the detectors start and
-checked again after they finish. The secret and skill detectors read the very bytes that
+checked again after they finish. The secret, skill and hook detectors read the very bytes that
 snapshot hashed, so their findings are bound to the same content. If the two differ the worktree changed under
 the detectors, so the run is superseded rather than reporting findings for
 content that no longer exists. The runtime detector reads the executables the
@@ -28,6 +28,17 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .workspace_hook_config_findings import (
+    HOOK_CONFIG_DETECTOR,
+    project_hook_config_findings,
+    with_hook_config_coverage,
+)
+from .workspace_mcp_config_findings import (
+    MCP_CONFIG_DETECTOR,
+    assess_workspace_mcp_configs,
+    project_mcp_config_findings,
+    with_mcp_config_coverage,
+)
 from .workspace_runtime_findings import (
     RUNTIME_DETECTOR,
     assessment_context_digest,
@@ -40,7 +51,14 @@ from .workspace_runtime_findings import (
 from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 from .workspace_skill_findings import SKILL_DETECTOR, project_skill_findings, with_skill_coverage
 
-DETECTOR_SET: Final = ("supply_chain_local_v1", SECRET_DETECTOR, RUNTIME_DETECTOR, SKILL_DETECTOR)
+DETECTOR_SET: Final = (
+    "supply_chain_local_v1",
+    SECRET_DETECTOR,
+    RUNTIME_DETECTOR,
+    SKILL_DETECTOR,
+    MCP_CONFIG_DETECTOR,
+    HOOK_CONFIG_DETECTOR,
+)
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
@@ -129,6 +147,7 @@ def execute(
     if not assessments.renew_lease(store, run, now_ms=clock()):
         return _LEASE_LOST
     posture = _runtime_posture(store, root)
+    mcp_configs = assess_workspace_mcp_configs(store, root)
     if not assessments.renew_lease(store, run, now_ms=clock()):
         return _LEASE_LOST
     context_digest = assessment_context_digest(
@@ -154,14 +173,22 @@ def execute(
         project_secret_findings(before.secrets),
         runtime_findings,
         project_skill_findings(before.skills),
+        project_mcp_config_findings(mcp_configs),
+        project_hook_config_findings(before.hooks),
     )
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
-    coverage = with_skill_coverage(
-        with_runtime_coverage(
-            coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+    coverage = with_hook_config_coverage(
+        with_mcp_config_coverage(
+            with_skill_coverage(
+                with_runtime_coverage(
+                    coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+                ),
+                before.skills,
+            ),
+            mcp_configs,
         ),
-        before.skills,
+        before.hooks,
     )
     return assessments.RunOutcome(
         state="completed" if coverage["status"] == "complete" else "partial",
@@ -179,15 +206,18 @@ def _detector_snapshot(root: Path, secret_key: str) -> WorkspaceSnapshot:
     The run is then partial: coverage reports a dropped detector as not run.
     """
 
+    # Each scan is newer than the one before it, so a runtime that lacks one
+    # lacks every later one too.
     try:
-        return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key, skills=True)
+        return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key, skills=True, hooks=True)
     except WorkspaceSnapshotError as error:
         if error.code == "workspace_snapshot_secrets_unavailable":
-            # A runtime without the secret scan predates the skill scan too.
             return workspace_snapshot(root, mode="content")
-        if error.code != "workspace_snapshot_skills_unavailable":
+        if error.code == "workspace_snapshot_skills_unavailable":
+            return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key)
+        if error.code != "workspace_snapshot_hooks_unavailable":
             raise
-    return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key)
+    return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key, skills=True)
 
 
 def _runtime_posture(store: Any, root: Path) -> dict[str, object] | None:

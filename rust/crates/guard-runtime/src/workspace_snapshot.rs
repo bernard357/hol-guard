@@ -27,12 +27,15 @@ use sha2::{Digest, Sha256};
 use crate::workspace_snapshot_file::DirHandle;
 use crate::workspace_snapshot_git::{git_identity, GitIdentity};
 
+#[path = "workspace_snapshot_hooks.rs"]
+mod hooks;
 #[path = "workspace_snapshot_secrets.rs"]
 mod secrets;
 #[path = "workspace_snapshot_skills.rs"]
 mod skills;
 #[path = "workspace_snapshot_walk.rs"]
 mod walk;
+use hooks::HookScan;
 #[cfg(test)]
 use secrets::MAX_SECRET_FINDINGS;
 use secrets::{SecretKey, SecretScan, WalkSkips};
@@ -43,6 +46,7 @@ pub(crate) const COMMAND: &str = "workspace-snapshot";
 pub(crate) const FEATURE: &str = "workspace-snapshot-v1";
 pub(crate) const SECRETS_FEATURE: &str = "workspace-snapshot-secrets-v1";
 pub(crate) const SKILLS_FEATURE: &str = "workspace-snapshot-skills-v1";
+pub(crate) const HOOKS_FEATURE: &str = "workspace-snapshot-hooks-v1";
 const RESULT_SCHEMA: &str = "guard.workspace-snapshot.v1";
 const CONTRACT_VERSION: u32 = 1;
 
@@ -126,6 +130,10 @@ pub(crate) struct SnapshotRequest {
     /// hashes. Needs `content` mode.
     #[serde(default)]
     pub(crate) skills: bool,
+    /// Also check every hook command the project's agent configuration
+    /// files list. Needs `content` mode.
+    #[serde(default)]
+    pub(crate) hooks: bool,
 }
 
 struct Limits {
@@ -204,6 +212,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
     if request.skills && request.mode != SnapshotMode::Content {
         return Err("workspace_snapshot_skills_need_content".to_owned());
     }
+    if request.hooks && request.mode != SnapshotMode::Content {
+        return Err("workspace_snapshot_hooks_need_content".to_owned());
+    }
     let secret_key = match (request.secrets, request.secret_key.as_ref()) {
         (true, Some(key)) if key.is_usable() => Some(key),
         (true, _) => return Err("workspace_snapshot_secrets_need_key".to_owned()),
@@ -222,6 +233,7 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         skills: request
             .skills
             .then(|| SkillScan::new(&worktree_key, &[&requested, &root])),
+        hooks: request.hooks.then(|| HookScan::new(&worktree_key)),
         ..Walk::default()
     };
     walk_directory(&mut handle, "", 0, request.mode, &limits, &mut walk);
@@ -270,6 +282,7 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         .filter(|reason| SECRET_SCAN_LIMITS.contains(reason))
         .collect();
     let skills = walk.skills.take().map(|scan| scan.report(&incomplete));
+    let hooks = walk.hooks.take().map(|scan| scan.report(&incomplete));
     let secrets = walk.secrets.take().map(|scan| {
         let skips = WalkSkips {
             sensitive: walk.counts.sensitive,
@@ -321,6 +334,9 @@ pub(crate) fn snapshot(request: &SnapshotRequest) -> Result<Value, String> {
         }
         if let Some(skills) = skills {
             fields.insert("skills".to_owned(), skills);
+        }
+        if let Some(hooks) = hooks {
+            fields.insert("hooks".to_owned(), hooks);
         }
     }
     Ok(result)
@@ -384,6 +400,9 @@ fn snapshot_digest(
     hex::encode(hasher.finalize())
 }
 
+#[cfg(test)]
+#[path = "workspace_snapshot_hooks_tests.rs"]
+mod hooks_tests;
 #[cfg(test)]
 #[path = "workspace_snapshot_secrets_tests.rs"]
 mod secrets_tests;

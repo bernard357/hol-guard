@@ -490,6 +490,70 @@ fn each_runtime_installs_from_its_own_marketplace() {
 }
 
 #[test]
+fn links_block_is_only_returned_when_asked_and_names_the_listing() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        (
+            ".claude-plugin/marketplace.json",
+            r#"{"name":"acme-claude","plugins":[{"name":"pdf-tools","source":"./"}]}"#,
+        ),
+    ]);
+    let plain = ok(json!({"command": "links", "root": root_str(&root)}));
+    assert!(plain.get("block").is_none());
+
+    let links = ok(
+        json!({"command": "links", "root": root_str(&root), "block": true, "slug": "acme/pdf-tools"}),
+    );
+    let block = links["block"].as_str().expect("block");
+    let lines: Vec<&str> = block.lines().collect();
+    assert_eq!(
+        lines[0],
+        "<!-- hol-install-block:v1 slug=acme/pdf-tools -->"
+    );
+    assert_eq!(lines.last(), Some(&"<!-- /hol-install-block -->"));
+    assert!(block.contains("https://hol.org/registry/plugins/acme%2Fpdf-tools"));
+    assert!(block.contains("hol-guard plugin install acme/pdf-tools --apply"));
+    assert!(block.contains("`claude plugin install pdf-tools@acme-claude`"));
+    assert!(!block.contains("`/plugin"));
+
+    for slug in ["../x", "acme/pdf tools", "-acme"] {
+        assert_eq!(
+            error(
+                json!({"command": "links", "root": root_str(&root), "block": true, "slug": slug})
+            ),
+            "plugin_kit_links_slug_invalid"
+        );
+    }
+}
+
+#[test]
+fn links_block_is_null_without_a_marketplace_guard_can_install_from() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+    ]);
+    let links = ok(json!({"command": "links", "root": root_str(&root), "block": true}));
+    assert_eq!(links["block"], Value::Null);
+}
+
+#[test]
+fn links_skip_marketplace_names_that_could_break_a_readme_cell() {
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        ("skills/pdf-tools/SKILL.md", SKILL),
+        (
+            ".claude-plugin/marketplace.json",
+            r#"{"name":"acme` | [x](https://evil.example)","plugins":[{"name":"pdf-tools","source":"./"}]}"#,
+        ),
+    ]);
+    let links = ok(json!({"command": "links", "root": root_str(&root), "block": true}));
+    assert_eq!(links["block"], Value::Null, "{links}");
+    let commands = links["install"].to_string();
+    assert!(!commands.contains("evil.example"), "{commands}");
+}
+
+#[test]
 fn init_scaffolds_only_a_new_folder_and_never_overwrites() {
     let root = repo(&[("README.md", "# New"), (".gitignore", "dist/")]);
     let result = ok(json!({"command": "init", "root": root_str(&root), "name": "my-plugin"}));
@@ -505,4 +569,53 @@ fn init_scaffolds_only_a_new_folder_and_never_overwrites() {
         "plugin_kit_init_folder_not_empty"
     );
     assert!(!busy.join(".claude-plugin").exists());
+}
+
+#[test]
+fn card_declares_without_claiming_verification_or_echoing_secrets() {
+    let input = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/needs-fixes/input");
+    let body = json!({"command": "card", "root": input.to_string_lossy()});
+    let response = guard_plugin_kit::run_request(body.to_string().as_bytes());
+    assert_eq!(response["ok"], json!(true), "{response}");
+    let card = &response["result"];
+    assert_eq!(card["schema"], json!("hol.plugin-card.v0-draft"));
+    assert_eq!(card["identity"]["verified"], json!(false));
+    let rendered = card.to_string();
+    assert!(rendered.contains("SERVICE_API_KEY"));
+    assert!(!rendered.contains("replace-me-123"));
+
+    let refused = json!({"command": "card", "root": input.to_string_lossy(), "slug": "a b"});
+    let response = guard_plugin_kit::run_request(refused.to_string().as_bytes());
+    assert_eq!(response["error"], json!("plugin_kit_card_slug_invalid"));
+}
+
+#[test]
+fn card_lists_unnamed_skills_arg_and_url_variables_and_uppercase_hosts() {
+    let mcp = json!({"mcpServers": {
+        "local": {
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/server.js", "--token", "${GITHUB_TOKEN}"],
+        },
+        "remote": {"type": "http", "url": "HTTPS://MCP.Example/mcp"},
+        "templated": {"type": "http", "url": "https://${MCP_HOST}/mcp"},
+    }});
+    let root = repo(&[
+        (".claude-plugin/plugin.json", MANIFEST),
+        (".mcp.json", &mcp.to_string()),
+        (
+            "skills/helper/SKILL.md",
+            "---\ndescription: Helps.\n---\n# Helper\n",
+        ),
+    ]);
+    let card = ok(json!({"command": "card", "root": root_str(&root)}));
+    assert_eq!(card["capabilities"]["skills"], json!(["helper"]));
+    assert_eq!(card["permissions"]["networkHosts"], json!(["mcp.example"]));
+    assert_eq!(
+        card["permissions"]["environment"],
+        json!(["GITHUB_TOKEN", "MCP_HOST"])
+    );
+    assert_eq!(
+        error(json!({"command": "card", "root": root_str(&root), "slug": "acme/"})),
+        "plugin_kit_card_slug_invalid"
+    );
 }

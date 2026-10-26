@@ -69,7 +69,7 @@ mod script;
 #[path = "workspace_contained_settings.rs"]
 mod settings;
 #[path = "workspace_contained_sibling.rs"]
-mod sibling;
+pub(super) mod sibling;
 #[path = "workspace_contained_vendored.rs"]
 mod vendored;
 
