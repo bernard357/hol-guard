@@ -729,7 +729,8 @@ fn step(
                 Action::Uninstall => None,
             },
             remove_marketplace: None,
-            marketplace_repository: (action == Action::Uninstall).then(|| market.repository.clone()),
+            marketplace_repository: (action == Action::Uninstall)
+                .then(|| market.repository.clone()),
         }
     };
     match target.runtime.as_str() {

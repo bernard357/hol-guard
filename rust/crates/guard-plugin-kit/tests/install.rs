@@ -237,7 +237,9 @@ fn a_reinstall_into_another_marketplace_does_not_inherit_ownership() {
     assert_eq!(record_with(moved, false)["ok"], json!(true));
     let response = uninstall(&home, "acme/toolgate", &["codex"]);
     assert!(
-        response["result"]["steps"][0].get("remove_marketplace").is_none(),
+        response["result"]["steps"][0]
+            .get("remove_marketplace")
+            .is_none(),
         "{response}"
     );
 }

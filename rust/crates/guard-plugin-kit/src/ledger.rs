@@ -143,8 +143,14 @@ fn stored_target(target: &Value) -> Value {
 
 /// Whether two recorded marketplaces have the same name and repository.
 fn same_marketplace(a: &Value, b: &Value) -> bool {
-    let key = |m: &Value, k: &str| m.get(k).and_then(Value::as_str).map(str::to_ascii_lowercase);
-    a.is_object() && key(a, "name") == key(b, "name") && key(a, "repository") == key(b, "repository")
+    let key = |m: &Value, k: &str| {
+        m.get(k)
+            .and_then(Value::as_str)
+            .map(str::to_ascii_lowercase)
+    };
+    a.is_object()
+        && key(a, "name") == key(b, "name")
+        && key(a, "repository") == key(b, "repository")
 }
 
 /// Runtimes of an entry whose marketplace Guard added, so `uninstall` may
