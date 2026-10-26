@@ -136,9 +136,9 @@ pub(super) fn peel(
             return Err("cd target outside the workspace");
         }
         // Only a cd into a sibling repository may end in `;` or carry
-        // `2>/dev/null`: the directory is resolved here and nothing runs when
-        // it is gone, so the core never falls back to the session directory
-        // the way the shell would after a failed cd.
+        // `2>/dev/null`: the directory is resolved here and nothing is peeled
+        // when it is gone, so the core never falls back to the session
+        // directory the way the shell would after a failed cd.
         if (sequenced || quiet.is_some()) && within {
             return Err("unsupported cd prefix");
         }

@@ -153,9 +153,9 @@ def peel_contained_wrapper(
     by `&&`; after a cd into a sibling root, the core may be an `&&` list of
     plain commands, which is re-authorized there. Only a cd into a sibling
     repository may end in `;` or carry `2>/dev/null`: the directory is resolved
-    by native authority and nothing runs when it is gone, so the core never
-    falls back to the session directory the way the shell would after a failed
-    cd.
+    by native authority and nothing is peeled when it is gone, so the core
+    never falls back to the session directory the way the shell would after a
+    failed cd.
 
     Raises ValueError for a wrapped shape native authority does not peel, which
     the sink answers by running the text whole in the sandbox native authority

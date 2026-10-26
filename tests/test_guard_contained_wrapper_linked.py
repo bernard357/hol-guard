@@ -53,8 +53,10 @@ def test_a_sequence_after_cd_into_a_sibling_root_peels_like_an_and_list(tmp_path
     assert peel_contained_wrapper(
         "cd ../project-report ; npm test && git status", workspace=workspace, home=home, cwd=workspace
     ) == ("npm test && git status", worktree.resolve(), None)
-    # The cd target is resolved before anything runs; a missing root runs nothing.
-    with pytest.raises(OSError):
+    # The cd target is resolved before anything runs, so a missing root is never
+    # peeled: the sink runs the text whole in the sandbox instead of the core in
+    # the session directory the shell would fall back to.
+    with pytest.raises((ValueError, OSError)):
         peel_contained_wrapper(f"cd {home / 'gone'}; npm test", workspace=workspace, home=home, cwd=workspace)
 
 
