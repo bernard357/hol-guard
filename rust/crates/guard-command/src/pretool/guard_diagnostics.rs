@@ -129,9 +129,17 @@ pub(super) fn safe_hol_guard_arguments(arguments: &[String]) -> bool {
         || posture_inspection(&words)
 }
 
-/// Read-only posture checks that report what Guard would change and change
-/// nothing. `repair --dry-run` is the recovery path's own preview, and
-/// `package-shims status` reports which shims are installed.
+/// `repair --dry-run`, the recovery path's own preview: every repair step
+/// branches on the dry run before it reads any state it would change, and the
+/// report names what it would do.
+///
+/// `package-shims status` reads as a posture check of the same kind and is
+/// deliberately absent. Its handler resolves the package-firewall entitlement
+/// through a refresh first, and for an install whose cloud proof has gone
+/// stale that refresh writes refresh state under the guard home and
+/// synchronises with Guard Cloud. A status read that heals is not the
+/// effect-free shape this admission proves, so it stays under review until
+/// the status path can report without healing.
 fn posture_inspection(words: &[&str]) -> bool {
     let json_flags = words.iter().filter(|word| **word == "--json").count();
     let rest: Vec<&str> = words
@@ -139,11 +147,7 @@ fn posture_inspection(words: &[&str]) -> bool {
         .copied()
         .filter(|word| *word != "--json")
         .collect();
-    json_flags <= 1
-        && matches!(
-            rest.as_slice(),
-            ["repair", "--dry-run"] | ["package-shims"] | ["package-shims", "status"]
-        )
+    json_flags <= 1 && matches!(rest.as_slice(), ["repair", "--dry-run"])
 }
 
 /// The approval queue and the retry hint of one resolved request. The

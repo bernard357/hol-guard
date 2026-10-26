@@ -43,7 +43,7 @@
       "expect": "allow"
     },
     {
-      "id": "guard-package-shims-status",
+      "id": "guard-package-shims-status-refreshes-entitlement",
       "fix_area": "shell",
       "harnesses": [
         "codex",
@@ -57,10 +57,10 @@
         "command": "hol-guard package-shims status"
       },
       "cwd": "worktree",
-      "expect": "allow"
+      "expect": "not_allow"
     },
     {
-      "id": "guard-package-shims-bare",
+      "id": "guard-package-shims-bare-refreshes-entitlement",
       "fix_area": "shell",
       "harnesses": [
         "codex",
@@ -74,7 +74,7 @@
         "command": "hol-guard package-shims --json"
       },
       "cwd": "org_app",
-      "expect": "allow"
+      "expect": "not_allow"
     },
     {
       "id": "guard-package-shims-help",
