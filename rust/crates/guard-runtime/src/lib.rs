@@ -361,6 +361,7 @@ mod guard_store_local_cli_grant_vectors_tests;
 mod guard_store_local_cli_grants;
 mod guard_store_local_cli_inventory;
 mod guard_store_local_cli_inventory_capabilities;
+mod guard_store_local_cli_inventory_item;
 mod guard_store_local_cli_inventory_rows;
 #[cfg(test)]
 mod guard_store_local_cli_inventory_rows_tests;

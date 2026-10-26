@@ -24,6 +24,11 @@ from .store_local_cli_retention import utc_now_iso
 from .store_local_cli_rows import _row_int, _row_values, local_cli_rules_exist
 from .store_local_cli_schema import ensure_local_cli_schema
 
+# How many times one listing starts over because the inventory changed between
+# its pages. Each restart means a connector was observed or granted mid-walk;
+# a store still changing after this many is reported rather than read forever.
+_LIST_RESTART_LIMIT = 4
+
 
 def _catalog_args(
     cli_id: str,
@@ -122,16 +127,31 @@ class StoreLocalCliMixin:
 
         A connector carries its whole command catalog, so a device with many
         of them holds more inventory than one reply may frame. The resident
-        answers a page at a time and names the offset the next page starts
-        at; this walks those offsets so callers still see the full list.
+        answers a page at a time, names the offset the next page starts at and
+        the snapshot of the list those offsets index into. Each later page
+        sends that snapshot back; when the list changed in between, the
+        resident asks for a restart rather than letting the walk skip or
+        repeat an item.
         """
 
         items: list[dict[str, object]] = []
         offset = 0
+        snapshot: str | None = None
+        restarts = 0
         while True:
-            page = self._native_store_call("list_local_cli_items", {"offset": offset})
-            if not isinstance(page, dict):
+            args: dict[str, object] = {"offset": offset}
+            if snapshot is not None:
+                args["snapshot"] = snapshot
+            page = self._native_store_call("list_local_cli_items", args)
+            if not isinstance(page, dict) or not isinstance(page.get("snapshot"), str):
                 raise sqlite3.DatabaseError("native_local_cli_items_invalid")
+            if page.get("restart") is True:
+                restarts += 1
+                if restarts > _LIST_RESTART_LIMIT:
+                    raise sqlite3.DatabaseError("native_local_cli_items_unsettled")
+                items, offset, snapshot = [], 0, page["snapshot"]
+                continue
+            snapshot = page["snapshot"]
             listed = page.get("items")
             if not isinstance(listed, list) or any(not isinstance(item, dict) for item in listed):
                 raise sqlite3.DatabaseError("native_local_cli_items_invalid")
