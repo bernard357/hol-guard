@@ -19,9 +19,11 @@ use super::{Ctx, View, PROTECTED, RECOVERY_REQUIRED};
 use crate::extension_control_proof::{mutation_digest, Mutation};
 use crate::policy_bundle_time::from_isoformat;
 
-/// A request that failed after preparing its transition may be retried with
+/// A request that died after preparing its transition may be retried with
 /// the same single-use proof, which needs the prepared row and its proof
-/// reservation to survive. Only rows older than this are abandoned.
+/// reservation to survive. Only rows older than this are abandoned, unless
+/// the caller names the row as its own: a request that failed in process
+/// takes its row back at once rather than refuse every other save.
 const ABANDONED_TRANSITION_GRACE_MICROS: i64 = 300 * 1_000_000;
 
 /// What resuming a prepared transition comes to.
