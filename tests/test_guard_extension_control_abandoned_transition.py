@@ -126,7 +126,19 @@ def test_new_request_after_abandoned_transition_commits_without_manual_recovery(
     assert view.revision == 1
 
 
-def test_anchored_transition_is_not_applied_without_explicit_recovery(tmp_path: Path) -> None:
+def test_sealed_transition_is_finished_on_the_next_read(tmp_path: Path) -> None:
+    """A prepared row is undecided; a sealed one is decided and only unrecorded.
+
+    The save above dies before its anchor is written, so nothing says which
+    revision was meant and the rollback window decides. This one dies on the
+    final anchor write, after the row is committed and the proof consumed, so
+    the revision it names is already authorised and verified. Holding that for
+    a recovery verb blocks every command on the install for a bookkeeping flip
+    nobody has to decide, so the next ordinary read finishes it instead.
+    `test_read_finalizes_database_commit_when_final_anchor_write_failed` pins
+    the rest of the resumed state.
+    """
+
     secrets = MemorySecretStore()
     store = _store(tmp_path, secrets)
     secrets.fail_anchor_set_number = secrets.anchor_set_count + 2
@@ -135,7 +147,8 @@ def test_anchored_transition_is_not_applied_without_explicit_recovery(tmp_path: 
 
     view = store.read_extension_control_authority(catalog_digest=_CATALOG)
 
-    assert view.health is AuthorityHealth.RECOVERY_REQUIRED
+    assert view.health is AuthorityHealth.PROTECTED
+    assert view.revision == 1
 
 
 def test_unexpected_apply_failure_returns_a_stable_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
