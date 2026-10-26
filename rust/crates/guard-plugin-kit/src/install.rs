@@ -152,8 +152,8 @@ pub struct Step {
     pub marketplace: Option<String>,
     /// The commit HOL scanned. Codex is pinned with `--ref` when the
     /// marketplace is added. Claude Code cannot take a commit on that
-    /// command, so the step records it here. This plan does not compare
-    /// an installed checkout with it.
+    /// command, so the CLI compares Claude Code's installed commit with
+    /// this one after the install and rolls back a mismatch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_commit: Option<String>,
 }
@@ -670,8 +670,7 @@ fn step(
         let plugin = target.plugin.as_deref().expect("validated");
         let id = format!("{plugin}@{}", market.name);
         // Only Codex takes a commit when adding a marketplace. Claude Code
-        // clones a branch. `expected_commit` records the scanned commit;
-        // this plan does not compare the checkout.
+        // clones a branch, so the CLI checks its commit after the install.
         let pin = (program == "codex")
             .then_some(market.commit.as_deref())
             .flatten();
