@@ -17,21 +17,21 @@ from codex_plugin_scanner.guard.store import GuardStore
 
 
 def _patch_worker_popen(monkeypatch: pytest.MonkeyPatch, replacement: Callable[..., object]) -> None:
-    """Replace worker spawns while every native runtime call still runs.
+    """Replace recovery-worker spawns while every other subprocess still runs.
 
-    A recovery worker is always launched through a Python interpreter and every
-    native call runs the Guard runtime binary, so ``argv[0]`` tells the two
-    apart without naming one native subcommand.
+    Both recovery routes name the worker in their command: the frozen build
+    passes its own flag and the source build passes the worker module. Matching
+    on that leaves the native runtime calls these paths make on the real
+    ``Popen``, however many subcommands they use.
     """
 
     real_popen = subprocess.Popen
+    markers = ("--_hol-guard-codex-daemon-recovery-worker", "codex_plugin_scanner.guard.daemon.recovery_worker")
 
     def popen(command: object, *args: object, **kwargs: object) -> object:
-        if isinstance(command, (list, tuple)) and command:
-            launcher = Path(str(command[0])).name.lower()
-            if not launcher.startswith("python") and launcher != Path(sys.executable).name.lower():
-                return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
-        return replacement(command, *args, **kwargs)
+        if isinstance(command, (list, tuple)) and any(str(part) in markers for part in command):
+            return replacement(command, *args, **kwargs)
+        return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
 
     monkeypatch.setattr(subprocess, "Popen", popen)
 
