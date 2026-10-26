@@ -11,12 +11,11 @@ from typing import TYPE_CHECKING, Any, cast
 from .runtime.composio_contract import composio_tool_role
 from .runtime.composio_discovery import ComposioActionSchema
 from .runtime.composio_workflows import ComposioWorkflowProposal
-from .runtime.local_cli_identity import UnlistedCliIdentity, is_local_cli_id
+from .runtime.local_cli_identity import UnlistedCliIdentity
 from .runtime.observed_mcp_tools import ObservedMcpTool, observed_mcp_tool
 from .store_local_cli_retention import LocalCliReplaySkippedError, utc_now_iso
 from .store_local_cli_schema import ensure_local_cli_schema
-from .store_mcp_catalog import read_mcp_skill_page
-from .store_mcp_provider_catalog import describe_provider_actions, read_provider_actions
+from .store_mcp_provider_catalog import describe_provider_actions
 
 if TYPE_CHECKING:
     from .store import GuardStore
@@ -33,13 +32,20 @@ class StoreLocalMcpMixin:
             self, method: str, args: Mapping[str, object], *, busy_timeout_seconds: float | None = None
         ) -> Any: ...
 
-    def read_mcp_provider_choices(self) -> dict[str, str]:
-        from .store_mcp_provider_permissions import read_native_provider_choices
+    def _native_mcp_read(self, method: str, args: Mapping[str, object], reason: str) -> dict[str, object]:
+        page = self._native_store_call(method, args)
+        if not isinstance(page, dict):
+            raise sqlite3.DatabaseError(reason)
+        return cast(dict[str, object], page)
 
-        with self._connect() as connection:
-            connection.execute("begin")
-            ensure_local_cli_schema(connection, for_read=True)
-            return read_native_provider_choices(connection)
+    def read_mcp_provider_choices(self) -> dict[str, str]:
+        choices = self._native_store_call("read_mcp_provider_choices", {})
+        if not isinstance(choices, dict) or any(
+            not isinstance(selector, str) or not isinstance(state, str)
+            for selector, state in cast(dict[object, object], choices).items()
+        ):
+            raise sqlite3.DatabaseError("native_mcp_provider_choices_invalid")
+        return cast(dict[str, str], choices)
 
     def observed_mcp_history(self, *, limit: int) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         """Return the paused requests and receipts the connector scan reads.
@@ -86,12 +92,10 @@ class StoreLocalMcpMixin:
         return cast(dict[str, str], actions)
 
     def read_mcp_provider_authority_hash(self) -> str | None:
-        from .store_mcp_provider_catalog import read_provider_authority
-
-        with self._connect() as connection:
-            connection.execute("begin")
-            ensure_local_cli_schema(connection, for_read=True)
-            return read_provider_authority(connection)
+        digest = self._native_store_call("read_mcp_provider_authority_hash", {})
+        if digest is not None and not isinstance(digest, str):
+            raise sqlite3.DatabaseError("native_mcp_provider_authority_invalid")
+        return digest
 
     def record_composio_discovery(
         self,
@@ -150,14 +154,11 @@ class StoreLocalMcpMixin:
         return cli_id
 
     def read_local_mcp_workflows(self, cli_id: str, *, offset: int = 0) -> dict[str, object]:
-        if not is_local_cli_id(cli_id):
-            raise ValueError("invalid provider connection")
-        from .store_mcp_workflows import read_workflow_proposals
-
-        with self._connect() as connection:
-            connection.execute("begin deferred")
-            ensure_local_cli_schema(connection, for_read=True)
-            return read_workflow_proposals(connection, cli_id, offset=offset)
+        return self._native_mcp_read(
+            "read_local_mcp_workflows",
+            {"cli_id": cli_id, "offset": offset},
+            "native_mcp_workflow_page_invalid",
+        )
 
     def read_local_mcp_provider_actions(
         self,
@@ -168,29 +169,26 @@ class StoreLocalMcpMixin:
         search: str = "",
         expected_token: str | None = None,
     ) -> dict[str, object]:
-        if not is_local_cli_id(cli_id):
-            raise ValueError("invalid provider connection")
-        with self._connect() as connection:
-            connection.execute("begin deferred")
-            ensure_local_cli_schema(connection, for_read=True)
-            observation = connection.execute(
-                "select identity_hash from local_cli_observation where cli_id = ? and surface = 'mcp'",
-                (cli_id,),
-            ).fetchone()
-            if observation is None:
-                raise ValueError("provider connection not found")
-            page, declarations = read_provider_actions(
-                connection,
-                cli_id,
-                observation[0],
-                limit=limit,
-                offset=offset,
-                search=search,
-                expected_token=expected_token,
-            )
+        result = self._native_mcp_read(
+            "read_local_mcp_provider_actions",
+            {
+                "cli_id": cli_id,
+                "limit": limit,
+                "offset": offset,
+                "search": search,
+                "expected_token": expected_token,
+            },
+            "native_mcp_provider_actions_invalid",
+        )
+        page, declarations = result.get("page"), result.get("declarations")
+        if not isinstance(page, dict) or not isinstance(declarations, list):
+            raise sqlite3.DatabaseError("native_mcp_provider_actions_invalid")
+        # The classification the page carries is display evidence the resident
+        # does not own, so the native read returns the declarations and the
+        # description still happens here.
         return describe_provider_actions(
-            page,
-            declarations,
+            cast(dict[str, object], page),
+            cast("Sequence[dict[str, object]]", declarations),
             guard_home=cast("GuardStore", self).guard_home,
         )
 
@@ -202,25 +200,16 @@ class StoreLocalMcpMixin:
         search: str,
         expected_revision: int | None = None,
     ) -> dict[str, object]:
-        if not is_local_cli_id(cli_id):
-            raise ValueError("mcp_skills_unavailable")
-        with self._connect() as connection:
-            connection.execute("begin deferred")
-            ensure_local_cli_schema(connection, for_read=True)
-            observation = connection.execute(
-                "select identity_hash from local_cli_observation where cli_id = ? and surface = 'mcp'",
-                (cli_id,),
-            ).fetchone()
-            if observation is None:
-                raise ValueError("mcp_skills_unavailable")
-            return read_mcp_skill_page(
-                connection,
-                cli_id,
-                observation[0],
-                offset=offset,
-                search=search,
-                expected_revision=expected_revision,
-            )
+        return self._native_mcp_read(
+            "read_local_mcp_skills",
+            {
+                "cli_id": cli_id,
+                "offset": offset,
+                "search": search,
+                "expected_revision": expected_revision,
+            },
+            "native_mcp_skill_page_invalid",
+        )
 
     def find_local_mcp_observation(
         self,

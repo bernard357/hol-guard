@@ -51,6 +51,8 @@ use crate::guard_store_local_cli as local_cli;
 use crate::guard_store_local_cli_grants as local_cli_grants;
 use crate::guard_store_local_mcp_declarations as local_mcp_declarations;
 use crate::guard_store_local_mcp_observation as local_mcp;
+use crate::guard_store_mcp_provider_reads as mcp_provider_reads;
+use crate::guard_store_mcp_workflow_reads as mcp_workflow_reads;
 use crate::guard_store_native_receipts as native_receipts;
 use crate::guard_store_native_review_consume as native_review_consume;
 use crate::guard_store_observed_mcp as observed_mcp;
@@ -351,6 +353,11 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "command_activity_diagnostics"
         | "list_command_shadow_observations"
         | "observed_mcp_tool_actions"
+        | "read_mcp_provider_choices"
+        | "read_mcp_provider_authority_hash"
+        | "read_local_mcp_provider_actions"
+        | "read_local_mcp_workflows"
+        | "read_local_mcp_skills"
         | "workflow_capability_plan"
         | "get_approval_request"
         | "list_approval_requests"
@@ -532,6 +539,13 @@ fn dispatch(
         "count_command_shadow_observations" => privacy::count_shadow(connection),
         "list_command_shadow_observations" => privacy::list_shadow(connection, args),
         "observed_mcp_tool_actions" => observed_mcp::observed_mcp_tool_actions(connection),
+        "read_mcp_provider_choices" => mcp_provider_reads::provider_choices(connection),
+        "read_mcp_provider_authority_hash" => {
+            mcp_provider_reads::provider_authority_hash(connection)
+        }
+        "read_local_mcp_provider_actions" => mcp_provider_reads::provider_actions(connection, args),
+        "read_local_mcp_workflows" => mcp_workflow_reads::workflow_proposals(connection, args),
+        "read_local_mcp_skills" => mcp_workflow_reads::mcp_skill_page(connection, args),
         "observed_mcp_history" => observed_mcp::observed_mcp_history(connection, args),
         "read_local_cli_grant" => local_cli_grants::read_grant(connection, args),
         "read_local_cli_command_catalog" => {
