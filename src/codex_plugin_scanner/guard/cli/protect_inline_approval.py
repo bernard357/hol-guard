@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import re
 import select
 import shlex
 import sys
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from ..store import GuardStore
 
 _POLL_SECONDS = 0.5
+_URL = re.compile(r"https?://[^\s<>\"'`]+")
 _ANSWERS: dict[str, tuple[str, bool] | None] = {
     "y": ("once", False),
     "yes": ("once", False),
@@ -298,13 +300,25 @@ def human_protect_guidance(
     """Panel title and lines: approval steps for a person, the agent guidance otherwise.
 
     The agent guidance tells a harness to wait and not retry, which reads as a dead
-    end to a person at a terminal. A signed review link from it is kept.
+    end to a person at a terminal. The approval page link from it is kept, first.
     """
 
     steps = approval_step_lines(payload, env=env)
     if not steps:
         return "Guard guidance", guidance
-    return "Approve this install", [*steps, *(line for line in guidance if line.startswith("Review: "))]
+    link = _approval_link(guidance)
+    return "Approve this install", [*([f"Approve in the browser: {link}"] if link else []), *steps]
+
+
+def _approval_link(guidance: list[str]) -> str:
+    """The approval page from the agent guidance, preferring its explicit review link."""
+
+    ordered = sorted(guidance, key=lambda line: not line.startswith("Review: "))
+    for line in ordered:
+        match = _URL.search(line)
+        if match:
+            return match.group(0).rstrip(".,;:)]")
+    return ""
 
 
 __all__ = [

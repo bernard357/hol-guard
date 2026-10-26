@@ -167,7 +167,9 @@ def test_plain_output_names_the_commands_that_approve_the_install(monkeypatch: p
     monkeypatch.setattr(inline, "approval_resolution_invoked_from_agent", lambda _env: False)
     payload = _paused_payload()
     payload["supply_chain"] = {"status": "synced", "bundle": {}}
+    payload["primary_approval_url"] = f"http://127.0.0.1:5474/requests/{_REQUEST_ID}"
     text = _plain_text_protect(payload)
+    assert f"Approve in the browser: http://127.0.0.1:5474/requests/{_REQUEST_ID}\n" in text
     assert f"hol-guard approvals approve {_REQUEST_ID}\n" in text
     assert f"hol-guard approvals approve {_REQUEST_ID} --remember" in text
     assert "Then run it again: bun install -g @openai/codex" in text
