@@ -208,15 +208,15 @@ fn replay_profile(content: &str, base: &[String]) -> Vec<String> {
         if stripped.is_empty() {
             continue;
         }
-        if let Some(next) = apply_fish_add_path(&stripped, &entries) {
+        if let Some(next) = apply_fish_add_path(stripped, &entries) {
             entries = next;
             continue;
         }
-        if let Some(value) = path_assignment_value(&stripped) {
+        if let Some(value) = path_assignment_value(stripped) {
             entries = expand_path_value(value, &entries);
             continue;
         }
-        if let Some(next) = apply_set_path(&stripped, &entries) {
+        if let Some(next) = apply_set_path(stripped, &entries) {
             entries = next;
         }
     }
