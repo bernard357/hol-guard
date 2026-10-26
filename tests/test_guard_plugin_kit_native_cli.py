@@ -175,12 +175,27 @@ def test_plugin_fails_closed_without_native_runtime(
         (
             {"version": "3.58.0", "system": "Linux", "machine": "aarch64"},
             "The Plugin Kit needs HOL Guard's native runtime, and this install has none for Linux aarch64. "
-            "Reinstall to get it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+            "PyPI does not publish that build. Install it from the release: hol-guard update",
         ),
         (
             {"version": "3.58.0", "system": "Darwin", "machine": "x86_64"},
             "The Plugin Kit needs HOL Guard's native runtime, and this install has none for macOS x86_64. "
+            "PyPI does not publish that build. Install it from the release: hol-guard update",
+        ),
+        (
+            {"version": "3.58.0", "system": "Windows", "machine": "ARM64"},
+            "The Plugin Kit needs HOL Guard's native runtime, and this install has none for Windows ARM64. "
+            "PyPI does not publish that build. Install it from the release: hol-guard update",
+        ),
+        (
+            {"version": "3.58.0", "system": "Linux", "machine": "x86_64"},
+            "The Plugin Kit needs HOL Guard's native runtime, and this install has none for Linux x86_64. "
             "Reinstall to get it: pipx install --force hol-guard (or uv tool install --force hol-guard)",
+        ),
+        (
+            {"version": "3.58.0a6", "system": "FreeBSD", "machine": "amd64"},
+            "The Plugin Kit needs HOL Guard's native runtime, which is not built for FreeBSD amd64. "
+            "It is built for macOS, Linux and Windows on x86_64 and arm64.",
         ),
         (
             {"version": "3.58.0a6", "system": "Darwin", "machine": "arm64"},
@@ -204,6 +219,19 @@ def test_the_native_unavailable_message_names_the_platform_and_the_fix(
     kwargs: dict[str, object], expected: str
 ) -> None:
     assert plugin_kit_cli.native_unavailable_message(**kwargs) == expected  # type: ignore[arg-type]
+
+
+def test_a_found_runtime_that_does_not_match_is_not_called_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    status = SimpleNamespace(
+        available=True,
+        compatible=False,
+        identity=SimpleNamespace(path="runtime"),
+        capabilities=None,
+    )
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda **_kwargs: status)
+    with pytest.raises(plugin_kit_cli.PluginKitNativeError, match="does not match") as raised:
+        plugin_kit_cli._native_request({})
+    assert "has none" not in str(raised.value)
 
 
 def test_unknown_native_errors_are_printed_as_codes(monkeypatch: pytest.MonkeyPatch) -> None:

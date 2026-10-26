@@ -27,14 +27,18 @@ AGENT_PLUGINS_SPEC = "agent-plugins-1.0"
 _TIMEOUT_SECONDS = 120.0
 _OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 _REINSTALL = "pipx install --force hol-guard (or uv tool install --force hol-guard)"
-# Stable releases on PyPI carry a native wheel for each of these.
-_NATIVE_PLATFORMS = {
+# These three stable wheels are attached to the GitHub release and are not uploaded to PyPI.
+_RELEASE_INSTALL = "hol-guard update"
+_GITHUB_ONLY_PLATFORMS = {
     ("Darwin", "x86_64"),
+    ("Linux", "aarch64"),
+    ("Windows", "ARM64"),
+}
+# A native build exists for each of these. PyPI carries the rest.
+_NATIVE_PLATFORMS = _GITHUB_ONLY_PLATFORMS | {
     ("Darwin", "arm64"),
     ("Linux", "x86_64"),
-    ("Linux", "aarch64"),
     ("Windows", "AMD64"),
-    ("Windows", "ARM64"),
 }
 _SYSTEM_NAMES = {"Darwin": "macOS"}
 _NATIVE_FAILED = "The HOL Guard Plugin Kit did not complete."
@@ -135,9 +139,16 @@ class PluginKitNativeError(RuntimeError):
         self.code = code
 
 
+def _native_install_command(system: str, machine: str) -> str:
+    if (system, machine) in _GITHUB_ONLY_PLATFORMS:
+        return _RELEASE_INSTALL
+    return _REINSTALL
+
+
 def native_unavailable_message(
     *,
     outdated: bool = False,
+    incompatible: bool = False,
     version: str | None = None,
     system: str | None = None,
     machine: str | None = None,
@@ -150,15 +161,25 @@ def native_unavailable_message(
     where = f"{_SYSTEM_NAMES.get(system, system)} {machine}"
     if outdated:
         return f"This HOL Guard's native runtime is too old for the Plugin Kit. Update it: {_REINSTALL}"
-    if re.search(r"(a|b|rc|dev)\d*$", version):
+    if incompatible:
+        command = _native_install_command(system, machine)
         return (
-            f"HOL Guard {version} is a pre-release, and pre-releases on PyPI do not include the native "
-            f"runtime the Plugin Kit needs. Install the latest release: {_REINSTALL}"
+            f"HOL Guard found a native runtime for {where}, but it does not match this install. Update it: {command}"
         )
     if (system, machine) not in _NATIVE_PLATFORMS:
         return (
             f"The Plugin Kit needs HOL Guard's native runtime, which is not built for {where}. "
             "It is built for macOS, Linux and Windows on x86_64 and arm64."
+        )
+    if re.search(r"(a|b|rc|dev)\d*$", version):
+        return (
+            f"HOL Guard {version} is a pre-release, and pre-releases on PyPI do not include the native "
+            f"runtime the Plugin Kit needs. Install the latest release: {_REINSTALL}"
+        )
+    if (system, machine) in _GITHUB_ONLY_PLATFORMS:
+        return (
+            f"The Plugin Kit needs HOL Guard's native runtime, and this install has none for {where}. "
+            f"PyPI does not publish that build. Install it from the release: {_RELEASE_INSTALL}"
         )
     return (
         f"The Plugin Kit needs HOL Guard's native runtime, and this install has none for {where}. "
@@ -173,10 +194,10 @@ def _native_request(request: Mapping[str, object]) -> dict[str, Any]:
     from ..native_runtime import native_runtime_status
 
     status = native_runtime_status()
-    if not status.available or not status.compatible or status.identity is None or status.capabilities is None:
+    if not status.available or status.identity is None:
         raise PluginKitNativeError(native_unavailable_message())
-    if PLUGIN_KIT_FEATURE not in status.capabilities.features:
-        raise PluginKitNativeError(native_unavailable_message(outdated=True))
+    if not status.compatible or status.capabilities is None or PLUGIN_KIT_FEATURE not in status.capabilities.features:
+        raise PluginKitNativeError(native_unavailable_message(incompatible=True))
     runtime = status.identity.path
     completed = run_isolated_hook_process(
         (str(runtime), PLUGIN_KIT_COMMAND, "--stdin"),
