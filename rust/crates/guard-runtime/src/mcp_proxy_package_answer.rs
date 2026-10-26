@@ -110,17 +110,42 @@ pub(crate) fn reason_signals(evaluation: &Map<String, Value>) -> Vec<String> {
             reasons
                 .iter()
                 .map(|reason| {
-                    reason
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .filter(|text| !text.is_empty())
-                        .or_else(|| reason.get("code").and_then(Value::as_str))
-                        .unwrap_or("")
-                        .to_owned()
+                    truthy_text(reason.get("message"))
+                        .or_else(|| truthy_text(reason.get("code")))
+                        .unwrap_or_default()
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A reason field as the text an evaluation's own reporter wrote for it: a
+/// non-empty string, a non-zero number or `true`. An empty, zero, false or
+/// absent field carries none, so the next field is read instead.
+fn truthy_text(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) if !text.is_empty() => Some(text.clone()),
+        Value::Number(number) if number.as_f64().is_some_and(|n| n != 0.0) => {
+            Some(python_number_text(number))
+        }
+        Value::Bool(true) => Some("True".to_owned()),
+        _ => None,
+    }
+}
+
+/// A JSON number as Python's `str()` writes it: integers bare, floats with
+/// at least one fractional digit.
+fn python_number_text(number: &serde_json::Number) -> String {
+    if number.is_f64() {
+        let text = number.to_string();
+        if text.contains(['.', 'e', 'E']) {
+            text
+        } else {
+            format!("{text}.0")
+        }
+    } else {
+        number.to_string()
+    }
 }
 
 /// The evaluation's own risk summary, or an empty string.
@@ -132,29 +157,44 @@ fn risk_summary(evaluation: &Map<String, Value>) -> String {
         .to_owned()
 }
 
+/// What restating an evaluation as a block changes: its decision, its policy
+/// action and the user copy the block writes, with the guidance text as its
+/// own next step. The proxy applies it to the evaluation it already holds, so
+/// an answer never echoes a whole evaluation back.
+pub(crate) fn blocked_package_overlay(evaluation: &Map<String, Value>, message: &str) -> Value {
+    json!({
+        "decision": "block",
+        "policy_action": "block",
+        "user_copy": {
+            "title": "Package request blocked",
+            "summary": evaluation.get("risk_summary").cloned().unwrap_or_else(|| json!("")),
+            "dashboard_url": Value::Null,
+            "next_step": message,
+            "harness_message": message,
+        },
+    })
+}
+
 /// The evaluation a request queued under `safe-alternative` is answered with:
-/// the one the lane settled on, restated as the block the agent was actually
-/// given, with the guidance text as its own next step.
+/// the one the lane settled on with [`blocked_package_overlay`] written over
+/// it.
 pub(crate) fn blocked_package_evaluation(evaluation: &Map<String, Value>, message: &str) -> Value {
     let mut blocked = evaluation.clone();
-    blocked.insert("decision".to_owned(), json!("block"));
-    blocked.insert("policy_action".to_owned(), json!("block"));
     let mut user_copy = blocked
         .get("user_copy")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_else(Map::new);
-    user_copy.insert("title".to_owned(), json!("Package request blocked"));
-    user_copy.insert(
-        "summary".to_owned(),
-        evaluation
-            .get("risk_summary")
-            .cloned()
-            .unwrap_or_else(|| json!("")),
-    );
-    user_copy.insert("dashboard_url".to_owned(), Value::Null);
-    user_copy.insert("next_step".to_owned(), json!(message));
-    user_copy.insert("harness_message".to_owned(), json!(message));
+    if let Value::Object(overlay) = blocked_package_overlay(evaluation, message) {
+        for (key, value) in overlay {
+            match value {
+                Value::Object(fields) if key == "user_copy" => user_copy.extend(fields),
+                value => {
+                    blocked.insert(key, value);
+                }
+            }
+        }
+    }
     blocked.insert("user_copy".to_owned(), Value::Object(user_copy));
     Value::Object(blocked)
 }
@@ -257,11 +297,7 @@ pub(crate) fn package_answer(query: &McpPackageAnswerQueryV1) -> Result<Value, &
             let evaluation = evaluation(query)?;
             Ok(block(
                 stored_package_block_message(tool, server),
-                json!({
-                    "approvalRequests": [],
-                    "guardPolicyAction": "block",
-                    "supplyChainEvaluation": Value::Object(evaluation.clone()),
-                }),
+                json!({"approvalRequests": [], "guardPolicyAction": "block"}),
                 "package-block-stored".to_owned(),
                 "block",
                 reason_signals(evaluation),
@@ -273,11 +309,7 @@ pub(crate) fn package_answer(query: &McpPackageAnswerQueryV1) -> Result<Value, &
             let evaluation = evaluation(query)?;
             Ok(block(
                 terminal_package_message(tool, server, action),
-                json!({
-                    "approvalRequests": [],
-                    "guardPolicyAction": action,
-                    "supplyChainEvaluation": Value::Object(evaluation.clone()),
-                }),
+                json!({"approvalRequests": [], "guardPolicyAction": action}),
                 format!("terminal-package-{action}"),
                 action,
                 reason_signals(evaluation),
@@ -304,7 +336,7 @@ pub(crate) fn package_answer(query: &McpPackageAnswerQueryV1) -> Result<Value, &
                 "risk_summary": summary,
                 "risk_signals": reasons,
                 "safe_alternative_signals": safe_alternative_signals,
-                "safe_alternative_evaluation": blocked_package_evaluation(evaluation, &message),
+                "safe_alternative_overlay": blocked_package_overlay(evaluation, &message),
             }))
         }
     }

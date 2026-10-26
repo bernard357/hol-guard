@@ -127,7 +127,7 @@ fn a_stored_tool_block_names_a_package_tool_call_when_it_carried_one() {
 }
 
 #[test]
-fn a_package_block_carries_the_evaluation_and_its_reason_signals() {
+fn a_package_block_carries_its_reason_signals_without_echoing_the_evaluation() {
     let terminal = package_answer(&query(
         McpPackageAnswerKindV1::TerminalPackage,
         Some("block"),
@@ -138,7 +138,9 @@ fn a_package_block_carries_the_evaluation_and_its_reason_signals() {
         json!("HOL Guard blocked package install request install_package from registry.")
     );
     assert_eq!(terminal["decision"], json!("terminal-package-block"));
-    assert_eq!(terminal["data"]["supplyChainEvaluation"], evaluation());
+    // The proxy attaches the evaluation it already holds; the answer stays
+    // small however large the evaluation is.
+    assert_eq!(terminal["data"].get("supplyChainEvaluation"), None);
     // A message, an empty message falling back to its code, and neither.
     assert_eq!(
         terminal["signals"],
@@ -159,6 +161,7 @@ fn a_package_block_carries_the_evaluation_and_its_reason_signals() {
     assert_eq!(stored["decision"], json!("package-block-stored"));
     assert_eq!(stored["policy_action"], json!("block"));
     assert_eq!(stored["data"]["guardPolicyAction"], json!("block"));
+    assert_eq!(stored["data"].get("supplyChainEvaluation"), None);
 }
 
 #[test]
@@ -217,7 +220,6 @@ fn a_queued_package_carries_its_decision_signals_and_safe_alternative_restatemen
         json!("Approve the request, then retry.")
     );
 
-    let restated = &answer["safe_alternative_evaluation"];
     let (message, _) = safe_alternative_block(
         TOOL,
         SERVER,
@@ -228,21 +230,66 @@ fn a_queued_package_carries_its_decision_signals_and_safe_alternative_restatemen
             String::new(),
         ],
     );
+    // Only what the restatement changes, never the evaluation itself.
+    assert_eq!(answer.get("safe_alternative_evaluation"), None);
+    assert_eq!(
+        answer["safe_alternative_overlay"],
+        json!({
+            "decision": "block",
+            "policy_action": "block",
+            "user_copy": {
+                "title": "Package request blocked",
+                "summary": "left-pad has a known advisory",
+                "dashboard_url": null,
+                "next_step": message,
+                "harness_message": message,
+            },
+        })
+    );
+
+    let restated = blocked_package_evaluation(&object(evaluation()), &message);
     assert_eq!(restated["decision"], json!("block"));
     assert_eq!(restated["policy_action"], json!("block"));
     assert_eq!(
         restated["user_copy"]["title"],
         json!("Package request blocked")
     );
-    assert_eq!(
-        restated["user_copy"]["summary"],
-        json!("left-pad has a known advisory")
-    );
     assert_eq!(restated["user_copy"]["dashboard_url"], Value::Null);
     assert_eq!(restated["user_copy"]["next_step"], json!(message));
     assert_eq!(restated["user_copy"]["harness_message"], json!(message));
     // Everything else the evaluation stated is kept.
     assert_eq!(restated["reasons"], evaluation()["reasons"]);
+}
+
+/// A reporter that wrote a number or a boolean for a reason's text: the
+/// signal is that value as text, and a falsy one falls through to the code.
+#[test]
+fn reason_signals_read_numeric_and_boolean_reason_text() {
+    let evaluation = object(json!({
+        "reasons": [
+            {"message": 404, "code": "ignored"},
+            {"message": 1.5},
+            {"message": 2.0},
+            {"message": true},
+            {"message": false, "code": "fallback"},
+            {"message": 0, "code": 7},
+            {"message": null, "code": false},
+            {"message": "", "code": ""},
+        ],
+    }));
+    assert_eq!(
+        reason_signals(&evaluation),
+        vec![
+            "404".to_owned(),
+            "1.5".to_owned(),
+            "2.0".to_owned(),
+            "True".to_owned(),
+            "fallback".to_owned(),
+            "7".to_owned(),
+            String::new(),
+            String::new(),
+        ]
+    );
 }
 
 #[test]

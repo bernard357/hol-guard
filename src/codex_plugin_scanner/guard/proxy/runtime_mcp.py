@@ -2094,11 +2094,20 @@ class RuntimeMcpGuardProxy:
                 scanner_evidence=scanner_evidence,
                 policy_action=policy_action,
             )
-            # The resident restates the evaluation as the block the agent was
-            # given; its guidance is whatever the approval center answered.
-            blocked = answer["safe_alternative_evaluation"]
+            # The resident says how the evaluation is restated as the block the
+            # agent was given; its guidance is whatever the approval center
+            # answered.
+            overlay = answer["safe_alternative_overlay"]
             message = response["error"]["message"]
-            blocked["user_copy"].update(next_step=message, harness_message=message)
+            blocked = package_evaluation.to_dict()
+            user_copy = blocked.get("user_copy")
+            blocked.update(decision=overlay["decision"], policy_action=overlay["policy_action"])
+            blocked["user_copy"] = {
+                **(user_copy if isinstance(user_copy, dict) else {}),
+                **overlay["user_copy"],
+                "next_step": message,
+                "harness_message": message,
+            }
             response["error"]["data"]["supplyChainEvaluation"] = blocked
             return response, event
         approval_center_url = ensure_guard_daemon(self.context.guard_home)
@@ -2254,6 +2263,11 @@ class RuntimeMcpGuardProxy:
         )
         if answer["kind"] != "block":
             raise NativeMcpProxyDecisionError("native_mcp_proxy_decision_payload_invalid")
+        data = answer["data"]
+        if kind in {"stored_package_block", "terminal_package"} and leg.evaluation is not None:
+            # The resident does not echo the evaluation back; attach the one
+            # this call already holds.
+            data["supplyChainEvaluation"] = leg.evaluation.to_dict()
         # A package block records the arguments under the call's own name.
         projected_name = tool_name if leg.evaluation is None else str(params.get("name") or "unknown")
         block_tool_call(
@@ -2278,7 +2292,7 @@ class RuntimeMcpGuardProxy:
         }
         if leg.scanner_evidence or answer["scanner_evidence_always"]:
             event["scanner_evidence"] = list(leg.scanner_evidence)
-        return _blocked_tool_response(message_id, tool_name, answer["message"], answer["data"]), event
+        return _blocked_tool_response(message_id, tool_name, answer["message"], data), event
 
     def _record_client_capabilities(self, method: str, params: object) -> None:
         del method, params
