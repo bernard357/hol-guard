@@ -8312,30 +8312,6 @@ def test_guard_hook_copilot_permission_request_defers_tool_calls_payload(
     _assert_permission_request_deferred(output)
 
 
-def test_normalize_hook_payload_prefers_matching_tool_call_args() -> None:
-    payload = guard_commands_module._normalize_hook_payload(
-        {
-            "toolName": "danger_lab/dangerous_delete",
-            "toolCalls": [
-                {
-                    "id": "call-safe",
-                    "name": "safe_tools/read_file",
-                    "args": json.dumps({"path": "README.md"}),
-                },
-                {
-                    "id": "call-dangerous",
-                    "name": "danger_lab/dangerous_delete",
-                    "args": json.dumps({"target": "dangerous-marker.json"}),
-                },
-            ],
-        }
-    )
-
-    assert payload["tool_name"] == "danger_lab/dangerous_delete"
-    assert payload["tool_input"] == {"target": "dangerous-marker.json"}
-    assert payload["arguments"] == {"target": "dangerous-marker.json"}
-
-
 def test_runtime_policy_path_prefers_pi_workspace_settings(tmp_path):
     home_dir = tmp_path / "home"
     workspace_dir = tmp_path / "workspace"
@@ -16074,22 +16050,26 @@ def test_codex_post_tool_output_does_not_requeue_package_request_after_camelcase
     workspace_dir = tmp_path / "workspace"
     guard_home.mkdir(parents=True, exist_ok=True)
     workspace_dir.mkdir(parents=True, exist_ok=True)
-    payload = guard_commands_module._normalize_hook_payload(
-        {
-            "hookEventName": "PostToolUse",
-            "toolName": "Bash",
-            "toolInput": {"command": "npm install -g @getpaseo/cli"},
-            "tool_response": {
-                "stdout": (
-                    "HOL Guard blocked `@getpaseo/cli` before install.\n"
-                    "Open HOL Guard to approve or keep this blocked.\n"
-                )
-            },
-            "sourceScope": "project",
-            "preExecutionResult": "block",
+    # The payload as the retired Python normaliser left it: the harness's
+    # camelCase keys plus their snake_case copies.
+    payload = {
+        "hookEventName": "PostToolUse",
+        "toolName": "Bash",
+        "toolInput": {"command": "npm install -g @getpaseo/cli"},
+        "sourceScope": "project",
+        "preExecutionResult": "block",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "npm install -g @getpaseo/cli"},
+        "arguments": {"command": "npm install -g @getpaseo/cli"},
+        "tool_response": {
+            "stdout": (
+                "HOL Guard blocked `@getpaseo/cli` before install.\nOpen HOL Guard to approve or keep this blocked.\n"
+            )
         },
-        harness="codex",
-    )
+        "source_scope": "project",
+        "pre_execution_result": "block",
+    }
 
     artifact = guard_commands_module._hook_runtime_artifact(
         harness="codex",
