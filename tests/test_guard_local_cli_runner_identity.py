@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.daemon import hook_native_local_cli, hook_native_review_approval
-from codex_plugin_scanner.guard.local_cli_trust import matching_local_cli_grant, utc_now
+from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.local_cli_identity import (
     identify_unlisted_cli,
     is_local_cli_id,
 )
 from codex_plugin_scanner.guard.store import GuardStore
 
-from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
+from .local_cli_native_fixture import native_local_cli_grant_resident, review_rule_verdict  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -90,11 +90,9 @@ def test_registry_identity_honors_blocks_only(tmp_path: Path, state: str) -> Non
     assert identity is not None
     store = _grant_store(tmp_path, identity, state)
 
-    match = matching_local_cli_grant(
-        store=store, command=command, cwd=workspace, home_dir=home_dir, current_action="review"
-    )
+    match = review_rule_verdict(store, command=command, cwd=workspace, home_dir=home_dir)
 
-    assert match == ((identity, "blocked") if state == "blocked" else None)
+    assert match == (("blocked", identity.name) if state == "blocked" else None)
 
 
 def test_local_identity_honors_allow_grant(tmp_path: Path) -> None:
@@ -105,11 +103,9 @@ def test_local_identity_honors_allow_grant(tmp_path: Path) -> None:
     assert identity is not None
     store = _grant_store(tmp_path, identity, "allowed")
 
-    match = matching_local_cli_grant(
-        store=store, command="npx wrangler whoami", cwd=workspace, home_dir=home_dir, current_action="review"
-    )
+    match = review_rule_verdict(store, command="npx wrangler whoami", cwd=workspace, home_dir=home_dir)
 
-    assert match == (identity, "allowed")
+    assert match == ("allowed", None)
 
 
 def _native_review(

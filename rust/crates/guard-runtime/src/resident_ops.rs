@@ -464,6 +464,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::LocalCliHook(request) => {
                 crate::local_cli_hook_op::evaluate_local_cli_hook_request(&request)
             }
+            ResidentOperationV1::HookLocalCliRule(request) => {
+                crate::hook_direct::local_cli::rule_op::evaluate_hook_local_cli_rule_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::ConnectorSetupContext(request) => {
                 crate::connector_setup_context_op::evaluate_connector_setup_context_request(
                     &request,
@@ -829,6 +834,7 @@ fn operation_guard_home(operation: &ResidentOperationV1) -> Option<&str> {
         ResidentOperationV1::RunnerAuthority(request) => Some(&request.guard_home),
         ResidentOperationV1::LocalCliGrantDecide(request) => Some(&request.guard_home),
         ResidentOperationV1::LocalCliHook(request) => Some(&request.guard_home),
+        ResidentOperationV1::HookLocalCliRule(request) => Some(&request.guard_home),
         ResidentOperationV1::ConnectorSetupContext(request) => Some(&request.guard_home),
         ResidentOperationV1::McpToolEvidence(request) => Some(&request.guard_home),
         ResidentOperationV1::LocalMcpGrantDecide(request) => Some(&request.guard_home),
@@ -871,6 +877,7 @@ fn operation_store_path(operation: &ResidentOperationV1) -> Option<&str> {
         ResidentOperationV1::PolicyDecisionLookup(request) => Some(&request.store_path),
         ResidentOperationV1::LocalCliGrantDecide(request) => Some(&request.store_path),
         ResidentOperationV1::LocalCliHook(request) => Some(&request.store_path),
+        ResidentOperationV1::HookLocalCliRule(request) => Some(&request.store_path),
         ResidentOperationV1::ConnectorSetupContext(request) => Some(&request.store_path),
         ResidentOperationV1::LocalMcpGrantDecide(request) => Some(&request.store_path),
         ResidentOperationV1::ContributedMcpDecide(request) => Some(&request.store_path),

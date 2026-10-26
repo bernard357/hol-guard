@@ -249,6 +249,8 @@ pub(super) fn launch_cwd(
 
 #[path = "hook_direct_local_cli_block.rs"]
 pub(crate) mod block;
+#[path = "hook_direct_local_cli_rule_op.rs"]
+pub(crate) mod rule_op;
 
 #[cfg(test)]
 #[path = "hook_direct_local_cli_tests.rs"]
