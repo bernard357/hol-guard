@@ -52,6 +52,7 @@ from codex_plugin_scanner.guard.local_trust_contract import (
     select_trust_backend,
 )
 from codex_plugin_scanner.guard.models import PolicyDecision
+from codex_plugin_scanner.guard.native_context import ensure_resident_prerequisite
 from codex_plugin_scanner.guard.native_policy_snapshot_constants import (
     NATIVE_POLICY_VERIFIER_KEY_NAME,
     NATIVE_RUNTIME_STATE_DIRECTORY,
@@ -1132,6 +1133,10 @@ def test_upsert_policy_uses_single_integrity_key_lookup_per_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _store(tmp_path)
+    # The resident's one-time verifier-key provisioning also reads the master.
+    # It happens once per guard home, not once per write, so settle it before
+    # counting the lookups the write itself makes.
+    assert ensure_resident_prerequisite(store.guard_home, store=store)
     original_lookup = store._policy_integrity_secret_material
     lookup_calls = 0
 

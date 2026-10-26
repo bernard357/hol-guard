@@ -94,7 +94,7 @@ def test_invalid_reason_from_the_resident_is_surfaced() -> None:
 def _patch_transport(
     monkeypatch: pytest.MonkeyPatch, clock: list[float], seen: dict[str, Any], on_request: Callable[[], None]
 ) -> None:
-    monkeypatch.setattr(native_guard_store, "ensure_resident_prerequisite", lambda _home: True)
+    monkeypatch.setattr(native_guard_store, "ensure_resident_prerequisite", lambda _home, **_kwargs: True)
     monkeypatch.setattr(native_guard_store.time, "monotonic", lambda: clock[0])
 
     def request(**kwargs: Any) -> None:

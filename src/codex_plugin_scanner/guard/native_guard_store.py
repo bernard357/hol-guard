@@ -125,6 +125,7 @@ def native_guard_store_call(
     args: Mapping[str, object],
     deadline_monotonic: float,
     busy_timeout_seconds: float | None = None,
+    prerequisite_store: Any | None = None,
 ) -> tuple[Any, int | None]:
     """Run one store method in the resident; return ``(payload, outbox_generation)``.
 
@@ -132,9 +133,14 @@ def native_guard_store_call(
     storage-gate wait. The remaining budget is recomputed here, after startup
     work, and bounds both the SQLite busy timeout and the transport wait, so the
     call never outlasts the caller's deadline.
+
+    ``prerequisite_store`` is the caller's own open store. The resident's
+    verifier key is derived from the policy-integrity master, so provisioning it
+    from any other store would write a key the caller's rows cannot be verified
+    against; callers that have a store pass it rather than let one be opened.
     """
 
-    if not ensure_resident_prerequisite(guard_home):
+    if not ensure_resident_prerequisite(guard_home, store=prerequisite_store):
         raise _unavailable(prerequisite_unavailable_code("native_guard_store_prerequisite_unavailable", guard_home))
     remaining_seconds = deadline_monotonic - time.monotonic()
     if remaining_seconds <= 0:
