@@ -17,8 +17,9 @@ on:
 permissions: {}
 
 concurrency:
-  # One group per release train: tag runs, main pushes and repair dispatches publish in order.
-  group: hol-guard-mcp-registry-${{ github.event.workflow_run.head_branch == 'release/3.0' && 'release-3.0' || 'main' }}
+  # Tag runs and repair dispatches publish in order. GitHub keeps one pending run per group,
+  # so each branch push run gets its own group and can never cancel a queued release.
+  group: hol-guard-mcp-registry-${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'workflow_dispatch') && 'release' || format('push-{0}', github.event.workflow_run.id) }}
   cancel-in-progress: false
 
 jobs:

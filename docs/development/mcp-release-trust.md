@@ -39,9 +39,11 @@ the latest release from GitHub; nothing else comes from the dispatcher, and the
 rebuilt event goes through every check above. Only the current latest stable
 release qualifies, so a dispatch cannot move the MCP Registry back to an older
 version. The dispatch runs trusted `main` code, as a `workflow_run` does.
-All Registry publications on one train share a concurrency group, and the publish
-job checks again that its tag is still the latest stable release just before it
-publishes, so a delayed run never replaces a newer version.
+Tag runs and repair dispatches share one Registry concurrency group; each branch
+push run gets its own, because GitHub keeps one pending run per group and a push
+could otherwise cancel a queued release. The publish job checks again that its tag
+is still the latest stable release just before it publishes, so a delayed run never
+replaces a newer version.
 
 The three release checkouts depend on the successful gate and consume only its
 validated outputs. They do not fall back to event data or the latest branch tip.
