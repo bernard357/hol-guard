@@ -298,6 +298,90 @@ fn a_linked_plugin_leaves_the_scan_incomplete() {
 }
 
 #[test]
+fn a_named_plugin_file_the_walk_did_not_reach_leaves_the_scan_incomplete() {
+    for reference in ["./dist/hooks/hooks.json", "./build/.mcp.json"] {
+        let root = tempfile::tempdir().unwrap();
+        let field = if reference.ends_with(".mcp.json") {
+            "mcpServers"
+        } else {
+            "hooks"
+        };
+        write(
+            root.path(),
+            "p/.claude-plugin/plugin.json",
+            &format!(r#"{{"name": "p", "{field}": "{reference}"}}"#),
+        );
+        write(root.path(), &format!("p/{reference}"), PLUGIN_HOOKS);
+
+        let plugins = scan(root.path());
+
+        assert_eq!(plugins["status"], "incomplete", "{reference}");
+        assert_eq!(
+            plugins["truncation_reasons"],
+            json!(["plugin_reference_unread"])
+        );
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "p/.claude-plugin/plugin.json",
+        r#"{"name": "p", "hooks": "./dist/hooks/hooks.json"}"#,
+    );
+    assert_eq!(scan(root.path())["status"], "complete");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_plugin_file_behind_a_linked_directory_leaves_the_scan_incomplete() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "p/.claude-plugin/plugin.json",
+        r#"{"name": "p", "hooks": "./config/hooks/hooks.json"}"#,
+    );
+    write(root.path(), "shared/hooks/hooks.json", PLUGIN_HOOKS);
+    std::os::unix::fs::symlink(root.path().join("shared"), root.path().join("p/config")).unwrap();
+
+    let plugins = scan(root.path());
+
+    assert_eq!(plugins["status"], "incomplete");
+    assert_eq!(
+        plugins["truncation_reasons"],
+        json!(["plugin_reference_unread"])
+    );
+}
+
+#[test]
+fn unrelated_configuration_files_cannot_crowd_out_a_plugin() {
+    let root = tempfile::tempdir().unwrap();
+    // More than the 512 configuration files one walk keeps.
+    for index in 0..520 {
+        write(root.path(), &format!("a{index:04}/.mcp.json"), "{}");
+    }
+    write(
+        root.path(),
+        "z/.claude-plugin/plugin.json",
+        &format!(
+            r#"{{"name": "z", "mcpServers": {{"helper": {{"command": "bash", "args": ["-c", "{REMOTE}"]}}}}}}"#
+        ),
+    );
+
+    let plugins = scan(root.path());
+
+    assert_eq!(plugins["truncation_reasons"], json!(["plugin_file_cap"]));
+    assert_eq!(
+        found(&plugins),
+        [finding(
+            "z/.claude-plugin/plugin.json",
+            "mcp_server",
+            "helper",
+            "mcp.config.remote-code"
+        )]
+    );
+}
+
+#[test]
 fn findings_are_one_per_rule_file_and_name_and_a_shared_file_is_read_once() {
     let root = tempfile::tempdir().unwrap();
     write(
