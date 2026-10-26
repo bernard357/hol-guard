@@ -13,7 +13,7 @@ otherwise ``unset``), so it can never disagree with the grant that decides.
 from __future__ import annotations
 
 import sqlite3
-from typing import Final, Literal
+from typing import Final
 
 FIRST_BLOCKED_CAUSES: Final = (
     "exec_outside_roots",
@@ -33,7 +33,6 @@ CONTEXT_COLUMNS: Final = (
 # Caps the resident applies as well; the store never keeps more than this.
 MAX_SUMMARY_CHARS: Final = 240
 MAX_LABEL_CHARS: Final = 80
-ConnectorResolutionState = Literal["unset", "allowed", "blocked"]
 # The causes a grant capability resolves, and the capability each implies.
 CAPABILITY_BY_CAUSE: Final = {
     "connect_loopback": "loopback-network",
@@ -61,24 +60,6 @@ def validated_first_blocked_cause(raw: object) -> str | None:
     if not isinstance(raw, str) or raw not in FIRST_BLOCKED_CAUSES:
         raise ValueError("invalid_first_blocked_cause")
     return raw
-
-
-def connector_resolution_state(
-    connection: sqlite3.Connection, cli_id: str, identity_hash: str
-) -> ConnectorResolutionState:
-    """Derive the decision state from the grant row; a changed identity is ``unset``."""
-
-    exists = connection.execute(
-        "select 1 from sqlite_master where type = 'table' and name = 'local_cli_grant'"
-    ).fetchone()
-    if exists is None:
-        return "unset"
-    row = connection.execute("select identity_hash, state from local_cli_grant where cli_id = ?", (cli_id,)).fetchone()
-    if row is None or row[0] != identity_hash:
-        return "unset"
-    if row[1] == "allowed":
-        return "allowed"
-    return "blocked" if row[1] == "blocked" else "unset"
 
 
 def note_capability_cause(connection: sqlite3.Connection, *, cli_id: str, identity_hash: str, cause: str) -> int:
@@ -113,8 +94,6 @@ __all__ = [
     "FIRST_BLOCKED_CAUSES",
     "MAX_LABEL_CHARS",
     "MAX_SUMMARY_CHARS",
-    "ConnectorResolutionState",
-    "connector_resolution_state",
     "ensure_local_cli_context_columns",
     "note_capability_cause",
     "validated_first_blocked_cause",
