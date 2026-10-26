@@ -246,12 +246,12 @@ fn request_matches_the_decide_wire_shape() {
         json!(expected.fingerprint)
     );
     assert_eq!(request["params"], json!(call));
+    assert!(request.get("resident_provider_catalog").is_none());
     let decoded: McpRelayDecideRequestV1 = serde_json::from_value(request).unwrap();
     assert_eq!(decoded.build.tool_name, "read");
     assert_eq!(decoded.hash_workspace, facts.hash_workspace);
     assert_eq!(decoded.path.as_deref(), Some("/usr/bin:/bin"));
     assert!(!decoded.resident_provider_catalog);
-    assert!(request.get("resident_provider_catalog").is_none());
     let shell = params(json!({"name": "bash", "arguments": {"command": "ls"}}));
     assert!(decide_request(&facts, &shell, None, &catalog, &no_prompt()).is_some());
 }
