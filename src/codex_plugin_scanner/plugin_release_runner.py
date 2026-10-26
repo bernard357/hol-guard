@@ -73,7 +73,6 @@ def evidence_step() -> int:
             plugin_name=evidence.plugin_name,
             plugin_version=evidence.plugin_version,
             guard_version=evidence.guard_version,
-            generated_at=evidence.generated_at,
         )
         if sbom_path
         else None
@@ -146,14 +145,17 @@ def release_changes(value: object) -> dict[str, object] | None:
     flags = value.get("flags")
     if not isinstance(previous, str) or not previous or not isinstance(flags, list):
         return None
-    kept = [
-        {"kind": kind, "text": "".join(character for character in text if character.isprintable())[:300]}
-        for flag in flags[:_MAX_FLAGS]
-        if isinstance(flag, Mapping)
-        and (kind := flag.get("kind")) in _FLAG_KINDS
-        and isinstance(text := flag.get("text"), str)
-        and text
-    ]
+    kept: list[dict[str, str]] = []
+    for flag in flags:
+        if len(kept) == _MAX_FLAGS:
+            break
+        if not isinstance(flag, Mapping):
+            continue
+        kind, text = flag.get("kind"), flag.get("text")
+        if isinstance(kind, str) and kind in _FLAG_KINDS and isinstance(text, str):
+            plain = "".join(character for character in text if character.isprintable())[:300]
+            if plain:
+                kept.append({"kind": kind, "text": plain})
     return {"previousVersion": previous[:100], "flags": kept}
 
 

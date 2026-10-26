@@ -2,11 +2,15 @@
 
 The SBOM lists the third-party packages a plugin release ships or starts:
 the non-development entries of ``package-lock.json``, exact ``==`` pins in
-``requirements*.txt`` files, registry and git packages in ``uv.lock``, and the
-packages its MCP servers launch through npx, bunx, pnpx or uvx. Only the
-plugin folder itself is read; nested folders, symbolic links and oversized
-files are skipped. The document is deterministic for a given commit, so the
-digest recorded in the release evidence identifies it exactly.
+``requirements*.txt`` files other than development ones, registry and git
+packages in ``uv.lock``, and the packages its MCP servers launch through npx,
+bunx, pnpx or uvx. Only the plugin folder itself is read; nested folders,
+symbolic links and oversized files are skipped. The document carries no run
+time, so it is identical for a given commit and the digest recorded in the
+release evidence identifies it exactly.
+
+Like the rest of the release workflow tooling, this runs once per release in
+GitHub Actions and never in the Guard runtime, so it stays in Python.
 """
 
 from __future__ import annotations
@@ -34,6 +38,12 @@ _MAX_TEXT = 214
 _REQUIREMENT_RE = re.compile(
     r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*===?\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)\s*(?:(?:[;#\\]|--).*)?$"
 )
+_LAUNCH_RE = re.compile(r"^((?:@[^@/\s]+/)?[^@=<>!~\s\[]+)(?:\[[^\]]*\])?(?:(@|==)(.+)|[<>!~=].*)?$")
+_NPM_EXACT_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+_PYPI_EXACT_RE = re.compile(r"^\d[0-9A-Za-z._+!-]*$")
+_DEV_REQUIREMENTS = frozenset(
+    {"dev", "develop", "development", "test", "tests", "testing", "lint", "docs", "doc", "ci", "typing"}
+)
 _NPM_LAUNCHERS = frozenset({"npx", "bunx", "pnpx"})
 _LOCAL_UV_SOURCES = frozenset({"editable", "virtual", "directory", "path"})
 
@@ -49,12 +59,15 @@ class SbomComponent:
     scope: Scope
     sha512: str | None
     source: str
+    vcs_url: str | None = None
 
     @property
     def purl(self) -> str:
         segments = "/".join(quote(part, safe="._-~") for part in self.name.split("/"))
         version = f"@{quote(self.version, safe='._-~')}" if self.version else ""
-        return f"pkg:{self.ecosystem}/{segments}{version}"
+        # A git checkout is not the registry release of the same name and version.
+        qualifier = f"?vcs_url={quote(self.vcs_url, safe='')}" if self.vcs_url else ""
+        return f"pkg:{self.ecosystem}/{segments}{version}{qualifier}"
 
 
 @dataclass(frozen=True)
@@ -194,6 +207,7 @@ def uv_components(text: str) -> list[SbomComponent]:
         version = _text(entry.get("version"))
         if name is None or version is None:
             continue
+        git = _text(source.get("git")) if isinstance(source, Mapping) else None
         found.append(
             SbomComponent(
                 ecosystem="pypi",
@@ -202,17 +216,24 @@ def uv_components(text: str) -> list[SbomComponent]:
                 scope="required",
                 sha512=None,
                 source="uv.lock",
+                vcs_url=f"git+{git}" if git else None,
             )
         )
     return found
 
 
-def _split_launch(package: str, *, npm: bool) -> tuple[str, str | None]:
-    if not npm:
-        name, _, version = package.partition("==")
-        return _pypi_name(name), version or None
-    at = package.find("@", 1)
-    return (package[:at], package[at + 1 :] or None) if at > 0 else (package, None)
+def _split_launch(package: str, *, npm: bool) -> tuple[str, str | None] | None:
+    """Name and exact version of a launcher spec; tags and ranges keep no version."""
+
+    match = _LAUNCH_RE.match(package)
+    if match is None:
+        return None
+    name, operator, spec = match.groups()
+    exact = _NPM_EXACT_RE if npm else _PYPI_EXACT_RE
+    version = spec if spec and (operator == "@" or not npm) and exact.match(spec) else None
+    if npm:
+        return name, version.removeprefix("v") if version else None
+    return _pypi_name(name), version
 
 
 def launcher_components(servers: Sequence[object]) -> list[SbomComponent]:
@@ -228,7 +249,10 @@ def launcher_components(servers: Sequence[object]) -> list[SbomComponent]:
         if launcher not in _NPM_LAUNCHERS and launcher != "uvx":
             continue
         npm = launcher in _NPM_LAUNCHERS
-        name, version = _split_launch(package, npm=npm)
+        split = _split_launch(package, npm=npm)
+        if split is None:
+            continue
+        name, version = split
         found.append(
             SbomComponent(
                 ecosystem="npm" if npm else "pypi",
@@ -242,6 +266,13 @@ def launcher_components(servers: Sequence[object]) -> list[SbomComponent]:
     return found
 
 
+def _is_dev_requirements(filename: str) -> bool:
+    """requirements-dev.txt, requirements_test.txt and the like are not shipped."""
+
+    words = re.split(r"[-_.]", filename.lower().removeprefix("requirements").removesuffix(".txt"))
+    return any(word in _DEV_REQUIREMENTS for word in words)
+
+
 def collect_components(plugin_dir: Path, servers: Sequence[object]) -> list[SbomComponent]:
     found: list[SbomComponent] = []
     if (text := _read(plugin_dir / "package-lock.json")) is not None:
@@ -253,6 +284,8 @@ def collect_components(plugin_dir: Path, servers: Sequence[object]) -> list[Sbom
     except OSError:
         requirement_files = []
     for path in requirement_files:
+        if _is_dev_requirements(path.name):
+            continue
         if (text := _read(path)) is not None:
             found.extend(requirements_components(text, path.name))
     locked = {(component.ecosystem, component.name) for component in found}
@@ -293,7 +326,6 @@ def build_plugin_release_sbom(
     plugin_name: str | None,
     plugin_version: str | None,
     guard_version: str,
-    generated_at: str,
 ) -> PluginReleaseSbom | None:
     """The SBOM for one release, or None when it declares no packages or too many to list."""
 
@@ -309,7 +341,6 @@ def build_plugin_release_sbom(
         "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, f'https://github.com/{repository}/commit/{commit_sha}')}",
         "version": 1,
         "metadata": {
-            "timestamp": generated_at,
             "tools": {"components": [{"type": "application", "name": "hol-guard", "version": guard_version}]},
             "component": subject,
         },

@@ -47,11 +47,18 @@ source = { editable = "." }
 name = "Pydantic_Core"
 version = "2.27.1"
 source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "mcp"
+version = "1.2.0"
+source = { git = "https://github.com/acme/mcp?rev=main#0123abc" }
 """
 SERVERS = (
     McpServerSurface("weather", "stdio", "npx", "@acme/weather-mcp", None, ()),
     McpServerSurface("search", "stdio", "uvx", "mcp-server-fetch==2025.1.0", None, ()),
     McpServerSurface("latest", "stdio", "bunx", "left-pad", None, ()),
+    McpServerSurface("tagged", "stdio", "npx", "zod@latest", None, ()),
+    McpServerSurface("lint", "stdio", "uvx", "ruff@0.6.0", None, ()),
     McpServerSurface("local", "stdio", "node", None, None, ()),
 )
 
@@ -62,6 +69,7 @@ def _plugin(tmp_path: Path) -> Path:
     (plugin / "package-lock.json").write_text(json.dumps(PACKAGE_LOCK), encoding="utf-8")
     (plugin / "requirements.txt").write_text(REQUIREMENTS, encoding="utf-8")
     (plugin / "uv.lock").write_text(UV_LOCK, encoding="utf-8")
+    (plugin / "requirements-dev.txt").write_text("pytest==8.3.0\n", encoding="utf-8")
     nested = plugin / "examples"
     nested.mkdir()
     (nested / "requirements.txt").write_text("nested==9.9.9\n", encoding="utf-8")
@@ -77,7 +85,6 @@ def _sbom(plugin: Path, servers: tuple[McpServerSurface, ...] = SERVERS):
         plugin_name="weather-tools",
         plugin_version="1.2.0",
         guard_version="3.58.0",
-        generated_at="2026-10-26T00:00:00Z",
     )
 
 
@@ -96,7 +103,9 @@ def test_sbom_lists_shipped_packages_from_lockfiles_and_launchers(tmp_path: Path
         "pkg:pypi/foo-bar@1.0.0",
         "pkg:pypi/mcp-server-fetch@2025.1.0",
         "pkg:pypi/mcp@1.2.0",
+        "pkg:pypi/mcp@1.2.0?vcs_url=git%2Bhttps%3A%2F%2Fgithub.com%2Facme%2Fmcp%3Frev%3Dmain%230123abc",
         "pkg:pypi/pydantic-core@2.27.1",
+        "pkg:pypi/ruff@0.6.0",
     ]
     by_purl = {component["purl"]: component for component in document["components"]}
     assert by_purl["pkg:npm/zod@3.23.8"]["hashes"] == [{"alg": "SHA-512", "content": bytes(range(64)).hex()}]
@@ -110,7 +119,8 @@ def test_sbom_lists_shipped_packages_from_lockfiles_and_launchers(tmp_path: Path
         "name": "weather-tools",
         "version": "1.2.0",
     }
-    assert sbom.summary.components == 9
+    assert "timestamp" not in document["metadata"]
+    assert sbom.summary.components == 11
     assert sbom.summary.sha256 == hashlib.sha256(sbom.document.encode("utf-8")).hexdigest()
     again = tmp_path / "again"
     again.mkdir()
@@ -166,18 +176,18 @@ def test_runner_binds_the_sbom_digest_into_the_attested_evidence(
     sbom_bytes = (tmp_path / "sbom.cdx.json").read_bytes()
     evidence = json.loads((tmp_path / "evidence.json").read_text(encoding="utf-8"))
     assert outputs["sbom_path"] == str(tmp_path / "sbom.cdx.json")
-    assert outputs["sbom_components"] == "7"
+    assert outputs["sbom_components"] == "8"
     assert evidence["sbom"] == {
         "format": "CycloneDX",
         "spec_version": "1.6",
         "sha256": hashlib.sha256(sbom_bytes).hexdigest(),
-        "components": 7,
+        "components": 8,
     }
 
     monkeypatch.setenv("RELEASE_STATUS", "disabled")
     assert plugin_release_runner.main(["summary"]) == 0
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
-    assert f"- SBOM: CycloneDX 1.6, 7 components, SHA-256 {evidence['sbom']['sha256']}" in summary
+    assert f"- SBOM: CycloneDX 1.6, 8 components, SHA-256 {evidence['sbom']['sha256']}" in summary
 
 
 def test_runner_leaves_the_sbom_out_when_none_is_requested(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -196,7 +206,10 @@ CHANGES = {
         {"kind": "env", "text": "New environment variables read: TOKEN\n::error::forged"},
         {"kind": "unknown", "text": "dropped"},
         {"kind": "check", "text": ""},
-    ],
+        {"kind": ["egress"], "text": "unhashable kind"},
+    ]
+    + [{"kind": "unknown", "text": "padding"}] * 25
+    + [{"kind": "hooks", "text": "New hooks: SessionStart"}],
 }
 
 
@@ -214,6 +227,7 @@ def test_registration_passes_on_only_known_change_flags(monkeypatch: pytest.Monk
         "flags": [
             {"kind": "egress", "text": "New network destinations: upload.example.net"},
             {"kind": "env", "text": "New environment variables read: TOKEN::error::forged"},
+            {"kind": "hooks", "text": "New hooks: SessionStart"},
         ],
     }
 

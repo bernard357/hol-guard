@@ -66,11 +66,11 @@ The evidence never includes source code, scanner findings, file contents, local 
 When the release declares third-party packages, the evidence step also writes a CycloneDX 1.6 SBOM (`sbom_path` output) and the evidence records its format, spec version, SHA-256 and component count under `sbom`. Because the evidence is attested, the attestation binds the SBOM file by digest. The SBOM lists:
 
 - the non-development entries of `package-lock.json` (lockfile versions 1 to 3), with their SHA-512 integrity hashes;
-- exact `==` pins in `requirements*.txt`;
+- exact `==` pins in `requirements*.txt`, except development files such as `requirements-dev.txt` or `requirements-test.txt`;
 - registry and git packages in `uv.lock`, without the plugin's own editable or local entries;
-- the packages MCP servers start through `npx`, `bunx`, `pnpx` or `uvx`, without a version when the launch is unpinned.
+- the packages MCP servers start through `npx`, `bunx`, `pnpx` or `uvx`, without a version when the launch names a tag or range or no version at all. An unversioned launch of a package the lockfile already lists is left out.
 
-Only files directly in `plugin_dir` are read. Symbolic links, files over 32 MiB and files that do not parse are skipped. A release with no packages, or more than 50,000, gets no SBOM rather than a partial one, and its evidence has no `sbom` key. The document is deterministic for a commit, so rerunning a release reproduces the same digest. The reusable workflow keeps the evidence and the SBOM as the `hol-plugin-release` run artifact for 90 days.
+Only files directly in `plugin_dir` are read. Symbolic links, files over 32 MiB and files that do not parse are skipped. A release with no packages, or more than 50,000, gets no SBOM rather than a partial one, and its evidence has no `sbom` key. The document records no run time, so rerunning a release of the same commit with the same Guard version reproduces the same digest. A `uv.lock` package installed from git carries its repository in a `vcs_url` qualifier, so it never merges with the registry release of the same name and version. The reusable workflow keeps the evidence and the SBOM as the `hol-plugin-release` run artifact for 90 days.
 
 ## Changes since the previous release
 
