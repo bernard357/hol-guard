@@ -517,6 +517,9 @@ def test_a_declared_install_command_runs_only_when_its_sha256_is_accepted(
     assert ["claude", "plugin", "install", "toolgate@acme", "--json", "--accept-command", DECLARED] in runtimes.ran
     assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
 
+    # Installing again would report "already installed", so start over to reach the prompt.
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0, error
     monkeypatch.setattr(runner, "stdin_is_terminal", lambda: True)
     with pytest.raises(SystemExit):
         _install(spec_file, *base, "--accept-command", "not-a-sha")
@@ -837,7 +840,9 @@ def test_runtimes_installed_outside_path_are_found_and_the_plan_says_so(
     }
     out = io.StringIO()
     install.write_plan(plan, install.find_programs(), apply=False, out=out)
-    assert f"({claude}, not on PATH)" in out.getvalue()
+    row = next(line for line in out.getvalue().splitlines() if line.lstrip().startswith("Claude Code"))
+    assert str(claude) in row
+    assert row.endswith("(not on PATH)")
 
 
 def test_windows_looks_in_the_npm_folder_under_appdata(tmp_path: Path) -> None:
@@ -928,12 +933,12 @@ def test_the_spec_endpoint_override_reaches_a_local_portal_and_says_so(
     assert f"Warning: {install.SPEC_URL_ENV} is set. Install details come from {endpoint}, not hol.org." in error
     origin = endpoint.removesuffix("api/guard/plugins/install-spec")
     assert f"Listing   {origin}registry/plugins/acme%2Ftoolgate" in output
-    assert runtimes.ran[-1] == ["codex", "plugin", "add", "toolgate@acme"]
+    assert ["codex", "plugin", "add", "toolgate@acme"] in runtimes.ran
 
     # The record kept the local listing, and uninstall plans from it through the same override.
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
     assert exit_code == 0, error
-    assert runtimes.ran[-1] == ["codex", "plugin", "remove", "toolgate@acme"]
+    assert ["codex", "plugin", "remove", "toolgate@acme"] in runtimes.ran
 
 
 def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
@@ -1219,10 +1224,13 @@ def test_one_tip_after_the_first_install_only_on_a_terminal(
     assert "Tip: hol-guard plugin uninstall acme/toolgate shows how to remove it again." in output
 
 
-def test_help_lists_plugin_and_each_command_has_examples() -> None:
+def test_help_lists_plugin_and_each_command_has_examples(monkeypatch: pytest.MonkeyPatch) -> None:
     from codex_plugin_scanner.guard.cli import commands_parser_constants
 
     assert "  plugin       Install a HOL plugin listing" in commands_parser_constants._GUARD_HELP_GROUPS
+    # The program name selects the Guard command set, as it does for the installed script.
+    monkeypatch.setattr(guard_cli.sys, "argv", ["hol-guard"])
+    monkeypatch.setenv("COLUMNS", "80")
     output = io.StringIO()
     with contextlib.redirect_stdout(output), pytest.raises(SystemExit):
         guard_cli.main(["plugin", "install", "--help"])

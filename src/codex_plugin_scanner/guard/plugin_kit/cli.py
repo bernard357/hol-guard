@@ -263,12 +263,12 @@ def build_parser(*, program_name: str = "hol-guard plugin") -> argparse.Argument
         command = commands.add_parser(
             name,
             help=help_text,
-            description=help_text,
+            description=help_text.replace(" Prints", "\nPrints"),
             epilog=(
                 "examples:\n"
                 + (
                     f"  {program_name} install acme/toolgate                  show the plan\n"
-                    f"  {program_name} install acme/toolgate --apply          install, confirming each\n"
+                    f"  {program_name} install acme/toolgate --apply          install, asking first\n"
                     f"  {program_name} install acme/toolgate --apply --runtime codex\n"
                     if name == "install"
                     else f"  {program_name} uninstall acme/toolgate                show the plan\n"
