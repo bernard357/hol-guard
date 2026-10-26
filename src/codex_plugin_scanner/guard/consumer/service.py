@@ -484,7 +484,7 @@ def _persist_detected(
     evidence: Mapping[str, Any],
     snapshot: dict[str, object],
     *,
-    policy_action: str,
+    policy_action: GuardAction,
     approved: bool,
     advance_snapshot: bool,
     cache_provenance: bool,
