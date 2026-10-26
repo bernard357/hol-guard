@@ -39,8 +39,11 @@ pub(super) fn redirected_launch(command: &CanonicalCommandV1, context: PathConte
 
 /// Whether a redirect in `text` writes a file whose name `bare`, the same
 /// text without its redirects, also spells. Names compare by their last path
-/// component, so `./run.js` and `/work/run.js` both match `run.js`. A target
-/// the scan cannot pick out counts as named.
+/// component with every quote and escape removed, so `./run.js`,
+/// `/work/run.js`, `ru"n.js"` and `r\un.js` all match `run.js`. A word that
+/// could expand to the name, through a glob, a brace or a parameter outside
+/// single quotes, counts as naming it, as does a target the scan cannot pick
+/// out.
 fn writes_a_named_file(text: &str, bare: &str) -> bool {
     let Some(words) = split_unquoted(text, char::is_whitespace) else {
         return true;
@@ -50,27 +53,16 @@ fn writes_a_named_file(text: &str, bare: &str) -> bool {
     }) else {
         return true;
     };
-    let file_name = |word: &str| {
-        let word = word.trim_matches(['\'', '"']);
-        word.rsplit('/').next().unwrap_or(word).to_owned()
-    };
-    let spelled: Vec<String> = spelled
-        .into_iter()
-        .filter(|word| !word.is_empty())
-        .map(file_name)
-        .collect();
     let words: Vec<&str> = words.into_iter().filter(|word| !word.is_empty()).collect();
-    words.iter().enumerate().any(|(index, word)| {
+    let mut targets = Vec::new();
+    for (index, word) in words.iter().enumerate() {
         // A `>` inside a quoted argument is text, not a redirect.
         let Some((before, rest)) = word.rsplit_once('>') else {
-            return false;
+            continue;
         };
-        if before.contains(['\'', '"']) {
-            return false;
-        }
         let rest = rest.trim_start_matches('|');
-        if rest.starts_with('&') {
-            return false;
+        if before.contains(['\'', '"']) || rest.starts_with('&') {
+            continue;
         }
         let target = match rest {
             "" => match words.get(index + 1) {
@@ -80,8 +72,63 @@ fn writes_a_named_file(text: &str, bare: &str) -> bool {
             rest => rest,
         };
         let target = target.trim_end_matches([';', '&', '|']);
-        target != "/dev/null" && spelled.contains(&file_name(target))
-    })
+        if target != "/dev/null" {
+            targets.push(target);
+        }
+    }
+    if targets.is_empty() {
+        return false;
+    }
+    let spelled: Vec<&str> = spelled
+        .into_iter()
+        .filter(|word| !word.is_empty())
+        .collect();
+    if targets
+        .iter()
+        .chain(&spelled)
+        .any(|word| could_expand(word))
+    {
+        return true;
+    }
+    let names: Vec<String> = spelled.iter().map(|word| file_name(word)).collect();
+    targets
+        .iter()
+        .any(|target| names.contains(&file_name(target)))
+}
+
+/// The last path component of a word with its quotes and escapes removed.
+fn file_name(word: &str) -> String {
+    let word: String = word
+        .chars()
+        .filter(|character| !matches!(character, '\'' | '"' | '\\'))
+        .collect();
+    word.rsplit('/').next().unwrap_or(&word).to_owned()
+}
+
+/// Whether the shell could expand the word into a name it does not spell: a
+/// glob or a brace outside quotes, or a parameter outside single quotes other
+/// than `$!`, the last job's process ID.
+fn could_expand(word: &str) -> bool {
+    let chars: Vec<char> = word.chars().collect();
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    for (index, &character) in chars.iter().enumerate() {
+        if single {
+            single = character != '\'';
+        } else if escaped {
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '\'' && !double {
+            single = true;
+        } else if character == '"' {
+            double = !double;
+        } else if (character == '$' && chars.get(index + 1) != Some(&'!'))
+            || (!double && matches!(character, '*' | '?' | '[' | '{'))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// The inline program of every interpreter launch in a list or a loop, read

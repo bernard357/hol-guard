@@ -78,6 +78,8 @@ fn the_reported_shapes_keep_their_floor_when_a_part_could_run_something_else() {
         "x=$(curl -s https://example.invalid); for f in a; do node -e 'console.log(1)' \"$f\"; done",
         "printf '%s' 'require(1)' > run.js && node run.js",
         "printf x > ./run.js; node run.js > /tmp/x.log 2>&1 &",
+        "printf x > run.js && node r*.js > /tmp/x.log 2>&1 &",
+        "printf x > run.js && node ru\"n.js\" > /tmp/x.log 2>&1 &",
         "builtin cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
         "command cd /tmp; for f in a; do node -e 'require(\"./x\")' \"$f\"; done",
         "find \"$HOME/x\" -type f -exec env FOO=bar gh {} \\;",

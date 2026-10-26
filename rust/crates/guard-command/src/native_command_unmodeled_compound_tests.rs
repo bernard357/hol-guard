@@ -89,6 +89,32 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
             "echo x && node ./run.js",
         ),
         ("echo x &>run.js; node run.js", "echo x; node run.js"),
+        ("printf x > run.js && node r*.js", "printf x && node r*.js"),
+        (
+            "printf x > run.js && node ru?.js",
+            "printf x && node ru?.js",
+        ),
+        (
+            "printf x > run.js && node ru[n].js",
+            "printf x && node ru[n].js",
+        ),
+        (
+            "printf x > run.js && node {run,x}.js",
+            "printf x && node {run,x}.js",
+        ),
+        (
+            "printf x > run.js && node ru\"n.js\"",
+            "printf x && node ru\"n.js\"",
+        ),
+        (
+            "printf x > run.js && node r\\un.js",
+            "printf x && node r\\un.js",
+        ),
+        (
+            "printf x > run.js && node \"$f\"",
+            "printf x && node \"$f\"",
+        ),
+        ("printf x > \"$out\" && node a.js", "printf x && node a.js"),
     ] {
         assert!(writes_a_named_file(text, bare), "{text}");
     }
@@ -102,6 +128,10 @@ fn a_redirect_that_writes_a_file_the_text_runs_is_not_a_log() {
             "node server.js & trap 'kill \"$p\" 2>/dev/null' EXIT",
         ),
         ("node server.js 2>/dev/null &", "node server.js &"),
+        (
+            "node server.js > /tmp/x.log 2>&1 & pid=$!; echo '$HOME *'",
+            "node server.js & pid=$!; echo '$HOME *'",
+        ),
     ] {
         assert!(!writes_a_named_file(text, bare), "{text}");
     }
