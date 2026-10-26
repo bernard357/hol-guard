@@ -10,6 +10,7 @@ import pytest
 
 import codex_plugin_scanner.guard.config as config_module
 from codex_plugin_scanner.guard.config import (
+    GuardConfig,
     load_guard_config,
     maybe_auto_revert_watch,
     resolve_risk_action,
@@ -17,7 +18,9 @@ from codex_plugin_scanner.guard.config import (
 )
 from codex_plugin_scanner.guard.harness_posture import (
     config_for_harness,
+    harness_posture_status,
     harness_posture_summary,
+    known_harness_ids,
     protection_settings_payload,
 )
 from codex_plugin_scanner.guard.mdm.contracts import ManagedPolicy, ManagedPolicyState
@@ -252,3 +255,34 @@ def test_failed_sidecar_write_binds_no_overrides(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sidecar_module, "_write_private_file", _fail)
     assert write_harness_postures_sidecar(store, generation=2, policy_digest=digest, postures={"codex": "watch"}) == {}
     assert read_harness_postures_sidecar(store, generation=2, policy_digest=digest) == {}
+
+
+def test_an_unoverridden_harness_does_not_ask_the_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def boom(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("runtime")
+
+    monkeypatch.setattr("codex_plugin_scanner.guard.harness_posture.resolve_native_guard_config", boom)
+    config = GuardConfig(guard_home=tmp_path, workspace=None, harness_postures={"codex": "watch"})
+    assert config_for_harness(config, "claude-code") is config
+
+
+def test_status_asks_the_runtime_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    harnesses = known_harness_ids()
+    calls = {"n": 0}
+
+    def fake(_op: str, _fields: object) -> dict[str, object]:
+        calls["n"] += 1
+        view = {"posture": "protected", "mode": "enforce", "security_level": "standard"}
+        return {
+            "baseline": "protected",
+            "effective": {harness: "protected" for harness in harnesses},
+            "views": {harness: view for harness in harnesses},
+        }
+
+    monkeypatch.setattr("codex_plugin_scanner.guard.harness_posture.resolve_native_guard_config", fake)
+    rows = harness_posture_status(GuardConfig(guard_home=tmp_path, workspace=None))
+    assert calls["n"] == 1
+    assert [row["harness"] for row in rows] == list(harnesses)
+    summary = harness_posture_summary(GuardConfig(guard_home=tmp_path, workspace=None))
+    assert calls["n"] == 2
+    assert summary["harnesses_in_watch"] == []

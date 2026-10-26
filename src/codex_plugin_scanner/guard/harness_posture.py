@@ -211,12 +211,14 @@ def config_for_harness(config: GuardConfig, harness: object) -> GuardConfig:
 
     Returns ``config`` unchanged unless the harness carries an override, so the
     hot path and every un-overridden harness are byte-for-byte unaffected.
+    Asking the runtime first would fail launch when that resolution is
+    unavailable, even for a harness that inherits the baseline.
     """
 
-    key = runtime_harness_key(harness)
-    if key is None:
+    if harness_posture_override(config, harness) is None:
         return config
-    view = _resolved_postures(config).views.get(key)
+    key = runtime_harness_key(harness)
+    view = _resolved_postures(config).views.get(key) if key is not None else None
     if view is None:
         return config
     return replace(
@@ -267,9 +269,10 @@ def harness_posture_summary(config: GuardConfig) -> dict[str, object]:
     """
 
     overrides = dict(sorted((config.harness_postures or {}).items()))
+    effective = _resolved_postures(config).effective
     return {
         "harness_postures": overrides,
-        "harnesses_in_watch": [h for h in known_harness_ids() if effective_harness_posture(config, h) == "watch"],
+        "harnesses_in_watch": [h for h in known_harness_ids() if effective.get(h) == "watch"],
     }
 
 
@@ -289,12 +292,13 @@ def harness_posture_status(config: GuardConfig) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     overrides = config.harness_postures or {}
     stamps = config.harness_watch_entered_at or {}
+    resolved = _resolved_postures(config)
     for harness in known_harness_ids():
         override = overrides.get(harness)
         rows.append(
             {
                 "harness": harness,
-                "posture": effective_harness_posture(config, harness),
+                "posture": resolved.effective.get(harness, resolved.baseline),
                 "override": override,
                 "inherited": override is None,
                 "watch_entered_at": stamps.get(harness),
