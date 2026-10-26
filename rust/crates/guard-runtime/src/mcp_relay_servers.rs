@@ -124,9 +124,18 @@ pub(crate) fn report(
 }
 
 /// Whether the proxy, not the resident, decides some call of `tool`: a
-/// definition without a name.
+/// definition without a name the relay can send.
 pub(crate) fn proxy_tool(tool: &Value) -> bool {
-    tool.get("name").and_then(Value::as_str).is_none()
+    !tool
+        .get("name")
+        .and_then(Value::as_str)
+        .is_some_and(sendable_name)
+}
+
+/// A tool name the relay sends a call for (`decide_request`); a call to any
+/// other name is never sent.
+pub(crate) fn sendable_name(name: &str) -> bool {
+    !name.is_empty() && name.is_ascii()
 }
 
 /// A Composio wrapper, whose identity binds the provider catalog hash

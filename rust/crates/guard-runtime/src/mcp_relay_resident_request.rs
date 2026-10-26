@@ -180,7 +180,7 @@ pub(super) fn decide_request(
     let name = params
         .get("name")
         .and_then(Value::as_str)
-        .filter(|name| !name.is_empty() && name.is_ascii())?;
+        .filter(|name| crate::mcp_relay_servers::sendable_name(name))?;
     let arguments = arguments(params.get("arguments"), order)?;
     let expected = catalog.snapshot();
     let catalog_fingerprint = expected.fingerprint.clone()?;
