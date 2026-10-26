@@ -6,9 +6,11 @@
 //! answers come back in request order. No verdict is decided here; ranking
 //! and classification are the in-crate evaluators' answers.
 
+use std::mem::take;
+
 use guard_contracts::{
     McpClassificationItemV1, McpClassificationRequestV1, SuggestionToolV1,
-    MCP_CLASSIFICATION_MAX_ITEMS, MCP_CLASSIFICATION_REQUEST_SCHEMA,
+    MCP_CLASSIFICATION_MAX_BYTES, MCP_CLASSIFICATION_MAX_ITEMS, MCP_CLASSIFICATION_REQUEST_SCHEMA,
 };
 use serde_json::{Map, Value};
 
@@ -218,16 +220,48 @@ fn observed_count(value: Option<&Value>) -> i64 {
     count.clamp(-COUNT_LIMIT, COUNT_LIMIT)
 }
 
-/// `classify_mcp_actions`: describe each declaration in request order.
+/// `json` writes one byte between array elements.
+const ARRAY_SEPARATOR_BYTES: usize = 1;
+
+/// One packed classifier page: the declarations it carries and the request
+/// positions they came from.
+#[derive(Default)]
+pub(crate) struct Page {
+    pub(crate) indices: Vec<usize>,
+    pub(crate) items: Vec<McpClassificationItemV1>,
+}
+
+/// Serialized size of a request carrying no items. Python measures the whole
+/// envelope for every page because the page travels as one frame; the two
+/// parts around the items never change, so measuring them once is the same
+/// budget.
+fn envelope_bytes() -> usize {
+    let request = McpClassificationRequestV1 {
+        schema: MCP_CLASSIFICATION_REQUEST_SCHEMA.to_owned(),
+        request_id: String::new(),
+        items: Vec::new(),
+    };
+    serde_json::to_vec(&request).map_or(usize::MAX, |bytes| bytes.len())
+}
+
+/// Serialized size of one declaration inside the items array.
+fn item_bytes(item: &McpClassificationItemV1) -> Option<usize> {
+    serde_json::to_vec(item).ok().map(|bytes| bytes.len())
+}
+
+/// Pack the declarations the classifier's parser would accept into pages that
+/// stay under both the item cap and the byte budget, the way Python's
+/// `_chunks` packs them.
 ///
-/// A declaration the classifier's parser would refuse comes back `null`, the
-/// same undescribed answer Python's transport mirror produces, so one
-/// oversized provider schema never costs the rest of the batch its
-/// descriptions.
-pub(crate) fn classifications(definitions: &[&Value]) -> Vec<Value> {
-    let mut described = vec![Value::Null; definitions.len()];
-    let mut sendable: Vec<usize> = Vec::new();
-    let mut items: Vec<McpClassificationItemV1> = Vec::new();
+/// A declaration too large to travel even on its own is left out of every
+/// page: the caller hears nothing about it rather than losing the rest of the
+/// batch's descriptions. Large stored schemas repeated across a connector's
+/// commands would otherwise build one page far past what the op accepts.
+pub(crate) fn pack(definitions: &[&Value]) -> Vec<Page> {
+    let base = envelope_bytes();
+    let mut pages: Vec<Page> = Vec::new();
+    let mut page = Page::default();
+    let mut page_bytes = base;
     for (index, definition) in definitions.iter().enumerate() {
         let name = definition.get("name").map(py_text).unwrap_or_default();
         let schema = definition.get("inputSchema").cloned();
@@ -238,36 +272,82 @@ pub(crate) fn classifications(definitions: &[&Value]) -> Vec<Value> {
         {
             continue;
         }
-        sendable.push(index);
-        items.push(McpClassificationItemV1 {
+        let item = McpClassificationItemV1 {
             name,
             schema,
             provider: None,
             annotations,
             full_schema: true,
-        });
-    }
-    for (page, chunk) in sendable.chunks(MCP_CLASSIFICATION_MAX_ITEMS).enumerate() {
-        let offset = page * MCP_CLASSIFICATION_MAX_ITEMS;
-        let request = McpClassificationRequestV1 {
-            schema: MCP_CLASSIFICATION_REQUEST_SCHEMA.to_owned(),
-            request_id: String::new(),
-            items: items[offset..offset + chunk.len()].to_vec(),
         };
-        let Ok(payload) = evaluate(&request) else {
+        let Some(size) = item_bytes(&item)
+            .filter(|size| base.saturating_add(*size) <= MCP_CLASSIFICATION_MAX_BYTES)
+        else {
+            continue;
+        };
+        let added = if page.items.is_empty() {
+            size
+        } else {
+            size + ARRAY_SEPARATOR_BYTES
+        };
+        if !page.items.is_empty()
+            && (page.items.len() == MCP_CLASSIFICATION_MAX_ITEMS
+                || page_bytes.saturating_add(added) > MCP_CLASSIFICATION_MAX_BYTES)
+        {
+            pages.push(take(&mut page));
+            page_bytes = base + size;
+        } else {
+            page_bytes += added;
+        }
+        page.indices.push(index);
+        page.items.push(item);
+    }
+    if !page.items.is_empty() {
+        pages.push(page);
+    }
+    pages
+}
+
+/// Send one packed page and write its answers into `described`.
+///
+/// A refused page, a reply of another shape, or a reply of another length
+/// answers `false`: the caller then leaves every declaration undescribed,
+/// because describing some of them from a partial answer is the one thing
+/// neither side may do.
+fn describe_page(page: Page, described: &mut [Value]) -> bool {
+    let request = McpClassificationRequestV1 {
+        schema: MCP_CLASSIFICATION_REQUEST_SCHEMA.to_owned(),
+        request_id: String::new(),
+        items: page.items,
+    };
+    let Ok(payload) = evaluate(&request) else {
+        return false;
+    };
+    let Some(Value::Array(reply)) = payload.get("classifications").cloned() else {
+        return false;
+    };
+    if reply.len() != page.indices.len() {
+        return false;
+    }
+    for (index, entry) in page.indices.iter().zip(reply) {
+        described[*index] = entry;
+    }
+    true
+}
+
+/// `classify_mcp_actions`: describe each declaration in request order.
+///
+/// A declaration the classifier's parser would refuse, or one no page can
+/// carry, comes back `null`, the same undescribed answer Python's transport
+/// mirror produces, so one oversized provider schema never costs the rest of
+/// the batch its descriptions.
+pub(crate) fn classifications(definitions: &[&Value]) -> Vec<Value> {
+    let mut described = vec![Value::Null; definitions.len()];
+    for page in pack(definitions) {
+        if !describe_page(page, &mut described) {
             // Python raises here and the caller keeps the items it already
             // built, undescribed; describing them from a partial answer is
             // the one thing neither side may do.
             return vec![Value::Null; definitions.len()];
-        };
-        let Some(Value::Array(reply)) = payload.get("classifications").cloned() else {
-            return vec![Value::Null; definitions.len()];
-        };
-        if reply.len() != chunk.len() {
-            return vec![Value::Null; definitions.len()];
-        }
-        for (index, entry) in chunk.iter().zip(reply) {
-            described[*index] = entry;
         }
     }
     described
