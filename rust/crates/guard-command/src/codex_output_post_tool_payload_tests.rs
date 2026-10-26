@@ -195,6 +195,39 @@ fn a_flattened_response_is_not_repeated() {
     );
 }
 
+/// A line of the response that merely occurs inside a longer line the caller
+/// sent has not been read: `token=abc` is its own secret even when the caller
+/// happened to send `xtoken=abcdef`.
+#[test]
+fn a_line_inside_a_longer_one_is_not_read_yet() {
+    let mut body = output_body(json!({"command": "ls"}));
+    body["tool_response"] = json!({"stdout": "token=abc"});
+    body["response_text"] = json!("xtoken=abcdef");
+    let input = Input::parse(&body).unwrap();
+    assert_eq!(input.response_text, "token=abc\nxtoken=abcdef");
+}
+
+/// The comparison hashes the caller's lines once rather than searching its
+/// whole text per response line, so a large response that the caller already
+/// flattened is read well inside the hook deadline.
+#[test]
+fn a_large_flattened_response_is_compared_once() {
+    let text: String = (0..50_000)
+        .map(|line| format!("line {line} of the tool response\n"))
+        .collect();
+    let mut body = output_body(json!({"command": "ls"}));
+    body["tool_response"] = json!({"stdout": text});
+    body["response_text"] = json!(text);
+    let started = std::time::Instant::now();
+    let input = Input::parse(&body).unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "comparing a flattened response took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(input.response_text, text);
+}
+
 /// The walk reads the named output keys at the top level and everything below
 /// them, so a secret nested under a key this scan does not name is still read
 /// once something it does name carries it.

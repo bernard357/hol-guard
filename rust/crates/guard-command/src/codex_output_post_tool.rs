@@ -6,6 +6,7 @@
 //! answer; everything between, including which commands the payload names,
 //! runs here under one deadline.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -234,10 +235,21 @@ fn response_text(supplied: String, whole: Option<&Value>) -> String {
 /// ordinary two-key response, and the scan would read every line of it twice.
 /// Each line is checked on its own instead, which also survives the caller
 /// trimming what it sent.
+///
+/// The lines are matched whole, through a set built once over `supplied`. A
+/// substring search would read a 2 MB response once per line of it, long past
+/// the hook deadline, and would also count `token=abc` as read because
+/// `xtoken=abcdef` happens to contain it.
 fn already_read(collected: &str, supplied: &str) -> bool {
+    let supplied: HashSet<&str> = supplied
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
     collected
         .lines()
-        .filter(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
         .all(|line| supplied.contains(line))
 }
 
