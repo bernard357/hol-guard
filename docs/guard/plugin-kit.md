@@ -10,6 +10,8 @@ The Kit runs inside the HOL Guard native runtime. It reads only the folder you n
 | :--- | :--- | :--- |
 | `hol-guard plugin check [path] [--strict]` | Detects the plugin, lists its skills, MCP servers, commands and agents, and reports problems. `--strict` fails on warnings too. | 0 passed, 1 failed, 2 could not run |
 | `hol-guard plugin package [path] [--out DIR] [--runtimes a,b] [--force] [--strict]` | Runs `check`, then writes one folder per runtime. Writes nothing when the check fails. Refuses a non-empty output folder unless `--force`, which first removes the files the previous package recorded in its `hol.provenance.json` and leaves every other file alone. The output folder may not be the repository root or overlap a folder the Kit reads, and a path through a symlink is refused. A runtime named in `--runtimes` that cannot load the plugin is an error; runtimes listed in `hol.json` are packaged where supported. | 0 packaged, 1 check failed, 2 could not run |
+| `hol-guard plugin check [path] --spec agent-plugins-1.0` | Checks the folder against the Agent Plugins 1.0.0 spec instead of runtime loaders. Each finding names the spec section and whether a client would reject the whole plugin or only one component. | 0 conforms, 1 does not, 2 could not run |
+| `hol-guard plugin convert [path] --to RUNTIME [--out DIR] [--force]` | Writes one runtime's package, such as `agent-plugins`, `codex` or `gemini-cli`. An `agent-plugins` package is checked against the spec after it is written. | 0 converted, 1 check failed, 2 could not run |
 | `hol-guard plugin links [path]` | Prints the install command for each runtime the repository already supports, and what is left to list it everywhere. | 0, or 2 could not run |
 | `hol-guard plugin init [path] [--name NAME]` | In a plugin repository, writes `hol.json`. In a new folder (empty, or holding only a README, a LICENSE or dotfiles) with `--name`, scaffolds a minimal Claude Code plugin with one skill. Never overwrites a file. | 0, or 2 could not run |
 
@@ -68,6 +70,10 @@ exclude_paths = ["distributions/*"]
 ```
 
 `out` is relative to the repository and cannot leave it. The Kit skips `dist/` and any folder holding `hol.provenance.json`, so a package is never read back as source.
+
+## Agent Plugins 1.0
+
+`hol-guard plugin convert --to agent-plugins` writes `plugin.json` and `mcp.json` in the Agent Plugins 1.0.0 layout. Each server gets its `type`, and runtime root placeholders such as `${CLAUDE_PLUGIN_ROOT}` become `${PLUGIN_ROOT}`. Environment variables, headers and servers that the spec cannot express portably are left out, and the output says which. `hol-guard plugin check --spec agent-plugins-1.0` then confirms the result, or checks a package you wrote by hand.
 
 ## List the plugin
 
