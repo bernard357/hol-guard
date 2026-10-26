@@ -103,18 +103,27 @@ def _git_config_no_system_enabled(value: str | None) -> bool:
 
 # `home` written the way the shell it is pasted into reads it. POSIX quoting
 # puts `C:\\guards\\ci` inside single quotes, which `cmd.exe` hands on as part
-# of the path, so a Windows person pastes a command that repairs nothing. Both
-# `cmd.exe` and PowerShell read a double-quoted path literally, backslashes
-# included; a path needing no quoting stays bare. A Windows path cannot hold a
-# `"`, so nothing inside has to be escaped.
-def _quote_home(home: str, windows: bool) -> str:
+# of the path, so a Windows person pastes a command that repairs nothing. A
+# Windows path needing no quoting stays bare, and one that merely needs holding
+# together is double-quoted, which both shells read literally, backslashes
+# included. A Windows path cannot hold a `"`, so nothing inside has to be
+# escaped. Double quotes are not literal to either shell, though: PowerShell
+# expands `$name` inside them and reads a backtick as an escape, and `cmd.exe`
+# expands `%VAR%`. Single quotes would hold those in PowerShell but become part
+# of the path in `cmd.exe`, so no one rendering reaches such a store and the
+# block keeps the short command instead of naming a path the shell rewrote.
+def _quote_home(home: str, windows: bool) -> str | None:
     if not windows:
         return shlex.quote(home)
     plain = home != "" and all(
         character.isascii() and (character.isalnum() or character in "_-.:\\\\/")
         for character in home
     )
-    return home if plain else '"' + home + '"'
+    if plain:
+        return home
+    if any(character in home for character in "$%`"):
+        return None
+    return '"' + home + '"'
 
 
 # The block names the home this hook read its authority from. Pasting the bare
@@ -136,9 +145,12 @@ def _authority_remediation() -> str:
     guard_home = Path(GUARD_HOME)
     if home_dir / ".hol-guard" == guard_home:
         return _AUTHORITY_REMEDIATION
+    quoted = _quote_home(str(guard_home), os.name == "nt")
+    if quoted is None:
+        return _AUTHORITY_REMEDIATION
     return _AUTHORITY_REMEDIATION.replace(
         "command controls recover-authority",
-        f"command --guard-home {_quote_home(str(guard_home), os.name == 'nt')} controls recover-authority",
+        f"command --guard-home {quoted} controls recover-authority",
     )
 
 

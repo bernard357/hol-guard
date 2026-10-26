@@ -61,6 +61,10 @@ fn authority_block_remediation(guard_home: Option<&Path>) -> String {
 /// installer resolves the home it bakes in, so a person whose home is reached
 /// through a symlink may be told the path of the install they are already
 /// pointing at, which is longer than it needs to be but still the right one.
+///
+/// A home no shell spelling reaches also keeps the bare command, rather than
+/// one the shell would rewrite into a different store; [`quote_home`] says
+/// which homes those are.
 fn remediation_for_home(
     guard_home: Option<&Path>,
     home_dir: Option<&Path>,
@@ -72,26 +76,38 @@ fn remediation_for_home(
     if home_dir.is_none_or(|home| home.join(".hol-guard") == guard_home) {
         return AUTHORITY_BLOCK_REMEDIATION.to_owned();
     }
-    let quoted = quote_home(&guard_home.to_string_lossy(), windows);
+    let Some(quoted) = quote_home(&guard_home.to_string_lossy(), windows) else {
+        return AUTHORITY_BLOCK_REMEDIATION.to_owned();
+    };
     AUTHORITY_BLOCK_REMEDIATION.replace(
         "command controls recover-authority",
         &format!("command --guard-home {quoted} controls recover-authority"),
     )
 }
 
-/// `home` written the way the shell this block is pasted into reads it.
+/// `home` written the way the shell this block is pasted into reads it, or
+/// `None` when no spelling reaches that store.
 ///
 /// POSIX quoting puts `C:\guards\ci` inside single quotes, which `cmd.exe`
 /// hands on as part of the path, so a Windows person pastes a command that
-/// repairs nothing. Both `cmd.exe` and PowerShell read a double-quoted path
-/// literally, backslashes included, so that is the form a Windows block
-/// offers; a path that needs no quoting is left bare, because quotes a path
-/// does not need only invite editing. A Windows path cannot hold a `"`, so
-/// nothing inside has to be escaped. `windows` is passed rather than read from
-/// `cfg!`, so both renderings are compiled and tested on every platform.
-pub(crate) fn quote_home(home: &str, windows: bool) -> String {
+/// repairs nothing. A Windows path that needs no quoting is left bare, because
+/// quotes a path does not need only invite editing, and one that merely needs
+/// holding together is double-quoted, which both shells read literally,
+/// backslashes included. A Windows path cannot hold a `"`, so nothing inside
+/// has to be escaped.
+///
+/// Double quotes are not literal to either shell, though. PowerShell expands
+/// `$name` inside them and reads a backtick as an escape, and `cmd.exe`
+/// expands `%VAR%`; a Windows path may legally hold all three. Single quotes
+/// would hold them in PowerShell but become part of the path in `cmd.exe`, so
+/// no one rendering reaches such a store. Naming it anyway would send the
+/// person to repair a path the shell rewrote while this install stays blocked,
+/// which is the failure the naming exists to prevent, so the block keeps the
+/// short command instead. `windows` is passed rather than read from `cfg!`, so
+/// both renderings are compiled and tested on every platform.
+pub(crate) fn quote_home(home: &str, windows: bool) -> Option<String> {
     if !windows {
-        return crate::mcp_proxy_shlex::quote(home);
+        return Some(crate::mcp_proxy_shlex::quote(home));
     }
     let plain = !home.is_empty()
         && home.chars().all(|character| {
@@ -99,10 +115,12 @@ pub(crate) fn quote_home(home: &str, windows: bool) -> String {
                 || matches!(character, '_' | '-' | '.' | ':' | '\\' | '/')
         });
     if plain {
-        home.to_owned()
-    } else {
-        format!("\"{home}\"")
+        return Some(home.to_owned());
     }
+    if home.contains(['$', '%', '`']) {
+        return None;
+    }
+    Some(format!("\"{home}\""))
 }
 
 #[cfg(test)]

@@ -30,7 +30,9 @@ _AUTHORITY_REASON = "HOL Guard requires the native command extension policy befo
 def _expected_home(guard_home: Path) -> str:
     """``guard_home`` as the hook writes it on the platform the test runs on."""
 
-    return _quote_home(str(guard_home), os.name == "nt")
+    quoted = _quote_home(str(guard_home), os.name == "nt")
+    assert quoted is not None, guard_home
+    return quoted
 
 
 def _fixture(name: str) -> dict[str, object]:
@@ -148,6 +150,33 @@ class TestZCodeHookResponses:
         assert '--guard-home "C:\\Program Files\\guard\\.hol-guard" controls' in spaced
         assert "'" not in spaced
 
+    def test_a_windows_home_the_shells_would_rewrite_keeps_the_short_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # PowerShell expands `$name` inside double quotes and reads a backtick
+        # as an escape; `cmd.exe` expands `%VAR%`. Single quotes would hold
+        # them in PowerShell but become part of the path in `cmd.exe`, so no
+        # rendering reaches the store. Naming it would send the person to
+        # repair whatever the shell rewrote it into while this install stays
+        # blocked.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        for home in (
+            "C:\\guards\\$ci",
+            "C:\\guards\\%CI%",
+            "C:\\guards\\`ci",
+            "C:\\Program Files\\guard$\\.hol-guard",
+        ):
+            assert _quote_home(home, True) is None, home
+            assert _authority_block_remediation(Path(home), True) == _AUTHORITY_BLOCK_REMEDIATION, home
+
+    def test_a_posix_home_holding_those_characters_is_still_named(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Single quotes make all three literal to a POSIX shell.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
+        named = _authority_block_remediation(Path("/opt/g$x/ci"), False)
+        assert "--guard-home '/opt/g$x/ci' controls" in named
+
     def test_the_two_shells_get_their_own_spelling(self) -> None:
         # Same path, two renderings: the whole reason the platform is carried
         # rather than read from the host.
@@ -180,7 +209,7 @@ _BRIDGE_PATH = (
 )
 # Punctuation only: the alphanumerics are plain in every copy, so the probe is
 # the part of the alphabet a copy could disagree about.
-_PUNCTUATION = "_-.:\\/ ~$'\"@%^&(){}[]|;,<>?*!+=#"
+_PUNCTUATION = "_-.:\\/ ~$'\"@%^&(){}[]|;,<>?*!+=#`"
 
 
 def _standalone_hook_script_names() -> dict[str, object]:
@@ -235,6 +264,9 @@ class TestAuthorityRemediationParity:
             "C:\\Program Files\\guard\\.hol-guard",
             "C:\\Users\\RUNNER~1\\Temp\\g",
             "/opt/g$x/ci",
+            "C:\\guards\\$ci",
+            "C:\\guards\\%CI%",
+            "C:\\guards\\`ci",
             "",
         )
         for home in homes:

@@ -518,6 +518,7 @@ fn an_authority_block_names_the_home_the_bridge_read() {
             &home.home.to_string_lossy(),
             cfg!(windows)
         )
+        .expect("the fixture home renders for the shell it would be pasted into")
     );
     assert!(stderr.contains(&named), "{stderr}");
     daemon.join().unwrap().unwrap();

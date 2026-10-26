@@ -462,6 +462,7 @@ def test_generated_zcode_authority_block_stderr_names_the_home_it_reads(tmp_path
     # Spelled by the script's own quoting rule, because a Windows home renders
     # for `cmd.exe`, not for a POSIX shell.
     named = module._quote_home(module.GUARD_HOME, os.name == "nt")
+    assert named is not None, module.GUARD_HOME
     assert f"hol-guard command --guard-home {named} controls recover-authority" in stderr
 
 

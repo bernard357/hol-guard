@@ -110,3 +110,38 @@ fn the_two_shells_get_their_own_spelling() {
         "{windows}"
     );
 }
+
+/// A Windows home holding `$`, `%` or a backtick survives no rendering: the
+/// double quotes both shells would need let PowerShell expand `$name` and
+/// `cmd.exe` expand `%VAR%`, and single quotes become part of the path in
+/// `cmd.exe`. Naming it would send the person to repair whatever the shell
+/// rewrote it into while this install stays blocked, so the block keeps the
+/// short command, which at least repairs the default store.
+#[test]
+fn a_windows_home_the_shells_would_rewrite_keeps_the_short_command() {
+    let windows_home = Path::new("C:\\Users\\casey");
+    for home in [
+        "C:\\guards\\$ci",
+        "C:\\guards\\%CI%",
+        "C:\\guards\\`ci",
+        "C:\\Program Files\\guard$\\.hol-guard",
+    ] {
+        assert_eq!(quote_home(home, true), None, "{home}");
+        assert_eq!(
+            remediation_for_home(Some(Path::new(home)), Some(windows_home), true),
+            BARE,
+            "{home}"
+        );
+    }
+}
+
+/// A POSIX shell is told the same characters are literal by single quotes, so
+/// the same home is still named there.
+#[test]
+fn a_posix_home_holding_those_characters_is_still_named() {
+    let named = remediation_for_home(Some(Path::new("/opt/g$x/ci")), Some(&home()), false);
+    assert!(
+        named.contains("--guard-home '/opt/g$x/ci' controls"),
+        "{named}"
+    );
+}
