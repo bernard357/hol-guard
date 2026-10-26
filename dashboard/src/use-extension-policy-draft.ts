@@ -399,7 +399,7 @@ export function useExtensionPolicyDraft(props: {
     } finally {
       setPreviewBusy(false);
     }
-  }, [baseEffective, draftLayers]);
+  }, [baseEffective, draftLayers, handleApiError]);
 
   const keepConflicts = useCallback(() => {
     if (!pendingRebase) return;
