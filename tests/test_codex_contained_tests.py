@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters import codex_contained_tests as route
+from tests import codex_containment_route as route
 
 
 def receipt() -> dict[str, object]:
@@ -292,7 +292,7 @@ def test_linux_does_not_take_an_unofficial_codex_name(monkeypatch):
 
 
 def test_windows_ancestor_walk_rejects_a_reused_parent_id(monkeypatch):
-    from codex_plugin_scanner.guard.adapters import codex_contained_tests_windows as walk
+    from tests import codex_containment_route_windows as walk
 
     monkeypatch.setattr(walk.sys, "platform", "win32")
     monkeypatch.setattr(walk.os, "getpid", lambda: 30)
