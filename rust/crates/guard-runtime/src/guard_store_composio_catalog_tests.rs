@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 
 use crate::guard_store_cmd_vectors_tests::{error_code, temp_home};
 use crate::guard_store_local_cli_vectors_tests::{build_database, replay_vectors, run_step};
+use crate::local_store_read;
 
 const COMPOSIO_VECTORS: &str =
     include_str!("../testdata/guard_store/composio_catalog_vectors.json");
@@ -53,6 +54,40 @@ impl Fixture {
                 |row| row.get(0),
             )
             .unwrap()
+    }
+
+    /// Brings the store up to what a read expects of a migrated one: the
+    /// schema marker, and the grant table a page left-joins for each action's
+    /// state. The recorded writer vectors carry neither, because the writers
+    /// read neither.
+    fn migrate_for_reads(&self) {
+        let connection = Connection::open(self.home.join("guard.db")).unwrap();
+        connection
+            .execute_batch(
+                "create table if not exists local_cli_schema_migration (
+                     singleton integer primary key check (singleton = 1),
+                     version integer not null,
+                     checksum text not null
+                 );
+                 create table if not exists local_mcp_provider_grant (
+                     cli_id text not null,
+                     identity_hash text not null,
+                     tool_slug text not null,
+                     state text not null check (state in ('review', 'block')),
+                     updated_at text not null,
+                     primary key (cli_id, identity_hash, tool_slug)
+                 )",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "insert or replace into local_cli_schema_migration values (1, ?1, ?2)",
+                rusqlite::params![
+                    local_store_read::SUPPORTED_SCHEMA_VERSION,
+                    local_store_read::schema_checksum(local_store_read::SUPPORTED_SCHEMA_VERSION),
+                ],
+            )
+            .unwrap();
     }
 
     fn action_rows(&self) -> i64 {
@@ -215,6 +250,7 @@ fn a_page_of_a_full_catalog_stays_inside_the_response_cap() {
     let reply = fixture.run(&batch);
     assert_eq!(reply["status"], "ok", "{reply}");
     assert_eq!(fixture.action_rows(), 40);
+    fixture.migrate_for_reads();
 
     let read = json!({
         "method": "read_local_mcp_provider_actions",
