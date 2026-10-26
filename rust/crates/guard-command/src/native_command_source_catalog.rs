@@ -80,10 +80,11 @@ pub(super) fn validate_trust(bytes: &[u8]) -> Result<(), &'static str> {
 
 /// The first-party publisher label shipped in existing pack trust digests.
 /// Catalog `displayName` can change; this preimage stays so a rename does not
-/// quarantine selected packs.
-fn trust_identity(publisher: &Value) -> Value {
+/// quarantine selected packs. External publishers keep the declared label in
+/// the digest, including a source that claims the `hol` id.
+fn trust_identity(trust_class: &str, publisher: &Value) -> Value {
     let mut identity = publisher.clone();
-    if identity.get("id").and_then(Value::as_str) == Some("hol") {
+    if trust_class == "first-party" && identity.get("id").and_then(Value::as_str) == Some("hol") {
         identity["displayName"] = Value::String("Hashgraph Online".to_owned());
     }
     identity
@@ -236,7 +237,7 @@ pub(super) fn lower_catalog_inner(
             }));
         }
         let trust_record = serde_json::json!({"extension_id":extension.extension_id,
-            "trust_class":class, "activation":activation, "publisher":trust_identity(&publisher)});
+            "trust_class":class, "activation":activation, "publisher":trust_identity(class, &publisher)});
         trusts.push(trust_record);
         let mut native_permissions = Vec::new();
         for (index, permission) in extension.permissions.iter().enumerate() {
