@@ -286,7 +286,7 @@ pub(crate) fn mcp_skill_page(connection: &Connection, args: &Args<'_>) -> StoreR
             caseless::default_case_fold_str(&haystack).contains(&needle)
         })
         .collect();
-    selected.sort_by_key(sort_key);
+    selected.sort_by_key(|entry| sort_key(entry));
     let start = (offset as usize).min(selected.len());
     let end = start.saturating_add(SKILL_PAGE).min(selected.len());
     let next_offset = if end < selected.len() {
