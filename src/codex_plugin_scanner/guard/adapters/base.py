@@ -177,15 +177,20 @@ def _user_owned_executable(candidate: Path) -> bool:
 def _which_from_user_directories(
     command: str, home: Path | None = None, extra_directories: tuple[Path, ...] = ()
 ) -> str | None:
-    """Locate a CLI the user installed outside the bare desktop launch PATH.
+    """Locate a CLI the user installed outside the process PATH.
 
+    The usual user install directories are searched only under the bare desktop launch
+    PATH. ``extra_directories`` names a tool's own installer directory and is searched
+    under any PATH. Every candidate must pass the same ownership and write checks.
     Only availability checks use this. Launch and probe commands keep resolving through
     PATH, so nothing found here is ever executed.
     """
 
-    if os.name == "nt" or os.sep in command or not _system_only_path(os.environ.get("PATH")):
+    if os.name == "nt" or os.sep in command:
         return None
-    directories = _user_command_directories(command, Path.home() if home is None else home)
+    directories: tuple[Path, ...] = ()
+    if _system_only_path(os.environ.get("PATH")):
+        directories = _user_command_directories(command, Path.home() if home is None else home)
     for directory in (*directories, *extra_directories):
         candidate = directory / command
         if _user_owned_executable(candidate):

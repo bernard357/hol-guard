@@ -140,7 +140,7 @@ def test_symlink_loop_is_ignored(home: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert _command_available("guardtestcli") is False
 
 
-def test_extra_directory_follows_the_same_rules(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_extra_directory_follows_the_same_rules(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     installer_directory = home / ".guardtestcli-code" / "bin"
     executable = _install(installer_directory, "guardtestcli")
     monkeypatch.setenv("PATH", LAUNCHD_PATH)
@@ -150,8 +150,16 @@ def test_extra_directory_follows_the_same_rules(home: Path, tmp_path: Path, monk
     installer_directory.chmod(0o777)
     assert _command_available("guardtestcli", home, (installer_directory,)) is False
 
-    installer_directory.chmod(0o755)
+
+def test_extra_directory_is_searched_under_a_terminal_path(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install(home / ".bun" / "bin", "guardtestcli")
+    installer_directory = home / ".guardtestcli-code" / "bin"
+    executable = _install(installer_directory, "guardtestcli")
     empty = tmp_path / "empty-bin"
     empty.mkdir()
     monkeypatch.setenv("PATH", f"{empty}{os.pathsep}{LAUNCHD_PATH}")
-    assert _command_available("guardtestcli", home, (installer_directory,)) is False
+
+    assert _which_from_user_directories("guardtestcli", home) is None
+    assert _which_from_user_directories("guardtestcli", home, (installer_directory,)) == str(executable)
