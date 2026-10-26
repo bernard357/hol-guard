@@ -201,8 +201,9 @@ def _run_capped(argv: Sequence[str], *, timeout: float, **options: Any) -> subpr
 
     def read() -> None:
         size = 0
+        fd = stream.fileno()
         with stream:
-            for chunk in iter(lambda: stream.read1(65536), b""):
+            for chunk in iter(lambda: os.read(fd, 65536), b""):
                 size += len(chunk)
                 if size > OUTPUT_LIMIT_BYTES:
                     too_large.set()
