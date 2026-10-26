@@ -58,6 +58,47 @@ pub(in crate::pretool) fn repository_hidden_directory(
     if !canonical.is_dir() && !canonical.is_file() {
         return false;
     }
+    repository_hidden_below(&canonical, home_dir, cwd, false)
+}
+
+/// Whether `canonical` names an existing document of the repository's own
+/// content that happens to sit below a hidden directory.
+///
+/// A checkout keeps real content in hidden directories: `.codex-plugin` and
+/// `.claude-plugin` hold the manifest a plugin is read from, `.well-known`
+/// holds an agent card, `.github` holds the workflows. Reading one is
+/// ordinary work, and the screens that make a hidden *listing* safe make the
+/// read safe too, with two additions. The repository's own `.git` tree is
+/// administrative, not content — it holds remote URLs, rebase author scripts
+/// and hook bodies — so a content read never reaches it. And the name has to
+/// carry a document extension, which keeps the rule off the compiled
+/// programs, archives and key material that also live under hidden
+/// directories.
+///
+/// This is deliberately a property of the path rather than a list of
+/// directory names: the next harness to invent a dot-directory for its
+/// manifest needs no change here.
+pub(in crate::pretool) fn repository_hidden_source_document(
+    canonical: &Path,
+    home_dir: Option<&str>,
+    cwd: Option<&str>,
+) -> bool {
+    canonical.is_file()
+        && guard_secure_fs::source_document_extension(canonical)
+        && repository_hidden_below(canonical, home_dir, cwd, true)
+}
+
+/// The screens shared by the hidden listing and the hidden content read:
+/// the path sits below a hidden component inside a repository work tree, and
+/// no component below that repository names agent state, a credential store,
+/// a harness home or an environment file. `content_read` additionally keeps
+/// the repository's own administrative tree out.
+fn repository_hidden_below(
+    canonical: &Path,
+    home_dir: Option<&str>,
+    cwd: Option<&str>,
+    content_read: bool,
+) -> bool {
     // Ancestors run from the deepest path up, so the last hidden one found is
     // the outermost; the work tree that must carry `.git` holds it.
     let Some(repository) = canonical
@@ -80,10 +121,12 @@ pub(in crate::pretool) fn repository_hidden_directory(
             return false;
         };
         let name = name.to_string_lossy().to_ascii_lowercase();
-        !guarded_hidden_name(&name) && !name.starts_with(".env")
+        !guarded_hidden_name(&name)
+            && !name.starts_with(".env")
+            && !(content_read && name == ".git")
     }) && std::fs::symlink_metadata(repository.join(".git")).is_ok()
-        && guard_secure_fs::sensitive_path_family(&canonical).is_none()
-        && !guard_secure_fs::credential_named_path(&canonical)
+        && guard_secure_fs::sensitive_path_family(canonical).is_none()
+        && !guard_secure_fs::credential_named_path(canonical)
         && super::resolved_path_allowed(repository, home_dir, cwd)
 }
 

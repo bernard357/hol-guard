@@ -241,3 +241,87 @@ fn codex_plan_evidence_reads_but_auth_and_config_do_not() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+fn read(value: &Path, home: &Path, cwd: &Path) -> bool {
+    super::bounded_structured_file_read_target(value.to_str().unwrap(), home.to_str(), cwd.to_str())
+}
+
+fn plant(path: &Path, body: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+}
+
+#[test]
+fn a_repositorys_own_documents_read_from_hidden_directories() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    for document in [
+        ".codex-plugin/plugin.json",
+        ".claude-plugin/plugin.json",
+        ".well-known/agent-card.json",
+        ".github/workflows/ci.yml",
+        "tests/fixtures/good-plugin/.codex-plugin/plugin.json",
+        ".next/standalone/server.mjs",
+    ] {
+        plant(&repo.join(document), "{}\n");
+        assert!(read(&repo.join(document), &home, &repo), "{document}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_administrative_tree_and_guarded_names_keep_their_review() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    for document in [
+        // The repository's own administrative tree is not its content: this
+        // script carries the author of the commit being rebased.
+        ".git/worktrees/fix/rebase-merge/author-script.sh",
+        ".git/config.toml",
+        // An environment file is never a document, whatever it is named.
+        ".config/.env.production.json",
+        ".envrc/settings.json",
+        // Agent state, a credential store and a harness home stay guarded.
+        ".agents/skills/deploy/SKILL.md",
+        ".ssh/config.toml",
+        ".aws/config.json",
+        // A name without a document extension is bytes of some other kind.
+        ".codex-plugin/runtime.bin",
+    ] {
+        plant(&repo.join(document), "x\n");
+        assert!(!read(&repo.join(document), &home, &repo), "{document}");
+    }
+    // A hidden directory in a plain folder that is no checkout keeps its
+    // review: the proof is the work tree, not the dot in the name.
+    let plain = home.join("plain");
+    plant(&plain.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(!read(
+        &plain.join(".codex-plugin/plugin.json"),
+        &home,
+        &plain
+    ));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_does_not_borrow_the_proof_for_the_administrative_tree() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    plant(&repo.join(".git/config.toml"), "[remote]\n");
+    std::fs::create_dir_all(repo.join(".codex-plugin")).unwrap();
+    std::os::unix::fs::symlink(
+        repo.join(".git/config.toml"),
+        repo.join(".codex-plugin/plugin.json"),
+    )
+    .unwrap();
+    // The rule reads the resolved path, so a document name in a hidden
+    // directory the repository owns cannot stand in for the `.git` tree.
+    assert!(!read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}

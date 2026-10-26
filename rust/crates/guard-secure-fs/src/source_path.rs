@@ -201,6 +201,17 @@ fn source_shape_allowed(path: &Path, parts: &[String]) -> bool {
             .is_some_and(source_extension)
 }
 
+/// Whether `path`'s own name ends in one of the extensions a project's
+/// documents carry. Data formats belong here: a plugin manifest, a workflow
+/// definition and a README are as much a repository's own content as its
+/// code. `is_source_code_extension` is the narrower list, for code syntax
+/// alone.
+pub fn source_document_extension(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(source_extension)
+}
+
 /// Whether a file name carries an extension this crate reads as source text.
 ///
 /// A name with no extension at all, or one this list does not hold, is bytes
