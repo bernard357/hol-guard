@@ -937,7 +937,7 @@ const COVERAGE_REASONS = {
   runtimes_incomplete: "Some runtimes this workspace's tools launch could not be identified or checked.",
   skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked.",
   mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked.",
-  hook_config_incomplete: "Some agent hook settings could not be read, so not every project hook was checked."
+  hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",

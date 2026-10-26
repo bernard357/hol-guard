@@ -417,7 +417,7 @@ const hookGapMarkup = renderToStaticMarkup(
     onAction: () => {},
   }),
 );
-assert.ok(hookGapMarkup.includes("Some agent hook settings could not be read"), "an incomplete hook scan is named");
+assert.ok(hookGapMarkup.includes("Some agent hook settings could not be fully checked"), "an incomplete hook scan is named");
 assert.ok(hookGapMarkup.includes("Project hook checking is not part of this check yet."));
 const skillGapMarkup = renderToStaticMarkup(
   createElement(WorktreeRow, {
