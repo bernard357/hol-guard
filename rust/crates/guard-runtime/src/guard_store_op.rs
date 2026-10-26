@@ -48,6 +48,7 @@ use crate::guard_store_connector_context as connector_context;
 use crate::guard_store_db::{exec, query_all, query_one, text, StoreError, StoreResult};
 use crate::guard_store_inventory as inventory;
 use crate::guard_store_local_cli as local_cli;
+use crate::guard_store_local_cli_catalog as local_cli_catalog;
 use crate::guard_store_local_cli_grants as local_cli_grants;
 use crate::guard_store_local_mcp_declarations as local_mcp_declarations;
 use crate::guard_store_local_mcp_observation as local_mcp;
@@ -421,6 +422,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "managed_keyring_reconcile"
         | "record_local_cli_observation"
         | "replace_local_cli_commands"
+        | "merge_local_cli_commands"
         | "forget_local_cli_observation"
         | "record_connector_setup_context"
         | "local_cli_replay_allowed"
@@ -554,7 +556,12 @@ fn dispatch(
         "workflow_capability_plan" => wfcap::plan(connection, args),
         "workflow_capability_commit" => wfcap::commit(connection, args),
         "record_local_cli_observation" => local_cli::record_observation(connection, args),
-        "replace_local_cli_commands" => local_cli::replace_commands(connection, args),
+        "replace_local_cli_commands" => {
+            local_cli_catalog::write_local_cli_catalog(connection, args, false)
+        }
+        "merge_local_cli_commands" => {
+            local_cli_catalog::write_local_cli_catalog(connection, args, true)
+        }
         "forget_local_cli_observation" => local_cli::forget_observation(connection, args),
         "record_connector_setup_context" => connector_context::record_context(connection, args),
         "local_cli_replay_allowed" => local_cli::replay_allowed_op(connection, args),

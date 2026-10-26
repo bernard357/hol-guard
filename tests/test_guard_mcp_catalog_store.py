@@ -17,10 +17,19 @@ _SECOND = "2026-09-27T12:01:00Z"
 
 
 def _tool_authority(store: GuardStore, identity: UnlistedCliIdentity, tool_name: str) -> dict[str, object] | None:
-    from codex_plugin_scanner.guard.store_mcp_catalog import read_mcp_tool_authority
-
     with store._connect() as connection:
-        return read_mcp_tool_authority(connection, identity.cli_id, identity.identity_hash, tool_name)
+        catalog = connection.execute(
+            "select revision from local_mcp_catalog where cli_id = ? and identity_hash = ?",
+            (identity.cli_id, identity.identity_hash),
+        ).fetchone()
+        if catalog is None:
+            return None
+        rows = connection.execute(
+            """select tool_name, authority_hash from local_mcp_tool_authority
+               where cli_id = ? and identity_hash = ? and catalog_revision = ? and tool_name = ?""",
+            (identity.cli_id, identity.identity_hash, catalog[0], tool_name),
+        ).fetchall()
+    return {"authority_hashes": dict(rows)}
 
 
 def _grant_and_authority(store: GuardStore, identity: UnlistedCliIdentity) -> tuple[object, ...]:
