@@ -53,8 +53,14 @@ const APPROVAL_REASON_WITHOUT_URL: &str = concat!(
 ///
 /// The flag goes on `command`, which is the parser that carries it; after
 /// `recover-authority` argparse hands it to the leaf, which takes no options
-/// and would reject the whole line. `extension_controls_commands` builds its
-/// own recovery argv the same way, and
+/// and would reject the whole line. It is `--guard-home`, the flag that names
+/// the Guard home itself, and the one `extension_controls_commands`
+/// (`_recovery_command`) prints for the same recovery, so a person who meets
+/// the block and a person who meets the CLI's own message are told to run the
+/// same thing. `--home` names the directory the person lives in and only
+/// stands in for the Guard home when none was given; handing it a Guard home
+/// reaches the right store but resolves every other home-dependent value
+/// against a directory nobody lives in.
 /// `test_recover_authority_accepts_the_home_the_block_names` pins that this
 /// spelling parses.
 fn reason_without_url(guard_home: &Path, home_dir: &str) -> String {
@@ -64,7 +70,7 @@ fn reason_without_url(guard_home: &Path, home_dir: &str) -> String {
     let quoted = crate::mcp_proxy_shlex::quote(&guard_home.to_string_lossy());
     APPROVAL_REASON_WITHOUT_URL.replace(
         "command controls recover-authority",
-        &format!("command --home {quoted} controls recover-authority"),
+        &format!("command --guard-home {quoted} controls recover-authority"),
     )
 }
 

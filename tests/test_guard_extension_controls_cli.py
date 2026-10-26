@@ -335,17 +335,25 @@ def test_recover_authority_accepts_the_home_the_block_names(tmp_path: Path) -> N
 
     `command_policy_repair.rs` prints this line to a person whose every
     command is blocked, and the recovery verb takes no options of its own, so
-    a `--home` after it would be handed to the leaf and rejected. That failure
-    would only show up on an install whose Guard home is not the default one,
-    which is the install the line exists for.
+    a `--guard-home` after it would be handed to the leaf and rejected. That
+    failure would only show up on an install whose Guard home is not the
+    default one, which is the install the line exists for.
+
+    It is `--guard-home` rather than `--home`, matching the argv
+    `_recovery_command` prints for the same recovery. `--home` names the
+    directory the person lives in; the router only falls back to it for the
+    Guard home, and it resolves every other home-dependent value against it,
+    so a Guard home passed that way reaches the right store under a home
+    nobody lives in.
     """
 
     guard_home = tmp_path / "elsewhere" / ".hol-guard"
     parser = _build_parser("hol-guard", program_mode="hol-guard")
 
     parsed = parser.parse_args(
-        ["command", "--home", str(guard_home), "controls", "recover-authority"]
+        ["command", "--guard-home", str(guard_home), "controls", "recover-authority"]
     )
 
-    assert parsed.home == str(guard_home)
+    assert parsed.guard_home == str(guard_home)
+    assert parsed.home is None
     assert parsed.controls_command == "recover-authority"

@@ -207,7 +207,7 @@ fn the_recovery_command_names_a_home_the_cli_would_not_find() {
     let reason = result["reason"].as_str().unwrap();
     assert!(
         reason.contains(&format!(
-            "`hol-guard command --home '{}' controls recover-authority`",
+            "`hol-guard command --guard-home '{}' controls recover-authority`",
             elsewhere.display()
         )),
         "{reason}"
