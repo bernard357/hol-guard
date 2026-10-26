@@ -6,7 +6,7 @@
 //! snapshot that advanced without its digests would let a saved grant bind to
 //! a schema the user never saw.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
@@ -140,9 +140,11 @@ pub(crate) fn write_mcp_catalog(
             }
         }
     }
-    let mut review_ids: Vec<String> = Vec::new();
-    let mut added: Vec<&str> = Vec::new();
-    let mut authority_changed: Vec<&str> = Vec::new();
+    // Python collects all three as sets, so a server that lists one name
+    // twice still reports it once.
+    let mut review_ids: BTreeSet<String> = BTreeSet::new();
+    let mut added: BTreeSet<&str> = BTreeSet::new();
+    let mut authority_changed: BTreeSet<&str> = BTreeSet::new();
     let mut listed: HashSet<&str> = HashSet::new();
     for tool in listed_tools {
         let Some(Value::String(name)) = tool.as_object().and_then(|tool| tool.get("name")) else {
@@ -153,21 +155,18 @@ pub(crate) fn write_mcp_catalog(
         }
         let previous = previous_by_name.get(name.as_str());
         listed.insert(name.as_str());
-        let moved = match previous {
+        match previous {
             None => {
-                added.push(name.as_str());
-                true
+                added.insert(name.as_str());
             }
             Some(previous) => {
-                let changed = authority_shape(previous)? != authority_shape(tool)?;
-                if changed {
-                    authority_changed.push(name.as_str());
+                if authority_shape(previous)? != authority_shape(tool)? {
+                    authority_changed.insert(name.as_str());
                 }
-                changed
             }
-        };
-        if moved {
-            review_ids.push(slug_command_id(name));
+        }
+        if added.contains(name.as_str()) || authority_changed.contains(name.as_str()) {
+            review_ids.insert(slug_command_id(name));
         }
         tools.insert(name.as_str(), tool);
     }
@@ -183,9 +182,6 @@ pub(crate) fn write_mcp_catalog(
     if tools.len() > MAX_SNAPSHOT_TOOLS {
         return value_error("MCP catalog snapshot exceeds its tool limit");
     }
-    added.sort_unstable();
-    authority_changed.sort_unstable();
-
     let ttl_ms = catalog.get("cache_ttl_ms");
     let received_at = catalog
         .get("cache_received_at")
@@ -243,7 +239,7 @@ pub(crate) fn write_mcp_catalog(
         ],
     )?;
     rebuild_tool_authority(connection, cli_id, identity_hash, &raw, revision)?;
-    Ok(review_ids)
+    Ok(review_ids.into_iter().collect())
 }
 
 /// `catalog.<key> or prior.get(<key>)` for the protocol version, and

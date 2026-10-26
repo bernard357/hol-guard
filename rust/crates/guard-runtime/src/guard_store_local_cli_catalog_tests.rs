@@ -586,3 +586,31 @@ fn an_empty_args_map_fails_closed() {
     let args: Map<String, Value> = Map::new();
     assert!(write_local_cli_catalog(&connection, &Args(&args), false).is_err());
 }
+
+#[test]
+fn a_tool_listed_twice_counts_as_one_change() {
+    let connection = database();
+    observed(&connection, "mcp");
+    call(
+        &connection,
+        json!({
+            "cli_id": CLI,
+            "commands": [command("search", "search")],
+            "identity_hash": IDENTITY,
+            "seen_at": "2026-10-26T00:00:00+00:00",
+            "mcp_catalog": {
+                "complete": true,
+                "tools": [tool("search", json!({})), tool("search", json!({}))],
+            },
+        }),
+        false,
+    )
+    .unwrap();
+    let stored = snapshot(&connection);
+    assert_eq!(stored["changes"]["added"], json!(["search"]));
+    assert_eq!(stored["known_count"], json!(1));
+    assert_eq!(
+        grant_states(&connection),
+        [("search".into(), "review".into())]
+    );
+}
