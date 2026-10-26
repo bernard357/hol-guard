@@ -95,6 +95,11 @@ fn an_asking_session_is_decidable_for_every_relay_harness() {
         session_decidable(&asking("enforce"), &home, "opencode"),
         Ok(())
     );
+    // Under observe the route answers both prompts before it observes a call.
+    assert_eq!(
+        session_decidable(&asking("observe"), &home, "opencode"),
+        Ok(())
+    );
     // Opencode answers the native prompt from the decision; the others
     // answer `False` and take the inline elicitation before this queue.
     for harness in ["codex", "copilot", "cursor", "hermes"] {
@@ -111,11 +116,6 @@ fn an_asking_session_is_decidable_for_every_relay_harness() {
 #[test]
 fn an_asking_session_hands_off_what_the_resident_cannot_queue() {
     let home = no_store_home("ask-off");
-    // The proxy prompts before it observes a call.
-    assert_eq!(
-        session_decidable(&asking("observe"), &home, "opencode"),
-        Err("mcp_relay_session_review_mode")
-    );
     // The center the request links and the source its row is written with.
     let mut no_center = asking("enforce");
     no_center.review.approval_center_origin = None;

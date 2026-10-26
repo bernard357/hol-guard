@@ -12,9 +12,7 @@
 //!   route answers natively, or a receipt redaction level the configs do not
 //!   agree on. The route is native under `safe-alternative`, and under `ask`
 //!   (`mcp_relay_decide_ask.rs`), which also needs the approval center and the
-//!   review OAuth source the daemon binds with it. Under `ask`
-//!   `mode = "observe"` still hands off: the proxy prompts before it observes
-//!   a call, which the resident cannot answer;
+//!   review OAuth source the daemon binds with it;
 //! - a store holding a policy bundle the resident cannot judge the way the
 //!   daemon would, with a row this harness's lookups reach, remote policy
 //!   rows, or saved rows whose
@@ -38,8 +36,6 @@ use crate::policy_store::policy_store_direct_lane::DirectLaneBinding;
 
 /// `blocked_request_mode`, under which the queue route blocks natively.
 const SAFE_ALTERNATIVE_MODE: &str = "safe-alternative";
-/// `mode`, under which the proxy prompts before it observes a call.
-const OBSERVE_MODE: &str = "observe";
 const SESSION_REVIEW_MODE: &str = "mcp_relay_session_review_mode";
 const SESSION_REDACTION_UNBOUND: &str = "mcp_relay_session_redaction_unbound";
 
@@ -57,9 +53,7 @@ pub(crate) fn session_decidable(
         // needs the center it links and the OAuth source the row is written
         // with.
         Some(ASK_MODE) => {
-            view.mode != OBSERVE_MODE
-                && review.approval_center_origin.is_some()
-                && review.review_oauth_source.is_some()
+            review.approval_center_origin.is_some() && review.review_oauth_source.is_some()
         }
         _ => false,
     };
