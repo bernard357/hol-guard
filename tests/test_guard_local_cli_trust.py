@@ -130,3 +130,28 @@ def test_grant_does_not_allow_compound_source_and_ssh(tmp_path: Path) -> None:
     direct = review_rule_verdict(store, command=f"bash {helper} ssh 1", cwd=tmp_path, home_dir=tmp_path)
     assert direct is not None
     assert direct[0] == "allowed"
+
+
+def test_listing_restarts_when_the_inventory_changes_between_pages(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path)
+    sent: list[dict[str, object]] = []
+    replies: list[dict[str, object]] = [
+        {"items": [{"cli_id": "alpha"}], "next_offset": 1, "snapshot": "one"},
+        {"restart": True, "snapshot": "two"},
+        {"items": [{"cli_id": "beta"}], "next_offset": 1, "snapshot": "two"},
+        {"items": [{"cli_id": "alpha"}], "next_offset": None, "snapshot": "two"},
+    ]
+
+    def native(method: str, args: dict[str, object]) -> dict[str, object]:
+        assert method == "list_local_cli_items"
+        sent.append(dict(args))
+        return replies.pop(0)
+
+    monkeypatch.setattr(store, "_native_store_call", native)
+    assert [item["cli_id"] for item in store.list_local_cli_items()] == ["beta", "alpha"]
+    assert sent == [
+        {"offset": 0},
+        {"offset": 1, "snapshot": "one"},
+        {"offset": 0, "snapshot": "two"},
+        {"offset": 1, "snapshot": "two"},
+    ]

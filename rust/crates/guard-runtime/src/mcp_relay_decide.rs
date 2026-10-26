@@ -120,6 +120,12 @@ pub(crate) struct McpRelayDecideRequestV1 {
     /// The client's inline approval prompt, which the relay owns.
     #[serde(default)]
     pub(crate) inline: Inline,
+    /// Set by a relay that leaves a Composio wrapper's provider catalog hash
+    /// to the resident, which reads it from the store as the proxy did. A
+    /// resident that predates it rejects the field, so the relay defers and
+    /// the call fails closed instead of hashing without the catalog.
+    #[serde(default)]
+    pub(crate) resident_provider_catalog: bool,
 }
 
 /// What the relay knows about the client's inline elicitation prompt.
@@ -432,13 +438,25 @@ fn decide(
         policy_store,
     )?;
     drop(snapshot);
+    let asks = admitted.binding.review.blocked_request_mode.as_deref() == Some(ASK_MODE);
     // A package call is answered by its own lane, under the package policy and
     // the tool authority together, so none of the tool-only route below runs
-    // for it.
+    // for it. The prompts that route raises first under `ask` are the proxy's.
     if let Some(packaged) = legged.as_ref().and_then(Legged::decided) {
+        if asks
+            && ask::prompts_before_package(
+                &request.catalog_state,
+                &resolved.mode,
+                &request.build.tool_name,
+                &request.build.harness,
+                request.inline.available,
+                &resolved.decision,
+            )
+        {
+            return Err(ask::PACKAGE_PROMPT);
+        }
         return settle_package(request, &admitted, &resolved, packaged, policy_store);
     }
-    let asks = admitted.binding.review.blocked_request_mode.as_deref() == Some(ASK_MODE);
     let proxy = crate::mcp_tool_policy_proxy::proxy_payload(
         &McpToolPolicyProxyInputV1 {
             catalog_state: request.catalog_state.clone(),
@@ -623,7 +641,7 @@ fn resolve(
         )?,
         None => None,
     };
-    let identity = identity(request, &view, control_digest.clone())?;
+    let identity = identity(request, &view, control_digest.clone(), connection)?;
     let subject = subject::subject(request, &identity, &view)?;
     let catalog = crate::contributed_mcp_decision_op::Catalog {
         guard_home: &request.guard_home,
@@ -936,9 +954,12 @@ fn identity(
     request: &McpRelayDecideRequestV1,
     view: &view::HarnessView,
     control_digest: String,
+    connection: Option<&Connection>,
 ) -> Result<McpToolCallIdentityPayloadV1, &'static str> {
-    let (artifact, private) = crate::mcp_tool_call_identity_build::build_artifact(&request.build)
-        .map_err(|_| IDENTITY_FAILED)?;
+    let mut build = request.build.clone();
+    build.provider_catalog_hash = provider_catalog_hash(request, connection)?;
+    let (artifact, private) =
+        crate::mcp_tool_call_identity_build::build_artifact(&build).map_err(|_| IDENTITY_FAILED)?;
     let input = McpToolCallHashInputV1 {
         arguments: guard_command::mcp_tool_signals::risk_arguments(&request.arguments),
         config: Some(view.hash_config.clone()),
@@ -955,6 +976,23 @@ fn identity(
         artifact_hash: Some(hashed.token_or_digest),
         risk_categories: hashed.risk_categories,
     })
+}
+
+/// The provider catalog hash a Composio wrapper's identity binds, which the
+/// proxy reads from the store (`read_mcp_provider_authority_hash`) and no
+/// other tool carries. A Composio call from a relay that did not leave the
+/// hash to this resident is refused rather than hashed without it.
+fn provider_catalog_hash(
+    request: &McpRelayDecideRequestV1,
+    connection: Option<&Connection>,
+) -> Result<Option<String>, &'static str> {
+    if !crate::mcp_relay_servers::composio_tool(&request.build.tool_name) {
+        return Ok(None);
+    }
+    if !request.resident_provider_catalog {
+        return Err(IDENTITY_FAILED);
+    }
+    provider::authority_hash(connection)
 }
 
 #[path = "mcp_relay_decide_ask.rs"]

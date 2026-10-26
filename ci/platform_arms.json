@@ -1363,6 +1363,14 @@
    "body": "d4309f13f345"
   },
   {
+   "verdict": "windows-unsupported",
+   "note": "Python's `platform.node()` is the DNS host name on Windows, which `COMPUTERNAME` (the upper-cased, 15-character NetBIOS name) does not match, and a bundle rule scoped to a device compares its name exactly. The arm reports no host name, so a device still on a generic label has no known name, `cached_bundle_identities` answers none, and every caller defers the bundle's rows to the store rather than authorizing them under a name the store would not use.",
+   "file": "rust/crates/guard-runtime/src/policy_bundle_store_identities.rs",
+   "item": "fn host_name() -> Option<String>",
+   "cfg": "not(unix)",
+   "body": "6a7c0c4ecb3c"
+  },
+  {
    "verdict": "other-platform",
    "note": "Windows takes the mutation lock in its own arm; elsewhere `native_command_control_mutation_lock_unsupported` refuses the mutation rather than performing it unlocked.",
    "file": "rust/crates/guard-runtime/src/policy_store_command_authority.rs",

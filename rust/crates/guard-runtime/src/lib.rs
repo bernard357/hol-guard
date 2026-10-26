@@ -363,9 +363,12 @@ mod guard_store_local_cli_grant_vectors_tests;
 mod guard_store_local_cli_grants;
 mod guard_store_local_cli_inventory;
 mod guard_store_local_cli_inventory_capabilities;
+mod guard_store_local_cli_inventory_item;
 mod guard_store_local_cli_inventory_rows;
 #[cfg(test)]
 mod guard_store_local_cli_inventory_rows_tests;
+#[cfg(test)]
+mod guard_store_local_cli_inventory_tests;
 #[cfg(test)]
 mod guard_store_local_cli_inventory_vectors_tests;
 mod guard_store_local_cli_mcp_snapshot;
@@ -470,6 +473,7 @@ mod hook_authority_state_op;
 mod hook_bridge_daemon_start;
 mod hook_bridge_fallback;
 mod hook_cli_claude_text;
+mod hook_cli_emit;
 #[cfg(test)]
 mod hook_decision_apply_patch_gate_tests;
 mod hook_decision_artifact_directive;
@@ -670,6 +674,7 @@ use guard_policy_bundle::{
 };
 mod policy_bundle_op;
 mod policy_bundle_payload_hash;
+mod policy_bundle_store_identities;
 #[cfg(test)]
 mod policy_bundle_transport_tests;
 mod policy_decision_lookup_op;

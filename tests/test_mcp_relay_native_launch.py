@@ -64,7 +64,7 @@ def advertised(monkeypatch: pytest.MonkeyPatch) -> set[str]:
     monkeypatch.setattr(
         native_hook_bridge,
         "native_hook_bridge_executable",
-        lambda feature: _RUNTIME if feature in features else None,
+        lambda feature, *, guard_home=None: _RUNTIME if feature in features else None,
     )
     return features
 
@@ -128,15 +128,49 @@ def test_native_canary_needs_a_runtime_serving_relay_decisions(
     assert mcp_proxy_launch(sys.executable, args)[0] == str(_RUNTIME)
 
 
-def test_frozen_builds_keep_the_python_proxy_and_windows_selects_the_relay(
-    tmp_path: Path, advertised: set[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    advertised.add(NATIVE_MCP_RELAY_FEATURE)
+def test_the_relay_is_resolved_for_the_proxys_guard_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(MCP_RELAY_SELECTION_ENV, raising=False)
+    homes: list[Path | None] = []
+
+    def executable(feature: str, *, guard_home: Path | None = None) -> Path | None:
+        homes.append(guard_home)
+        return _RUNTIME
+
+    monkeypatch.setattr(native_hook_bridge, "native_hook_bridge_executable", executable)
     args = _python_args(tmp_path)
-    monkeypatch.setattr(mcp_relay_native.sys, "frozen", True, raising=False)
-    assert mcp_proxy_launch(sys.executable, args)[0] == sys.executable
-    monkeypatch.delattr(mcp_relay_native.sys, "frozen")
     assert mcp_proxy_launch(sys.executable, args)[0] == str(_RUNTIME)
+    inline = [*args[:4], f"--guard-home={tmp_path / 'other'}", *args[4:], "--guard-home", str(tmp_path / "last")]
+    assert mcp_proxy_launch(sys.executable, inline)[0] == str(_RUNTIME)
+    assert homes == [tmp_path / "guard", tmp_path / "last"]
+
+
+def test_a_frozen_build_launches_the_durable_runtime_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner.guard import native_runtime, native_runtime_durable
+
+    monkeypatch.delenv(MCP_RELAY_SELECTION_ENV, raising=False)
+    monkeypatch.setattr(native_hook_bridge.sys, "frozen", True, raising=False)
+    identity = type("Identity", (), {"path": _RUNTIME})()
+    capabilities = type("Capabilities", (), {"features": frozenset({NATIVE_MCP_RELAY_FEATURE})})()
+    status = type(
+        "Status", (), {"available": True, "compatible": True, "identity": identity, "capabilities": capabilities}
+    )()
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda **_: status)
+    durable = tmp_path / "guard" / "native-runtime" / "copy" / "hol-guard-runtime"
+    published: list[Path] = []
+
+    def durable_hook_runtime(_identity: object, guard_home: Path) -> Path:
+        published.append(guard_home)
+        return durable
+
+    monkeypatch.setattr(native_runtime_durable, "durable_hook_runtime", durable_hook_runtime)
+    args = _python_args(tmp_path)
+    assert mcp_proxy_launch(sys.executable, args) == (
+        str(durable),
+        [NATIVE_MCP_RELAY_COMMAND, sys.executable, *args],
+    )
+    assert published == [tmp_path / "guard"]
+    without_home = [value for value in args if value not in {"--guard-home", str(tmp_path / "guard")}]
+    assert mcp_proxy_launch(sys.executable, without_home)[0] == sys.executable
 
 
 def test_shared_launcher_entry_selects_the_relay(tmp_path: Path, advertised: set[str]) -> None:
@@ -266,3 +300,29 @@ def test_inventory_recovers_the_original_launch_behind_the_relay(tmp_path: Path)
     servers = discover_harness_mcp_servers(home_dir=tmp_path, guard_home=tmp_path / "guard", detections=(detection,))
     assert len(servers) == 1
     assert servers[0].launch_command == "python fixture_server.py --stdio"
+
+
+def test_a_frozen_opencode_argv_relays_in_module_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, advertised: set[str]
+) -> None:
+    advertised.add(NATIVE_MCP_RELAY_FEATURE)
+    module_args = _python_args(tmp_path, "opencode-mcp-proxy", "opencode")
+    frozen_args = module_args[3:]
+    launcher = str(tmp_path / "hol-guard")
+    assert mcp_proxy_launch(launcher, frozen_args) == (launcher, frozen_args)
+
+    monkeypatch.setattr(mcp_relay_native.sys, "frozen", True, raising=False)
+    relayed = mcp_proxy_launch(launcher, frozen_args)
+    assert relayed == (str(_RUNTIME), [NATIVE_MCP_RELAY_COMMAND, launcher, *module_args])
+    assert python_proxy_launch(*relayed) == (launcher, tuple(module_args))
+    assert mcp_proxy_launch(launcher, ["scan", "--guard-home", "x"]) == (launcher, ["scan", "--guard-home", "x"])
+
+
+def test_a_frozen_cli_runs_the_module_argv_the_relay_hands_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner import cli
+
+    module_argv = ["-m", "codex_plugin_scanner.cli", "guard", "opencode-mcp-proxy", "--guard-home", "g"]
+    assert cli._frozen_module_argv(module_argv) == module_argv  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(cli.sys, "frozen", True, raising=False)
+    assert cli._frozen_module_argv(module_argv) == module_argv[2:]  # pyright: ignore[reportPrivateUsage]
+    assert cli._frozen_module_argv(["-m", "pip"]) == ["-m", "pip"]  # pyright: ignore[reportPrivateUsage]
