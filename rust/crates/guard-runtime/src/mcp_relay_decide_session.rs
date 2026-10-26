@@ -22,7 +22,9 @@
 //!
 //! `mode = "observe"` alone hands nothing off: the resident takes its
 //! observe-forward route and its downgrade of a pending saved approval
-//! (`mcp_relay_decide_observe.rs`).
+//! (`mcp_relay_decide_observe.rs`). A package call the proxy would prompt
+//! for before its package lane still defers per call, under either mode
+//! (`mcp_relay_decide_ask.rs`).
 //!
 //! This only steers which launcher runs. Each call is still admitted by
 //! `mcp_relay_decide`, which repeats every check and refuses whatever it does

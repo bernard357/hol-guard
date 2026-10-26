@@ -438,13 +438,25 @@ fn decide(
         policy_store,
     )?;
     drop(snapshot);
+    let asks = admitted.binding.review.blocked_request_mode.as_deref() == Some(ASK_MODE);
     // A package call is answered by its own lane, under the package policy and
     // the tool authority together, so none of the tool-only route below runs
-    // for it.
+    // for it. The prompts that route raises first under `ask` are the proxy's.
     if let Some(packaged) = legged.as_ref().and_then(Legged::decided) {
+        if asks
+            && ask::prompts_before_package(
+                &request.catalog_state,
+                &resolved.mode,
+                &request.build.tool_name,
+                &request.build.harness,
+                request.inline.available,
+                &resolved.decision,
+            )
+        {
+            return Err(ask::PACKAGE_PROMPT);
+        }
         return settle_package(request, &admitted, &resolved, packaged, policy_store);
     }
-    let asks = admitted.binding.review.blocked_request_mode.as_deref() == Some(ASK_MODE);
     let proxy = crate::mcp_tool_policy_proxy::proxy_payload(
         &McpToolPolicyProxyInputV1 {
             catalog_state: request.catalog_state.clone(),
