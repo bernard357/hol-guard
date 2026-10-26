@@ -668,6 +668,7 @@ use guard_policy_bundle::{
 };
 mod policy_bundle_op;
 mod policy_bundle_payload_hash;
+mod policy_bundle_store_identities;
 #[cfg(test)]
 mod policy_bundle_transport_tests;
 mod policy_decision_lookup_op;
