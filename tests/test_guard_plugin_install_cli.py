@@ -9,9 +9,12 @@ shell, and the record that ``uninstall`` plans from and opt-in telemetry reads.
 from __future__ import annotations
 
 import contextlib
+import http.server
 import io
 import json
 import subprocess
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -257,3 +260,105 @@ def test_telemetry_marks_only_listings_guard_installed(guard_home: Path) -> None
     marked = install.mark_guard_installs(report, guard_home)["entries"]
     assert [entry.get("via") for entry in marked] == ["hol-guard", None, None]
     assert "via" not in report["entries"][0]
+
+
+@pytest.fixture
+def local_portal() -> Iterator[tuple[str, list[str]]]:
+    """A loopback install-spec endpoint serving SPEC with its listing on the same origin."""
+
+    requests: list[str] = []
+    holder: dict[str, str] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.path)
+            body = json.dumps({**SPEC, "listingUrl": f"{holder['origin']}registry/plugins/acme%2Ftoolgate"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    holder["origin"] = f"http://127.0.0.1:{server.server_address[1]}/"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"{holder['origin']}api/guard/plugins/install-spec", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_spec_endpoint_override_reaches_a_local_portal_and_says_so(
+    local_portal: tuple[str, list[str]], programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    endpoint, requests = local_portal
+    monkeypatch.setenv(install.SPEC_URL_ENV, endpoint)
+    exit_code, output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes", "--runtime", "codex"])
+    assert exit_code == 0, error
+    assert requests == ["/api/guard/plugins/install-spec?slug=acme%2Ftoolgate"]
+    assert f"Warning: {install.SPEC_URL_ENV} is set. Install details come from {endpoint}, not hol.org." in error
+    origin = endpoint.removesuffix("api/guard/plugins/install-spec")
+    assert f"Listing: {origin}registry/plugins/acme%2Ftoolgate" in output
+    assert programs[-1][1:] == ["plugin", "add", "toolgate@acme"]
+
+    # The record kept the local listing, and uninstall plans from it through the same override.
+    exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
+    assert exit_code == 0, error
+    assert programs[-1][1:] == ["plugin", "remove", "toolgate@acme"]
+
+
+def test_a_hol_org_listing_is_refused_once_the_endpoint_is_overridden(
+    local_portal: tuple[str, list[str]], spec_file: Path, programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The listing check follows the override instead of also accepting hol.org,
+    # so a fixture endpoint cannot vouch for a listing it does not serve.
+    monkeypatch.setenv(install.SPEC_URL_ENV, local_portal[0])
+    exit_code, _output, error = _run(
+        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file), "--apply", "--yes"]
+    )
+    assert (exit_code, programs) == (2, [])
+    assert "failed Guard's checks" in error
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://registry.example/api/guard/plugins/install-spec",
+        "http://10.0.0.5:3000/api/guard/plugins/install-spec",
+        "ftp://127.0.0.1/spec",
+        "https://user:pass@registry.example/spec",
+        "https://registry.example/spec?slug=other",
+        "https://registry.example/spec#x",
+        "http://127.0.0.1:99999/spec",
+        "not a url",
+    ],
+)
+def test_an_unsafe_spec_endpoint_override_is_refused_before_any_request(
+    value: str, programs: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(install.SPEC_URL_ENV, value)
+    monkeypatch.setattr(install, "managed_urlopen", lambda *_a, **_k: pytest.fail("no request expected"))
+    exit_code, output, error = _run(["plugin", "install", "acme/toolgate", "--apply", "--yes"])
+    assert (exit_code, output, programs) == (2, "", [])
+    assert f"{install.SPEC_URL_ENV} must be an https URL" in error
+
+
+@pytest.mark.parametrize(
+    ("value", "origin"),
+    [
+        ("https://staging.example/api/guard/plugins/install-spec", "https://staging.example/"),
+        ("http://localhost:3000/api/guard/plugins/install-spec", "http://localhost:3000/"),
+        ("http://[::1]:3000/spec", "http://[::1]:3000/"),
+        ("http://host.docker.internal:3000/spec", "http://host.docker.internal:3000/"),
+        ("", None),
+    ],
+)
+def test_allowed_spec_endpoint_overrides_and_their_listing_origin(value: str, origin: str | None) -> None:
+    endpoint, listing_origin = install.spec_endpoint({install.SPEC_URL_ENV: value})
+    assert listing_origin == origin
+    assert endpoint == (value or install.SPEC_URL)

@@ -108,10 +108,11 @@ pub fn record(
     runtime: &str,
     installed: bool,
     spec: Option<Value>,
+    origin: &str,
 ) -> Result<Value, String> {
     let added = match (installed, spec) {
         (true, Some(spec)) => {
-            install::validate(&spec)?;
+            install::validate(&spec, origin)?;
             if spec["slug"].as_str() != Some(slug) {
                 return Err("plugin_kit_install_spec_mismatch".to_owned());
             }

@@ -10,6 +10,7 @@ fixed programs, and this module prints that plan. Nothing runs unless
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,11 @@ from ...version import __version__
 from ..mdm.network import ManagedNetworkError, managed_urlopen
 
 SPEC_URL = "https://hol.org/api/guard/plugins/install-spec"
+#: Points Guard at another install-spec endpoint, such as a local portal with
+#: test listings. https anywhere; plain http only on this machine or the
+#: Docker host. Listing pages must then live on the same origin.
+SPEC_URL_ENV = "HOL_GUARD_PLUGIN_SPEC_URL"
+_HTTP_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
 VIA_GUARD = "hol-guard"
 #: The only programs a plan may start. Each is the runtime's own CLI.
 PROGRAMS = ("claude", "codex", "npx")
@@ -45,8 +51,29 @@ def parse_target(value: str) -> tuple[str, str | None]:
     return slug, version or None
 
 
-def fetch_spec(slug: str) -> dict[str, Any]:
-    url = f"{SPEC_URL}?{urllib.parse.urlencode({'slug': slug})}"
+def spec_endpoint(environ: Mapping[str, str] | None = None) -> tuple[str, str | None]:
+    """The install-spec URL, and its origin when the user overrode it."""
+
+    value = (os.environ if environ is None else environ).get(SPEC_URL_ENV, "").strip()
+    if not value:
+        return SPEC_URL, None
+    try:
+        parts = urllib.parse.urlsplit(value)
+        host = (parts.hostname or "").lower()
+        parts.port  # noqa: B018 - raises on a malformed port
+    except ValueError:
+        host = ""
+    allowed = parts.scheme == "https" or (parts.scheme == "http" and host in _HTTP_HOSTS)
+    if not host or not allowed or parts.username or parts.password or parts.query or parts.fragment:
+        raise PluginInstallError(
+            f"{SPEC_URL_ENV} must be an https URL, or http on localhost or host.docker.internal, "
+            "with no credentials, query or fragment."
+        )
+    return value, f"{parts.scheme}://{parts.netloc.lower()}/"
+
+
+def fetch_spec(slug: str, endpoint: str = SPEC_URL) -> dict[str, Any]:
+    url = f"{endpoint}?{urllib.parse.urlencode({'slug': slug})}"
     request = urllib.request.Request(
         url, headers={"User-Agent": f"hol-guard/{__version__}", "Accept": "application/json"}
     )
@@ -108,7 +135,13 @@ def recorded_installs(guard_home: Path) -> dict[str, list[str]]:
 
 
 def record(
-    guard_home: Path, slug: str, runtime: str, *, installed: bool, spec: Mapping[str, Any] | None = None
+    guard_home: Path,
+    slug: str,
+    runtime: str,
+    *,
+    installed: bool,
+    spec: Mapping[str, Any] | None = None,
+    listing_origin: str | None = None,
 ) -> None:
     """Add a runtime to Guard's install record (``spec`` is the one installed) or drop it."""
 
@@ -121,6 +154,8 @@ def record(
         "runtime": runtime,
         "installed": installed,
     }
+    if listing_origin:
+        request["listing_origin"] = listing_origin
     if installed:
         request["spec"] = dict(spec or {})
     try:

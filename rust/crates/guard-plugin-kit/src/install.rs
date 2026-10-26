@@ -136,14 +136,36 @@ fn valid_text(value: &str, max: usize) -> bool {
 
 const INVALID: &str = "plugin_kit_install_spec_invalid";
 
-fn parse(spec: Value) -> Result<Spec, String> {
+/// Where listing pages live. HOL's own site unless the user pointed Guard at
+/// another install-spec endpoint (a local portal in tests), in which case the
+/// CLI passes that endpoint's origin and listings must live there instead.
+pub const HOL_ORIGIN: &str = "https://hol.org/";
+
+/// An origin the CLI may pass: `http(s)://host[:port]/`, nothing after it.
+pub(crate) fn valid_origin(value: &str) -> bool {
+    let Some(rest) = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let Some(authority) = rest.strip_suffix('/') else {
+        return false;
+    };
+    (1..=255).contains(&authority.len())
+        && authority
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'))
+}
+
+fn parse(spec: Value, origin: &str) -> Result<Spec, String> {
     let spec: Spec = serde_json::from_value(spec).map_err(|_| INVALID.to_owned())?;
     if spec.schema != SPEC_SCHEMA {
         return Err("plugin_kit_install_spec_unsupported".to_owned());
     }
     let listing_ok = spec
         .listing_url
-        .strip_prefix("https://hol.org/")
+        .strip_prefix(origin)
         .is_some_and(|rest| valid_text(rest, 300) && !rest.contains(char::is_whitespace));
     let version_ok = spec.version.as_deref().is_none_or(|v| valid_text(v, 64));
     let repository_ok = spec.repository.as_deref().is_none_or(valid_repository);
@@ -186,8 +208,8 @@ fn parse(spec: Value) -> Result<Spec, String> {
 }
 
 /// Check a spec with the same rules as a plan, without building one.
-pub(crate) fn validate(spec: &Value) -> Result<(), String> {
-    parse(spec.clone()).map(|_| ())
+pub(crate) fn validate(spec: &Value, origin: &str) -> Result<(), String> {
+    parse(spec.clone(), origin).map(|_| ())
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {
@@ -254,14 +276,16 @@ fn step(target: &Target, action: Action, available: &BTreeSet<String>) -> Step {
 }
 
 /// Build the plan. `available` names the programs found on PATH and
-/// `requested` limits it to some runtimes (empty means every target).
+/// `requested` limits it to some runtimes (empty means every target), and
+/// `origin` is where listing pages must live (see [`HOL_ORIGIN`]).
 pub fn plan(
     spec: Value,
     action: Action,
     available: &[String],
     requested: &[String],
+    origin: &str,
 ) -> Result<Plan, String> {
-    let spec = parse(spec)?;
+    let spec = parse(spec, origin)?;
     if requested.iter().any(|r| !RUNTIMES.contains(&r.as_str())) {
         return Err("plugin_kit_install_runtime_unknown".to_owned());
     }

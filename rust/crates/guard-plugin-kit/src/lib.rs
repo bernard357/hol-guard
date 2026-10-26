@@ -91,6 +91,9 @@ enum Request {
         slug: Option<String>,
         #[serde(default)]
         version: Option<String>,
+        /// Set only when the user overrode the install-spec endpoint.
+        #[serde(default)]
+        listing_origin: Option<String>,
     },
     /// Plans from what Guard recorded installing; see `ledger.rs`.
     Uninstall {
@@ -100,6 +103,8 @@ enum Request {
         available: Vec<String>,
         #[serde(default)]
         runtimes: Vec<String>,
+        #[serde(default)]
+        listing_origin: Option<String>,
     },
     Record {
         guard_home: String,
@@ -108,6 +113,8 @@ enum Request {
         installed: bool,
         #[serde(default)]
         spec: Option<Value>,
+        #[serde(default)]
+        listing_origin: Option<String>,
     },
     Installs {
         guard_home: String,
@@ -163,8 +170,16 @@ fn handle(request: Request) -> Result<Value, String> {
             runtimes,
             slug,
             version,
+            listing_origin,
         } => {
-            let plan = install::plan(spec, install::Action::Install, &available, &runtimes)?;
+            let origin = origin(listing_origin.as_deref())?;
+            let plan = install::plan(
+                spec,
+                install::Action::Install,
+                &available,
+                &runtimes,
+                origin,
+            )?;
             if slug.is_some_and(|slug| slug != plan.slug) {
                 return Err("plugin_kit_install_spec_mismatch".to_owned());
             }
@@ -178,14 +193,22 @@ fn handle(request: Request) -> Result<Value, String> {
             slug,
             available,
             runtimes,
+            listing_origin,
         } => {
+            let origin = origin(listing_origin.as_deref())?;
             let spec = ledger::spec(&guard_home, &slug)?;
-            let plan = install::plan(spec, install::Action::Uninstall, &available, &runtimes)
-                .map_err(|error| match error.as_str() {
-                    "plugin_kit_install_runtime_not_offered" => ledger::NOT_RECORDED.to_owned(),
-                    "plugin_kit_install_runtime_unknown" => error,
-                    _ => ledger::INVALID.to_owned(),
-                })?;
+            let plan = install::plan(
+                spec,
+                install::Action::Uninstall,
+                &available,
+                &runtimes,
+                origin,
+            )
+            .map_err(|error| match error.as_str() {
+                "plugin_kit_install_runtime_not_offered" => ledger::NOT_RECORDED.to_owned(),
+                "plugin_kit_install_runtime_unknown" => error,
+                _ => ledger::INVALID.to_owned(),
+            })?;
             encode(&plan)
         }
         Request::Record {
@@ -194,7 +217,11 @@ fn handle(request: Request) -> Result<Value, String> {
             runtime,
             installed,
             spec,
-        } => ledger::record(&guard_home, &slug, &runtime, installed, spec),
+            listing_origin,
+        } => {
+            let origin = origin(listing_origin.as_deref())?;
+            ledger::record(&guard_home, &slug, &runtime, installed, spec, origin)
+        }
         Request::Installs { guard_home } => ledger::installs(&guard_home),
         Request::Package {
             root,
@@ -206,6 +233,16 @@ fn handle(request: Request) -> Result<Value, String> {
             let root = resolve_root(&root)?;
             package(&root, out_dir.as_deref(), &runtimes, force, strict)
         }
+    }
+}
+
+/// The origin listing URLs must use: HOL's own unless the CLI passed the
+/// origin of an overridden install-spec endpoint.
+fn origin(listing_origin: Option<&str>) -> Result<&str, String> {
+    match listing_origin {
+        None => Ok(install::HOL_ORIGIN),
+        Some(origin) if install::valid_origin(origin) => Ok(origin),
+        Some(_) => Err("plugin_kit_request_invalid".to_owned()),
     }
 }
 
