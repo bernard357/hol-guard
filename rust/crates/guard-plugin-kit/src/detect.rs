@@ -134,7 +134,7 @@ pub fn detect(root: &Path) -> Result<Detection, String> {
     plugin
         .skills
         .sort_by(|left, right| left.dir.cmp(&right.dir));
-    servers::resolve_bundles(&root.join(&base), &mut plugin.mcp_servers);
+    servers::resolve_bundles(&root.join(&base), &base, &files, &mut plugin.mcp_servers);
 
     let join = |name: &str| {
         if base.is_empty() {

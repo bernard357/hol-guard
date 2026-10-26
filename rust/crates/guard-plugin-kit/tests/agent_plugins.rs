@@ -616,6 +616,47 @@ fn a_working_folder_inside_the_plugin_travels_with_the_server() {
 }
 
 #[test]
+fn a_working_folder_with_no_packaged_files_is_reported_not_shipped() {
+    let root = repo(&[
+        (
+            "plugin.json",
+            &manifest(json!({"description": "Fill PDF forms."})),
+        ),
+        (
+            "mcp.json",
+            &mcp(json!({
+                "empty": {"type": "stdio", "command": "pdf-server", "cwd": "./work"},
+                "excluded": {"type": "stdio", "command": "pdf-server", "cwd": "./scratch"},
+                "kept": {"type": "stdio", "command": "pdf-server", "cwd": "./data"},
+            })),
+        ),
+        (
+            ".plugin-scanner.toml",
+            "[plugin_kit]\nexclude_paths = [\"scratch/*\"]\n",
+        ),
+        ("scratch/notes.txt", "draft"),
+        ("data/forms.json", "{}"),
+    ]);
+    std::fs::create_dir(root.join("work")).expect("work folder");
+    let out = package(&root, "agent-plugins");
+    assert!(!out.join("work").exists());
+    assert!(!out.join("scratch").exists());
+    assert_eq!(
+        read_json(&out.join("mcp.json"))["mcpServers"]
+            .as_object()
+            .expect("servers")
+            .keys()
+            .collect::<Vec<_>>(),
+        ["kept"]
+    );
+    assert_eq!(
+        dropped_for(&root, "agent-plugins"),
+        json!(["mcp_servers_not_portable"])
+    );
+    assert_eq!(conformance(&out, true)["passed"], json!(true));
+}
+
+#[test]
 fn an_agent_plugins_source_keeps_its_root_in_other_runtimes() {
     let plugin = json!({
         "$schema": PLUGIN_SCHEMA,

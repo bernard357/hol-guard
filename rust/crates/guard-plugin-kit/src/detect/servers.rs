@@ -4,13 +4,14 @@
 //! detection does.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
 use super::text;
 use crate::model::{McpServer, Plugin, ROOT_PLACEHOLDERS};
 use crate::reference::{normalize_template, single_reference};
+use crate::walk;
 
 /// Adds each server in an `mcpServers` map that is not already known.
 /// `gemini` reads a bare `url` as SSE, as Gemini CLI does.
@@ -124,19 +125,39 @@ fn server_entry(config: &Map<String, Value>, gemini: bool) -> McpServer {
 }
 
 /// Records, for each server, the paths below `plugin_dir` its command, args
-/// and `cwd` name, and whether any of them is missing there.
-pub(super) fn resolve_bundles(plugin_dir: &Path, servers: &mut BTreeMap<String, McpServer>) {
+/// and `cwd` name, and whether any of them is missing there. `files` is the
+/// repository walk and `base` the plugin folder within it: a folder counts
+/// only when the walk found a file in it, since packaging copies the walked
+/// files and an empty or fully excluded folder would not exist in the
+/// package.
+pub(super) fn resolve_bundles(
+    plugin_dir: &Path,
+    base: &str,
+    files: &[PathBuf],
+    servers: &mut BTreeMap<String, McpServer>,
+) {
     let Ok(canonical_root) = plugin_dir.canonicalize() else {
         return;
+    };
+    let carries_files = |relative: &str| {
+        let folder = if base.is_empty() {
+            format!("{relative}/")
+        } else {
+            format!("{base}/{relative}/")
+        };
+        files
+            .iter()
+            .any(|file| walk::display(file).starts_with(&folder))
     };
     for server in servers.values_mut() {
         for relative in root_references(server) {
             // The canonical path must be the written one, so no part of it
             // is a symlink, which the package walk would not follow.
-            let present = plugin_dir
-                .join(&relative)
+            let resolved = plugin_dir.join(&relative);
+            let present = resolved
                 .canonicalize()
-                .is_ok_and(|resolved| resolved == canonical_root.join(&relative));
+                .is_ok_and(|resolved| resolved == canonical_root.join(&relative))
+                && (!resolved.is_dir() || carries_files(&relative));
             if present {
                 if !server.bundled.contains(&relative) {
                     server.bundled.push(relative);
