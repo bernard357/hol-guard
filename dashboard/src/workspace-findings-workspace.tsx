@@ -22,6 +22,7 @@ import {
   RuntimeFindingsTable,
   SecretFindingsTable,
   SkillFindingsTable,
+  WorkflowFindingsTable,
 } from "./workspace-findings-tables";
 import { FixCell, FixHistory, FixLoadError, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
@@ -50,6 +51,7 @@ const COVERAGE_REASONS: Record<string, string> = {
   mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked.",
   hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened.",
   plugin_manifest_incomplete: "Some agent plugin files could not be fully read, so not every plugin hook or MCP server was checked.",
+  ci_workflow_incomplete: "Some GitHub Actions workflows could not be fully read, so not every workflow was checked.",
 };
 
 const FAILURE_REASONS: Record<string, string> = {
@@ -70,6 +72,7 @@ const DETECTOR_LABELS: Record<string, string> = {
   mcp_config_v1: "MCP server checking",
   hook_config_v1: "Project hook checking",
   plugin_manifest_v1: "Agent plugin checking",
+  ci_workflow_v1: "CI workflow checking",
 };
 
 export type WorktreeStatus = { label: string; tone: TagTone; detail: string | null };
@@ -343,6 +346,7 @@ function FindingsSections(props: FindingsSectionsProps) {
   const servers = props.findings.filter((finding) => finding.kind === "mcp");
   const hooks = props.findings.filter((finding) => finding.kind === "hook");
   const plugins = props.findings.filter((finding) => finding.kind === "plugin");
+  const workflows = props.findings.filter((finding) => finding.kind === "workflow");
   if (props.findings.length === 0) {
     return <p className="text-sm text-slate-600">{emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked)}</p>;
   }
@@ -355,6 +359,7 @@ function FindingsSections(props: FindingsSectionsProps) {
       {servers.length > 0 && <McpFindingsTable findings={servers} />}
       {hooks.length > 0 && <HookFindingsTable findings={hooks} />}
       {plugins.length > 0 && <PluginFindingsTable findings={plugins} />}
+      {workflows.length > 0 && <WorkflowFindingsTable findings={workflows} />}
     </div>
   );
 }

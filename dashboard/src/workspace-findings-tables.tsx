@@ -176,6 +176,18 @@ export function PluginFindingsTable({ findings }: { findings: WorkspaceFinding[]
   );
 }
 
+export function WorkflowFindingsTable({ findings }: { findings: WorkspaceFinding[] }) {
+  return (
+    <RuleFindingsTable
+      findings={findings}
+      caption="GitHub Actions workflows with risky settings"
+      subjectLabel="Workflow"
+      subject={(finding) => <span className="break-all font-mono text-xs text-slate-700">{finding.path}</span>}
+      check={(finding) => finding.workflow}
+    />
+  );
+}
+
 const RUNTIME_VERDICTS: Record<string, { label: string; tone: TagTone }> = {
   affected: { label: "Affected version", tone: "attention" },
   restart_required: { label: "Restart needed", tone: "amber" },

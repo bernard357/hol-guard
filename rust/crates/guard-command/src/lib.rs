@@ -41,6 +41,7 @@ pub mod catalog_read_model;
 mod catalog_read_model_tests;
 mod catalog_read_projection;
 mod catalog_read_query;
+pub mod ci_workflow_risk;
 pub mod cloud_catalog;
 pub mod cloud_scrub;
 mod cloud_scrub_shell;

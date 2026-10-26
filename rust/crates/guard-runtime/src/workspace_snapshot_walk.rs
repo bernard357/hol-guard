@@ -10,6 +10,7 @@ use super::hooks::HookScan;
 use super::plugins::PluginScan;
 use super::secrets::SecretScan;
 use super::skills::SkillScan;
+use super::workflows::WorkflowScan;
 use super::{Limits, SnapshotMode, SKIP_DIRS};
 use crate::workspace_inventory_files::{
     LOCKFILE_CANDIDATES, MANIFEST_CANDIDATES, MAX_DEPTH as AUDIT_DISCOVERY_DEPTH,
@@ -96,6 +97,8 @@ pub(super) struct Walk {
     pub(super) hooks: Option<HookScan>,
     /// Present when the caller asked for the agent plugin check.
     pub(super) plugins: Option<PluginScan>,
+    /// Present when the caller asked for the CI workflow check.
+    pub(super) workflows: Option<WorkflowScan>,
 }
 
 #[derive(Default)]
@@ -115,7 +118,7 @@ impl Walk {
     }
 
     /// Record that the walk left `relative` unread, which matters only when it
-    /// is a skill, hook configuration or plugin file a scan had to read.
+    /// is a skill, hook configuration, plugin file or workflow a scan had to read.
     fn left_unread(&mut self, relative: &str) {
         if let Some(skills) = self.skills.as_mut() {
             if skills.admits(relative) {
@@ -132,10 +135,15 @@ impl Walk {
                 plugins.left_unread(relative);
             }
         }
+        if let Some(workflows) = self.workflows.as_mut() {
+            if workflows.admits(relative) {
+                workflows.left_unread();
+            }
+        }
     }
 
-    /// Record a special file the walk did not follow, which the skill, hook
-    /// and plugin scans count when their input could be there.
+    /// Record a special file the walk did not follow, which the skill, hook,
+    /// plugin and workflow scans count when their input could be there.
     fn left_special(&mut self, relative: &str) {
         if let Some(skills) = self.skills.as_mut() {
             skills.left_special(relative);
@@ -146,10 +154,13 @@ impl Walk {
         if let Some(plugins) = self.plugins.as_mut() {
             plugins.left_special(relative);
         }
+        if let Some(workflows) = self.workflows.as_mut() {
+            workflows.left_unfollowed(relative);
+        }
     }
 
-    /// Record a symlink the walk did not follow, which the skill, hook and
-    /// plugin scans count when their input could be behind it.
+    /// Record a symlink the walk did not follow, which the skill, hook,
+    /// plugin and workflow scans count when their input could be behind it.
     fn left_link(&mut self, relative: &str, target: Option<&Path>) {
         if let Some(skills) = self.skills.as_mut() {
             skills.left_link(relative, target);
@@ -159,6 +170,9 @@ impl Walk {
         }
         if let Some(plugins) = self.plugins.as_mut() {
             plugins.left_link(relative, target);
+        }
+        if let Some(workflows) = self.workflows.as_mut() {
+            workflows.left_unfollowed(relative);
         }
     }
 
@@ -333,8 +347,12 @@ fn admit_file(
         .plugins
         .as_mut()
         .is_some_and(|plugins| plugins.admits(child));
-    let capture =
-        (scan_content || scan_skill || scan_hooks || scan_plugin).then_some(&mut captured);
+    let scan_workflow = walk
+        .workflows
+        .as_mut()
+        .is_some_and(|workflows| workflows.admits(child));
+    let capture = (scan_content || scan_skill || scan_hooks || scan_plugin || scan_workflow)
+        .then_some(&mut captured);
     match hash_stable(file, node, limits.file_bytes, capture) {
         Ok((digest, read)) => {
             walk.hashed_bytes += read;
@@ -357,6 +375,11 @@ fn admit_file(
             if scan_plugin {
                 if let Some(plugins) = walk.plugins.as_mut() {
                     plugins.observe(child, &captured);
+                }
+            }
+            if scan_workflow {
+                if let Some(workflows) = walk.workflows.as_mut() {
+                    workflows.observe(child, &captured);
                 }
             }
         }

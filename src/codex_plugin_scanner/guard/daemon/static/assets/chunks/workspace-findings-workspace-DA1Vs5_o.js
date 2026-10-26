@@ -83,7 +83,8 @@ function normalizeFinding(value) {
       runtime: null,
       skill: null,
       mcp: null,
-      hook: null
+      hook: null,
+      workflow: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
@@ -109,7 +110,8 @@ function normalizeFinding(value) {
         falsePositiveHint: text$1(item.false_positive_hint)
       },
       mcp: null,
-      hook: null
+      hook: null,
+      workflow: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
@@ -137,7 +139,8 @@ function normalizeFinding(value) {
         confidence: text$1(item.confidence) ?? "likely",
         falsePositiveHint: text$1(item.false_positive_hint)
       },
-      hook: null
+      hook: null,
+      workflow: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "hook_config_v1") {
@@ -165,7 +168,8 @@ function normalizeFinding(value) {
         reason,
         confidence: text$1(item.confidence) ?? "likely",
         falsePositiveHint: text$1(item.false_positive_hint)
-      }
+      },
+      workflow: null
     };
   }
   if (item.source_kind === "workspace_source" && item.detector === "plugin_manifest_v1") {
@@ -190,7 +194,30 @@ function normalizeFinding(value) {
       runtime: null,
       skill: null,
       mcp: server === null ? null : { ...check, server },
-      hook: event === null ? null : { ...check, event }
+      hook: event === null ? null : { ...check, event },
+      workflow: null
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "ci_workflow_v1") {
+    const path = text$1(item.path);
+    const title = text$1(item.title);
+    const reason = text$1(item.reason);
+    if (path === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "workflow",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: null,
+      workflow: { title, reason, confidence: text$1(item.confidence) ?? "likely", falsePositiveHint: text$1(item.false_positive_hint) }
     };
   }
   if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
@@ -215,7 +242,8 @@ function normalizeFinding(value) {
       },
       skill: null,
       mcp: null,
-      hook: null
+      hook: null,
+      workflow: null
     };
   }
   const packageName = text$1(item.package_name);
@@ -233,7 +261,8 @@ function normalizeFinding(value) {
     runtime: null,
     skill: null,
     mcp: null,
-    hook: null
+    hook: null,
+    workflow: null
   };
 }
 function normalizeAssessment(value) {
@@ -442,6 +471,18 @@ function PluginFindingsTable({ findings }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block break-all font-mono text-xs text-slate-500", children: finding.path })
       ] }),
       check: (finding) => finding.hook ?? finding.mcp
+    }
+  );
+}
+function WorkflowFindingsTable({ findings }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    RuleFindingsTable,
+    {
+      findings,
+      caption: "GitHub Actions workflows with risky settings",
+      subjectLabel: "Workflow",
+      subject: (finding) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "break-all font-mono text-xs text-slate-700", children: finding.path }),
+      check: (finding) => finding.workflow
     }
   );
 }
@@ -978,7 +1019,8 @@ const COVERAGE_REASONS = {
   skills_incomplete: "Some agent skills could not be read in full, so their instructions may not all be checked.",
   mcp_config_incomplete: "Some MCP server settings could not be read, so not every configured server was checked.",
   hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened.",
-  plugin_manifest_incomplete: "Some agent plugin files could not be fully read, so not every plugin hook or MCP server was checked."
+  plugin_manifest_incomplete: "Some agent plugin files could not be fully read, so not every plugin hook or MCP server was checked.",
+  ci_workflow_incomplete: "Some GitHub Actions workflows could not be fully read, so not every workflow was checked."
 };
 const FAILURE_REASONS = {
   workspace_snapshot_failed: "Guard could not read this workspace.",
@@ -996,7 +1038,8 @@ const DETECTOR_LABELS = {
   skill_content_v1: "Skill checking",
   mcp_config_v1: "MCP server checking",
   hook_config_v1: "Project hook checking",
-  plugin_manifest_v1: "Agent plugin checking"
+  plugin_manifest_v1: "Agent plugin checking",
+  ci_workflow_v1: "CI workflow checking"
 };
 function sameWorktree(left, right) {
   return left.codebaseKey === right.codebaseKey && left.worktreeKey === right.worktreeKey;
@@ -1188,6 +1231,7 @@ function FindingsSections(props) {
   const servers = props.findings.filter((finding) => finding.kind === "mcp");
   const hooks = props.findings.filter((finding) => finding.kind === "hook");
   const plugins = props.findings.filter((finding) => finding.kind === "plugin");
+  const workflows = props.findings.filter((finding) => finding.kind === "workflow");
   if (props.findings.length === 0) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked) });
   }
@@ -1198,7 +1242,8 @@ function FindingsSections(props) {
     skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(SkillFindingsTable, { findings: skills }),
     servers.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(McpFindingsTable, { findings: servers }),
     hooks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookFindingsTable, { findings: hooks }),
-    plugins.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(PluginFindingsTable, { findings: plugins })
+    plugins.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(PluginFindingsTable, { findings: plugins }),
+    workflows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(WorkflowFindingsTable, { findings: workflows })
   ] });
 }
 function FindingsTable({ findings, fixes }) {

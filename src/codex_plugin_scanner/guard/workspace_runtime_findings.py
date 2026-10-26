@@ -170,9 +170,10 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
     runs check agent skill content. v6: runs check MCP server configuration.
     v7: runs check project hook commands.
     v8: runs check agent plugin hooks and MCP servers.
+    v9: runs check GitHub Actions workflows.
     """
 
-    encoded = f"guard.workspace-context.v8\0{feed_digest}\0{runtime_digest or 'unknown'}"
+    encoded = f"guard.workspace-context.v9\0{feed_digest}\0{runtime_digest or 'unknown'}"
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 

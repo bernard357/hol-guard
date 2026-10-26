@@ -1,12 +1,11 @@
 """Run one claimed workspace assessment.
 
 The run is bound to a content snapshot taken before the detectors start and
-checked again after they finish. The secret, skill and hook detectors read the very bytes that
-snapshot hashed, so their findings are bound to the same content. If the two differ the worktree changed under
-the detectors, so the run is superseded rather than reporting findings for
-content that no longer exists. The runtime detector reads the executables the
-worktree's configured tools would launch, without running them. Detectors run locally and the Cloud audit is
-never used from here. An automatic run is also offline: every network
+checked again after they finish. The content detectors read the very bytes
+that snapshot hashed. If the two differ the worktree changed under the
+detectors, so the run is superseded. The runtime detector reads the
+executables the worktree's tools would launch, without running them.
+Detectors run locally and the Cloud audit is never used from here. An automatic run is also offline: every network
 exchange the local evaluation asks for is answered from cache or refused,
 which leaves the run partial. A run the user asked for may look up package
 coordinates the way an interactive audit does.
@@ -28,6 +27,11 @@ from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .workspace_ci_workflow_findings import (
+    CI_WORKFLOW_DETECTOR,
+    project_ci_workflow_findings,
+    with_ci_workflow_coverage,
+)
 from .workspace_hook_config_findings import (
     HOOK_CONFIG_DETECTOR,
     project_hook_config_findings,
@@ -64,7 +68,10 @@ DETECTOR_SET: Final = (
     MCP_CONFIG_DETECTOR,
     HOOK_CONFIG_DETECTOR,
     PLUGIN_MANIFEST_DETECTOR,
+    CI_WORKFLOW_DETECTOR,
 )
+# The content scans in the order they reached the native runtime.
+_CONTENT_SCANS: Final = ("secrets", "skills", "hooks", "plugins", "workflows")
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
@@ -182,25 +189,21 @@ def execute(
         project_mcp_config_findings(mcp_configs),
         project_hook_config_findings(before.hooks),
         project_plugin_manifest_findings(before.plugins),
+        project_ci_workflow_findings(before.workflows),
     )
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
-    coverage = with_plugin_manifest_coverage(
-        with_hook_config_coverage(
-            with_mcp_config_coverage(
-                with_skill_coverage(
-                    with_runtime_coverage(
-                        coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused),
-                        posture,
-                    ),
-                    before.skills,
-                ),
-                mcp_configs,
-            ),
-            before.hooks,
-        ),
-        before.plugins,
+    coverage = with_runtime_coverage(
+        coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
     )
+    for add_coverage, result in (
+        (with_skill_coverage, before.skills),
+        (with_mcp_config_coverage, mcp_configs),
+        (with_hook_config_coverage, before.hooks),
+        (with_plugin_manifest_coverage, before.plugins),
+        (with_ci_workflow_coverage, before.workflows),
+    ):
+        coverage = add_coverage(coverage, result)
     return assessments.RunOutcome(
         state="completed" if coverage["status"] == "complete" else "partial",
         snapshot_digest=before.snapshot_digest,
@@ -218,21 +221,21 @@ def _detector_snapshot(root: Path, secret_key: str) -> WorkspaceSnapshot:
     """
 
     # Each scan is newer than the one before it, so a runtime that lacks one
-    # lacks every later one too.
+    # lacks every later one too: retry with only the scans before it.
     try:
-        return workspace_snapshot(
-            root, mode="content", secrets=True, secret_key=secret_key, skills=True, hooks=True, plugins=True
-        )
+        return _content_snapshot(root, secret_key, _CONTENT_SCANS)
     except WorkspaceSnapshotError as error:
-        if error.code == "workspace_snapshot_secrets_unavailable":
-            return workspace_snapshot(root, mode="content")
-        if error.code == "workspace_snapshot_skills_unavailable":
-            return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key)
-        if error.code == "workspace_snapshot_hooks_unavailable":
-            return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key, skills=True)
-        if error.code != "workspace_snapshot_plugins_unavailable":
+        missing = [scan for scan in _CONTENT_SCANS if error.code == f"workspace_snapshot_{scan}_unavailable"]
+        if not missing:
             raise
-    return workspace_snapshot(root, mode="content", secrets=True, secret_key=secret_key, skills=True, hooks=True)
+        return _content_snapshot(root, secret_key, _CONTENT_SCANS[: _CONTENT_SCANS.index(missing[0])])
+
+
+def _content_snapshot(root: Path, secret_key: str, scans: tuple[str, ...]) -> WorkspaceSnapshot:
+    requested: dict[str, Any] = dict.fromkeys(scans, True)
+    if "secrets" in scans:
+        requested["secret_key"] = secret_key
+    return workspace_snapshot(root, mode="content", **requested)
 
 
 def _runtime_posture(store: Any, root: Path) -> dict[str, object] | None:
