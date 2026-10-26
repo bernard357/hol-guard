@@ -26,12 +26,17 @@ WORKFLOWS_RESULT_SCHEMA: Final = "guard.workspace-workflows.v1"
 MAX_CI_WORKFLOW_FINDINGS: Final = 200
 
 _FINDING_ID = re.compile(r"[0-9a-f]{32}")
-_RULE_ID = re.compile(r"ci\.workflow\.[a-z0-9.-]{1,120}")
+_RULE_IDS: Final = frozenset(
+    {"ci.workflow.untrusted-checkout", "ci.workflow.write-all-permissions", "ci.workflow.unpinned-action"}
+)
 _REASON = re.compile(r"[a-z0-9_]{1,40}")
 _SEVERITIES: Final = frozenset({"critical", "high", "medium", "low", "info"})
 _CONFIDENCES: Final = frozenset({"weak", "likely", "strong"})
 _CATEGORY = re.compile(r"[a-z_]{1,32}")
-_WORKFLOW_FILE = re.compile(r"\.github/workflows/[^/\\\0]{1,250}\.ya?ml")
+# Any `.yml` or `.yaml` file directly in the root workflows directory, within
+# the native snapshot's path bound.
+_WORKFLOW_FILE = re.compile(r"\.github/workflows/[^/\0]*\.ya?ml")
+_MAX_PATH_BYTES: Final = 4096
 _MAX_TEXT_CHARS: Final = 1024
 _SKIP_KINDS: Final = ("oversize", "not_text", "unread", "linked")
 
@@ -77,11 +82,18 @@ def _status(result: object) -> tuple[str, dict[str, object], list[str]]:
     if not isinstance(result, Mapping) or result.get("schema") != WORKFLOWS_RESULT_SCHEMA:
         return "error", {}, ["unreadable_result"]
     status = result.get("status")
-    # A reply without its findings list cannot show that nothing was found.
+    # A reply without its findings list or its scan counts cannot show that
+    # nothing was found.
+    files_scanned = result.get("files_scanned")
     if (
         not isinstance(status, str)
         or status not in {"complete", "incomplete"}
         or not isinstance(result.get("findings"), list)
+        or not isinstance(files_scanned, int)
+        or isinstance(files_scanned, bool)
+        or files_scanned < 0
+        or not isinstance(result.get("skipped"), Mapping)
+        or not isinstance(result.get("truncation_reasons"), list)
     ):
         return "error", {}, ["unreadable_result"]
     reasons = _reasons(result.get("truncation_reasons"))
@@ -91,7 +103,7 @@ def _status(result: object) -> tuple[str, dict[str, object], list[str]]:
         reasons = ["incomplete"]
     skipped = result.get("skipped")
     summary: dict[str, object] = {
-        "files_scanned": _count(result.get("files_scanned")),
+        "files_scanned": files_scanned,
         "skipped": {kind: _count(skipped.get(kind)) if isinstance(skipped, Mapping) else 0 for kind in _SKIP_KINDS},
         "truncation_reasons": reasons,
     }
@@ -122,9 +134,9 @@ def _finding(item: object) -> dict[str, object] | None:
     if (
         not isinstance(finding_id, str)
         or not _FINDING_ID.fullmatch(finding_id)
-        or not isinstance(rule_id, str)
-        or not _RULE_ID.fullmatch(rule_id)
+        or rule_id not in _RULE_IDS
         or not isinstance(path, str)
+        or len(path.encode("utf-8", "surrogatepass")) > _MAX_PATH_BYTES
         or not _WORKFLOW_FILE.fullmatch(path)
         or not isinstance(category, str)
         or not _CATEGORY.fullmatch(category)

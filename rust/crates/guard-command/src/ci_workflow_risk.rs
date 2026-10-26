@@ -67,19 +67,32 @@ static USES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\s*(?:-\s*)?uses:\s*["']?([^\s#"']+)"#).expect("valid uses pattern")
 });
 static WRITE_ALL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^\s*permissions:\s*["']?write-all\b"#).expect("valid permissions pattern")
+    Regex::new(r#"^\s*["']?permissions["']?\s*:\s*["']?write-all\b"#)
+        .expect("valid permissions pattern")
 });
+/// An action step's `with:` key. Keys indented under it are the action's
+/// inputs, not the workflow's or job's own settings.
+static WITH_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^(\s*(?:-\s*)?)["']?with["']?\s*:\s*$"#).expect("valid with pattern")
+});
+/// The trigger in any of its forms (`workflow_run:`, `on: workflow_run`,
+/// `on: [workflow_run]`), but not the `github.event.workflow_run` context.
 static PRIVILEGED_TRIGGER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\bpull_request_target\b|\bworkflow_run\s*:").expect("valid trigger pattern")
+    Regex::new(r"(?:^|[^.\w])(?:pull_request_target|workflow_run)\b")
+        .expect("valid trigger pattern")
 });
 static CHECKOUT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\bactions/checkout\b|\bgit\s+checkout\b").expect("valid checkout pattern")
+    Regex::new(r"\bactions/checkout\b|\bgit\s+checkout\b|\bgh\s+pr\s+checkout\b")
+        .expect("valid checkout pattern")
 });
+/// `gh pr checkout` always fetches the pull request's own code.
+static GH_PR_CHECKOUT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bgh\s+pr\s+checkout\b").expect("valid gh checkout pattern"));
 /// Expressions that name the pull request's own code rather than the base
 /// branch the privileged workflow was started from.
 static UNTRUSTED_REF: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"github\.event\.pull_request\.head\.(?:sha|ref)\b|github\.event\.workflow_run\.head_(?:sha|branch)\b|github\.head_ref\b|refs/pull/",
+        r"github\.event\.pull_request\.(?:head\.(?:sha|ref)|merge_commit_sha)\b|github\.event\.workflow_run\.head_(?:sha|branch)\b|github\.head_ref\b|\bGITHUB_HEAD_REF\b|refs/pull/",
     )
     .expect("valid untrusted ref pattern")
 });
@@ -101,9 +114,11 @@ pub fn detect_ci_workflow_risk(text: &str) -> Vec<CiWorkflowRule> {
         .filter(|line| !line.trim_start().starts_with('#'))
         .collect();
     let any = |pattern: &Regex| lines.iter().any(|line| pattern.is_match(line));
-    let checks_out_head = lines
-        .iter()
-        .any(|line| CHECKOUT_TARGET.is_match(line) && UNTRUSTED_REF.is_match(line));
+    let checks_out_head = lines.iter().any(|line| {
+        GH_PR_CHECKOUT.is_match(line)
+            || (CHECKOUT_TARGET.is_match(line) && UNTRUSTED_REF.is_match(line))
+    });
+    let write_all = outside_action_inputs(&lines).any(|line| WRITE_ALL.is_match(line));
     let untrusted_checkout = any(&PRIVILEGED_TRIGGER) && any(&CHECKOUT) && checks_out_head;
     let unpinned = lines
         .iter()
@@ -111,12 +126,25 @@ pub fn detect_ci_workflow_risk(text: &str) -> Vec<CiWorkflowRule> {
         .any(|captures| is_unpinned(&captures[1]));
     [
         (untrusted_checkout, UNTRUSTED_CHECKOUT),
-        (any(&WRITE_ALL), WRITE_ALL_PERMISSIONS),
+        (write_all, WRITE_ALL_PERMISSIONS),
         (unpinned, UNPINNED_ACTION),
     ]
     .into_iter()
     .filter_map(|(found, rule)| found.then_some(rule))
     .collect()
+}
+
+/// The lines that are not an action's `with:` inputs.
+fn outside_action_inputs<'a>(lines: &'a [&'a str]) -> impl Iterator<Item = &'a str> + 'a {
+    let mut inputs_indent: Option<usize> = None;
+    lines.iter().copied().filter(move |line| {
+        let indent = line.len() - line.trim_start().len();
+        if inputs_indent.is_some_and(|key| indent > key) || line.trim().is_empty() {
+            return inputs_indent.is_none();
+        }
+        inputs_indent = WITH_BLOCK.captures(line).map(|captures| captures[1].len());
+        true
+    })
 }
 
 /// A remote action or reusable workflow not pinned to a full commit SHA. A

@@ -154,6 +154,33 @@ def test_older_runtime_keeps_earlier_scans_and_reports_workflows_not_run(tmp_pat
     assert outcome.coverage["detectors"]["ci_workflow_v1"] == "not_run"
 
 
+def test_a_runtime_missing_an_earlier_scan_still_runs_the_workflow_scan(tmp_path: Path, monkeypatch) -> None:
+    store, claimed = queued_run(tmp_path)
+    requested: list[tuple[bool, bool, bool]] = []
+
+    def snapshot(root: Path, *, secrets: bool = False, plugins: bool = False, workflows: bool = False, **_):
+        requested.append((secrets, plugins, workflows))
+        if plugins:
+            raise native.WorkspaceSnapshotError("workspace_snapshot_plugins_unavailable")
+        if workflows:
+            return replace(
+                SNAPSHOT,
+                secrets=SECRETS_COMPLETE,
+                skills=SKILLS_COMPLETE,
+                hooks=HOOKS_COMPLETE,
+                workflows=workflows_result(),
+            )
+        return SNAPSHOT
+
+    monkeypatch.setattr(runner, "workspace_snapshot", snapshot)
+    monkeypatch.setattr(runner, "_local_audit", lambda store, config, root: AUDIT)
+    outcome = runner.execute(store, None, claimed, clock=lambda: T0)
+    assert requested[:2] == [(True, True, True), (True, False, True)]
+    assert outcome.coverage is not None
+    assert outcome.coverage["detectors"]["ci_workflow_v1"] == "complete"
+    assert outcome.coverage["detectors"]["plugin_manifest_v1"] == "not_run"
+
+
 def test_a_runtime_without_the_workflow_scan_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
     from codex_plugin_scanner.guard import native_runtime
 
@@ -215,6 +242,12 @@ def test_a_workflow_scan_at_its_cap_marks_findings_truncated() -> None:
         {key: value for key, value in WORKFLOWS_COMPLETE.items() if key != "findings"},
         {**WORKFLOWS_COMPLETE, "findings": None},
         {**WORKFLOWS_COMPLETE, "findings": {"0": {}}},
+        {key: value for key, value in WORKFLOWS_COMPLETE.items() if key != "files_scanned"},
+        {**WORKFLOWS_COMPLETE, "files_scanned": True},
+        {**WORKFLOWS_COMPLETE, "files_scanned": -1},
+        {key: value for key, value in WORKFLOWS_COMPLETE.items() if key != "skipped"},
+        {key: value for key, value in WORKFLOWS_COMPLETE.items() if key != "truncation_reasons"},
+        {"schema": WORKFLOWS_COMPLETE["schema"], "status": "complete", "findings": []},
     ],
 )
 def test_an_unreadable_workflow_result_is_an_error(payload: dict[str, object]) -> None:
@@ -229,6 +262,8 @@ def test_an_unreadable_workflow_result_is_an_error(payload: dict[str, object]) -
         {"finding_id": "short"},
         {"rule_id": "hook.config.remote-code"},
         {"rule_id": "ci.workflow.has space"},
+        {"rule_id": "ci.workflow.unexpected"},
+        {"path": ".github/workflows/" + "w" * 4080 + ".yml"},
         {"rule_id": None},
         {"path": "ci.yml"},
         {"path": ".github/workflows/nested/ci.yml"},
@@ -256,8 +291,13 @@ def test_a_malformed_finding_is_dropped_and_leaves_the_scan_incomplete(bad: dict
     assert coverage["ci_workflow"]["truncation_reasons"] == ["invalid_finding"]
 
 
-def test_both_workflow_extensions_are_accepted() -> None:
-    paths = [".github/workflows/ci.yml", ".github/workflows/release.yaml"]
+def test_every_workflow_name_the_native_scan_reads_is_accepted() -> None:
+    paths = [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yaml",
+        ".github/workflows/.yml",
+        ".github/workflows/" + "w" * 251 + ".yml",
+    ]
     result = workflows_result(
         *(native_finding(finding_id=f"{index:032x}", path=path) for index, path in enumerate(paths))
     )

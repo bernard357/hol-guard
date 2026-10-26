@@ -220,15 +220,15 @@ def _detector_snapshot(root: Path, secret_key: str) -> WorkspaceSnapshot:
     The run is then partial: coverage reports a dropped detector as not run.
     """
 
-    # Each scan is newer than the one before it, so a runtime that lacks one
-    # lacks every later one too: retry with only the scans before it.
-    try:
-        return _content_snapshot(root, secret_key, _CONTENT_SCANS)
-    except WorkspaceSnapshotError as error:
-        missing = [scan for scan in _CONTENT_SCANS if error.code == f"workspace_snapshot_{scan}_unavailable"]
-        if not missing:
-            raise
-        return _content_snapshot(root, secret_key, _CONTENT_SCANS[: _CONTENT_SCANS.index(missing[0])])
+    scans = _CONTENT_SCANS
+    while True:
+        try:
+            return _content_snapshot(root, secret_key, scans)
+        except WorkspaceSnapshotError as error:
+            missing = next((scan for scan in scans if error.code == f"workspace_snapshot_{scan}_unavailable"), None)
+            if missing is None:
+                raise
+            scans = tuple(scan for scan in scans if scan != missing)
 
 
 def _content_snapshot(root: Path, secret_key: str, scans: tuple[str, ...]) -> WorkspaceSnapshot:

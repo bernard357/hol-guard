@@ -37,6 +37,14 @@ fn a_privileged_trigger_that_checks_out_the_pull_request_head_is_reported() {
             "on: pull_request_target\n",
             "refs/pull/${{ github.event.pull_request.number }}/merge",
         ),
+        (
+            "on: workflow_run\n",
+            "${{ github.event.workflow_run.head_branch }}",
+        ),
+        (
+            "on: [push, workflow_run]\n",
+            "${{ github.event.pull_request.merge_commit_sha }}",
+        ),
     ] {
         let text = format!(
             "{trigger}jobs:\n  build:\n{}",
@@ -50,6 +58,18 @@ fn a_privileged_trigger_that_checks_out_the_pull_request_head_is_reported() {
 fn a_git_checkout_of_the_head_in_a_privileged_run_step_is_reported() {
     let text = "on: pull_request_target\njobs:\n  t:\n    steps:\n      - run: git fetch origin && git checkout ${{ github.event.pull_request.head.sha }}\n";
     assert_eq!(ids(text), ["ci.workflow.untrusted-checkout"]);
+}
+
+#[test]
+fn a_shell_checkout_of_the_head_by_branch_or_pr_number_is_reported() {
+    for run in [
+        "git fetch origin \"$GITHUB_HEAD_REF\" && git checkout \"$GITHUB_HEAD_REF\"",
+        "gh pr checkout ${{ github.event.pull_request.number }}",
+    ] {
+        let text =
+            format!("on: pull_request_target\njobs:\n  t:\n    steps:\n      - run: {run}\n");
+        assert_eq!(ids(&text), ["ci.workflow.untrusted-checkout"], "{text}");
+    }
 }
 
 #[test]
@@ -92,6 +112,9 @@ fn write_all_permissions_are_reported_at_workflow_or_job_level() {
         "on: push\npermissions: write-all\njobs: {}\n",
         "on: push\njobs:\n  b:\n    permissions: \"write-all\"\n",
         "on: push\njobs:\n  b:\n    permissions: write-all # broad\n",
+        "on: push\n\"permissions\": write-all\n",
+        "on: push\njobs:\n  b:\n    'permissions': 'write-all'\n",
+        "on: push\njobs:\n  b:\n    steps:\n      - uses: ./a\n        with:\n          x: 1\n    permissions: write-all\n",
     ] {
         assert_eq!(ids(text), ["ci.workflow.write-all-permissions"], "{text}");
     }
@@ -103,6 +126,8 @@ fn narrow_or_read_all_permissions_are_quiet() {
         "on: push\npermissions: read-all\n",
         "on: push\npermissions:\n  contents: write\n",
         "on: push\n# permissions: write-all\n",
+        "on: push\njobs:\n  b:\n    steps:\n      - uses: ./local-action\n        with:\n          permissions: write-all\n",
+        "on: push\njobs:\n  b:\n    steps:\n      - with:\n\n          permissions: write-all\n        uses: ./local-action\n",
     ] {
         assert!(ids(text).is_empty(), "{text}");
     }
