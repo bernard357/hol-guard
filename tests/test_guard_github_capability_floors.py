@@ -405,8 +405,23 @@ def test_shell_capability_carrier_rejects_a_malformed_native_answer(
         lambda _entry, _arguments: {**_NATIVE_SHELL_ASSESSMENT, **malformed},
     )
 
-    with pytest.raises(NativeRunnerAuthorityError):
+    with pytest.raises(NativeRunnerAuthorityError, match=r"^native_github_shell_capabilities_invalid$"):
         classify_github_shell_capabilities("gh secret set TOKEN", home_dir=None)
+
+
+def test_carrier_capability_names_match_the_rust_contract() -> None:
+    """The carrier's accepted names are exactly the ones ``GitHubCapability::as_str`` returns."""
+
+    import re
+
+    from codex_plugin_scanner.guard.runtime.secret_file_request_services import github_shell_capabilities
+
+    contract = Path(__file__).resolve().parents[1] / "rust/crates/guard-command/src/github_capability_contract.rs"
+    body = contract.read_text(encoding="utf-8").split("fn as_str", 1)[1].split("\n    }\n", 1)[0]
+    rust_names = set(re.findall(r'Self::\w+ => "([a-z_]+)"', body))
+
+    assert rust_names
+    assert rust_names == set(github_shell_capabilities._CAPABILITY_NAMES)
 
 
 def test_shell_capability_carrier_takes_floor_and_eligibility_from_the_resident(
