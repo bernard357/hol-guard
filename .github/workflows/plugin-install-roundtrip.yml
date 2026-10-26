@@ -11,7 +11,9 @@ on:
     branches: [main]
     paths:
       - "rust/crates/guard-plugin-kit/src/install.rs"
+      - "rust/crates/guard-plugin-kit/src/lib.rs"
       - "rust/crates/guard-plugin-kit/src/ledger.rs"
+      - "rust/crates/guard-runtime/src/runtime_cli.rs"
       - "src/codex_plugin_scanner/guard/plugin_kit/install.py"
       - "src/codex_plugin_scanner/guard/plugin_kit/cli.py"
       - "scripts/ci/plugin_install_roundtrip.sh"
