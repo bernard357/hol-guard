@@ -115,11 +115,33 @@ fn parse_execution_context(value: Option<&Value>) -> Result<PackageExecutionCont
 /// Cloud transport fallbacks say where the evidence came from, not what the
 /// policy is. The action they produce is already in `decision` and
 /// `policy_action`, so leaving them out keeps a timeout from voiding approvals.
-const EVIDENCE_SOURCE_REASON_CODES: [&str; 4] = [
+const EVIDENCE_SOURCE_REASON_CODES: [&str; 5] = [
     "cloud_auth_error",
     "cloud_http_error",
     "cloud_invalid_response",
     "cloud_timeout",
+    "cloud_validation_error",
+];
+
+/// Per-package fields that name the package or carry its verdict. Scores, fix
+/// suggestions and reason text are left out: a feed refresh rewrites them
+/// without changing what is installed or what Guard decided about it.
+const PACKAGE_POLICY_KEYS: [&str; 15] = [
+    "alias",
+    "decision",
+    "dependencyPath",
+    "direct",
+    "ecosystem",
+    "name",
+    "namespace",
+    "packageManager",
+    "relatedAdvisoryIds",
+    "requestedVersion",
+    "resolvedVersion",
+    "ruleId",
+    "sourceIdentity",
+    "sourceRepository",
+    "sourceRevisionKind",
 ];
 
 /// Sorted, deduplicated reason codes. Messages are presentation text and may
@@ -139,9 +161,34 @@ fn policy_reason_codes(reasons: &Value) -> Vec<String> {
     codes
 }
 
+fn policy_packages(packages: &Value) -> Value {
+    let Some(items) = packages.as_array() else {
+        return packages.clone();
+    };
+    let project = |package: &Value| -> Value {
+        let Some(map) = package.as_object() else {
+            return package.clone();
+        };
+        let mut projected = Map::new();
+        for key in PACKAGE_POLICY_KEYS {
+            if let Some(value) = map.get(key) {
+                projected.insert(key.to_owned(), value.clone());
+            }
+        }
+        if let Some(reasons) = map.get("reasons") {
+            projected.insert(
+                "reason_codes".to_owned(),
+                json!(policy_reason_codes(reasons)),
+            );
+        }
+        Value::Object(projected)
+    };
+    Value::Array(items.iter().map(project).collect())
+}
+
 /// The policy half of the approval context. Bundle and feed revisions are left
 /// out on purpose: Guard Cloud refreshes them hourly, and a refresh that does
-/// not change the verdict, the matched rule or the matched advisories must not
+/// not change a verdict, a matched rule or the matched advisories must not
 /// void a saved approval.
 fn policy_context(
     request: &PackageApprovalHashRequestV1,
@@ -156,11 +203,14 @@ fn policy_context(
         "entitlement_state",
         "exception_id",
         "matched_rule_id",
-        "packages",
         "policy_action",
     ] {
         feed.insert(key.to_owned(), field(evaluation, key).clone());
     }
+    feed.insert(
+        "packages".to_owned(),
+        policy_packages(field(evaluation, "packages")),
+    );
     feed.insert(
         "reason_codes".to_owned(),
         json!(policy_reason_codes(field(evaluation, "reasons"))),

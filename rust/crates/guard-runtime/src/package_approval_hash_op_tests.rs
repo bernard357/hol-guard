@@ -168,10 +168,30 @@ fn context_token(vector: &Value, name: &str) -> Value {
     run(&request(vector, &workspace, "artifact_hash")).unwrap()["artifact_hash"].clone()
 }
 
+fn scored_vector() -> Value {
+    let mut vector = advisory_vector();
+    let package = &mut vector["request"]["evaluation"]["packages"][0];
+    package["decision"] = json!("warn");
+    package["riskScore"] = json!(41);
+    package["recommendedFixVersion"] = json!("1.3.1");
+    package["relatedAdvisoryIds"] = json!(["GHSA-0001"]);
+    package["reasons"] = json!([
+        {"advisoryId": "GHSA-0001", "code": "advisory", "message": "m", "source": "bundle"},
+    ]);
+    vector
+}
+
 #[test]
 fn feed_refresh_keeps_saved_approval_valid() {
-    let saved = advisory_vector();
+    let saved = scored_vector();
     let mut refreshed = saved.clone();
+    let package = &mut refreshed["request"]["evaluation"]["packages"][0];
+    package["riskScore"] = json!(57);
+    package["recommendedFixVersion"] = json!("1.4.0");
+    package["reasons"] = json!([
+        {"advisoryId": "GHSA-0001", "code": "advisory", "message": "stale bundle", "source": "bundle"},
+        {"code": "cloud_validation_error", "message": "invalid reply", "source": "guard-cloud"},
+    ]);
     let evaluation = &mut refreshed["request"]["evaluation"];
     evaluation["bundle_version"] = json!("b2");
     evaluation["policy_version"] = json!("p2");
@@ -192,7 +212,7 @@ fn feed_refresh_keeps_saved_approval_valid() {
 
 #[test]
 fn feed_changes_that_touch_the_verdict_still_require_reapproval() {
-    let saved = advisory_vector();
+    let saved = scored_vector();
     let saved_token = context_token(&saved, "verdict-saved");
 
     let mut new_advisory = saved.clone();
@@ -207,11 +227,20 @@ fn feed_changes_that_touch_the_verdict_still_require_reapproval() {
         .push(json!({"code": "typosquat", "message": "m", "severity": "high"}));
     let mut new_rule = saved.clone();
     new_rule["request"]["evaluation"]["matched_rule_id"] = json!("rule-2");
+    let mut package_verdict = saved.clone();
+    package_verdict["request"]["evaluation"]["packages"][0]["decision"] = json!("block");
+    let mut package_reason = saved.clone();
+    package_reason["request"]["evaluation"]["packages"][0]["reasons"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"code": "malware", "message": "m", "source": "bundle"}));
 
     for (name, changed) in [
         ("advisory", new_advisory),
         ("reason", new_reason),
         ("rule", new_rule),
+        ("package-verdict", package_verdict),
+        ("package-reason", package_reason),
     ] {
         let current = context_token(&changed, name);
         assert_eq!(
