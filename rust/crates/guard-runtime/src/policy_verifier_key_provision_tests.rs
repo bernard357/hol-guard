@@ -4,16 +4,19 @@ use super::{create_final_key, provision_verifier_key, VerifierKeyProvision};
 use guard_policy_snapshot::derive_verifier_key;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use tempfile::TempDir;
 
-static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
-
-fn root() -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "hol-guard-verifier-key-{}-{}",
-        std::process::id(),
-        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
-    ))
+/// A state directory only this test can name, removed however the test ends.
+///
+/// A process id and a counter both repeat across runs, so a directory a
+/// failed assertion left behind could be read as a later run's own state and
+/// turn a `Created` into a `Verified` or a key mismatch. Keep the handle
+/// alive for the whole test: dropping it removes the directory.
+fn root() -> (TempDir, PathBuf) {
+    let holder = TempDir::new().unwrap();
+    // Provisioning creates its own state base, so name one that is not there.
+    let state_base = holder.path().join("state");
+    (holder, state_base)
 }
 
 fn key_path(state_base: &std::path::Path) -> PathBuf {
@@ -22,7 +25,7 @@ fn key_path(state_base: &std::path::Path) -> PathBuf {
 
 #[test]
 fn provisioning_writes_the_derived_key_once() {
-    let state_base = root();
+    let (_root, state_base) = root();
     let master = [7u8; 32];
     assert_eq!(
         provision_verifier_key(&state_base, &master),
@@ -36,24 +39,22 @@ fn provisioning_writes_the_derived_key_once() {
         provision_verifier_key(&state_base, &master),
         Ok(VerifierKeyProvision::Verified)
     );
-    fs::remove_dir_all(&state_base).unwrap();
 }
 
 #[test]
 fn provisioning_leaves_no_temporary_behind() {
-    let state_base = root();
+    let (_root, state_base) = root();
     provision_verifier_key(&state_base, &[9u8; 32]).unwrap();
     let names: Vec<String> = fs::read_dir(&state_base)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(names, vec!["policy-verifier.key".to_owned()]);
-    fs::remove_dir_all(&state_base).unwrap();
 }
 
 #[test]
 fn a_changed_master_never_replaces_the_existing_key() {
-    let state_base = root();
+    let (_root, state_base) = root();
     let first = [1u8; 32];
     provision_verifier_key(&state_base, &first).unwrap();
     assert_eq!(
@@ -65,12 +66,11 @@ fn a_changed_master_never_replaces_the_existing_key() {
         fs::read(key_path(&state_base)).unwrap(),
         derive_verifier_key(&first).to_vec()
     );
-    fs::remove_dir_all(&state_base).unwrap();
 }
 
 #[test]
 fn a_master_of_the_wrong_length_is_refused_before_any_write() {
-    let state_base = root();
+    let (_root, state_base) = root();
     assert_eq!(
         provision_verifier_key(&state_base, &[3u8; 16]),
         Err("native_policy_verifier_master_invalid".to_owned())
@@ -80,7 +80,7 @@ fn a_master_of_the_wrong_length_is_refused_before_any_write() {
 
 #[test]
 fn an_oversized_key_file_is_reported_without_waiting() {
-    let state_base = root();
+    let (_root, state_base) = root();
     provision_verifier_key(&state_base, &[4u8; 32]).unwrap();
     // Longer than a key: not a partial write, so no retry window applies.
     fs::write(key_path(&state_base), [5u8; 40]).unwrap();
@@ -88,12 +88,11 @@ fn an_oversized_key_file_is_reported_without_waiting() {
         provision_verifier_key(&state_base, &[4u8; 32]),
         Err("native_policy_verifier_key_invalid".to_owned())
     );
-    fs::remove_dir_all(&state_base).unwrap();
 }
 
 #[test]
 fn a_create_failure_with_no_key_present_reports_the_write_failure() {
-    let state_base = root();
+    let (_root, state_base) = root();
     // Nothing exists under this parent, so the exclusive create fails and
     // leaves nothing behind. Confirming a key here would answer a write
     // failure with "no key", which reads as a missing install.
@@ -117,7 +116,7 @@ fn a_link_failure_that_is_not_missing_link_support_is_reported() {
     // already reports every error it gets. Only the Unix link arm can mistake
     // a one-off failure for a filesystem that cannot link at all, and then
     // create the final path on a disk that just refused the write.
-    let state_base = root();
+    let (_root, state_base) = root();
     fs::create_dir_all(&state_base).unwrap();
     let temporary = state_base.join("policy-verifier.key.tmp");
     fs::write(&temporary, [6u8; 32]).unwrap();
@@ -129,5 +128,4 @@ fn a_link_failure_that_is_not_missing_link_support_is_reported() {
         ),
         Err(Some("native_policy_verifier_key_write_failed".to_owned()))
     );
-    fs::remove_dir_all(&state_base).unwrap();
 }
