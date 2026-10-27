@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 
+from .native_hook_adapter import NativeHookAdapterError
 from .native_hook_artifact_compose import NativeHookComposeError, native_hook_compose
 
 FreshHookReviewer = Callable[
@@ -69,13 +70,23 @@ def revalidate_codex_live_allow(
 
     fresh_envelope: dict[str, object] | None = None
     if hook_payload is not None:
-        envelope = _hook_action_envelope(
-            harness="codex",
-            payload=hook_payload,
-            home_dir=home_dir,
-            workspace=workspace,
-            guard_home=guard_home,
-        )
+        try:
+            envelope = _hook_action_envelope(
+                harness="codex",
+                payload=hook_payload,
+                home_dir=home_dir,
+                workspace=workspace,
+                guard_home=guard_home,
+            )
+        except (NativeHookAdapterError, ValueError):
+            # Every live decision reaches here, a deny included, and the
+            # envelope is only ever evidence for the resident's precheck. An
+            # adapter that cannot build one must not escape into the daemon
+            # handler, or the completion the harness is waiting on is never
+            # written. An absent envelope is the fail-closed input: the
+            # resident refuses the fresh allow on it, and Python makes no
+            # judgement of its own.
+            envelope = None
         if envelope is not None:
             fresh_envelope = _mapping(_action_envelope_json(envelope))
 

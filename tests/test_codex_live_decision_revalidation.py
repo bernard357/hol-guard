@@ -11,12 +11,14 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard import codex_live_decision_revalidation as revalidation_module
+from codex_plugin_scanner.guard.cli import commands_support_hook_payload as hook_payload_support
 from codex_plugin_scanner.guard.cli.commands_support_hook_payload import (
     _action_envelope_json,
     _hook_action_envelope,
 )
 from codex_plugin_scanner.guard.codex_live_decision_revalidation import revalidate_codex_live_allow
 from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
+from codex_plugin_scanner.guard.native_hook_adapter import NativeHookAdapterError
 from codex_plugin_scanner.guard.store import GuardStore
 
 pytestmark = pytest.mark.usefixtures("approval_questionnaire_mode")
@@ -100,6 +102,33 @@ def test_fresh_allow_requires_the_exact_original_action(tmp_path: Path, native_l
         reviewer=lambda _payload, _workspace, _claimed_hash, _request_id: {
             "hookSpecificOutput": {"hookEventName": "PreToolUse"}
         },
+    )
+
+    assert authorized is False
+
+
+def test_a_decision_completes_when_the_action_adapter_cannot_build_an_envelope(
+    tmp_path: Path, native_live_allow: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter failure refuses the fresh allow instead of escaping the handler.
+
+    Every live decision runs this path, a deny included. An exception here would
+    leave the daemon handler without a completion, and the harness waiting on it
+    would never be answered.
+    """
+
+    request, hook_payload, home_dir = _fixture(tmp_path)
+
+    def unavailable(**_kwargs: object) -> None:
+        raise NativeHookAdapterError("native_hook_adapter_unavailable")
+
+    monkeypatch.setattr(hook_payload_support, "_hook_action_envelope", unavailable)
+
+    authorized = revalidate_codex_live_allow(
+        {**request, "resolution_action": "block"},
+        {"hook_input": json.dumps(hook_payload)},
+        home_dir=home_dir,
+        reviewer=lambda _payload, _workspace, _claimed_hash, _request_id: None,
     )
 
     assert authorized is False
