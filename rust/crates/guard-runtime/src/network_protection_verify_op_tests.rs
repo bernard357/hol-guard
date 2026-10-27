@@ -81,7 +81,9 @@ fn accepts_the_producer_signed_bundle_under_its_own_keyring() {
     let payload = result(&request(response.clone(), Some(keys))).payload;
 
     assert_eq!(payload["outcome"], "verified");
-    assert_eq!(payload["saved"]["bundle"], response["bundle"]);
+    // The bundle object stays with the caller that sent it; the reply names it
+    // by the hash this verifier computed over it.
+    assert!(payload["saved"].get("bundle").is_none());
     assert_eq!(payload["saved"]["payloadHash"], response["payloadHash"]);
     assert_eq!(payload["saved"]["keyId"], json!("network-producer-key"));
     assert_eq!(
@@ -156,4 +158,45 @@ fn refuses_a_keyring_it_cannot_read_rather_than_falling_back() {
     let message = refusal(&request(response(), Some(json!(["not-a-key"]))));
 
     assert_eq!(message, "verificationKeys must contain objects");
+}
+
+#[test]
+fn refuses_a_saved_keyring_envelope_that_carries_no_entries() {
+    // The sync writes `{"workspace_id": ..., "keys": [...]}`, so an envelope
+    // without a list of entries is a damaged row, not a device that has saved
+    // nothing. Reading it as empty would hand trust back to the pinned
+    // production fingerprint.
+    let message = refusal(&request(
+        response(),
+        Some(json!({ "workspace_id": workspace_id() })),
+    ));
+
+    assert_eq!(message, "Saved network protection keyring is malformed");
+}
+
+#[test]
+fn refuses_a_saved_keyring_whose_entries_are_not_a_list() {
+    let message = refusal(&request(response(), Some(json!({ "keys": "none" }))));
+
+    assert_eq!(message, "Saved network protection keyring is malformed");
+}
+
+#[test]
+fn refuses_a_saved_keyring_that_is_not_an_envelope_at_all() {
+    let message = refusal(&request(response(), Some(json!("corrupt"))));
+
+    assert_eq!(message, "Saved network protection keyring is malformed");
+}
+
+#[test]
+fn still_reads_an_envelope_that_lists_no_entries_as_an_empty_keyring() {
+    // An empty list is a readable keyring: the workspace has revoked every
+    // entry, and the pinned production fingerprint is the remaining anchor,
+    // which the producer's test key does not match.
+    let message = refusal(&request(response(), Some(json!({ "keys": [] }))));
+
+    assert_eq!(
+        message,
+        "Network protection bundle signing key is not trusted"
+    );
 }

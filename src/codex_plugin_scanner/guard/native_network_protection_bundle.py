@@ -6,9 +6,10 @@ rollback against the bundle already saved, the keyring the signing key must
 anchor to, that key's rotation state, and the RSA-PSS signature. This module
 ships the response as it was fetched together with the caller's saved keyring
 in its stored wire form, binds the reply by ``request_id`` plus
-``request_sha256``, and returns the saved form the resident produced. Nothing
-is re-decided here, so a resident that cannot answer leaves the bundle
-unverified rather than accepted.
+``request_sha256``, and returns the saved form the resident produced, with the
+bundle object this call shipped put back under it. Nothing is re-decided here,
+so a resident that cannot answer leaves the bundle unverified rather than
+accepted.
 """
 
 from __future__ import annotations
@@ -34,11 +35,15 @@ class NetworkProtectionBundleUnavailableError(NetworkProtectionBundleError):
 
     A ``NetworkProtectionBundleError``, because every caller already treats a
     failed verification that way and an unreachable verifier must not read as
-    a pass.
+    a pass. ``reason`` is one of a short fixed set naming which step gave up,
+    so an operator reading a failed sync can tell a resident that is missing
+    the feature from a request it would not take or a reply it did not bind.
+    It never carries the underlying text, which may name local paths.
     """
 
-    def __init__(self) -> None:
-        super().__init__("Network protection bundle verification is unavailable")
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Network protection bundle verification is unavailable ({reason})")
 
 
 def native_verify_network_protection_response(
@@ -61,7 +66,7 @@ def native_verify_network_protection_response(
 
     home = Path(_resolve_digest_home(guard_home))
     if not ensure_resident_prerequisite(home):
-        raise NetworkProtectionBundleUnavailableError
+        raise NetworkProtectionBundleUnavailableError("resident_unavailable")
     wire: dict[str, object] = {
         "schema": _REQUEST_SCHEMA,
         "request_id": f"network-protection-verify-{uuid4().hex}",
@@ -83,10 +88,10 @@ def native_verify_network_protection_response(
             record_success=False,
         )
     except (TypeError, ValueError, OSError, RuntimeError):
-        raise NetworkProtectionBundleUnavailableError from None
-    answer = _payload(reply, wire, home)
+        raise NetworkProtectionBundleUnavailableError("request_refused") from None
+    answer = _payload(reply, wire, home, failure_reason="native_network_protection_verify_binding")
     if not isinstance(answer, dict):
-        raise NetworkProtectionBundleUnavailableError
+        raise NetworkProtectionBundleUnavailableError("reply_unbound")
     outcome = answer.get("outcome")
     if outcome == "refused":
         message = answer.get("message")
@@ -95,5 +100,10 @@ def native_verify_network_protection_response(
         )
     saved = answer.get("saved")
     if outcome != "verified" or not isinstance(saved, dict):
-        raise NetworkProtectionBundleUnavailableError
-    return saved
+        raise NetworkProtectionBundleUnavailableError("reply_malformed")
+    # A bundle response may run to several megabytes, more than a reply may
+    # carry, so the resident names the bundle it verified by ``payloadHash``
+    # instead of sending it back. The object below is the one this call
+    # shipped and the one that hash covers, so putting it back rebuilds the
+    # saved form without judging anything.
+    return {"bundle": response.get("bundle"), **saved}

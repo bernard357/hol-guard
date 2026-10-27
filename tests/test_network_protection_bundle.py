@@ -188,8 +188,37 @@ def test_sync_fetches_the_derived_route_and_saves_the_verified_bundle(
     assert requested == ["https://hol.org/api/guard/network/bundle?workspaceId=workspace-alpha"]
     assert summary["status"] == "synced"
     saved = store.get_sync_payload(NETWORK_PROTECTION_SYNC_STATE_KEY)
+    # The verifier names the bundle by its own hash instead of sending the
+    # object back, so the saved form is only complete once the bundle this
+    # sync fetched is put back under it.
     assert saved["bundle"] == response["bundle"]
+    assert saved["payloadHash"] == response["payloadHash"]
+    assert saved["keyId"] == response["bundle"]["keyId"]
     assert isinstance(saved["expiresAtEpoch"], int)
+
+
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
+def test_sync_refuses_a_saved_keyring_it_cannot_read(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, signing_key: RSAPrivateKey
+) -> None:
+    # A damaged keyring row is not a device that has saved no keyring: reading
+    # it as empty would put the pinned production fingerprint back in charge of
+    # what this workspace trusts.
+    store = _connected_store(tmp_path, monkeypatch)
+    store.set_sync_payload(
+        "supply_chain_bundle_keyring",
+        {"workspace_id": WORKSPACE_ID},
+        "2026-10-21T00:00:00Z",
+    )
+    response = _response(signing_key, generated_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+    monkeypatch.setattr(guard_runner, "_fetch_supply_chain_bundle_payload", lambda request: response)
+
+    failed = guard_runner.sync_network_protection_bundle_best_effort(store)
+
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert "Saved network protection keyring is malformed" in str(failed["error"])
+    assert store.get_sync_payload(NETWORK_PROTECTION_SYNC_STATE_KEY) is None
 
 
 @pytest.mark.usefixtures("native_approval_reuse_runtime")
