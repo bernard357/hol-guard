@@ -15,7 +15,6 @@ from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard.approvals import queue_blocked_approvals
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.consumer import artifact_hash, evaluate_detection
-from codex_plugin_scanner.guard.incident import build_incident_context
 from codex_plugin_scanner.guard.mcp_tool_calls import (
     build_tool_call_artifact,
     build_tool_call_hash,
@@ -46,6 +45,7 @@ from codex_plugin_scanner.guard.runtime.secret_sensitivity import (
     classify_secret_path,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.incident_context_support import build_incident_context
 
 LOCAL_COMPOSE_SAFE_CASES = (
     "docker compose up -d postgres",

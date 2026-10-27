@@ -310,6 +310,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::ComposioRole(request) => {
                 crate::composio_role_op::evaluate_composio_role_request(&request)
             }
+            ResidentOperationV1::ProjectIdentity(request) => {
+                crate::project_identity_op::evaluate_project_identity_request(&request)
+            }
             ResidentOperationV1::SkillWorkflowPreflight(request) => {
                 crate::skill_workflow_preflight_op::evaluate_skill_workflow_preflight_request(
                     &request,
@@ -762,8 +765,8 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::InventoryUrlRedaction(request) => {
                 crate::inventory_url_redaction_op::evaluate_inventory_url_redaction(&request)
             }
-            ResidentOperationV1::VerifiedReadPlan(request) => {
-                crate::verified_read_plan_op::evaluate_verified_read_plan(&request)
+            ResidentOperationV1::VerifiedReadExecute(request) => {
+                crate::verified_read_execute_op::evaluate_verified_read_execute(&request)
             }
             ResidentOperationV1::AibomReportSummaries(request) => {
                 crate::aibom_report_summaries_op::evaluate_aibom_report_summaries(&request)
