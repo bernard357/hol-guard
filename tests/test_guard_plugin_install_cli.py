@@ -236,12 +236,12 @@ def terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "stdin_is_terminal", lambda: True)
 
 
-def _run(argv: list[str], stdin: str = "") -> tuple[int, str, str]:
+def _run(argv: list[str], stdin: str = "", argv0: str = "hol-guard") -> tuple[int, str, str]:
     output = io.StringIO()
     error = io.StringIO()
     original_argv, original_stdin = guard_cli.sys.argv, guard_cli.sys.stdin
     try:
-        guard_cli.sys.argv = ["hol-guard"]
+        guard_cli.sys.argv = [argv0]
         guard_cli.sys.stdin = io.StringIO(stdin)
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
             exit_code = guard_cli.main(argv)
@@ -252,6 +252,15 @@ def _run(argv: list[str], stdin: str = "") -> tuple[int, str, str]:
 
 def _install(spec_path: Path, *flags: str, target: str = "acme/toolgate", stdin: str = "") -> tuple[int, str, str]:
     return _run(["plugin", "install", target, "--spec-file", str(spec_path), *flags], stdin=stdin)
+
+
+def test_windows_launcher_name_prints_as_hol_guard(spec_file: Path, runtimes: FakeRuntimes) -> None:
+    exit_code, output, _error = _run(
+        ["plugin", "install", "acme/toolgate", "--spec-file", str(spec_file)], argv0="hol-guard.EXE"
+    )
+    assert exit_code == 0
+    assert "Undo: hol-guard plugin uninstall acme/toolgate --apply --runtime claude-code" in output
+    assert ".EXE" not in output
 
 
 def test_install_prints_the_plan_security_first_and_runs_nothing(spec_file: Path, runtimes: FakeRuntimes) -> None:
