@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "guard.mcp-server-contribution.v1",
+  "id": "mcp.discourse",
+  "version": "1.0.0",
+  "name": "Discourse MCP",
+  "description": "Offers local opt-in review for Discourse MCP post, topic and private-message mutations. Unlisted tools keep existing Guard policy; this is not affiliated with or bundled into Discourse MCP.",
+  "trustClass": "external",
+  "activation": "opt-in",
+  "publisher": {
+    "id": "discourse.org",
+    "displayName": "Discourse",
+    "url": "https://www.discourse.org"
+  },
+  "icon": {
+    "kind": "none"
+  },
+  "homepage": "https://github.com/discourse/discourse-mcp",
+  "license": "MIT",
+  "launch": {
+    "kind": "package-launcher",
+    "command": "npx",
+    "package": "@discourse/mcp"
+  },
+  "riskClasses": [
+    "forum-content-write",
+    "private-message-write",
+    "remote-account-mutation"
+  ],
+  "tools": [
+    {
+      "name": "discourse_create_post",
+      "state": "review"
+    },
+    {
+      "name": "discourse_create_topic",
+      "state": "review"
+    },
+    {
+      "name": "discourse_update_topic",
+      "state": "review"
+    },
+    {
+      "name": "discourse_create_private_message",
+      "state": "review"
+    },
+    {
+      "name": "other",
+      "state": "inherit"
+    }
+  ],
+  "referenceUrls": [
+    "https://github.com/discourse/discourse-mcp",
+    "https://github.com/discourse/discourse-mcp/blob/main/README.md"
+  ],
+  "saferAlternatives": [
+    "Use read-only MCP tools without --allow_writes when editing forum content is unnecessary.",
+    "Confirm the selected Discourse site, target topic and audience before enabling a write action.",
+    "Leave the contribution disabled until a local administrator chooses to enable it."
+  ]
+}
