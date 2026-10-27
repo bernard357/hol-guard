@@ -267,7 +267,6 @@
    "class": "python_transport",
    "paths": [
     "src/codex_plugin_scanner/guard/adapters/*argv*.py",
-    "src/codex_plugin_scanner/guard/adapters/_modules/*/*auth*.py",
     "src/codex_plugin_scanner/guard/adapters/*bridge*.py",
     "src/codex_plugin_scanner/guard/adapters/*resume*.py",
     "src/codex_plugin_scanner/guard/adapters/_modules/*/*resume*.py",
