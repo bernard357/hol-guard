@@ -21,16 +21,17 @@ Guard needs both the Python package and its matching native runtime. A successfu
 or that an agent is protected. The universal `py3-none-any` wheel does not contain
 the native runtime.
 
-The 3.56.0 release provides these artifacts:
+Stable releases provide these artifacts. Linux ARM64 wheels start with 3.58.0;
+earlier releases have none.
 
 | Python platform | Native wheel location | Installation notes |
 | --- | --- | --- |
 | macOS ARM64, macOS 11 or later | PyPI and GitHub release | Use native ARM64 Python. |
-| macOS Intel, macOS 13 or later | GitHub release | The PyPI universal wheel needs the matching native wheel from the same release. |
+| macOS Intel, macOS 13 or later | GitHub release | The PyPI universal wheel needs the matching native wheel from the same release. The `cryptography` dependency must build from source; see below. |
 | Linux x86_64, glibc 2.17 or later | PyPI and GitHub release | Use a compatible manylinux interpreter. |
 | Windows x64 | PyPI and GitHub release | Use x64 Python (`win-amd64`). |
 | Windows ARM64 with native ARM64 Python | GitHub release | The native runtime exists, but the Python 3.12 dependency install currently requires source builds. Use the x64 Python route below. |
-| Linux ARM64 | No published native wheel | The universal wheel cannot complete setup or provide protection on this platform. Use a platform with a published native wheel. |
+| Linux ARM64, glibc 2.17 or later | GitHub release, 3.58.0 and later | The PyPI universal wheel needs the matching native wheel from the same release. |
 
 Check the [release assets](https://github.com/hashgraph-online/hol-guard/releases)
 for your exact Guard version. Keep the Python package and native wheel versions
@@ -38,21 +39,40 @@ matched; an artifact for another architecture is not a native installation.
 
 ### macOS Intel: install the matching native wheel
 
-Try `hol-guard update` first to let the updater repair the existing installation.
-If it cannot recover the native runtime, use the same-version wheel below.
+`cryptography` 49 and later publish no Intel macOS wheels, so `pipx install
+hol-guard` builds it from source. That build needs a Rust toolchain and OpenSSL
+headers, and fails with `failed to run custom build command for openssl-sys` when
+either is missing. Install both (for example `brew install rust openssl@3`) before
+installing Guard.
 
-After a normal pipx installation has installed Guard and its dependencies, replace
-the universal wheel with the native wheel for the **same installed version** before
-checking runtime readiness. For Guard 3.56.0 on Intel macOS 13 or later:
+Once the install succeeds, run `hol-guard update`. On a platform whose native wheel
+is on the GitHub release only, it downloads the wheel for the installed version,
+checks it against the digest published with that release and installs it.
+
+If the updater cannot recover the native runtime, replace the universal wheel with
+the native wheel for the **same installed version** by hand before checking runtime
+readiness. On Intel macOS 13 or later:
 
 ```bash
-pipx runpip hol-guard install --force-reinstall --no-deps "https://github.com/hashgraph-online/hol-guard/releases/download/v3.56.0/hol_guard-3.56.0-py3-none-macosx_13_0_x86_64.whl"
+V=$(hol-guard --version | awk '{print $NF}')
+pipx runpip hol-guard install --force-reinstall --no-deps "https://github.com/hashgraph-online/hol-guard/releases/download/v$V/hol_guard-$V-py3-none-macosx_13_0_x86_64.whl"
 ```
 
 Here `--no-deps` only repairs an existing installation whose full dependency install
 already succeeded; it is not a substitute for installing those dependencies. For a
 different Guard version, select that version's matching Intel wheel from the release
 assets. Then run the readiness check below before starting setup.
+
+### Linux ARM64: install the matching native wheel
+
+From 3.58.0, install Guard with pipx as usual, then run `hol-guard update` to fetch
+and verify the native wheel from the GitHub release. To do it by hand, use the same
+installed version:
+
+```bash
+V=$(hol-guard --version | awk '{print $NF}')
+pipx runpip hol-guard install --force-reinstall --no-deps "https://github.com/hashgraph-online/hol-guard/releases/download/v$V/hol_guard-$V-py3-none-manylinux_2_17_aarch64.whl"
+```
 
 ### Windows ARM64: select x64 Python
 
