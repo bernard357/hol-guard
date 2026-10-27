@@ -280,6 +280,8 @@ mod tool_action_identity;
 pub use tool_action_identity::*;
 mod verified_read_decision;
 pub use verified_read_decision::*;
+mod verified_read_execute;
+pub use verified_read_execute::*;
 mod verified_read_plan;
 pub use verified_read_plan::*;
 mod inventory_item_classification;

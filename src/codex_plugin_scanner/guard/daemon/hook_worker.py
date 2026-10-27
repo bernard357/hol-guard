@@ -299,6 +299,19 @@ class HookWorker(HookWorkerNativeMixin):
             # the harness asks for, so the decision stays with the harness's
             # own approval prompt.
             return {"hookSpecificOutput": {"hookEventName": "PermissionRequest"}}
+        if event_name == "PreToolUse" and harness.strip().lower() == "cursor":
+            from .cursor_shell_route import cursor_shell_route_response
+
+            routed = cursor_shell_route_response(
+                self,
+                payload=payload,
+                home_dir=home_dir,
+                guard_home=guard_home,
+                workspace=workspace,
+                deadline=deadline,
+            )
+            if routed is not None:
+                return routed
         # Send even unknown or malformed event labels to Rust. The edge
         # returns no semantic result for unsupported events, which this
         # method turns into a deterministic deny/fail-safe response.

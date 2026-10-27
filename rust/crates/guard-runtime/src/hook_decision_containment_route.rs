@@ -34,11 +34,19 @@ const PRE_TOOL_USE: &str = "PreToolUse";
 const SANDBOX_REQUIRED: &str = "sandbox-required";
 const REVIEW: &str = "review";
 const PRE_TOOL_EVENTS: [&str; 2] = ["PreToolUse", "pre_tool_use"];
-const SHELL_TOOLS: [&str; 4] = ["Bash", "bash", "run_terminal_command", "run_command"];
-/// Harnesses whose hook applies `updatedInput` on its own; Codex is routed
-/// only by its bridge, which first confirms the running Codex applies it.
+const SHELL_TOOLS: [&str; 5] = [
+    "Bash",
+    "bash",
+    "run_terminal_command",
+    "run_command",
+    "Shell",
+];
+/// Harnesses whose hook applies `updatedInput` on its own. Codex is routed
+/// only by its bridge, which first confirms the running Codex applies it,
+/// and Cursor only by its silent `preToolUse` probe for `Shell`, whose
+/// `updated_input` Cursor applies before `beforeShellExecution` runs.
 const ROUTED_HARNESSES: [&str; 2] = ["zcode", "claude-code"];
-const BRIDGE_HARNESS: &str = "codex";
+const BRIDGE_HARNESSES: [&str; 2] = ["codex", "cursor"];
 /// The sink command is quoted for Git Bash, or PowerShell for Codex; any
 /// other harness on Windows keeps its single review.
 const WINDOWS_SINK_HARNESSES: [&str; 2] = ["claude-code", "codex"];
@@ -151,7 +159,9 @@ fn sink(inputs: &ContainmentSinkInputsV1, host: Host) -> Result<&'static str, &'
         return Err("receipt_only");
     }
     let harness = inputs.harness.as_str();
-    if !(ROUTED_HARNESSES.contains(&harness) || (inputs.bridge && harness == BRIDGE_HARNESS)) {
+    if !(ROUTED_HARNESSES.contains(&harness)
+        || (inputs.bridge && BRIDGE_HARNESSES.contains(&harness)))
+    {
         return Err("harness_not_routed");
     }
     if text(&inputs.decision) != Some("deny")

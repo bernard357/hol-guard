@@ -495,6 +495,7 @@ mod hook_decision_artifact_review_route;
 mod hook_decision_benign_tool_action_tests;
 mod hook_decision_claude_permission_verdict;
 mod hook_decision_compose;
+mod hook_decision_containment_rewrite;
 mod hook_decision_containment_route;
 mod hook_decision_directive;
 mod hook_decision_finalize;
@@ -805,7 +806,11 @@ mod trust_attestation_verify_op;
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
 mod verified_read_decision_op;
-mod verified_read_plan_op;
+#[cfg(unix)]
+mod verified_read_execute;
+mod verified_read_execute_op;
+#[cfg(unix)]
+mod verified_read_lines;
 #[cfg(windows)]
 mod windows_node_build;
 #[cfg(windows)]
