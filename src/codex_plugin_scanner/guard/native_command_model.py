@@ -27,7 +27,7 @@ def _valid_identity(identity: object) -> bool:
 
 
 def _segments_fit(payload: dict[str, Any]) -> bool:
-    """Check the model's shape only: segment count and spans that tile the normalized text in order."""
+    """Check the model's shape only: segment count, string texts and spans that lie in the normalized text in order."""
     text = payload.get("normalized_text")
     segments = payload.get("segments")
     if not isinstance(text, str) or not isinstance(segments, list) or len(segments) > _MAX_SEGMENTS:
@@ -46,7 +46,9 @@ def _segments_fit(payload: dict[str, Any]) -> bool:
             return False
         if not previous_end <= start < end <= len(text):
             return False
-        if text[start:end] != segment.get("text"):
+        # The text may differ from its span: Rust rewrites a complete `[[ ... ]]`
+        # test to the single-bracket form and keeps the span on the original.
+        if not isinstance(segment.get("text"), str):
             return False
         previous_end = end
     return True
