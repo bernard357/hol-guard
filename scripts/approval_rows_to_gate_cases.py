@@ -737,12 +737,7 @@ def option_names(text: str) -> bool:
     ``git blame -L:chargeAcmeCustomer`` and ``--author=acme`` all keep their name. The whole
     token is read, so any word in it that renaming would have replaced drops the row.
     """
-    return any(
-        word not in GENERIC
-        for token in text.split()
-        if token.startswith("-")
-        for word in WORD.findall(token)
-    )
+    return any(word not in GENERIC for token in text.split() if token.startswith("-") for word in WORD.findall(token))
 
 
 def rename_value(value: Any, table: dict[str, str]) -> Any:

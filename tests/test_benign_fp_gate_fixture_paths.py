@@ -20,6 +20,7 @@ of cases probe deliberately for something absent and name themselves below.
 
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import re
@@ -148,10 +149,8 @@ def test_every_benign_case_finds_the_paths_it_reads() -> None:
                     continue
                 missing.append(f"{case['id']}: {reference}")
     finally:
-        try:
+        with contextlib.suppress(NameError):
             fixture.cleanup()
-        except NameError:
-            pass
         shutil.rmtree(root, ignore_errors=True)
     assert not missing, (
         "benign cases name paths the fixture does not build, so they measure a "
