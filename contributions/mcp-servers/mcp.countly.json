@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "guard.mcp-server-contribution.v1",
+  "id": "mcp.countly",
+  "version": "1.0.0",
+  "name": "Countly MCP",
+  "description": "HOL-authored opt-in review policy for four Countly MCP application mutations; Countly does not bundle or maintain this Guard contribution. Unlisted tools retain the existing Guard policy.",
+  "trustClass": "external",
+  "activation": "opt-in",
+  "publisher": {
+    "id": "hol",
+    "displayName": "HOL",
+    "url": "https://hol.org"
+  },
+  "icon": {
+    "kind": "none"
+  },
+  "homepage": "https://github.com/Countly/countly-mcp-server",
+  "license": "MIT",
+  "launch": {
+    "kind": "package-launcher",
+    "command": "npx",
+    "package": "countly-mcp-server"
+  },
+  "riskClasses": [
+    "application-configuration-write",
+    "analytics-data-destruction",
+    "user-data-deletion"
+  ],
+  "tools": [
+    {
+      "name": "apps_create",
+      "state": "review"
+    },
+    {
+      "name": "apps_delete",
+      "state": "review"
+    },
+    {
+      "name": "apps_reset",
+      "state": "review"
+    },
+    {
+      "name": "apps_delete_user",
+      "state": "review"
+    },
+    {
+      "name": "other",
+      "state": "inherit"
+    }
+  ],
+  "referenceUrls": [
+    "https://github.com/Countly/countly-mcp-server",
+    "https://github.com/Countly/countly-mcp-server/blob/main/README.md",
+    "https://github.com/Countly/countly-mcp-server/blob/main/src/tools/app-management.ts"
+  ],
+  "saferAlternatives": [
+    "Review target Countly instance, app ID, token scope and requested mutation before approving an application change.",
+    "Use read-only Countly tools or an account without application deletion rights for exploration.",
+    "Keep this third-party policy disabled until a local administrator opts in; stronger Guard rules still apply."
+  ]
+}
