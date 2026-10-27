@@ -16,7 +16,7 @@ from codex_plugin_scanner.guard import workspace_assessment_worker as worker
 from codex_plugin_scanner.guard import workspace_runtime_findings as runtimes
 from codex_plugin_scanner.guard.daemon import workspace_assessment_api as api
 from codex_plugin_scanner.guard.store import GuardStore
-from tests.workspace_fix_support import admit_worktree
+from tests.workspace_fix_support import admit_worktree, get_run
 
 T0 = 1_000_000_000
 
@@ -404,7 +404,7 @@ def test_oversized_result_is_recorded_as_failure(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(assessments, "claim_next", lambda store, owner, now_ms, **_: claimed)
     monkeypatch.setattr(runner, "execute", lambda store, config, run, **_: huge)
     assert runner.run_next(store, None, owner="test", clock=lambda: T0 + 1)
-    run = assessments.get_run(store, claimed.run_id)
+    run = get_run(store, claimed.run_id)
     assert run is not None and (run["state"], run["error_code"]) == ("failed", "assessment_result_too_large")
 
 
