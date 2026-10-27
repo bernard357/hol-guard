@@ -34,8 +34,15 @@ pub(crate) fn linked_root(value: &str, cwd: &Path) -> Option<PathBuf> {
 /// then plain names reaches from `cwd`, as in `cd ..` or `cd ../app`. It is
 /// the same directory the absolute spelling of that path names, which the
 /// caller proves an unaliased, readable directory, so the climb reaches
-/// nothing an absolute `cd` would not. The logical `$PWD` residual described
-/// above is the one a linked worktree accepts.
+/// nothing an absolute `cd` would not.
+///
+/// In its default logical mode, `cd ..` is `cd "$(dirname "$PWD")"`. The
+/// `$PWD` projection (see `chain_literals_pwd`) already reads `$PWD` as the
+/// reported cwd and `$(dirname "$PWD")` as its lexical parent, so the
+/// climb rests on the same assumption, and the residual described above is
+/// the one that projection and a linked worktree accept. A cwd that is not
+/// its own canonical path is refused, since its lexical parent need not be
+/// its physical one.
 pub(crate) fn climbed(value: &str, cwd: &Path) -> Option<PathBuf> {
     if cfg!(windows)
         || value.len() > 4096
