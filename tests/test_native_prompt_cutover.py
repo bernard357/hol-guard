@@ -111,7 +111,9 @@ def test_merged_prompt_review_cannot_fall_back_to_python(monkeypatch, tmp_path):
     ],
 )
 def test_real_resident_attachment_intent(prompt_home, text, state):
-    assert native_prompt.trailing_secret_read_state(text) == state
+    result = native_prompt.analyze("trailing_secret_read_state", prompt_text=text)
+    assert isinstance(result, dict)
+    assert result["state"] == (list(state) if state is not None else None)
 
 
 @pytest.mark.parametrize("reply", [None, {}, {"result": None}, {"result": "bad"}])
