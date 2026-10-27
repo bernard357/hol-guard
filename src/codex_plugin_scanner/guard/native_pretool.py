@@ -1,8 +1,8 @@
 """Mechanical Python launcher for Rust PreToolUse authority.
 
 This module validates and returns the native decision. It does not parse,
-classify, or lower the semantic result. Command-model shadow comparison stays
-in native_command_model and is not a PreToolUse authority.
+classify, or lower the semantic result. native_command_model only projects
+the Rust command model into the Python type and is not a PreToolUse authority.
 """
 
 from __future__ import annotations

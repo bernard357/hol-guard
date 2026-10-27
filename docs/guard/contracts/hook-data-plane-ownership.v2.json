@@ -481,10 +481,9 @@
    "id": "python_reference_oracle",
    "class": "python_semantic",
    "paths": [
-    "src/codex_plugin_scanner/guard/native_command_model.py",
-    "src/codex_plugin_scanner/guard/native_command_model_wrappers.py"
+    "src/codex_plugin_scanner/guard/native_command_model.py"
    ],
-   "current": "retired Python oracle; remaining paths are mechanical command-model helpers",
+   "current": "retired Python oracle; the remaining path projects the native command model without re-deriving it",
    "target": "retired"
   },
   {

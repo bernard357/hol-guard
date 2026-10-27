@@ -117,6 +117,15 @@ def test_shadow_native_identity_is_reused_without_another_transport(monkeypatch)
     monkeypatch.setattr(client, "ensure_resident_prerequisite", lambda _: False)
     assert projected.to_dict()["security_identity"] == rich.security_identity
     assert _canonical_command_from_native("echo hi", {**payload, "security_identity": "invalid"}) is None
+    malformed_segment = {key: value for key, value in payload["segments"][0].items() if key != "span"}
+    for damaged in (
+        {**payload, "segments": [malformed_segment]},
+        {**payload, "segments": "echo hi"},
+        {**payload, "dialect": "powershell"},
+        {**payload, "confidence": "guess"},
+        {**payload, "path_overridden": True},
+    ):
+        assert _canonical_command_from_native("echo hi", damaged) is None
 
 
 @pytest.mark.parametrize(

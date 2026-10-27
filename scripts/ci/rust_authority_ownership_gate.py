@@ -248,8 +248,8 @@ def _pretool_gate() -> None:
     command_model = Path("src/codex_plugin_scanner/guard/native_command_model.py")
     if command_model.exists():
         model = _read(command_model)
-        if 'status.mode != "force"' not in model:
-            raise RuntimeError("command-model bridge is not confined to force")
+        if "native_resident_client_request" in model or "native_runtime_status" in model:
+            raise RuntimeError("command-model projection reaches the native runtime itself")
         if "Python remains authoritative" in model:
             raise RuntimeError("command-model bridge still declares Python authority")
 
