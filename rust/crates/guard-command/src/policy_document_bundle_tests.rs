@@ -112,10 +112,7 @@ fn a_bundle_without_compilable_rules_names_what_is_missing() {
             json!({"bundle": {"payload": []}}),
             "missing_policy_bundle_payload",
         ),
-        (
-            json!({"bundle": {"payload": {}}}),
-            "invalid_policy_spec",
-        ),
+        (json!({"bundle": {"payload": {}}}), "invalid_policy_spec"),
         (
             json!({"bundle": {"payload": {"spec": {}}}}),
             "invalid_policy_rules",

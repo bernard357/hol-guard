@@ -517,7 +517,6 @@ def test_runtime_canonical_enforcement_compiles_signed_v2_payload() -> None:
     ]
 
 
-
 def _device_scoped_bundle() -> dict[str, object]:
     def rule(identifier: str, artifact: str, devices: list[str]) -> dict[str, object]:
         return {
