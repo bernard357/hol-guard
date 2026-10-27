@@ -79,11 +79,6 @@ _SERIALIZERS: Final = (
         "snapshot",
         "HookMetricsRecorder",
     ),
-    (
-        "src/codex_plugin_scanner/guard/daemon/hook_metrics.py",
-        "maybe_flush_to_store",
-        "HookMetricsRecorder",
-    ),
 )
 
 
@@ -239,21 +234,8 @@ def _dynamic_failures() -> list[str]:
         from codex_plugin_scanner.guard.daemon.hook_metrics import HookMetricsRecorder
 
         metrics = HookMetricsRecorder()
-        metrics.record(
-            harness="pi",
-            event_name="PostToolUse",
-            route="native_resident",
-            payload_kind="inline",
-            output_size=32,
-            latency_ms=5.0,
-            decision="allow",
-            policy_action=None,
-            model_output_action="allow",
-            reason_code="source_full_scan_allow",
-            cache_status="miss",
-            fallback_kind="none",
-            scanner_bytes=32,
-        )
+        metrics.record_route("native_resident")
+        metrics.record_failure(stage="engine", exception_type="RuntimeError")
         # The evidence record itself is serialized by the Rust writer now, so
         # this probe covers the Python artifacts that are still built here.
         failures.extend(
