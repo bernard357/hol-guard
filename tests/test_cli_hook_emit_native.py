@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -22,12 +23,13 @@ def test_bridge_harness_prints_the_resident_rendering(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(cli, "native_cli_hook_emit", rendered)
     stream = io.StringIO()
+    deadline = time.monotonic() + 30.0
     code = cli.emit_hook_review(
-        "grok", {"policy_action": "block"}, event_name="PreToolUse", output_stream=stream, deadline=12.5
+        "grok", {"policy_action": "block"}, event_name="PreToolUse", output_stream=stream, deadline=deadline
     )
     assert code == 2
     assert stream.getvalue() == '{"decision":"deny"}\n'
-    assert calls == [("grok", {"policy_action": "block"}, "PreToolUse", 12.5)]
+    assert calls == [("grok", {"policy_action": "block"}, "PreToolUse", deadline)]
 
 
 @pytest.mark.parametrize("answer", (None, {"stdout": 1, "stderr": "", "exit_code": 0}, {"exit_code": True}))
@@ -56,12 +58,13 @@ def test_other_harness_prints_the_resident_document(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(cli, "native_cli_hook_emit", rendered)
     stream = io.StringIO()
+    deadline = time.monotonic() + 30.0
     code = cli.emit_hook_review(
-        "cursor", {"policy_action": "block"}, event_name="PreToolUse", output_stream=stream, deadline=3.5
+        "cursor", {"policy_action": "block"}, event_name="PreToolUse", output_stream=stream, deadline=deadline
     )
     assert code == exit_code
     assert stream.getvalue() == printed + "\n"
-    assert calls == [("cursor", {"policy_action": "block"}, "PreToolUse", 3.5, True)]
+    assert calls == [("cursor", {"policy_action": "block"}, "PreToolUse", deadline, True)]
 
 
 @pytest.mark.parametrize(
@@ -98,13 +101,14 @@ def test_an_unread_answer_to_an_event_that_cannot_pause_lets_the_turn_continue(
 
     monkeypatch.setattr(cli, "native_cli_hook_emit", unavailable)
     stream = io.StringIO()
+    deadline = time.monotonic() + 30.0
     code = cli.emit_hook_review(
-        harness, {"continue": True}, event_name="PostToolUse", output_stream=stream, deadline=7.0
+        harness, {"continue": True}, event_name="PostToolUse", output_stream=stream, deadline=deadline
     )
     assert stream.getvalue() == _fail_closed_line(harness, "PostToolUse")
     assert json.loads(stream.getvalue())["continue"] is True
     assert code == 0
-    assert deadlines == [7.0]
+    assert deadlines == [deadline]
 
 
 def test_claude_code_prints_the_resident_document_with_its_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,3 +183,43 @@ def test_the_emit_render_ships_a_large_answer_under_its_own_budget(monkeypatch: 
         "cli_hook_emit": render._CLI_HOOK_EMIT_MAX_REQUEST_BYTES,
         "cli_document": render._MAX_REQUEST_BYTES,
     }
+
+
+def test_a_spent_review_budget_still_delivers_the_decided_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The review owns the hook's budget and may use all of it.
+
+    Writing the answer the review decided gets a floor of its own, so a verdict
+    Guard already reached - an allow as readily as a block - is not thrown away
+    for a fail-closed document by a clock the review already ran out.
+    """
+
+    seen: list[float | None] = []
+    printed = '{\n  "policy_action": "allow"\n}'
+
+    def rendered(harness, response, *, event_name, guard_home=None, deadline=None, document=False):
+        del harness, response, event_name, guard_home, document
+        seen.append(deadline)
+        return {"stdout": printed, "exit_code": 0, "policy_action": "allow"}
+
+    monkeypatch.setattr(cli, "native_cli_hook_emit", rendered)
+    stream = io.StringIO()
+    before = time.monotonic()
+    code = cli.emit_hook_review(
+        "cursor",
+        {"policy_action": "allow"},
+        event_name="PreToolUse",
+        output_stream=stream,
+        deadline=time.monotonic() - 5.0,
+    )
+    assert code == 0
+    assert stream.getvalue() == printed + "\n"
+    assert len(seen) == 1
+    delivery = seen[0]
+    assert delivery is not None
+    assert delivery >= before + cli._DELIVERY_BUDGET_SECONDS
+
+
+def test_delivery_leaves_a_deadline_with_budget_left_alone() -> None:
+    deadline = time.monotonic() + 30.0
+    assert cli._delivery_deadline(deadline) == deadline
+    assert cli._delivery_deadline(None) is None

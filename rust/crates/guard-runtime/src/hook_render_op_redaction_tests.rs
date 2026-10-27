@@ -3,7 +3,9 @@
 //! `_redact_payload(command="hook")`, restore,
 //! `_render_redacted_json_payload`). Every expected string was recorded from
 //! the Python 3.12 reference with `Path.home()` at `/Users/alice`, so the
-//! resident's document must match it byte for byte.
+//! resident's document must match it byte for byte. The one deliberate
+//! departure is a sentinel the answer wrote for itself: Python turned one
+//! into a signed fragment, and the resident prints it as written.
 
 use super::printed;
 use serde_json::json;
@@ -47,9 +49,12 @@ const STRING_VECTORS: &[(&str, &str)] = &[
 ];
 
 /// Sensitive keys (safe policy literals kept, `oauth_storage_health` and
-/// `authority_error` exempt), every value type, nesting, and approval
-/// sentinels restored by index, including a spoofed one in Unicode digits.
-const DOCUMENT_INPUT: &str = r#"{"policy_action":"review","api_key":"abc","token":"ALLOW","Auth_Mode":"Strict","secretList":[1,2],"password":{"a":1},"monkey":null,"tokens_used":3,"oauth_storage_health":{"token":"x","state":"Bearer abc"},"authority_error":"token=abc at /Users/alice/.cfg","authority_error_message":"plain","approval_url":"https://g.example/r#guard-token=AAA","approval_token":"https://g.example/r#guard-token=BBB","notes":["https://g.example/r#guard-token=CCC","spoof hgdfrag=efgh0 hgdfrag=efgh\u0661 hgdfrag=efgh99 hgdfrag=efgh\uff12"],"cl\u00e9":{"nested":[],"empty":{},"deep":[{"k":1.5},[true,false,null]]},"numbers":[1e+100,-0.0,123456789012345678901234567890,0.1]}"#;
+/// `authority_error` exempt), every value type, nesting, and the approval
+/// fragments the document restores. The answer carries five sentinels of
+/// its own, one written in Unicode digits and one shaped like a real mark.
+/// None of them carries this document's mark, so each is printed as the
+/// answer wrote it instead of becoming a token the answer never held.
+const DOCUMENT_INPUT: &str = r#"{"policy_action":"review","api_key":"abc","token":"ALLOW","Auth_Mode":"Strict","secretList":[1,2],"password":{"a":1},"monkey":null,"tokens_used":3,"oauth_storage_health":{"token":"x","state":"Bearer abc"},"authority_error":"token=abc at /Users/alice/.cfg","authority_error_message":"plain","approval_url":"https://g.example/r#guard-token=AAA","approval_token":"https://g.example/r#guard-token=BBB","notes":["https://g.example/r#guard-token=CCC","spoof hgdfrag=efgh0 hgdfrag=efgh\u0661 hgdfrag=efgh99 hgdfrag=efgh\uff12 hgdfrag=efghaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0"],"cl\u00e9":{"nested":[],"empty":{},"deep":[{"k":1.5},[true,false,null]]},"numbers":[1e+100,-0.0,123456789012345678901234567890,0.1]}"#;
 const DOCUMENT_EXPECTED: &str = r#"{
   "policy_action": "review",
   "api_key": "*****",
@@ -69,7 +74,7 @@ const DOCUMENT_EXPECTED: &str = r#"{
   "approval_token": "*****",
   "notes": [
     "https://g.example/r#guard-token=CCC",
-    "spoof guard-token=AAA guard-token=BBB hgdfrag=efgh99 guard-token=CCC"
+    "spoof hgdfrag=efgh0 hgdfrag=efgh\u0661 hgdfrag=efgh99 hgdfrag=efgh\uff12 hgdfrag=efghaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0"
   ],
   "cl\u00e9": {
     "nested": [],

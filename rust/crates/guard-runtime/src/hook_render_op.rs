@@ -25,7 +25,7 @@ use guard_command::hook_responses::{
 use guard_contracts::{
     artifact_id_from_event, cursor_after_shell_observed, cursor_observer_event_for_payload,
     evaluation_has_terminal_policy_action, hook_render_max_bytes, HookRenderRequestV1,
-    HookRenderResultV1, HOOK_RENDER_RESULT_SCHEMA,
+    HookRenderResultV1, HOOK_RENDER_RESULT_SCHEMA, MAX_NATIVE_RESPONSE_BYTES,
 };
 use serde_json::{json, Value};
 
@@ -49,6 +49,12 @@ pub(crate) fn evaluate_hook_render_request(
         payload,
     })
 }
+
+/// What a `cli_hook_emit` document may take up. A caller reads the answer
+/// over the resident stream, which refuses anything past
+/// `MAX_NATIVE_RESPONSE_BYTES`, so the rest of the result - its schema,
+/// request id and digest - has to fit alongside the document.
+const CLI_EMIT_DOCUMENT_BUDGET_BYTES: usize = MAX_NATIVE_RESPONSE_BYTES - 128 * 1024;
 
 fn object_of(value: Option<&Value>) -> Option<&Object> {
     value.and_then(Value::as_object)
@@ -210,6 +216,16 @@ fn render(request: &HookRenderRequestV1) -> Result<Value, &'static str> {
             ),
         }
         .ok_or("native_hook_render_unrenderable")?;
+        // An answer may be four times the size of a response, and the
+        // printed document is larger again than the answer it renders: it
+        // is indented, written as ASCII and escaped a second time as a JSON
+        // string. A document the caller could never be handed is named here
+        // instead of being dropped unexplained when the stream reads it.
+        if serde_json::to_vec(&document).map_or(usize::MAX, |bytes| bytes.len())
+            > CLI_EMIT_DOCUMENT_BUDGET_BYTES
+        {
+            return Err("native_hook_render_document_too_large");
+        }
         return Ok(cli_payload(CliOutcome::Document(document)));
     }
     if matches!(

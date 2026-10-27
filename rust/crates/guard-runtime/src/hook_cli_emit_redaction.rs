@@ -34,8 +34,15 @@ const SAFE_POLICY_LITERALS: [&str; 9] = [
     "custom",
 ];
 /// The text that stands in for a signed approval fragment while the rest of
-/// the answer is redacted.
+/// the answer is redacted. The answer can carry text an agent wrote, so a
+/// sentinel is only half the mark: each document also draws a random one,
+/// and a sentinel is turned back into a token only when it carries this
+/// document's mark.
 const SENTINEL_PREFIX: &str = "hgdfrag=efgh";
+/// The length, in lowercase hexadecimal characters, of a document's mark.
+const SENTINEL_MARK_HEX: usize = 32;
+/// The lowercase hexadecimal alphabet a mark is written in.
+const MARK_DIGITS: [u8; 16] = *b"0123456789abcdef";
 
 /// The redacted document Python prints for the daemon answer `response`.
 /// `home_dir` is the caller's `Path.home()`, `None` when it has none.
@@ -45,18 +52,42 @@ pub(crate) fn redacted_hook_document(
     home_dir: Option<&str>,
     unmap: bool,
 ) -> String {
+    let document = PyVal::Dict(response.to_vec());
     let mut tokens = Vec::new();
-    let protected = protect_approval_tokens(PyVal::Dict(response.to_vec()), &mut tokens);
+    // Without a mark a sentinel cannot be told apart from text the answer
+    // itself carries, so the approval fragments are left where they are and
+    // masked like any other secret rather than printed on an answer's word.
+    let mark = document_mark();
+    let protected = match mark.as_deref() {
+        Some(mark) => protect_approval_tokens(document, mark, &mut tokens),
+        None => document,
+    };
     let masked = redact_value(protected, None, home_dir);
-    let restored = restore_approval_tokens(masked, &tokens);
+    let restored = match mark.as_deref() {
+        Some(mark) => restore_approval_tokens(masked, mark, &tokens),
+        None => masked,
+    };
     let mut out = String::new();
     serialize(&restored, 0, unmap, &mut out);
     out
 }
 
+/// This document's mark, drawn fresh from the operating system. `None` when
+/// the operating system has no entropy to give.
+fn document_mark() -> Option<String> {
+    let mut entropy = [0u8; SENTINEL_MARK_HEX / 2];
+    getrandom::fill(&mut entropy).ok()?;
+    let mut mark = String::with_capacity(SENTINEL_MARK_HEX);
+    for byte in entropy {
+        mark.push(char::from(MARK_DIGITS[usize::from(byte >> 4)]));
+        mark.push(char::from(MARK_DIGITS[usize::from(byte & 0x0f)]));
+    }
+    Some(mark)
+}
+
 /// `_protect_ephemeral_approval_tokens`: each signed dashboard fragment, in
 /// traversal order, becomes a sentinel that no redaction rule touches.
-fn protect_approval_tokens(value: PyVal, tokens: &mut Vec<String>) -> PyVal {
+fn protect_approval_tokens(value: PyVal, mark: &str, tokens: &mut Vec<String>) -> PyVal {
     static TOKEN_URL_VALUE: OnceLock<Regex> = OnceLock::new();
     match value {
         PyVal::Str(text) => {
@@ -65,52 +96,57 @@ fn protect_approval_tokens(value: PyVal, tokens: &mut Vec<String>) -> PyVal {
             });
             let replaced = pattern.replace_all(&text, |captures: &Captures<'_>| {
                 tokens.push(captures[1].to_owned());
-                format!("{SENTINEL_PREFIX}{}", tokens.len() - 1)
+                format!("{SENTINEL_PREFIX}{mark}{}", tokens.len() - 1)
             });
             PyVal::Str(replaced.into_owned())
         }
         PyVal::Dict(entries) => PyVal::Dict(
             entries
                 .into_iter()
-                .map(|(key, item)| (key, protect_approval_tokens(item, tokens)))
+                .map(|(key, item)| (key, protect_approval_tokens(item, mark, tokens)))
                 .collect(),
         ),
         PyVal::List(items) => PyVal::List(
             items
                 .into_iter()
-                .map(|item| protect_approval_tokens(item, tokens))
+                .map(|item| protect_approval_tokens(item, mark, tokens))
                 .collect(),
         ),
         other => other,
     }
 }
 
-/// `_restore_ephemeral_approval_tokens`: a sentinel whose index names a
-/// protected fragment gets that fragment back; any other stays as written.
-fn restore_approval_tokens(value: PyVal, tokens: &[String]) -> PyVal {
+/// `_restore_ephemeral_approval_tokens`: a sentinel carrying this document's
+/// mark, whose index names a protected fragment, gets that fragment back.
+/// Any other sentinel stays exactly as the answer wrote it.
+fn restore_approval_tokens(value: PyVal, mark: &str, tokens: &[String]) -> PyVal {
     static SENTINEL: OnceLock<Regex> = OnceLock::new();
     match value {
         PyVal::Str(text) if text.contains(SENTINEL_PREFIX) => {
-            let pattern = compiled(&SENTINEL, || format!(r"{SENTINEL_PREFIX}(\d+)"));
-            let replaced =
-                pattern.replace_all(&text, |captures: &Captures<'_>| {
-                    match decimal_index(&captures[1]).and_then(|index| tokens.get(index)) {
-                        Some(token) => format!("guard-token={token}"),
-                        None => captures[0].to_owned(),
-                    }
-                });
+            let pattern = compiled(&SENTINEL, || {
+                format!(r"{SENTINEL_PREFIX}([0-9a-f]{{{SENTINEL_MARK_HEX}}})(\d+)")
+            });
+            let replaced = pattern.replace_all(&text, |captures: &Captures<'_>| {
+                if &captures[1] != mark {
+                    return captures[0].to_owned();
+                }
+                match decimal_index(&captures[2]).and_then(|index| tokens.get(index)) {
+                    Some(token) => format!("guard-token={token}"),
+                    None => captures[0].to_owned(),
+                }
+            });
             PyVal::Str(replaced.into_owned())
         }
         PyVal::Dict(entries) => PyVal::Dict(
             entries
                 .into_iter()
-                .map(|(key, item)| (key, restore_approval_tokens(item, tokens)))
+                .map(|(key, item)| (key, restore_approval_tokens(item, mark, tokens)))
                 .collect(),
         ),
         PyVal::List(items) => PyVal::List(
             items
                 .into_iter()
-                .map(|item| restore_approval_tokens(item, tokens))
+                .map(|item| restore_approval_tokens(item, mark, tokens))
                 .collect(),
         ),
         other => other,

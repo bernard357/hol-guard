@@ -73,6 +73,43 @@ fn oversized_request_is_rejected() {
 }
 
 #[test]
+fn cli_hook_emit_refuses_a_document_larger_than_a_response() {
+    // A character the answer carries as two bytes is written `\u00e9` in the
+    // printed document and escaped a second time when that document travels
+    // as a JSON string, so it leaves as seven. An answer well inside the
+    // answer budget can render a document no caller could ever read.
+    let reason = "\u{e9}".repeat(700_000);
+    let response_json = serde_json::to_string(&json!({
+        "policy_action": "block", "reason": reason,
+    }))
+    .expect("answer");
+    assert!(response_json.len() < guard_contracts::HOOK_RENDER_CLI_EMIT_MAX_BYTES);
+    let mut req = request("cli_hook_emit");
+    req.harness = "cursor".to_owned();
+    req.cli = Some(json!({
+        "event_name": "PreToolUse",
+        "response_json": response_json.clone(),
+        "document": true,
+    }));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.status, "error");
+    assert_eq!(result.code, "native_hook_render_document_too_large");
+
+    // The same answer still names its verdict for a caller that prints its
+    // own document: only the document the resident writes is bounded here.
+    req.cli = Some(json!({
+        "event_name": "PreToolUse",
+        "response_json": response_json,
+    }));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.status, "ok");
+    assert_eq!(
+        result.payload.expect("payload")["response"]["policy_action"],
+        "block"
+    );
+}
+
+#[test]
 fn cli_kinds_wrap_the_composed_outcome() {
     let mut req = request("cli_document");
     req.harness = "claude-code".to_owned();

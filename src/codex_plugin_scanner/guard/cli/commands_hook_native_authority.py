@@ -39,6 +39,24 @@ _DIAGNOSTIC_DRAIN_TIMEOUT_SECONDS = 0.25
 # wire format, so the CLI renders it the same way.
 _BRIDGE_RENDERED_HARNESSES = frozenset({"cline", "copilot", "devin", "grok", "hermes", "kimi", "openclaw", "zcode"})
 _RENDER_FAILURE_REASON = "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal."
+# What writing a finished answer is allowed to take when the review itself has
+# already used the hook's whole budget.
+_DELIVERY_BUDGET_SECONDS = 1.0
+
+
+def _delivery_deadline(deadline: float | None) -> float | None:
+    """The budget the resident gets for writing an answer Guard already gave.
+
+    ``deadline`` bounds the review, and the review is over by the time this
+    runs. A review that used all of it would leave the renderer nothing, and
+    the decided verdict - an allow as readily as a block - would be thrown
+    away for a fail-closed document. Writing the answer therefore keeps a
+    small floor of its own; a deadline with more than that left is unchanged.
+    """
+
+    if deadline is None:
+        return None
+    return max(deadline, time.monotonic() + _DELIVERY_BUDGET_SECONDS)
 
 
 def _bridge_hook_output(
@@ -234,6 +252,7 @@ def emit_hook_review(
     """
 
     canonical = _canonical_harness_name(harness)
+    deadline = _delivery_deadline(deadline)
     if canonical in _BRIDGE_RENDERED_HARNESSES:
         stdout, stderr, exit_code = _bridge_hook_output(
             canonical, response, event_name=event_name, guard_home=guard_home, deadline=deadline
