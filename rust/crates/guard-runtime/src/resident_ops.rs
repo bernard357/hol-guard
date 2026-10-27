@@ -480,6 +480,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::ArtifactRisk(request) => {
                 crate::artifact_risk_op::evaluate_artifact_risk_request(&request)
             }
+            ResidentOperationV1::SupplyChainBundleVerify(request) => {
+                crate::supply_chain_bundle_verify_op::evaluate_supply_chain_bundle_verify_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::LocalToolEligibility(request) => {
                 crate::local_tool_eligibility_op::evaluate_local_tool_eligibility_request(&request)
             }

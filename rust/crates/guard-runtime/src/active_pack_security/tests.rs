@@ -30,6 +30,23 @@ pub(crate) fn fixture(program: &str, key: &[u8], pending: bool) -> (String, Stri
     )
 }
 
+/// A record that saw a floor and quarantined nothing: what `complete` writes
+/// when the retained Root was authenticated by a runtime built from different
+/// source than the one running. The observation is kept and travels in the
+/// binding digest, but it denies nothing.
+pub(crate) fn floor_fixture(program: &str, key: &[u8]) -> (String, String) {
+    let mut state = state();
+    state.program = program.into();
+    state.applied.insert(
+        "floor:command.git".into(),
+        json!({"authority":state.authority,"engine":"2".repeat(64)}),
+    );
+    (
+        state.encode(key).unwrap(),
+        state.applicable_digest().unwrap().unwrap(),
+    )
+}
+
 #[test]
 fn protected_record_authenticates_and_inactive_epochs_do_not_change_identity() {
     let mut current = state();
