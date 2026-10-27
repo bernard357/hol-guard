@@ -448,7 +448,7 @@ def test_a_lifecycle_change_is_refused_before_its_first_write(
         HermesHarnessAdapter().install(context)
 
     assert config_yaml.read_text(encoding="utf-8") == "mcp_servers: {}\n"
-    assert not (guard_home / "managed").exists()
+    assert not _key_path(guard_home).exists()
 
 
 def test_a_provisioned_home_without_a_resident_is_still_unavailable(
