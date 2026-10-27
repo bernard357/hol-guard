@@ -14,6 +14,7 @@ import pytest
 
 from codex_plugin_scanner.guard.adapters import adapter_state_integrity as integrity
 from codex_plugin_scanner.guard.adapters.adapter_state_integrity import (
+    AdapterStateIntegrityUnavailableError,
     adapter_state_is_authenticated,
     authenticate_adapter_state,
     authenticated_adapter_path,
@@ -349,3 +350,113 @@ def test_non_posix_key_loader_rejects_directory_permissions_and_bad_json(
         harness="copilot",
         payload={"state_authentication": {}},
     )
+
+
+def _stamped_payload() -> dict[str, object]:
+    return {
+        "path": "/tmp/target.txt",
+        "state_authentication": {
+            "algorithm": "hmac-sha256",
+            "key_id": "id",
+            "mac": "0" * 64,
+            "schema_version": 1,
+        },
+    }
+
+
+def test_a_silent_runtime_is_not_read_as_an_unauthenticated_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable resident must not answer "not Guard's own" for a stamped manifest.
+
+    Uninstall reads that answer as "there is no authenticated state" and runs
+    legacy cleanup, which deletes Hermes' saved previous guard section and
+    skips the Copilot backup restore.
+    """
+
+    guard_home = tmp_path / "guard-home"
+    integrity._load_or_create_key(guard_home)
+
+    def unavailable(**_kwargs: object) -> dict[str, object]:
+        raise AdapterStateIntegrityUnavailableError
+
+    monkeypatch.setattr(integrity, "native_adapter_state_integrity", unavailable)
+
+    with pytest.raises(AdapterStateIntegrityUnavailableError):
+        adapter_state_is_authenticated(guard_home, harness="copilot", payload=_stamped_payload())
+    with pytest.raises(AdapterStateIntegrityUnavailableError):
+        authenticated_adapter_path(guard_home, harness="copilot", payload=_stamped_payload(), field="path")
+
+
+def test_a_missing_key_still_reads_as_an_unauthenticated_manifest(tmp_path: Path) -> None:
+    """A key file that is absent or unusable stays a verdict, not an outage."""
+
+    guard_home = tmp_path / "guard-home"
+
+    assert not adapter_state_is_authenticated(guard_home, harness="copilot", payload=_stamped_payload())
+    assert authenticated_adapter_path(guard_home, harness="copilot", payload=_stamped_payload(), field="path") is None
+
+
+def test_a_lifecycle_change_is_refused_before_its_first_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hermes asks for the resident before it rewrites ``config.yaml``."""
+
+    from codex_plugin_scanner.guard.adapters.base import HarnessContext
+    from codex_plugin_scanner.guard.adapters.hermes import HermesHarnessAdapter
+
+    home_dir = tmp_path / "home"
+    workspace_dir = tmp_path / "workspace"
+    home_dir.mkdir()
+    workspace_dir.mkdir()
+    config_yaml = home_dir / ".hermes" / "config.yaml"
+    config_yaml.parent.mkdir(parents=True)
+    config_yaml.write_text("mcp_servers: {}\n", encoding="utf-8")
+    guard_home = tmp_path / "guard-home"
+    context = HarnessContext(home_dir=home_dir, workspace_dir=workspace_dir, guard_home=guard_home)
+
+    def unreachable(_guard_home: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(integrity, "adapter_state_runtime_available", unreachable)
+
+    with pytest.raises(AdapterStateIntegrityUnavailableError):
+        HermesHarnessAdapter().install(context)
+
+    assert config_yaml.read_text(encoding="utf-8") == "mcp_servers: {}\n"
+    assert not (guard_home / "managed").exists()
+
+
+def test_a_reachable_runtime_admits_the_lifecycle_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reachable(_guard_home: Path) -> bool:
+        return True
+
+    monkeypatch.setattr(integrity, "adapter_state_runtime_available", reachable)
+
+    integrity.require_adapter_state_runtime(tmp_path / "guard-home")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a Windows spelling is only foreign off Windows")
+def test_a_foreign_absolute_path_never_resolves_against_the_working_directory(
+    tmp_path: Path,
+    native_adapter_state_integrity_runtime: Path,
+) -> None:
+    """The runtime accepts both families; this host only resolves its own.
+
+    A Guard home carried from Windows holds manifests whose paths the runtime
+    still authenticates, and ``C:\\Users\\dev\\config.json`` is a relative path
+    here, so resolving it would name a file under the working directory.
+    """
+
+    del native_adapter_state_integrity_runtime
+    guard_home = tmp_path / "guard-home"
+
+    for foreign in ("C:\\Users\\dev\\config.json", "\\\\server\\share\\config.json"):
+        stamped = authenticate_adapter_state(guard_home, harness="copilot", payload={"path": foreign})
+        assert adapter_state_is_authenticated(guard_home, harness="copilot", payload=stamped)
+        assert authenticated_adapter_path(guard_home, harness="copilot", payload=stamped, field="path") is None

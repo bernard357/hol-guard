@@ -26,7 +26,7 @@ from ..skill_directory_identity import (
 from ..stable_guard_cli import guard_cli_launcher
 from . import hermes_runtime_hooks
 from .adapter_safe_output import write_text_at_authorized_path
-from .adapter_state_integrity import authenticate_adapter_state
+from .adapter_state_integrity import authenticate_adapter_state, require_adapter_state_runtime
 from .base import HarnessAdapter, HarnessContext, _command_available, _json_payload, _run_command_probe
 from .bounded_cli_hook_bridge import bounded_cli_hook_command
 from .cloud_identity import cloud_agent_identity_environment, cloud_agent_identity_hints
@@ -157,6 +157,9 @@ class HermesHarnessAdapter(HarnessAdapter):
     fallback_hint = "Configure Hermes to use Guard-launched sessions for skill execution."
 
     def install(self, context: HarnessContext) -> dict[str, object]:
+        # The manifest is stamped last, so ask before the first write rather
+        # than leaving the config.yaml rewritten with nothing to restore from.
+        require_adapter_state_runtime(context.guard_home)
         hermes_home = _hermes_home(context)
         source_configs = _load_mcp_server_sources(hermes_home)
         # Only consult the mirror for a minimal sandbox, matching detect().

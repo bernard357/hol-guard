@@ -38,6 +38,18 @@ class AdapterStateIntegrityUnavailableError(RuntimeError):
     reason: str = "native_adapter_state_integrity_unavailable"
 
 
+def adapter_state_runtime_available(guard_home: Path | None = None) -> bool:
+    """Whether a resident that can stamp adapter state is reachable right now.
+
+    Lifecycle work calls this before its first write. Authentication is the
+    last step of an install, so a resident that is already gone when the
+    install starts would otherwise leave the harness configuration rewritten
+    and no manifest to uninstall from.
+    """
+
+    return ensure_resident_prerequisite(Path(_resolve_digest_home(guard_home)))
+
+
 def native_adapter_state_integrity(
     *,
     action: str,
