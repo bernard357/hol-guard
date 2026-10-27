@@ -386,13 +386,15 @@ fn unfiltered_directory_root(
         .filter(|root| root.is_dir())
 }
 
-/// Whether Grok's camel-case copies of the tool name and input repeat the
-/// snake-case values and the host did not cut the input short. A copy that
-/// differs from the value a proof reads could be the one the host acts on.
+/// Whether Grok's camel-case copies of the tool name and input, where both
+/// spellings are sent, repeat the snake-case values, and the host did not cut
+/// the input short. A copy that differs from the value a proof reads could be
+/// the one the host acts on.
 pub(super) fn mirrored_input_matches(root: &Map<String, Value>) -> bool {
     let differs = |copy: &str, original: &str| {
         root.get(copy)
-            .is_some_and(|value| Some(value) != root.get(original))
+            .zip(root.get(original))
+            .is_some_and(|(copy, original)| copy != original)
     };
     !differs("toolInput", "tool_input")
         && !differs("toolName", "tool_name")
