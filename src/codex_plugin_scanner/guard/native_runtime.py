@@ -75,6 +75,9 @@ _MAX_MANIFEST_BYTES = 16 * 1024
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _RESIDENT_PROTOCOL_FEATURE = "resident-protocol-v2"
+# The response decoder no longer re-checks the receipt; only a resident that
+# checks its own answer may be trusted with a PostToolUse review.
+_SELF_CHECK_FEATURE = "edge-self-check-v1"
 
 
 def native_mode() -> NativeMode:
@@ -586,7 +589,11 @@ def review_post_tool_native(
     if len(encoded := input_text.encode("utf-8")) > _MAX_REQUEST_BYTES:
         return record_native_hook_result("native_fail_safe", None)
     resident_output = None
-    if status.capabilities is not None and _RESIDENT_PROTOCOL_FEATURE in status.capabilities.features:
+    resident_supported = status.capabilities is not None and {
+        _RESIDENT_PROTOCOL_FEATURE,
+        _SELF_CHECK_FEATURE,
+    } <= set(status.capabilities.features)
+    if resident_supported:
         resident_output = native_resident_client_request(
             executable=status.identity.path,
             guard_home=request.guard_home,
@@ -609,11 +616,7 @@ def review_post_tool_native(
             return record_native_hook_result("native_resident", response)
         failure_reason = resident_error or "native_resident_invalid_response"
     else:
-        failure_reason = (
-            "native_resident_unavailable"
-            if status.capabilities is not None and _RESIDENT_PROTOCOL_FEATURE in status.capabilities.features
-            else "native_resident_protocol_unsupported"
-        )
+        failure_reason = "native_resident_unavailable" if resident_supported else "native_resident_protocol_unsupported"
 
     native_record_resident_failure(
         status.identity.sha256,

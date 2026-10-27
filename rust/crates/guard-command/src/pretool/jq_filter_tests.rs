@@ -140,8 +140,6 @@ fn rejects_environment_input_and_module_access() {
         "(env)",
         ".a // env",
         ".a == env",
-        "select(.a) | @base64",
-        "map(.a | @text)",
         "{a: [env]}",
         "import \"x\"",
         "include \"x\"",
@@ -260,8 +258,10 @@ fn rejects_malformed_and_oversized_pipelines() {
         ".a |",
         ".a | | length",
         ". | keys | keys | keys | keys | keys | keys | keys | keys",
-        "{a}",
         "{$ENV}",
+        "{a,}",
+        "{a, .b}",
+        "{@tsv}",
         "{(.a): .b}",
         "{a: env}",
         "{a: input}",
@@ -270,6 +270,46 @@ fn rejects_malformed_and_oversized_pipelines() {
         "{a-b: .x}",
         "{a: .x | @sh}",
         "{a: .x | tostring(1)}",
+    ] {
+        assert!(!safe_filter(filter), "expected rejected: {filter}");
+    }
+}
+
+#[test]
+fn admits_bare_rendering_formats_and_shorthand_keys() {
+    for filter in [
+        ".[] | @tsv",
+        ".workflow_runs[] | [.id, .name] | @tsv",
+        "select(.a) | @base64",
+        "map(.a | @text)",
+        ".items | @json",
+        ".[] | [.a, .b] | @csv",
+        ".name | @uri",
+        ".blob | @base64d",
+        "{a}",
+        "{number,title,state}",
+        "{\"a b\", count: .items | length}",
+        ".[] | {number, title}",
+    ] {
+        assert!(safe_filter(filter), "expected admitted: {filter}");
+    }
+}
+
+#[test]
+fn rejects_shell_and_templated_formats() {
+    for filter in [
+        "@sh",
+        ".[] | @sh",
+        "@sh \"rm \\(.a)\"",
+        "@tsv \"x\"",
+        "@text \"\\(env)\"",
+        "@tsvx",
+        "@",
+        "@ tsv",
+        ".a@tsv",
+        "@tsv@csv",
+        "@format(\"tsv\")",
+        "{a: @sh}",
     ] {
         assert!(!safe_filter(filter), "expected rejected: {filter}");
     }

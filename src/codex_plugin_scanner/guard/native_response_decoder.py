@@ -10,7 +10,6 @@ from .native_approval_errors import (
     NATIVE_APPROVAL_ERROR_CODES,
     NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES,
 )
-from .native_decision_receipt import receipt_matches_edge
 
 _NATIVE_ERROR_CODES = frozenset(
     {
@@ -76,8 +75,8 @@ def response_from_payload(payload: object) -> HookReviewResponse | None:
         result = decoded.get("result")
         if not isinstance(result, dict):
             return None
-        receipt = decoded.get("receipt")
-        if not receipt_matches_edge(decoded, receipt):
+        # The edge checked its receipt against this result before it answered.
+        if not isinstance(decoded.get("receipt"), dict):
             return None
         decoded = cast(dict[str, object], result)
     decision = decoded.get("decision")

@@ -31,7 +31,6 @@ _RAW_HTTP_BOUNDARIES = frozenset(
         "bridge/__init__.py",
         "adapters/bounded_cli_hook_daemon.py",
         "adapters/_modules/cursor/cursor_hook_script_template_head.py",
-        "adapters/_modules/codex/codex_daemon_hook_transport.py",
     }
 )
 

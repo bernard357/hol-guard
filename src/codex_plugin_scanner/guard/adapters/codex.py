@@ -409,7 +409,6 @@ def _hook_packaged_file_paths() -> tuple[tuple[str, Path], ...]:
     guard_root = Path(__file__).resolve().parents[1]
     return (
         ("bridge", Path(__file__).with_name("codex_daemon_hook_bridge.py").resolve()),
-        ("bridge_resume", Path(__file__).with_name("codex_daemon_hook_resume.py").resolve()),
         ("bridge_runtime", guard_root / "codex_hook_bridge_runtime.py"),
         ("hook_probe", guard_root / "runtime_transition_hook_probe.py"),
         ("native_receipt", guard_root / "native_decision_receipt.py"),

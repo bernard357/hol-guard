@@ -7420,6 +7420,217 @@
    ],
    "status": "native_behavior_ported_requires_ci",
    "rationale": "Argument validation for the filter stage is the classifier's, not the sink's: a grep naming a file or reading patterns, and a ripgrep spelling its own valued options, never reach the filter chain at all, so the native tests replace the ValueError the Python sink used to raise."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_answers_allow_before_guard_imports",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::an_authenticated_answer_is_rendered"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_preserves_deny",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::clean_answers_are_rendered_natively"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_falls_through_when_daemon_unreachable",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::a_started_daemon_answers_the_hook",
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::a_failed_start_fails_closed"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_ignores_unauthenticated_state",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::a_mismatched_token_fails_closed_before_the_hook_is_sent"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_falls_through_on_pending_approval",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_handoff_tests.rs::a_deny_naming_a_pending_approval_waits_for_the_browser"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_fails_closed_on_oversized_input",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::hook_input_is_bounded_and_normalized"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_normalizes_post_tool_use",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::other_events_forward_their_own_input"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_falls_through_on_worker_failure",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::a_process_failure_restarts_the_daemon_and_asks_once_more"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_execution_environment_matches_guard_collector",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/hook_env_stamp_tests.rs::stamp_matches_python"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_omits_surrogate_loader_values_and_keeps_the_name",
+   "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_tests.rs::lone_surrogates_are_forwarded_as_python_escapes_them",
+    "rust/crates/guard-runtime/src/hook_env_stamp_tests.rs::stamp_matches_python"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired stdlib fast path in the frozen Guard entrypoint, which repeated the Codex daemon round trip the native bridge owns. Codex hooks launch the native bridge, which authenticates the daemon, sends the hook and renders the answer."
+  },
+  {
+   "old_node": "tests/test_codex_signed_approval_handoff.py::test_pending_approval_prints_the_authenticated_browser_url",
+   "source_sha256": "a9acc74f6c7248d37bc246b30ce6b346cd3080b76c35e41dfd4a265087ab4664",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/native_review_link_tests.rs::a_loopback_approval_link_opens_only_once_it_is_signed"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python approval-link opener. The native bridge opens a loopback approval link only once it carries the signed session token."
+  },
+  {
+   "old_node": "tests/test_codex_signed_approval_handoff.py::test_pending_approval_does_not_open_unsigned_url_when_auth_token_load_fails",
+   "source_sha256": "a9acc74f6c7248d37bc246b30ce6b346cd3080b76c35e41dfd4a265087ab4664",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/native_review_link_tests.rs::a_loopback_approval_link_opens_only_once_it_is_signed",
+    "rust/crates/guard-runtime/src/native_review_link_tests.rs::loopback_links_the_client_would_sign_are_never_shown_unsigned"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python approval-link opener. The native bridge opens a loopback approval link only once it carries the signed session token."
+  },
+  {
+   "old_node": "tests/test_codex_live_completion_transport.py::test_slow_authenticated_completion_reaches_original_hook",
+   "source_sha256": "6304a1ef4eded11ffa3352611e5457d58969de82745038569ee5357af8b81c05",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::a_browser_allow_recorded_by_the_daemon_is_approved"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_live_completion_transport.py::test_lost_completion_retries_same_bound_action",
+   "source_sha256": "6304a1ef4eded11ffa3352611e5457d58969de82745038569ee5357af8b81c05",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::a_lost_completion_is_replayed_for_the_same_hook"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_live_completion_transport.py::test_unproven_or_changed_decision_does_not_retry_or_allow",
+   "source_sha256": "6304a1ef4eded11ffa3352611e5457d58969de82745038569ee5357af8b81c05",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::an_allow_the_daemon_does_not_record_keeps_the_deny"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_live_completion_transport.py::test_authentication_failure_is_not_retried",
+   "source_sha256": "6304a1ef4eded11ffa3352611e5457d58969de82745038569ee5357af8b81c05",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::a_refused_completion_is_not_replayed"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_live_completion_transport.py::test_transport_failure_is_bounded_by_attempts_and_deadline",
+   "source_sha256": "6304a1ef4eded11ffa3352611e5457d58969de82745038569ee5357af8b81c05",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::completion_stops_after_three_lost_replies",
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::an_unresolved_request_keeps_the_deny_at_the_deadline"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_daemon_hook_resume.py::test_pending_pretool_approval_requires_safe_request_id",
+   "source_sha256": "9abf0835eb3d0a08cae68e7f94630b3581630e380cc37a54730f447ea80001a2",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::pending_requests_match_python"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_daemon_hook_resume.py::test_resolution_action_rejects_terminal_or_unknown_policy",
+   "source_sha256": "9abf0835eb3d0a08cae68e7f94630b3581630e380cc37a54730f447ea80001a2",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::resolutions_map_as_python_maps_them"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_daemon_hook_resume.py::test_pending_pretool_parses_request_binding_from_reason",
+   "source_sha256": "9abf0835eb3d0a08cae68e7f94630b3581630e380cc37a54730f447ea80001a2",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::pending_requests_match_python"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_codex_daemon_hook_resume.py::test_poll_resolution_treats_http_exception_as_transient",
+   "source_sha256": "9abf0835eb3d0a08cae68e7f94630b3581630e380cc37a54730f447ea80001a2",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/codex_hook_bridge_approval_tests.rs::a_lost_poll_reply_is_asked_again"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python Codex approval wait. The native bridge parses the pending request, waits for the browser decision and asks the daemon to record it."
+  },
+  {
+   "old_node": "tests/test_hook_pager_default_equivalence.py::test_frozen_bridge_drops_context_rather_than_exceed_request_limit",
+   "source_sha256": "2e5284272237e54b2dccf7dfcecefa5c2806a33974647a6d0668693b14c1d915",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/hook_env_stamp_tests.rs::oversized_stamp_and_hint_forward_input_unchanged"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired frozen-entry copy of the hook context stamp. The native bridge stamps and bounds the hook input."
+  },
+  {
+   "old_node": "tests/test_hook_pager_default_equivalence.py::test_frozen_bridge_forwards_original_input_when_hints_leave_no_room",
+   "source_sha256": "2e5284272237e54b2dccf7dfcecefa5c2806a33974647a6d0668693b14c1d915",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/hook_env_stamp_tests.rs::oversized_stamp_and_hint_forward_input_unchanged"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired frozen-entry copy of the hook context stamp. The native bridge stamps and bounds the hook input."
   }
  ],
  "preserved_tests": [
@@ -7732,6 +7943,11 @@
    "old_node": "tests/test_npm_source_spec.py::test_git_approval_fingerprint_uses_canonical_repository_and_exact_commit",
    "new_node": "tests/test_guard_package_intent.py::test_git_approval_fingerprint_uses_canonical_repository_and_exact_commit",
    "reason": "Approval-fingerprint equivalence exercises the native package-intent artifact path, not the retired Python source parser, so it moves to the package-intent suite unchanged."
+  },
+  {
+   "old_node": "tests/test_codex_daemon_hook_resume.py::test_codex_json_pretool_package_install_reason_includes_request",
+   "new_node": "tests/test_guard_phase04_harness_ux.py::test_codex_json_pretool_package_install_names_its_request",
+   "reason": "The hook's package-install denial still names its approval request; the check reads the request id and approval link carried in the hook output fields now that the Python reason parser is gone."
   },
   {
    "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_kubernetes_secret_source",

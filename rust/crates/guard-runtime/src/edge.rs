@@ -23,6 +23,8 @@ use edge_identity::{
     verdict_policy_identity, MAX_EVENT_BYTES, MAX_HARNESS_BYTES, MAX_PATH_BYTES,
 };
 pub(crate) use edge_identity::{policy_generation_matches, stable_policy_identity};
+#[path = "edge_result_check.rs"]
+mod edge_result_check;
 
 /// Bind the exact validated tool intent without policy-generation identity.
 /// Policy evaluation remains bound by `request_identity`; this commitment is
@@ -283,15 +285,6 @@ fn validate_envelope_shape(envelope: &GuardHookEnvelopeV2) -> Result<(), String>
     Ok(())
 }
 
-fn validate_pre_tool_result(result: &Value) -> Result<(), String> {
-    let typed: guard_contracts::PreToolResultV1 = serde_json::from_value(result.clone())
-        .map_err(|_| "native_hook_pre_tool_result_invalid".to_owned())?;
-    if typed.schema != "guard-pre-tool-result.v1" || typed.authority != "rust" {
-        return Err("native_hook_pre_tool_result_schema_invalid".to_owned());
-    }
-    Ok(())
-}
-
 fn evaluate_validated_envelope(
     envelope: GuardHookEnvelopeV2,
     policy_snapshot: Option<&AdmittedPolicySnapshot>,
@@ -370,7 +363,7 @@ fn evaluate_validated_envelope(
             let evaluated = runtime_risk::apply_to_envelope(&envelope, policy_snapshot, evaluated);
             let value = serde_json::to_value(evaluated)
                 .map_err(|_| "native_hook_edge_response_invalid".to_owned())?;
-            validate_pre_tool_result(&value)?;
+            edge_result_check::validate_pre_tool_result(&value)?;
             let typed = serde_json::from_value::<PreToolResultV1>(value.clone())
                 .map_err(|_| "native_hook_pre_tool_result_invalid".to_owned())?;
             let receipt = receipt_from_pre_tool(
@@ -453,7 +446,7 @@ fn evaluate_validated_envelope(
         // Guard's Claude Code notice outside Watch; the typed result's reason is always text.
         let _ = crate::hook_direct::claude_prompt_text::brand(response, &result);
     }
-    crate::encode_response(&GuardHookEdgeResultV2 {
+    let edge = GuardHookEdgeResultV2 {
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),
         schema: GUARD_HOOK_EDGE_RESULT_V2_SCHEMA.to_owned(),
@@ -465,7 +458,9 @@ fn evaluate_validated_envelope(
         result,
         harness_response,
         receipt,
-    })
+    };
+    edge_result_check::check(&edge)?;
+    crate::encode_response(&edge)
 }
 
 /// Evaluate a resident hook envelope against the already-installed in-memory

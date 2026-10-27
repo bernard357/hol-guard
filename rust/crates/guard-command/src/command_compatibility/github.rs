@@ -95,6 +95,16 @@ fn literal_everywhere(text: &str, target: char) -> bool {
     true
 }
 
+/// `--jq @tsv`: a bare jq rendering format given as the whole filter, which
+/// names a formatter rather than a file.
+fn bare_jq_format(original: &[String], index: usize) -> bool {
+    index > 0
+        && matches!(original[index - 1].as_str(), "--jq" | "-q")
+        && original[index]
+            .strip_prefix('@')
+            .is_some_and(crate::pretool::safe_reads::jq_rendering_format)
+}
+
 fn classify(original: &[String], text: &str) -> Capabilities {
     // Quoted dynamic-looking values are deliberately outside this small native
     // grammar too. Distinguishing their expansion provenance needs literal proof.
@@ -103,10 +113,10 @@ fn classify(original: &[String], text: &str) -> Capabilities {
     // A backtick the raw text escapes or single-quotes is Markdown code
     // formatting in a body, never a command substitution.
     let graphql = original.len() > 1 && original[0] == "api" && original[1] == "graphql";
-    if original.iter().any(|value| {
+    if original.iter().enumerate().any(|(index, value)| {
         value.contains('\0')
             || (value.contains('`') && !literal_everywhere(text, '`'))
-            || value.starts_with('@')
+            || (value.starts_with('@') && !bare_jq_format(original, index))
             || (value.contains('$')
                 && !(graphql
                     && literal_everywhere(text, '$')
@@ -127,7 +137,7 @@ fn classify(original: &[String], text: &str) -> Capabilities {
                     .then(|| original.get(index + 1).map_or("", String::as_str))
             })
     });
-    if filters.any(|filter| !api::jq_is_static(filter)) {
+    if filters.any(|filter| !api::jq_is_static(filter) || !api::jq_formats_are_bare(filter)) {
         return None;
     }
     options::validate_selectors(original)?;

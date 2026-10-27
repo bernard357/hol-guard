@@ -53,15 +53,15 @@ def _valid_native_receipt() -> dict[str, object]:
 
 
 @pytest.mark.parametrize("writer_accepted", [True, False])
-def test_native_receipt_link_requires_validated_receipt(writer_accepted: bool) -> None:
+def test_native_receipt_link_records_the_edge_receipt(writer_accepted: bool) -> None:
     from codex_plugin_scanner.guard.daemon.hook_worker_native import HookWorkerNativeMixin
 
     host = SimpleNamespace(
         activity_writer=SimpleNamespace(submit_native_decision_receipt=lambda **kwargs: writer_accepted),
         _last_native_decision_receipt=None,
     )
-    incomplete = {"decision_id": "native-receipt-example"}
-    assert HookWorkerNativeMixin._record_native_decision_receipt(host, incomplete) is None
+    # The edge checked the receipt before it answered; only a non-mapping is refused here.
+    assert HookWorkerNativeMixin._record_native_decision_receipt(host, ["not", "a", "receipt"]) is None
     assert host._last_native_decision_receipt is None
     receipt = _valid_native_receipt()
     result = HookWorkerNativeMixin._record_native_decision_receipt(host, receipt)

@@ -109,6 +109,8 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "native-business-source-current-fence-v2".into(),
         "hook-envelope-v2".into(),
         "hook-harness-response-v1".into(),
+        // The edge checks its own result and receipt before it answers.
+        "edge-self-check-v1".into(),
         "git-execution-context-v1".into(),
         "native-resident-client-v1".into(),
         "shell-helpers-v1".into(),
@@ -233,6 +235,7 @@ pub(crate) enum ResidentOperationV1 {
     ApprovalBulkEligibility(ApprovalBulkEligibilityRequestV1),
     CodexRequestResume(CodexRequestResumeRequestV1),
     ApprovalQueueIdentity(ApprovalQueueIdentityRequestV1),
+    ExtensionControlTerminal(guard_contracts::ExtensionControlTerminalRequestV1),
     ApprovalResolutionPlan(ApprovalResolutionPlanRequestV1),
     ApprovalScope(ApprovalScopeRequestV1),
     ApprovalScopeSelect(guard_contracts::ApprovalScopeSelectRequestV1),
@@ -361,6 +364,7 @@ pub(crate) enum ResidentOperationV1 {
     AibomReportSummaries(guard_contracts::AibomReportSummariesRequestV1),
     RetryLineageCapture(guard_contracts::RetryLineageCaptureRequestV1),
     AdapterStateIntegrity(guard_contracts::AdapterStateIntegrityRequestV1),
+    ProtectionHealthReport(guard_contracts::ProtectionHealthReportRequestV1),
     Health(Value),
     Shutdown(Value),
 }

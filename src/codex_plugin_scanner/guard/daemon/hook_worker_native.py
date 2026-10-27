@@ -679,14 +679,12 @@ class HookWorkerNativeMixin:
         return (response, True)
 
     def _record_native_decision_receipt(self: _HookWorkerNativeHost, receipt: object) -> Mapping[str, object] | None:
-        """Accept only a validated Rust receipt; persistence remains best-effort."""
-
-        from ..native_decision_receipt import validate_native_decision_receipt
+        """Record the edge's receipt; the edge checked it before answering. Persistence is best-effort."""
 
         self._last_native_decision_receipt = None
-        accepted = validate_native_decision_receipt(receipt)
-        if accepted is None:
+        if not isinstance(receipt, dict):
             return None
+        accepted: dict[str, object] = receipt
         writer = self.activity_writer
         submit = getattr(writer, "submit_native_decision_receipt", None)
         if callable(submit):

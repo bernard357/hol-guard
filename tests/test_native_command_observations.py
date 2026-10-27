@@ -15,7 +15,6 @@ from codex_plugin_scanner.guard.native_decision_receipt import (
     receipt_matches_edge,
     validate_native_decision_receipt,
 )
-from codex_plugin_scanner.guard.native_hook_edge import _decode_pre_tool_result
 
 
 def _evidence() -> dict[str, object]:
@@ -239,72 +238,3 @@ def test_unknown_fields_duplicates_limits_and_unbound_error_reject() -> None:
     bad["evaluation_error"] = "native_command_evaluation_failed"
     _rehash(bad)
     assert validate_native_command_observations(bad) is None
-    valid_result = {
-        "schema": "guard-pre-tool-result.v1",
-        "version": 1,
-        "authority": "rust",
-        "action": {
-            "schema": "guard-pre-tool-action.v1",
-            "version": 1,
-            "harness": "claude-code",
-            "event": "PreToolUse",
-            "action_type": "command",
-            "operation": "execute",
-            "bounded": True,
-            "sensitive_target": False,
-        },
-        "decision": "deny",
-        "policy_action": "block",
-        "minimum_action": "block",
-        "reason_code": "native_command_extension_evaluation_failed",
-        "reason": "HOL Guard rejected malformed native extension evidence.",
-        "explicitly_benign": False,
-        "command_extensions": bad,
-    }
-    assert not _decode_pre_tool_result(valid_result, harness="claude-code")
-
-
-@pytest.mark.parametrize(
-    ("rule_id", "reason_code"),
-    (
-        ("command.shell-mutations.destructive-shell", "native_workspace_containment_required"),
-        ("command.ollama.push", "native_workspace_containment_required"),
-        ("command.shell-mutations.destructive-shell", "native_pytest_readonly_containment_required"),
-    ),
-)
-def test_the_edge_trusts_the_resident_floor_for_an_uncertain_match(rule_id: str, reason_code: str) -> None:
-    # The floor is Rust's to choose; the edge checks only the receipt's shape.
-    extensions = _observations()
-    observation = extensions["observations"][0]
-    observation.update(
-        extension_id=rule_id.rsplit(".", 1)[0],
-        rule_id=rule_id,
-        match_class="uncertainty",
-        match_classes=["unsafe", "uncertainty"],
-        uncertainty_reasons=["matcher-failure"],
-    )
-    extensions["binding"]["uncertainty_count"] = 1
-    _rehash(extensions)
-    result = {
-        "schema": "guard-pre-tool-result.v1",
-        "version": 1,
-        "authority": "rust",
-        "action": {
-            "schema": "guard-pre-tool-action.v1",
-            "version": 1,
-            "harness": "claude-code",
-            "event": "PreToolUse",
-            "action_type": "command",
-            "operation": "execute",
-            "bounded": True,
-            "sensitive_target": False,
-        },
-        "decision": "deny",
-        "policy_action": "sandbox-required",
-        "minimum_action": "sandbox-required",
-        "reason_code": reason_code,
-        "reason": "HOL Guard runs this command in a protected workspace sandbox.",
-        "explicitly_benign": False,
-        "command_extensions": extensions,
-    }
-    assert _decode_pre_tool_result(result, harness="claude-code") is True
