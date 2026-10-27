@@ -25,6 +25,11 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+from codex_plugin_scanner.guard.native_resident_revival import (
+    NATIVE_RUNTIME_DEAD_REASON,
+    NATIVE_RUNTIME_DEAD_REASON_CODE,
+)
+
 FAILED_START_WINDOW_SECONDS = 120.0
 FAILED_START_MARKER = "daemon-start-failed.json"
 DEAD_DAEMON_REASON_CODE = "daemon_dead_repair_needed"
@@ -39,12 +44,6 @@ DAEMON_START_MARKERS = (
 DAEMON_START_MARKER_WINDOW_SECONDS = 180.0
 _DAEMON_START_MARKER_MAX_BYTES = 4096
 _DAEMON_STATE_MAX_BYTES = 65536
-NATIVE_RUNTIME_DEAD_REASON_CODE = "native_resident_restart_circuit_open"
-# The one copy of this denial: the bridge, the daemon hook worker and the pool all use it.
-NATIVE_RUNTIME_DEAD_REASON = (
-    "HOL Guard's native runtime is not running and could not be restarted. "
-    "Run `hol-guard repair` in a terminal, then retry."
-)
 
 
 def _marker_path(state_path: str | Path) -> Path:
