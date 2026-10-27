@@ -380,8 +380,8 @@ def project_supply_chain_findings(
         fix_version = _text(package.get("recommendedFixVersion"))
         if (earlier := findings.get(finding_id)) is not None:
             # The same package listed twice is more evidence for one finding.
-            rule_ids.update(earlier["rule_ids"])
-            advisories.update(earlier["advisory_ids"])
+            rule_ids.update(_strings(earlier["rule_ids"]))
+            advisories.update(_strings(earlier["advisory_ids"]))
             severity = min(severity, earlier["severity"], key=_SEVERITY_ORDER.index)
             decision = min(decision, earlier["decision"], key=("block", "ask", "warn").index)
             fix_version = earlier["fix_version"] or fix_version
