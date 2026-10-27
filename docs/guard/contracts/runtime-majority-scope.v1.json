@@ -576,6 +576,10 @@
         "reason": "Retained conservatively in runtime scope: installed-upgrade recovery imports the existing authority phase and error contracts from this proof module. Count the complete module, including its proof helpers, rather than exclude code reached by startup recovery. Installed-upgrade authorization remains native."
       },
       {
+        "path": "src/codex_plugin_scanner/guard/stable_digest.py",
+        "reason": "Reviewed shared digest helper: review claim hashing, exact cloud review and package request evaluation reach it through lazy imports now that policy bundle key handling no longer imports it eagerly. Count the complete module in runtime scope; no runtime behavior is excluded."
+      },
+      {
         "path": [
           "src/codex_plugin_scanner/guard/adapters/_modules/pi/__init__.py",
           "src/codex_plugin_scanner/guard/adapters/_modules/zcode/__init__.py"

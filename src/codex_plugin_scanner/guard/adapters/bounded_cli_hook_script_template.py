@@ -135,9 +135,9 @@ def _quote_home(home: str, windows: bool) -> str | None:
 # the flag that names a store: `--home` also reaches it, but it moves the home
 # directory too, to a directory nobody lives in. It goes on `command`; the
 # `recover-authority` leaf takes no options. This copy of the decision has to
-# match the native bridge's `remediation_for_home`, because the script cannot
-# import it; tests/test_zcode_hooks.py pins the two to each other through a
-# Python reference.
+# match `zcode_hooks._authority_block_remediation` and the native bridge's
+# `remediation_for_home`, because the script cannot import either; the three
+# are pinned to each other in tests/test_zcode_hooks.py.
 def _authority_remediation() -> str:
     try:
         home_dir = Path.home()
