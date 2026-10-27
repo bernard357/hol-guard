@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..native_decision_receipt import receipt_matches_edge, validate_native_decision_receipt
+from ..native_decision_receipt import edge_receipt
 
 # v2 drops ``policy_digest``: it is ``H(config_digest, rule_digest)`` over the
 # whole compiled snapshot, so it moves whenever the publisher republishes, even
@@ -31,16 +31,8 @@ def native_review_policy_binding(
     receipt_bound = isinstance(verified_receipt, Mapping) and "command_extensions" in verified_receipt
     if "command_extensions" not in native_result and not receipt_bound:
         return None
-    receipt = validate_native_decision_receipt(verified_receipt)
-    if receipt is None or not receipt_matches_edge(
-        {
-            "harness": harness,
-            "event_name": "PreToolUse",
-            "payload_kind": receipt["payload_kind"],
-            "result": native_result,
-        },
-        receipt,
-    ):
+    receipt = edge_receipt(harness, native_result, verified_receipt)
+    if receipt is None:
         raise ValueError("native_review_policy_binding_invalid")
     if any(not isinstance(receipt.get(field), str) for field in ("policy_digest", "rule_digest", "runtime_identity")):
         raise ValueError("native_review_policy_binding_invalid")
