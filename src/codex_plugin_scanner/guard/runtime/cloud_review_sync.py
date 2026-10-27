@@ -6,8 +6,10 @@ import urllib.error
 from datetime import datetime, timezone
 from typing import Any
 
+from ..config import VALID_RECEIPT_REDACTION_LEVELS, load_guard_config
 from ..review_contracts import GuardReviewContractError, guard_review_oauth_metadata
 from ..store import GuardStore
+from ..synced_policy import validated_synced_policy_bundle
 from .cloud_request_native import cloud_error_text
 from .cloud_review_batching import (
     CloudReviewBatchLimits,
@@ -20,7 +22,6 @@ from .cloud_review_event_delivery import post_review_events
 from .cloud_review_event_projection import build_cloud_review_event, project_cloud_review_event
 from .cloud_review_retry_recovery import recover_rejected_review_events, retry_result_message
 from .cloud_review_sync_auth import resolve_cloud_review_sync_auth_context as _resolve_cloud_review_sync_auth_context
-from .local_request_snapshots import _resolve_cloud_receipt_redaction_level
 from .native_workspace_review_context import NativeWorkspaceReviewContextProbeState
 from .native_workspace_review_replay import (
     _PROBE_STATE_ATTRIBUTE,
@@ -45,6 +46,21 @@ __all__ = [
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _resolve_cloud_receipt_redaction_level(store: GuardStore) -> str:
+    policy_bundle = validated_synced_policy_bundle(store)
+    if policy_bundle is not None:
+        level = policy_bundle.get("receiptRedactionLevel")
+        if isinstance(level, str) and level in VALID_RECEIPT_REDACTION_LEVELS:
+            return level
+    try:
+        config = load_guard_config(store.guard_home)
+        if config.receipt_redaction_level in VALID_RECEIPT_REDACTION_LEVELS:
+            return config.receipt_redaction_level
+    except (OSError, ValueError):
+        pass
+    return "full"
 
 
 def _redacted_error(error: BaseException) -> str:

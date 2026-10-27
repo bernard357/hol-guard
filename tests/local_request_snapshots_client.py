@@ -1,4 +1,4 @@
-"""Store reads for the Cloud-safe local approval request snapshot.
+"""Test driver for the native Cloud-safe local approval request snapshot op.
 
 This module only reads the local store: request rows, paging cursors, review
 claims and routing identifiers. The native owner projects every row into its
@@ -14,16 +14,15 @@ from collections.abc import Mapping
 from contextlib import suppress
 from datetime import datetime, timezone
 
-from ..config import VALID_RECEIPT_REDACTION_LEVELS, load_guard_config
-from ..review_contracts import (
+from codex_plugin_scanner.guard.review_contracts import (
     GuardReviewContractError,
     GuardReviewOAuthMetadata,
     build_local_review_request_claim,
     guard_review_oauth_metadata,
 )
-from ..store import GuardStore
-from ..synced_policy import validated_synced_policy_bundle
-from .cloud_request_native import local_request_snapshot, project_request_row
+from codex_plugin_scanner.guard.runtime.cloud_request_native import local_request_snapshot, project_request_row
+from codex_plugin_scanner.guard.runtime.cloud_review_sync import _resolve_cloud_receipt_redaction_level
+from codex_plugin_scanner.guard.store import GuardStore
 
 LOCAL_REQUEST_PENDING_SNAPSHOT_LIMIT = 125
 LOCAL_REQUEST_RESOLVED_SNAPSHOT_LIMIT = 25
@@ -175,21 +174,6 @@ def _local_request_snapshot_next_cursor(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
     ).decode("ascii")
     return encoded.rstrip("=")
-
-
-def _resolve_cloud_receipt_redaction_level(store: GuardStore) -> str:
-    policy_bundle = validated_synced_policy_bundle(store)
-    if policy_bundle is not None:
-        level = policy_bundle.get("receiptRedactionLevel")
-        if isinstance(level, str) and level in VALID_RECEIPT_REDACTION_LEVELS:
-            return level
-    try:
-        config = load_guard_config(store.guard_home)
-        if config.receipt_redaction_level in VALID_RECEIPT_REDACTION_LEVELS:
-            return config.receipt_redaction_level
-    except (OSError, ValueError):
-        pass
-    return "full"
 
 
 def _usable(value: object) -> bool:

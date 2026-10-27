@@ -423,8 +423,9 @@ def test_shipped_scope_keeps_synchronous_hook_path_modules_in_scope(shipped_repo
     # rejected in the native capture parser. inventory_contract_fingerprints left
     # when AIBOM hashing moved into the resident. custom_extension_suggestion left
     # when the resident took over ranking the local CLI inventory.
+    # package_json_scripts left when the hook path stopped asking Python for
+    # package-script command ids.
     required = [
-        "runtime/package_json_scripts.py",
         "cli/render.py",
         "aibom_detection.py",
         "store_receipt_rollup_schema.py",

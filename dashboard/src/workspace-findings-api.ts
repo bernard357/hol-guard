@@ -50,6 +50,11 @@ export type WorkspaceFinding = {
   fixVersion: string | null;
   advisoryIds: string[];
   /**
+   * True when the latest scan could not recheck this finding (its detector did
+   * not finish), so it is still listed from the run that last observed it.
+   */
+  carried: boolean;
+  /**
    * Root-relative file path of a secret or skill finding, or the executable
    * path of a runtime finding. Guard never receives the secret itself.
    */
@@ -173,6 +178,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     decision: text(item.decision) ?? "warn",
     ruleIds: strings(item.rule_ids),
     advisoryIds: strings(item.advisory_ids),
+    carried: text(item.carried_from_run_id) !== null,
   };
   if (item.source_kind === "secret") {
     const path = text(item.path);
