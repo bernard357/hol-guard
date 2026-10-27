@@ -805,12 +805,14 @@ fn yarn_selector_name(selector: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn bun_lock_dependency_map(text: &str, deadline: &Deadline) -> ParseResult<DepMap> {
-    bun_lock_first_versions(text, deadline)
+    bun_lock_versions(text, deadline)
 }
 
-/// `_bun_lock_package_versions` (:290-310) reduced to what `_bun_lock_dependency_map`
-/// keeps: the first version of each package, in first-seen document order.
-fn bun_lock_first_versions(text: &str, deadline: &Deadline) -> ParseResult<DepMap> {
+/// `_bun_lock_package_versions` (:290-310): every version of each package, in
+/// first-seen document order. The first version stays the current one, as
+/// `_bun_lock_dependency_map` keeps it; the others are earlier versions, so
+/// the complete lockfile parse still lists every installed copy.
+fn bun_lock_versions(text: &str, deadline: &Deadline) -> ParseResult<DepMap> {
     deadline.ensure()?;
     // loads_jsonc(text or "{}", deadline_check=...) (:292) — thread the
     // deadline into normalize_jsonc_checked so the check fires mid-pass.
@@ -831,7 +833,8 @@ fn bun_lock_first_versions(text: &str, deadline: &Deadline) -> ParseResult<DepMa
     };
     // `payload.get("packages", {})` — dict.get returns the value of the LAST
     // occurrence of a duplicated key.
-    let mut first_versions = DepMap::new();
+    let mut versions = DepMap::new();
+    let mut first_versions: Vec<(String, String)> = Vec::new();
     // `payload.get("packages", {})` — a missing key yields the empty-dict
     // default and iterates nothing; a non-dict value is a shape error (:298).
     if let Some(packages) = jsonc_pairs_get(&payload_pairs, "packages") {
@@ -849,12 +852,16 @@ fn bun_lock_first_versions(text: &str, deadline: &Deadline) -> ParseResult<DepMa
             let Some((package_name, version)) = bun_resolution_identity(resolution) else {
                 continue;
             };
-            if !first_versions.contains_key(&package_name) {
-                first_versions.insert(package_name, version);
+            if !versions.contains_key(&package_name) {
+                first_versions.push((package_name.clone(), version.clone()));
             }
+            versions.insert(package_name, version);
         }
     }
-    Ok(first_versions)
+    for (package_name, version) in first_versions {
+        versions.insert(package_name, version);
+    }
+    Ok(versions)
 }
 
 /// `dict.get(key)` semantics over `JsoncPairs::Object` pairs — the value of
