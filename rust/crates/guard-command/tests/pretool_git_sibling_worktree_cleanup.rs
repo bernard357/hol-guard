@@ -75,6 +75,16 @@ fn assert_reviewed(session: &Session, command: &str) {
     );
 }
 
+/// A plain climb is proved for read-only steps only, so it may stay reviewed
+/// where its absolute spelling is not, but never decides differently once
+/// it passes.
+fn assert_read_climb(session: &Session, relative: &str, absolute: &str) {
+    let (action, reason) = verdict(session, relative);
+    if matches!(action.as_str(), "allow" | "warn") {
+        assert_eq!((action, reason), verdict(session, absolute), "{relative}");
+    }
+}
+
 #[test]
 fn committing_in_a_linked_worktree_beside_the_checkout_is_a_local_write() {
     let (session, _) = report_worktree("report-commit");
@@ -95,7 +105,8 @@ fn committing_in_a_linked_worktree_beside_the_checkout_is_a_local_write() {
         );
     }
     for command in [
-        // A `..` after a name is not a plain climb.
+        // Only a plain climb to the worktree root is proved.
+        "cd ../report-wt/reports && git add weekly.md",
         "cd ../report-wt/../report-wt && git add reports/weekly.md",
         // Other steps keep their own proofs.
         "cd ../report-wt && git add reports/weekly.md && rm -rf build",
@@ -103,24 +114,11 @@ fn committing_in_a_linked_worktree_beside_the_checkout_is_a_local_write() {
     ] {
         assert_reviewed(&session, command);
     }
-    // A plain climb from the canonical cwd is judged as its absolute spelling.
-    let org = session.org.display();
-    for (relative, absolute) in [
-        (
-            "cd ../report-wt/reports && git add weekly.md".to_owned(),
-            format!("cd {org}/report-wt/reports && git add weekly.md"),
-        ),
-        (
-            "cd .. && git status --short".to_owned(),
-            format!("cd {org} && git status --short"),
-        ),
-    ] {
-        assert_eq!(
-            verdict(&session, &relative),
-            verdict(&session, &absolute),
-            "{relative}"
-        );
-    }
+    assert_read_climb(
+        &session,
+        "cd .. && git status --short",
+        &format!("cd {} && git status --short", session.org.display()),
+    );
 }
 
 #[test]
@@ -204,18 +202,13 @@ fn siblings_that_are_not_linked_worktrees_of_the_session_stay_reviewed() {
     // A symlinked spelling of the real worktree.
     std::os::unix::fs::symlink(&worktree, session.org.join("alias-wt")).unwrap();
     for name in ["other", "other-wt", "linked-git", "alias-wt"] {
-        // A read is judged as its absolute spelling, except through the
-        // symlinked spelling, which a relative climb never follows.
+        // A relative climb never follows the symlinked spelling.
         let status = format!("cd ../{name} && git status --short");
         if name == "alias-wt" {
             assert_reviewed(&session, &status);
         } else {
             let absolute = format!("cd {}/{name} && git status --short", session.org.display());
-            assert_eq!(
-                verdict(&session, &status),
-                verdict(&session, &absolute),
-                "{status}"
-            );
+            assert_read_climb(&session, &status, &absolute);
         }
         for command in [
             format!("cd ../{name} && git add README.md && git commit -m x"),

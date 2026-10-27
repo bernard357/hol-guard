@@ -33,8 +33,9 @@ pub(crate) fn linked_root(value: &str, cwd: &Path) -> Option<PathBuf> {
 /// The directory a relative `cd` operand made of a leading run of `..` and
 /// then plain names reaches from `cwd`, as in `cd ..` or `cd ../app`. It is
 /// the same directory the absolute spelling of that path names, which the
-/// caller proves an unaliased, readable directory, so the climb reaches
-/// nothing an absolute `cd` would not.
+/// caller proves an unaliased, readable directory. Only read-only steps are
+/// proved after it: a write or Git write route reached through a relative
+/// `cd` assumes a target in the workspace or a linked worktree of it.
 ///
 /// In its default logical mode, `cd ..` is `cd "$(dirname "$PWD")"`. The
 /// `$PWD` projection (see `chain_literals_pwd`) already reads `$PWD` as the

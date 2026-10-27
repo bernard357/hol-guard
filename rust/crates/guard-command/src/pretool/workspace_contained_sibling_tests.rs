@@ -249,9 +249,6 @@ fn a_list_after_cd_into_a_sibling_root_runs_contained_there() {
         // `..` into a linked worktree of the session's repository is that
         // worktree's root, as the checkout a chain creates beside it is.
         "cd ../app-report && node scripts/report.mjs && cat reports/weekly.md".to_owned(),
-        // A plain climb to a sibling repository's root is that root, as its
-        // absolute spelling is.
-        "cd ../other && npm run build && ls dist".to_owned(),
     ] {
         assert_eq!(
             contained(&reason("omp", &home, &main, &command)),
@@ -267,7 +264,9 @@ fn a_sibling_cd_the_sink_would_not_rebase_keeps_its_review() {
     let (home, main, _tree) = fixture();
     let projects = main.parent().unwrap();
     for command in [
-        // A relative climb to a directory that is not a repository root.
+        // A relative parent is proved only into a linked worktree of the
+        // session's repository.
+        "cd ../other && npm run build && ls dist".to_owned(),
         "cd ../plain && npm run build && ls dist".to_owned(),
         "cd .. && npm run build && ls dist".to_owned(),
         // Not a repository root, or no repository at all.
