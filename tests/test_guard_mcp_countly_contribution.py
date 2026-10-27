@@ -29,9 +29,9 @@ def test_countly_package_identity_is_external_and_opt_in() -> None:
     assert contribution["activation"] == "opt-in"
     assert contribution["trustClass"] == "external"
     assert contribution["publisher"] == {
-        "id": "countly.com",
-        "displayName": "Countly",
-        "url": "https://countly.com",
+        "id": "community.kantorcodes",
+        "displayName": "Michael Kantor (HOL)",
+        "url": "https://github.com/kantorcodes",
     }
     assert contribution["launch"] == {
         "kind": "package-launcher",
