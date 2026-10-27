@@ -933,7 +933,17 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
         raise _StoppedError("failed", f"{_claude_unreadable(context.home)}, so it changed nothing.")
     had_plugin, prior = found
     if had_plugin and prior is None and _claude_source_command(context.home, plugin_id) is not None:
-        # Installed earlier by running its declared command: no commit to compare.
+        # Installed earlier by running its declared command: such a record keeps
+        # the command, not a commit, so the marketplace checkout it came from is
+        # the only commit there is to hold against the one HOL scanned.
+        head = _claude_marketplace_head(context.home, marketplace)
+        if expected and head != expected:
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code already has {plugin_id} from the {marketplace} marketplace at commit "
+                f"{_short(head)}, not the commit HOL scanned ({_short(expected)}), so Guard did not change it. "
+                f"To install what HOL scanned, remove it first with: claude plugin uninstall {plugin_id}",
+            )
         raise _AlreadyDoneError("already installed")
     if had_plugin and expected and prior != expected:
         raise _StoppedError(
@@ -988,6 +998,17 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
                 else f"The install command was not accepted, so nothing ran. To run it, add --accept-command {digest}."
             )
             raise _StoppedError("blocked", f"{reason}{undo_marketplace()}")
+        # Running the command is not undoable, so hold the checkout that
+        # declares it against the scanned commit before it runs; the check
+        # after the install still catches a checkout moved while it ran.
+        head = _claude_marketplace_head(context.home, marketplace)
+        if expected and head != expected:
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code's {marketplace} checkout is at commit {_short(head)}, not the commit HOL "
+                f"scanned ({_short(expected)}), so Guard did not let the install command "
+                f"run.{undo_marketplace()}",
+            )
         completed = run_install([*arguments, "--accept-command", digest])
         reply = _reply(completed.stdout)
     try:

@@ -106,6 +106,7 @@ class FakeRuntimes:
         self.declared_ran = "node setup.js"
         self.claude_marketplace = root / "claude-marketplace"
         self.claude_marketplace_head = SCANNED
+        self.head_after_install: str | None = None
         self.exit_codes: dict[tuple[str, ...], int] = {}
         self.raise_on: tuple[tuple[str, ...], BaseException] | None = None
 
@@ -165,6 +166,11 @@ class FakeRuntimes:
                 entry = {"sourceCommand": self.declared_ran} if self.declared else {"gitCommitSha": self.claude_commit}
                 installed["plugins"][args[2]] = [{"scope": "user", **entry}]
                 self._save("installed_plugins.json", installed)
+                if self.head_after_install:
+                    # The marketplace checkout moved while the install ran.
+                    head = self.claude_marketplace / ".git" / "HEAD"
+                    head.parent.mkdir(parents=True, exist_ok=True)
+                    head.write_text(f"{self.head_after_install}\n", encoding="utf-8")
                 reply = {"command": "install", "outcome": "ok", "pluginId": args[2]}
         elif program == "claude" and args[:2] == ["plugin", "uninstall"]:
             installed = self._state("installed_plugins.json")
@@ -1379,18 +1385,18 @@ def test_help_lists_plugin_and_each_command_has_examples(monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize(
-    ("ran", "head", "reason"),
+    ("ran", "swapped", "reason"),
     [
-        ("node other.js", SCANNED, "ran a different install command than the one Guard showed"),
+        ("node other.js", None, "ran a different install command than the one Guard showed"),
         ("node setup.js", "e" * 40, f"at commit eeeeeee, not the commit HOL scanned ({SCANNED[:7]})"),
     ],
 )
 def test_a_declared_command_install_is_removed_when_it_is_not_what_guard_showed(
-    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path, ran: str, head: str, reason: str
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path, ran: str, swapped: str | None, reason: str
 ) -> None:
     runtimes.declared = DECLARED
     runtimes.declared_ran = ran
-    runtimes.claude_marketplace_head = head
+    runtimes.head_after_install = swapped
     exit_code, _output, error = _install(
         spec_file, "--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED
     )
@@ -1400,3 +1406,42 @@ def test_a_declared_command_install_is_removed_when_it_is_not_what_guard_showed(
     assert ["claude", "plugin", "uninstall", "toolgate@acme"] in runtimes.ran
     assert runtimes.ran[-1] == ["claude", "plugin", "marketplace", "remove", "acme"]
     assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_declared_command_never_runs_from_a_checkout_that_is_not_the_scanned_commit(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    """Running the command is not undoable, so the checkout that declares it is
+    held against the scanned commit before it runs, not only afterwards."""
+
+    runtimes.declared = DECLARED
+    runtimes.claude_marketplace_head = "e" * 40
+    exit_code, _output, error = _install(
+        spec_file, "--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED
+    )
+    assert exit_code == 4
+    assert f"checkout is at commit eeeeeee, not the commit HOL scanned ({SCANNED[:7]})" in error
+    assert "did not let the install command run" in error
+    assert not any("--accept-command" in argv for argv in runtimes.ran)
+    assert runtimes.ran[-1] == ["claude", "plugin", "marketplace", "remove", "acme"]
+    assert install.recorded_installs(guard_home) == {}
+
+
+def test_a_plugin_installed_by_a_command_from_another_commit_is_not_called_already_installed(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    """A record left by a declared command carries no commit of its own, so the
+    checkout it came from is what a repeat install has to check."""
+
+    runtimes.declared = DECLARED
+    base = ("--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED)
+    exit_code, _output, error = _install(spec_file, *base)
+    assert exit_code == 0, error
+
+    (runtimes.claude_marketplace / ".git" / "HEAD").write_text("e" * 40 + "\n", encoding="utf-8")
+    before = len(runtimes.ran)
+    exit_code, _output, error = _install(spec_file, *base)
+    assert exit_code == 4
+    assert f"at commit eeeeeee, not the commit HOL scanned ({SCANNED[:7]})" in error
+    assert "claude plugin uninstall toolgate@acme" in error
+    assert not any(argv[:2] == ["claude", "plugin"] for argv in runtimes.ran[before:])
