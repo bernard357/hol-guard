@@ -80,7 +80,7 @@ assert.equal(
   now - 26 * hour,
   "a failed newer attempt does not refresh the result it left in place",
 );
-assert.equal(summary.needAttention, 2, "out of date and failed workspaces need attention; paused and assessing do not");
+assert.equal(summary.needAttention, 2, "out of date, partial and failed workspaces need attention; paused and assessing do not");
 assert.equal(summary.openFindings, 3);
 assert.equal(summary.openFindingsLowerBound, true, "a capped assessment makes the count a minimum");
 
@@ -113,5 +113,22 @@ const unrun = summarizeCodebaseChecks(
 const unrunMarkup = renderToStaticMarkup(createElement(AuditCodebaseChecksView, { summary: unrun }));
 assert.match(unrunMarkup, /Not yet/, "no check time is shown as not yet, never as a time");
 assert.doesNotMatch(unrunMarkup, /minimum/);
+
+const carried = summarizeCodebaseChecks(
+  normalizeWorkspaceFindingsState(
+    { runs: [], latest_runs: [{ ...fresh, run_id: "a-1", state: "completed", trigger_kind: "file_change" }] },
+    {
+      worktrees: [{ ...fresh, root: "/Users/dev/app", stale: false, paused: false }],
+      assessments: [
+        assessment(fresh, "a-1", now - 5 * 60 * 1000, {
+          coverage: { status: "partial", reasons: ["carried_finding_cap"], detectors: { supply_chain: "complete" } },
+          findings: [finding("4")],
+        }),
+      ],
+    },
+  ),
+);
+assert.equal(carried.openFindingsLowerBound, true, "dropped carried findings also make the count a minimum");
+assert.equal(carried.needAttention, 1, "an up-to-date workspace with partial coverage still needs attention");
 
 console.log("audit codebase checks: ok");

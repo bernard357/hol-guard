@@ -1,5 +1,5 @@
 import { j as jsxRuntimeExports, T as Tag, f as formatRelativeTime, r as reactExports, A as ActionButton, ef as HiMiniChevronLeft, H as HiMiniChevronRight, dk as IconActionButton, _ as HiMiniXMark, cU as GuardModalLayer, cG as HiMiniFunnel, p as HiMiniMagnifyingGlass, eg as HiMiniArrowDown, eh as HiMiniArrowUp, dR as HiMiniFolder, S as SectionLabel, d as HiMiniArrowPath, dp as HiMiniBugAnt, N as EmptyState, aM as HiMiniAdjustmentsHorizontal, ds as ConnectFlowCard, a4 as HiMiniExclamationTriangle, bQ as useResolvedApprovalGate, ei as runAuditRemediation, a6 as Badge, ej as isBlockedGuardAction, di as isSupplyChainAuditEvidence, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, aG as ApprovalProofModal, q as HiMiniDocumentText, bc as guardAwareHref, R as HiMiniShieldCheck } from "../guard-dashboard.js";
-import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-DUKaYs-f.js";
+import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-Beg0N44X.js";
 import { r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-COfFdlBN.js";
 import { c as createLatestRefresh, f as fetchWorkspaceFindings, s as sameWorktree, w as worktreeStatus } from "./workspace-findings-status-Dy4MdN69.js";
 const STEPS = [
@@ -1021,6 +1021,7 @@ function auditPriorityBadgeLabel(results, resolvedIds) {
   return count > 0 ? `${count} high priority` : null;
 }
 const REFRESH_MS = 15e3;
+const FINDING_CAP_REASONS = ["finding_cap", "carried_finding_cap"];
 function summarizeCodebaseChecks(state) {
   const summary = {
     worktrees: state.worktrees.length,
@@ -1041,7 +1042,9 @@ function summarizeCodebaseChecks(state) {
       continue;
     }
     summary.openFindings += assessment.findings.length;
-    if (assessment.reasons.includes("finding_cap")) summary.openFindingsLowerBound = true;
+    if (assessment.reasons.some((reason) => FINDING_CAP_REASONS.includes(reason))) {
+      summary.openFindingsLowerBound = true;
+    }
     const atMs = assessment.finishedAtMs;
     if (atMs === null) continue;
     if (summary.latestCheckAtMs === null || atMs > summary.latestCheckAtMs) summary.latestCheckAtMs = atMs;

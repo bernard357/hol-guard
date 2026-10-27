@@ -6,6 +6,8 @@ import { createLatestRefresh } from "./workspace-findings-refresh";
 import { sameWorktree, worktreeStatus } from "./workspace-findings-status";
 
 const REFRESH_MS = 15_000;
+// A run that hit either cap kept fewer findings than exist, so its count is a minimum.
+const FINDING_CAP_REASONS = ["finding_cap", "carried_finding_cap"];
 
 export type CodebaseCheckSummary = {
   worktrees: number;
@@ -39,7 +41,9 @@ export function summarizeCodebaseChecks(state: WorkspaceFindingsState): Codebase
       continue;
     }
     summary.openFindings += assessment.findings.length;
-    if (assessment.reasons.includes("finding_cap")) summary.openFindingsLowerBound = true;
+    if (assessment.reasons.some((reason) => FINDING_CAP_REASONS.includes(reason))) {
+      summary.openFindingsLowerBound = true;
+    }
     const atMs = assessment.finishedAtMs;
     if (atMs === null) continue;
     if (summary.latestCheckAtMs === null || atMs > summary.latestCheckAtMs) summary.latestCheckAtMs = atMs;
