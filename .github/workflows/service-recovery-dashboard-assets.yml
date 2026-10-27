@@ -101,8 +101,10 @@ jobs:
           bun run build
           assets=../src/codex_plugin_scanner/guard/daemon/static/assets
           test -s "$assets/guard-dashboard.js"
-          test -s "$assets/chunks/home-dashboard.js"
-          grep -q 'Open recovery' "$assets/chunks/home-dashboard.js"
+          home_chunk="$(find "$assets/chunks" -maxdepth 1 -name 'home-dashboard-*.js' -print -quit)"
+          test -n "$home_chunk"
+          test -s "$home_chunk"
+          grep -q 'Open recovery' "$home_chunk"
           if grep -Ern '^(<<<<<<<|=======|>>>>>>>)' "$assets"; then
             echo "Generated Dashboard assets contain merge markers" >&2
             exit 1
