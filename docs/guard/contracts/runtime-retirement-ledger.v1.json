@@ -7947,7 +7947,7 @@
   {
    "old_node": "tests/test_codex_daemon_hook_resume.py::test_codex_json_pretool_package_install_reason_includes_request",
    "new_node": "tests/test_guard_phase04_harness_ux.py::test_codex_json_pretool_package_install_reason_includes_request",
-   "reason": "The hook's package-install denial still names its approval request; the check reads the reason directly now that the Python parser is gone."
+   "reason": "The hook's package-install denial still names its approval request; the check reads the request id and link the hook output carries now that the Python parser is gone."
   }
  ],
  "unchanged_regression_suites": [

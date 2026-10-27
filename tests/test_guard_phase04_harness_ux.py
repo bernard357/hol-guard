@@ -636,8 +636,12 @@ def test_codex_json_pretool_package_install_reason_includes_request(tmp_path: Pa
         },
     )
     payload = _json_line(output)
-    reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
+    request_id = payload["guardApprovalRequestId"]
+    approval_url = payload["guardApprovalUrl"]
     assert exit_code == 0
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert isinstance(reason, str)
-    assert re.search(r"https?://\S+/requests/[A-Za-z0-9_-]{8,128}", reason)
+    assert isinstance(request_id, str)
+    assert re.fullmatch(r"[A-Za-z0-9_-]{8,128}", request_id)
+    assert isinstance(approval_url, str)
+    assert re.match(r"https?://", approval_url)
+    assert request_id in approval_url
