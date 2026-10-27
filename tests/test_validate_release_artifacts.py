@@ -181,17 +181,29 @@ def _restate_metadata_version(wheel: Path, metadata_version: str) -> None:
 
 
 @pytest.mark.parametrize("wheel_name", [f"hol_guard-{VERSION}-py3-none-any.whl", None])
+@pytest.mark.parametrize(
+    "declared",
+    [
+        # A backend that moved its default past what the upload reads.
+        "2.5",
+        # Neither of these is a core metadata version, but PEP 440 reads the
+        # first as equal to 2.4 and the second as below it, so an upper bound
+        # on the parsed version lets both through.
+        "2.4.0",
+        "2.4.dev1",
+    ],
+)
 def test_validate_wheel_set_rejects_core_metadata_the_publisher_cannot_upload(
-    tmp_path: Path, wheel_name: str | None
+    tmp_path: Path, wheel_name: str | None, declared: str
 ) -> None:
-    """A build backend that defaults past 2.4 makes an unpublishable wheel; catch it here."""
+    """Only the exact core metadata versions the publishing toolchain reads may ship."""
 
     platform = NON_WINDOWS[0]
     dist = _dist(tmp_path / "dist", (platform,))
     target = dist / (wheel_name or f"hol_guard-{VERSION}-py3-none-{platform}.whl")
-    _restate_metadata_version(target, "2.5")
+    _restate_metadata_version(target, declared)
 
-    with pytest.raises(ReleaseArtifactError, match="core metadata 2.5"):
+    with pytest.raises(ReleaseArtifactError, match=f"core metadata '{declared}'"):
         validate_wheel_set(
             dist,
             version=VERSION,
