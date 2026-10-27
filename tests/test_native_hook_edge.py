@@ -20,6 +20,7 @@ from codex_plugin_scanner.guard.native_resident_client import (
     native_resident_client_failure_code,
     native_resident_client_request,
 )
+from codex_plugin_scanner.guard.native_route_receipt import native_hook_route
 from codex_plugin_scanner.guard.native_runtime import (
     NativeRuntimeCapabilities,
     NativeRuntimeIdentity,
@@ -382,6 +383,74 @@ def test_command_model_records_allowlisted_error_envelope(
     assert native_resident_client_failure_code() == "native_client_deadline_exceeded"
 
 
+@pytest.mark.parametrize("event", ["PreToolUse", "PostToolUse", "Stop"])
+def test_raw_hook_bridge_refuses_a_resident_whose_edge_does_not_check_itself(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event: str,
+) -> None:
+    # Python no longer re-checks the edge result or receipt, so a resident that
+    # predates the edge self-check must never be asked, even in force mode.
+    runtime = tmp_path / "hol-guard-runtime"
+    runtime.write_bytes(b"runtime")
+    identity = NativeRuntimeIdentity(
+        path=runtime,
+        size=runtime.stat().st_size,
+        mtime_ns=runtime.stat().st_mtime_ns,
+        sha256="a" * 64,
+    )
+    capabilities = NativeRuntimeCapabilities(
+        protocol_version=1,
+        runtime_version="older",
+        rule_digest="b" * 64,
+        build_sha="c" * 40,
+        target="test",
+        features=(
+            "hook-envelope-v2",
+            "hook-harness-response-v1",
+            "native-resident-client-v1",
+            "pre-tool-generic-authority-v1",
+            "git-execution-context-v1",
+        ),
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.native_hook_edge.native_runtime_status",
+        lambda: NativeRuntimeStatus(
+            mode="force",
+            available=True,
+            compatible=True,
+            reason="ready",
+            identity=identity,
+            capabilities=capabilities,
+        ),
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_client(**kwargs: object) -> bytes:
+        calls.append(kwargs)
+        return json.dumps(_edge_result(), separators=(",", ":")).encode()
+
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.native_hook_edge.native_resident_client_request",
+        fake_client,
+    )
+    result = review_raw_hook_native(
+        payload={"hook_event_name": event, "tool_input": {"command": "pwd"}},
+        harness="claude",
+        event=event,
+        guard_home=tmp_path,
+        home_dir=tmp_path,
+        cwd=tmp_path,
+        source_ref_external_allowed=False,
+        observe_mode=False,
+        deadline=None,
+        policy_snapshot={"generation": 1},
+    )
+    assert result is None
+    assert native_hook_route() == "native_fail_safe"
+    assert not calls
+
+
 @pytest.mark.parametrize("request_id", [None, "request-1", "different-request"])
 @pytest.mark.parametrize("execution_context_supported", [True, False])
 def test_raw_hook_bridge_preserves_payload_for_rust_parsing(
@@ -407,6 +476,7 @@ def test_raw_hook_bridge_preserves_payload_for_rust_parsing(
         features=(
             "hook-envelope-v2",
             "hook-harness-response-v1",
+            "edge-self-check-v1",
             "native-resident-client-v1",
             "pre-tool-generic-authority-v1",
             *(["git-execution-context-v1"] if execution_context_supported else []),

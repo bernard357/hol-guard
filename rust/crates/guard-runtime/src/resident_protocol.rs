@@ -108,6 +108,8 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "native-business-source-current-fence-v2".into(),
         "hook-envelope-v2".into(),
         "hook-harness-response-v1".into(),
+        // The edge checks its own result and receipt before it answers.
+        "edge-self-check-v1".into(),
         "git-execution-context-v1".into(),
         "native-resident-client-v1".into(),
         "shell-helpers-v1".into(),

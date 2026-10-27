@@ -236,6 +236,8 @@ def _contract_failures(root: Path) -> list[str]:
             (
                 "pre-tool-command-authority-v1",
                 "pre-tool-generic-authority-v1",
+                # The edge checks its own answer; Python trusts it only then.
+                "edge-self-check-v1",
                 # The resident PreToolUse frame carries the command model
                 # request, now wrapped in the envelope that adds the path
                 # context the lane runs in.
@@ -289,7 +291,10 @@ def _bridge_failures(root: Path) -> list[str]:
     )
     bridge_source = read(command_bridge)
     failures.extend(
-        required_tokens(root / "src/codex_plugin_scanner/guard/native_hook_edge.py", ("pre-tool-generic-authority-v1",))
+        required_tokens(
+            root / "src/codex_plugin_scanner/guard/native_hook_edge.py",
+            ("pre-tool-generic-authority-v1", "edge-self-check-v1"),
+        )
     )
     # The edge checks its own pre-tool result and receipt before it answers.
     failures.extend(

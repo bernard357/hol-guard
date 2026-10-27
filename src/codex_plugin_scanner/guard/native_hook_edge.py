@@ -24,6 +24,9 @@ from .native_runtime_resilience import (
 _EDGE_FEATURE = "hook-envelope-v2"
 _CLIENT_FEATURE = "native-resident-client-v1"
 _RESPONSE_FEATURE = "hook-harness-response-v1"
+# Python no longer re-checks the edge result or receipt; only a resident that
+# checks its own answer may be trusted with it.
+_SELF_CHECK_FEATURE = "edge-self-check-v1"
 _UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
 
@@ -167,7 +170,7 @@ def review_raw_hook_native(
         return record_native_hook_result("native_fail_safe", None)
     status = runtime_status if runtime_status is not None else native_runtime_status()
     event_key = event.strip().lower().replace("_", "").replace("-", "")
-    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE}
+    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE, _SELF_CHECK_FEATURE}
     if event_key in {
         "pretool",
         "pretooluse",
