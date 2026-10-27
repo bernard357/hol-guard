@@ -44,6 +44,7 @@ from .native_package_protect_projection import (
     NativePackageProtectProjection,
     native_package_protect_projection,
 )
+from .native_package_workspace_scope import NativePackageWorkspaceScopeError
 from .native_shim_admin import NativeShimAdminError
 from .native_supply_chain_posture import native_local_supply_chain_posture
 from .native_workspace_inventory import native_workspace_inventory
@@ -698,6 +699,7 @@ def _final_package_protect_authority(
                 artifact_hash=current.artifact_hash,
                 workspace_dir=workspace_dir,
                 execution_context=current.execution_context,
+                guard_home=store.guard_home,
             ),
         )
     final_evaluation = native_finalize_package_protect(
@@ -948,6 +950,7 @@ def _resolve_stored_package_policy_override(
         artifact_hash=artifact_hash,
         workspace_dir=workspace_dir,
         execution_context=resolved_context,
+        guard_home=store.guard_home,
     )
     resolved, claim_disposition, reused_decision = native_resolve_stored_package_policy(
         evaluation,
@@ -982,17 +985,31 @@ def _package_policy_workspace_candidates(
     artifact_hash: str,
     workspace_dir: Path,
     execution_context: PackageExecutionContext | None = None,
+    guard_home: Path | None = None,
 ) -> tuple[str, ...]:
+    """Return the workspace scopes a saved package approval may be matched under.
+
+    The resident owns the derivation.  When it cannot answer - the probe's own
+    guard home has no resident, for one - there is no scope to match against,
+    so no saved approval is reused and the request is decided as if none had
+    been saved.  That is the closed outcome; deriving a key here instead would
+    be the guess this module no longer makes.
+    """
+
     resolved_execution_context = execution_context or build_package_execution_context(
         workspace_dir=workspace_dir,
         artifact=artifact,
     )
-    runtime_workspace = package_request_runtime_workspace_scope(
-        artifact_id=artifact.artifact_id,
-        artifact_hash=artifact_hash,
-        artifact_type=artifact.artifact_type,
-        execution_context=resolved_execution_context,
-    )
+    try:
+        runtime_workspace = package_request_runtime_workspace_scope(
+            artifact_id=artifact.artifact_id,
+            artifact_hash=artifact_hash,
+            artifact_type=artifact.artifact_type,
+            execution_context=resolved_execution_context,
+            guard_home=guard_home,
+        )
+    except NativePackageWorkspaceScopeError:
+        return ()
     return (runtime_workspace,) if runtime_workspace is not None else ()
 
 

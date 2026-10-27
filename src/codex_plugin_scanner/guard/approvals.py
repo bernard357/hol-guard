@@ -525,15 +525,21 @@ def apply_approval_resolution(
     request_artifact_id = _string_or_none(request.get("artifact_id"))
     request_artifact_hash = _string_or_none(request.get("artifact_hash"))
     resolved_workspace = resolve_request_workspace_scope(request, workspace) if scope == "workspace" else None
-    portable_package_workspace = package_request_portable_workspace_scope(
-        artifact_id=request_artifact_id,
-        artifact_hash=request_artifact_hash,
-        artifact_type=_string_or_none(request.get("artifact_type")),
-        execution_context=package_execution_context_from_scanner_evidence(request.get("scanner_evidence")),
-        guard_home=store.guard_home,
-    )
-    if scope == "workspace" and portable_package_workspace is not None:
-        resolved_workspace = portable_package_workspace
+    # Only a workspace-scoped decision is stored under a package workspace key,
+    # so only that scope asks the resident for one.  Every other scope ignored
+    # the answer, and asking anyway made each one depend on a resident it never
+    # needed - a shell "allow once" cannot fail because a package key could not
+    # be derived.
+    if scope == "workspace":
+        portable_package_workspace = package_request_portable_workspace_scope(
+            artifact_id=request_artifact_id,
+            artifact_hash=request_artifact_hash,
+            artifact_type=_string_or_none(request.get("artifact_type")),
+            execution_context=package_execution_context_from_scanner_evidence(request.get("scanner_evidence")),
+            guard_home=store.guard_home,
+        )
+        if portable_package_workspace is not None:
+            resolved_workspace = portable_package_workspace
     # The resident owns the decision identity, persistence mode, local-once row
     # and sibling selector; this function only executes the plan against the store.
     from .native_policy_snapshot_constants import NativePolicySnapshotError
