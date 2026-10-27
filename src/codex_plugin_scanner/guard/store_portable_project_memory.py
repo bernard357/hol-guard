@@ -39,7 +39,7 @@ class StorePortableProjectMemoryMixin:
             return operation
         return {
             **operation,
-            "metadata": enrich_project_identity_metadata(metadata),
+            "metadata": enrich_project_identity_metadata(metadata, guard_home=self.guard_home),
         }
 
     def peek_saved_decision_groups(
@@ -324,9 +324,10 @@ class StorePortableProjectMemoryMixin:
             self.send_policy_decision_lookup(request, required_feature=_PORTABLE_COMPOSITION),
         )
 
-    @staticmethod
-    def _portable_project_workspace(workspace: str | None) -> str | None:
+    def _portable_project_workspace(self, workspace: str | None) -> str | None:
         if not isinstance(workspace, str) or not workspace.strip():
             return None
         normalized = workspace.strip()
-        return normalized if is_portable_project_identity(normalized) else resolve_portable_project_identity(normalized)
+        if is_portable_project_identity(normalized):
+            return normalized
+        return resolve_portable_project_identity(normalized, guard_home=self.guard_home)

@@ -123,8 +123,11 @@ def _action_envelope_hash(request_row: dict[str, object]) -> str:
     return _sha256_hex(_stable_serialize(envelope))
 
 
-def _project_identity(request_row: dict[str, object]) -> str | None:
-    return resolve_portable_project_identity(_non_empty_string(request_row.get("workspace")))
+def _project_identity(request_row: dict[str, object], store) -> str | None:
+    return resolve_portable_project_identity(
+        _non_empty_string(request_row.get("workspace")),
+        guard_home=getattr(store, "guard_home", None),
+    )
 
 
 def _capability_category(request_row: dict[str, object]) -> str:
@@ -226,7 +229,7 @@ def build_local_review_request_claim(
         "nonce": _non_empty_string(request_row.get("queue_group_id")) or local_request_id,
         "policyAction": policy_action,
         "policyVersion": _policy_version(request_row),
-        "projectIdentity": _project_identity(request_row),
+        "projectIdentity": _project_identity(request_row, store),
         "queueGroupId": _non_empty_string(request_row.get("queue_group_id")),
         "recommendedScope": recommended_scope,
         "riskCategory": _risk_category(request_row),

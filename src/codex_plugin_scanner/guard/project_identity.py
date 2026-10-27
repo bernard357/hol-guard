@@ -32,7 +32,7 @@ def is_portable_project_identity(value: object) -> bool:
     )
 
 
-def resolve_portable_project_identity(workspace: str | Path | None) -> str | None:
+def resolve_portable_project_identity(workspace: str | Path | None, *, guard_home: Path | None = None) -> str | None:
     """Return a stable opaque classification for a conventional Git project.
 
     The identity is stable across clone locations when the clones share the
@@ -41,7 +41,9 @@ def resolve_portable_project_identity(workspace: str | Path | None) -> str | Non
     authenticate the workspace. The resident reads them directly and never
     launches a subprocess. A workspace the resident cannot settle, or no
     resident at all, has no identity: that only narrows what portable memory
-    matches.
+    matches. ``guard_home`` names the store asking the question, so a caller
+    holding a home other than the context-bound one is answered by that home's
+    resident rather than the default one.
     """
     if isinstance(workspace, Path):
         workspace = str(workspace)
@@ -71,7 +73,7 @@ def resolve_portable_project_identity(workspace: str | Path | None) -> str | Non
             operation,
             functools.partial(_resident_request, max_request_bytes=_MAX_REQUEST_BYTES),
             {"kind": "resolve", "workspace": workspace},
-            None,
+            guard_home,
             validate,
         )
     except ProjectIdentityError:
@@ -79,23 +81,27 @@ def resolve_portable_project_identity(workspace: str | Path | None) -> str | Non
     return payload["identity"]
 
 
-def resolve_project_identity_from_metadata(metadata: Mapping[str, object]) -> str | None:
+def resolve_project_identity_from_metadata(
+    metadata: Mapping[str, object], *, guard_home: Path | None = None
+) -> str | None:
     """Resolve explicit project identity first, upgrading path-like ids when possible."""
     explicit = _first_string(metadata, "project_id", "projectId")
     if explicit and not _looks_like_local_path(explicit):
         return explicit
 
     workspace = _first_string(metadata, "workspace_path", "workspacePath") or explicit
-    portable = resolve_portable_project_identity(workspace)
+    portable = resolve_portable_project_identity(workspace, guard_home=guard_home)
     if portable is not None:
         return portable
     return explicit
 
 
-def enrich_project_identity_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+def enrich_project_identity_metadata(
+    metadata: Mapping[str, object], *, guard_home: Path | None = None
+) -> dict[str, object]:
     """Return metadata with the canonical project identity in ``project_id``."""
     enriched = {str(key): value for key, value in metadata.items()}
-    project_identity = resolve_project_identity_from_metadata(metadata)
+    project_identity = resolve_project_identity_from_metadata(metadata, guard_home=guard_home)
     if project_identity is not None:
         enriched["project_id"] = project_identity
     return enriched
