@@ -1,4 +1,10 @@
-"""Authenticated transport primitives for the Codex daemon hook bridge."""
+"""Authenticated daemon transport primitives for the test and CI hook clients.
+
+Guard's hook bridges authenticate the daemon in the native runtime
+(``rust/crates/guard-runtime/src/claude_hook_bridge_auth.rs``). This file keeps
+the stdlib-only Python equivalent that ``daemon_hook_client.py`` uses to send
+hooks from tests, the installed SLO session and the installed-wheel probes.
+"""
 
 from __future__ import annotations
 
