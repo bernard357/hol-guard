@@ -11,7 +11,7 @@ from __future__ import annotations
 import atexit
 import shutil
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ def ensure_keyed_home(guard_home: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def native_local_cli_grant_resident(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
-    from codex_plugin_scanner.guard import local_cli_grant_decision, local_cli_hook
+    from codex_plugin_scanner.guard import local_cli_hook
     from codex_plugin_scanner.guard.daemon import hook_native_local_cli
     from codex_plugin_scanner.guard.native_resident_client import close_native_residents
 
@@ -69,18 +69,6 @@ def native_local_cli_grant_resident(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     homes.clear()
     _TEST_GUARD_HOME[:] = [tmp_path / "native-guard-home"]
 
-    def keyed(native: Callable[..., Any]) -> Callable[..., Any]:
-        """Wrap a native grant call so its home holds a verifier key first."""
-
-        def call(*, guard_home: Path, **kwargs: Any) -> Any:
-            ensure_keyed_home(guard_home)
-            return native(guard_home=guard_home, **kwargs)
-
-        return call
-
-    monkeypatch.setattr(
-        local_cli_grant_decision, "native_local_cli_grant", keyed(local_cli_grant_decision.native_local_cli_grant)
-    )
     native_hook = local_cli_hook.native_local_cli_hook
 
     def keyed_hook(store: Any, **kwargs: Any) -> Any:

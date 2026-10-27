@@ -137,6 +137,7 @@ def test_a_deeply_nested_path_is_kept() -> None:
         {"fingerprint": "short"},
         {"fingerprint": "G" * 32},
         {"severity": "catastrophic"},
+        {"severity": ["high"]},
     ],
 )
 def test_malformed_findings_are_dropped_and_leave_the_detector_incomplete(bad: dict[str, object]) -> None:

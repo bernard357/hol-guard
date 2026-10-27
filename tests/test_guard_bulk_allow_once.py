@@ -33,7 +33,7 @@ from codex_plugin_scanner.guard.native_approval_bulk_eligibility import (
     native_bulk_allow_once_eligibility,
 )
 from codex_plugin_scanner.guard.store import GuardStore
-from codex_plugin_scanner.guard.totp import totp_code_at_counter
+from tests.guard_totp_support import totp_code_at_counter
 
 PASSWORD = "bulk-approve-password"
 

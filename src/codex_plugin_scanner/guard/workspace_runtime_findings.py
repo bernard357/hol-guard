@@ -193,7 +193,7 @@ def project_runtime_findings(worktree_key: str, posture: Mapping[str, object]) -
     findings: dict[str, dict[str, object]] = {}
     for advisory in _rows(posture.get("advisories")):
         advisory_id, verdict = _text(advisory.get("advisory_id")), advisory.get("verdict")
-        if advisory_id is None or verdict not in _FINDING_VERDICTS:
+        if advisory_id is None or not isinstance(verdict, str) or verdict not in _FINDING_VERDICTS:
             continue
         severity = str(advisory.get("severity") or "").lower()
         for artifact_id in _list(advisory.get("affected_artifact_ids")):

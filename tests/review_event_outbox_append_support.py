@@ -1,4 +1,9 @@
-"""Transactional writes for the local Review event outbox."""
+"""Seed Review outbox events into a test store.
+
+The runtime appends these rows natively (`guard_store_outbox_append.rs`). Tests
+that need an outbox row without driving a full continuation use this writer,
+which follows the same sequence allocation, binding and quarantine rules.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +12,12 @@ import sqlite3
 from collections.abc import Mapping
 from uuid import uuid4
 
-from .review_event_integrity import review_event_payload_digest
-from .store_review_event_outbox_binding import load_review_oauth_binding
-from .store_review_event_outbox_schema import REVIEW_EVENT_SCHEMA_VERSION, review_event_payload_json
+from codex_plugin_scanner.guard.review_event_integrity import review_event_payload_digest
+from codex_plugin_scanner.guard.store_review_event_outbox_binding import load_review_oauth_binding
+from codex_plugin_scanner.guard.store_review_event_outbox_schema import (
+    REVIEW_EVENT_SCHEMA_VERSION,
+    review_event_payload_json,
+)
 
 # pyright: reportAny=false, reportUnusedCallResult=false
 

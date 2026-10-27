@@ -121,7 +121,6 @@ _TRANSPORT_INTEGRITY_PATHS: Final = frozenset(
         # Same correlation-only digest for the per-harness hook adapter op.
         "src/codex_plugin_scanner/guard/native_hook_adapter.py",
         "src/codex_plugin_scanner/guard/native_hook_adapter_wire.py",
-        "src/codex_plugin_scanner/guard/native_github_cli.py",
         # Same correlation-only digest for the Composio routing op.
         "src/codex_plugin_scanner/guard/native_composio_role.py",
         "src/codex_plugin_scanner/guard/native_shell_request_authority.py",
@@ -211,8 +210,6 @@ _TRANSPORT_DECODE_PATHS: Final = frozenset(
         # strictly bound and validated, never reinterpreted.
         "src/codex_plugin_scanner/guard/native_hook_adapter.py",
         "src/codex_plugin_scanner/guard/native_hook_adapter_wire.py",
-        # Decodes the bounded resident GitHub CLI classification envelope.
-        "src/codex_plugin_scanner/guard/native_github_cli.py",
         # Decodes the bounded resident Composio routing envelope; the role is
         # reported as the runtime named it and never re-derived.
         "src/codex_plugin_scanner/guard/native_composio_role.py",
@@ -299,7 +296,6 @@ _ASYNC_POLICY_PATHS: Final = frozenset(
     }
 )
 _PERSISTENCE_PATH_PREFIXES: Final = (
-    "src/codex_plugin_scanner/guard/runtime/hook_enrichment_queue.py",
     "src/codex_plugin_scanner/guard/daemon/hook_metrics.py",
     "src/codex_plugin_scanner/guard/private_file_io.py",
     "src/codex_plugin_scanner/guard/local_dashboard_session.py",

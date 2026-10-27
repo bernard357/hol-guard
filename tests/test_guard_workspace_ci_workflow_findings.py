@@ -265,6 +265,7 @@ def test_an_unreadable_workflow_result_is_an_error(payload: dict[str, object]) -
         {"rule_id": "ci.workflow.unexpected"},
         {"path": ".github/workflows/" + "w" * 4080 + ".yml"},
         {"rule_id": None},
+        {"rule_id": ["ci.workflow.untrusted-checkout"]},
         {"path": "ci.yml"},
         {"path": ".github/workflows/nested/ci.yml"},
         {"path": ".github/workflows/ci.json"},

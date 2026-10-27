@@ -7735,7 +7735,6 @@
   }
  ],
  "unchanged_regression_suites": [
-  "tests/test_native_runtime_admission.py",
   "tests/test_native_resident_client_cleanup.py",
   "tests/test_native_resident_client_pool.py",
   "ci/native_runtime/test_native_hook_client.py",
