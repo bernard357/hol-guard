@@ -735,8 +735,10 @@ def _claude_checkout_command(home: Path, marketplace: str, plugin_id: str) -> st
     plugins = catalog.get("plugins") if isinstance(catalog, dict) else None
     name = plugin_id.rsplit("@", 1)[0]
     for plugin in plugins if isinstance(plugins, list) else []:
-        source = plugin.get("source") if isinstance(plugin, dict) else None
-        if plugin.get("name") == name and isinstance(source, dict) and source.get("source") == "command":
+        if not isinstance(plugin, dict) or plugin.get("name") != name:
+            continue
+        source = plugin.get("source")
+        if isinstance(source, dict) and source.get("source") == "command":
             command = source.get("command")
             return command if isinstance(command, str) else None
     return None

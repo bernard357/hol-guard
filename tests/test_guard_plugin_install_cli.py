@@ -1470,3 +1470,23 @@ def test_a_plugin_installed_by_another_command_is_not_called_already_installed(
     assert "installed by running a command that is not the one the acme marketplace declares" in error
     assert "claude plugin uninstall toolgate@acme" in error
     assert not any(argv[:2] == ["claude", "plugin"] for argv in runtimes.ran[before:])
+
+
+def test_a_catalog_entry_that_is_not_an_object_does_not_stop_a_repeat_install(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    """The marketplace catalog is third-party content, so entries that are not
+    objects are skipped when looking up the declared command."""
+
+    runtimes.declared = DECLARED
+    base = ("--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED)
+    exit_code, _output, error = _install(spec_file, *base)
+    assert exit_code == 0, error
+
+    catalog = runtimes.claude_marketplace / ".claude-plugin" / "marketplace.json"
+    data = json.loads(catalog.read_text(encoding="utf-8"))
+    data["plugins"] = ["toolgate", None, *data["plugins"]]
+    catalog.write_text(json.dumps(data), encoding="utf-8")
+    exit_code, output, error = _install(spec_file, *base)
+    assert exit_code == 0, error
+    assert "already installed" in output + error
