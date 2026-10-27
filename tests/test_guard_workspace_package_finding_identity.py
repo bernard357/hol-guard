@@ -69,7 +69,7 @@ def test_the_projected_audit_still_names_one_finding_per_package() -> None:
     assert [(item["package_name"], item["package_version"]) for item in findings] == [("minimist", "1.2.8")]
 
 
-def test_a_partial_run_does_not_carry_an_earlier_identity_of_a_package_it_reports(tmp_path: Path) -> None:
+def test_a_partial_run_keeps_the_earlier_identity_of_a_package_it_reports(tmp_path: Path) -> None:
     # The earlier run recorded the package under another finding id, as runs
     # did while reason codes were part of the identity.
     store = admitted(tmp_path)
@@ -82,5 +82,25 @@ def test_a_partial_run_does_not_carry_an_earlier_identity_of_a_package_it_report
         at=T0 + 10,
     )
 
-    assert [item["finding_id"] for item in run["findings"]] == ["b" * 32]
+    assert [item["finding_id"] for item in run["findings"]] == ["a" * 32]
     assert "carried_findings" not in run["coverage"]
+
+
+def test_a_completed_run_keeps_the_earlier_identity_of_each_package(tmp_path: Path) -> None:
+    store = admitted(tmp_path)
+    listed = frozenset({("npm", "minimist", "1.2.8"), ("npm", "minimist", "0.0.8")})
+    assess(store, outcome("completed", [package_finding("a" * 32, "1.2.8")], listed, supply_chain="complete"), at=T0)
+
+    run = assess(
+        store,
+        outcome(
+            "completed",
+            [package_finding("b" * 32, "1.2.8"), package_finding("c" * 32, "0.0.8")],
+            listed,
+            supply_chain="complete",
+        ),
+        at=T0 + 10,
+    )
+
+    # The package the earlier run named keeps its id; another version is new.
+    assert [item["finding_id"] for item in run["findings"]] == ["a" * 32, "c" * 32]

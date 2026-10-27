@@ -11,8 +11,11 @@ settles every earlier finding of its own: one it no longer reports is gone.
 The supply chain audit can read every dependency file and still miss some
 advisory lookups. A package it no longer lists has left the worktree, so that
 package's earlier finding is settled rather than carried. A package the new
-run reports again is settled too: its new finding replaces the earlier one,
-even when the earlier one was recorded under an older finding identity.
+run reports again is settled too: its new finding replaces the earlier one.
+
+A package finding keeps the finding id the worktree's last run gave it, even
+when that run named the package under an older identity scheme, so the
+finding's history and its Cloud key stay with the package.
 
 Carried findings come after the run's own findings and stop at the same
 count and byte bounds. A finding that does not fit adds the
@@ -86,6 +89,27 @@ def carry_unchecked_findings(outcome: RunOutcome, previous: Mapping[str, object]
     )
 
 
+def keep_package_identities(outcome: RunOutcome, previous: Mapping[str, object] | None) -> RunOutcome:
+    """``outcome`` with each package finding under the id ``previous`` gave that package."""
+
+    earlier = previous.get("findings") if previous is not None else None
+    if not isinstance(earlier, list):
+        return outcome
+    known: dict[tuple[object, ...], object] = {}
+    for item in earlier:
+        if isinstance(item, Mapping) and item.get("source_kind") == "supply_chain" and item.get("finding_id"):
+            known.setdefault(_coordinate(item), item.get("finding_id"))
+    findings = [
+        {**item, "finding_id": known.get(_coordinate(item), item.get("finding_id"))}
+        if item.get("source_kind") == "supply_chain"
+        else item
+        for item in outcome.findings
+    ]
+    if findings == list(outcome.findings):
+        return outcome
+    return dataclasses.replace(outcome, findings=findings)
+
+
 def listed_packages(payload: Mapping[str, object]) -> frozenset[tuple[str, str, str]] | None:
     """The package coordinates a local audit read, as its findings name them.
 
@@ -130,4 +154,4 @@ def _size(item: Mapping[str, object]) -> int:
     return len(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
 
 
-__all__ = ["CARRIED_FINDING_CAP", "RECHECKED", "carry_unchecked_findings", "listed_packages"]
+__all__ = ["CARRIED_FINDING_CAP", "RECHECKED", "carry_unchecked_findings", "keep_package_identities", "listed_packages"]
