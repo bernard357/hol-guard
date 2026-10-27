@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from codex_plugin_scanner.guard.runtime.mcp_server_contribution import validate_mcp_contribution
-
 from .mcp_contribution_client import mcp_tool_state
+from .mcp_contribution_loader import validate_mcp_contribution_file
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CONTRIBUTION = _ROOT / "contributions/mcp-servers/mcp.countly.json"
@@ -20,10 +19,7 @@ _REVIEW_TOOLS = frozenset(
 
 def _payload() -> dict[str, object]:
     """Read and validate Countly's reviewed input rather than generated projections."""
-    result = json.loads(_CONTRIBUTION.read_text(encoding="utf-8"))
-    assert isinstance(result, dict)
-    validate_mcp_contribution(result, filename=_CONTRIBUTION.name)
-    return result
+    return validate_mcp_contribution_file(_CONTRIBUTION)
 
 
 def test_countly_package_identity_is_external_and_opt_in() -> None:
@@ -32,6 +28,11 @@ def test_countly_package_identity_is_external_and_opt_in() -> None:
     assert contribution["id"] == "mcp.countly"
     assert contribution["activation"] == "opt-in"
     assert contribution["trustClass"] == "external"
+    assert contribution["publisher"] == {
+        "id": "countly.com",
+        "displayName": "Countly",
+        "url": "https://countly.com",
+    }
     assert contribution["launch"] == {
         "kind": "package-launcher",
         "command": "npx",
