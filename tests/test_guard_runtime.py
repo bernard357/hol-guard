@@ -54,7 +54,7 @@ from codex_plugin_scanner.guard.models import (
     PolicyDecision,
 )
 from codex_plugin_scanner.guard.native_runner_authority import NativeRunnerAuthorityError
-from codex_plugin_scanner.guard.policy import decide_action, decide_action_with_v2
+from codex_plugin_scanner.guard.policy import build_decision_v2, decide_action
 from codex_plugin_scanner.guard.policy_bundle_delivery import policy_bundle_acknowledgement_payload
 from codex_plugin_scanner.guard.policy_bundle_parser import policy_bundle_rejection_message
 from codex_plugin_scanner.guard.proxy import RemoteGuardProxy
@@ -13299,13 +13299,13 @@ def test_decide_action_with_v2_preserves_legacy_action_and_adds_decision(tmp_pat
         default_action="block",
     )
 
-    action, decision = decide_action_with_v2(
+    action = decide_action(
         configured_action=None,
         default_action=None,
         config=config,
         changed=False,
-        reason="invalid-default-fallback",
     )
+    decision = build_decision_v2(action, reason="invalid-default-fallback")
 
     assert action == "block"
     assert decision.action == "block"

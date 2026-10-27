@@ -73,7 +73,6 @@ from ..bridge import (
     TelegramBackend,
     WebhookBackend,
 )
-from ..codex_app_server import codex_resume_metadata_from_hook_payload
 from ..codex_resume import inspect_codex_resume_capabilities
 from ..config import (
     DEFAULT_SECURITY_LEVEL,
@@ -110,7 +109,6 @@ from ..desktop_notifications import (
     ensure_desktop_notification_setup,
     macos_notification_guidance,
 )
-from ..harness_usage import record_harness_usage_events
 from ..incident import build_incident_context
 from ..local_dashboard_session import build_local_dashboard_session_token
 from ..local_supply_chain import (

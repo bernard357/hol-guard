@@ -13,13 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from codex_plugin_scanner.guard import local_cli_hook
-from codex_plugin_scanner.guard.adapters.grok_config import (
-    FOREIGN_HOOK_COMPAT_VENDORS,
-    _compat_table_span,
-    build_managed_config_block,
-    force_compat_hooks_false,
-    remove_managed_block,
-)
 from codex_plugin_scanner.guard.models import GuardAction
 from codex_plugin_scanner.guard.native_cli_runtime_support import cli_runtime_support as _native_cli_support
 from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError
@@ -61,31 +54,6 @@ def local_cli_grant_action(
     if action is None:
         raise NativeHookDecisionError("native_local_cli_hook_unavailable")
     return action
-
-
-def prepare_managed_config_text(
-    existing_text: str,
-    hook_command: str,
-    *,
-    saved_prior_hooks: Mapping[str, str | None] | None = None,
-) -> tuple[str, dict[str, str | None]]:
-    """Merge Guard's managed block without duplicating compat tables."""
-
-    cleaned = remove_managed_block(existing_text)
-    saved = dict(saved_prior_hooks or {})
-    prior_hooks: dict[str, str | None] = {}
-    emit_vendors: list[str] = []
-    for vendor in FOREIGN_HOOK_COMPAT_VENDORS:
-        if _compat_table_span(cleaned, vendor) is None:
-            emit_vendors.append(vendor)
-            prior_hooks[vendor] = saved.get(vendor)
-            continue
-        cleaned, previous = force_compat_hooks_false(cleaned, vendor)
-        saved_value = saved.get(vendor)
-        prior_hooks[vendor] = saved_value if saved_value is not None else previous
-    managed_block = build_managed_config_block(hook_command, emit_compat_vendors=tuple(emit_vendors))
-    merged = f"{cleaned.rstrip()}\n\n{managed_block}\n".lstrip()
-    return merged, prior_hooks
 
 
 @dataclass(frozen=True, slots=True)
