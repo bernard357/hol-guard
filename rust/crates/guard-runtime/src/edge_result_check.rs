@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 
 use crate::guard_store_guard_event::from_json;
 use crate::native_decision_receipt;
+use crate::pyjson;
 
 const INVALID: &str = "native_hook_edge_response_invalid";
 const RESULT_SCHEMA: &str = "guard-pre-tool-result.v1";
@@ -219,7 +220,10 @@ fn receipt_agrees(
     result: &Map<String, Value>,
     receipt: &Value,
 ) -> bool {
-    if !from_json(receipt).is_some_and(|receipt| native_decision_receipt::valid(&receipt)) {
+    // The validator reads the receipt as a hook client parses it off the wire.
+    if !pyjson::parse(&receipt.to_string())
+        .is_ok_and(|receipt| native_decision_receipt::valid(&receipt))
+    {
         return false;
     }
     let Some(receipt) = receipt.as_object() else {
