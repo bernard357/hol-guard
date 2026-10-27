@@ -270,6 +270,7 @@ mod tests {
             "{ n = $1 / 2; print n }",
             "NF { print } # skip lines with | or >",
             "split($0, parts, /,/) {print parts[1]}",
+            "f&&c<=22{print;c++} /sample\\.test\\.ts/{f=1}",
         ] {
             assert!(safe_program(program), "{program}");
         }

