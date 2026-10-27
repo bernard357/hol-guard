@@ -83,12 +83,15 @@ assert.equal(connectorSetupLinkFromSearch(`?setup=req%201&identity=${hash}`), nu
 assert.equal(connectorSetupLinkFromSearch(`?setup=req-1&identity=${"A".repeat(64)}`), null);
 assert.equal(connectorSetupLinkFromSearch(`?setup=${"r".repeat(129)}&identity=${hash}`), null);
 const link = { requestId: "req-1", identityHash: hash };
-assert.equal(connectorSetupMatch({ identity_hash: hash, state: "unset" }, link), "ready");
-assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed" }, link), "decided");
-assert.equal(connectorSetupMatch({ identity_hash: "b".repeat(64), state: "unset" }, link), "identity_changed");
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "unset", stale: false, surface: "cli" }, link), "ready");
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed", stale: false, surface: "cli" }, link), "decided");
+assert.equal(connectorSetupMatch({ identity_hash: "b".repeat(64), state: "unset", stale: false, surface: "cli" }, link), "identity_changed");
 // Allowed for an earlier version of the file: the allow no longer applies, so the link can allow this one.
-assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed", stale: true }, link), "reallow");
-assert.equal(connectorSetupMatch({ identity_hash: hash, state: "blocked", stale: true }, link), "decided");
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed", stale: true, surface: "cli" }, link), "reallow");
+// A changed server or package.json can bring new tools or scripts, so it keeps its full review.
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed", stale: true, surface: "mcp" }, link), "decided");
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "allowed", stale: true, surface: "package-scripts" }, link), "decided");
+assert.equal(connectorSetupMatch({ identity_hash: hash, state: "blocked", stale: true, surface: "cli" }, link), "decided");
 assert.equal(connectorSetupReady("ready"), true);
 assert.equal(connectorSetupReady("reallow"), true);
 assert.equal(connectorSetupReady("decided"), false);

@@ -35729,7 +35729,7 @@ function connectorSetupMatch(item, link) {
   return allowedEarlierVersion(item) ? "reallow" : "decided";
 }
 function allowedEarlierVersion(item) {
-  return item.state === "allowed" && item.stale === true;
+  return item.surface === "cli" && item.state === "allowed" && item.stale === true;
 }
 function connectorSetupReady(match) {
   return match === "ready" || match === "reallow";

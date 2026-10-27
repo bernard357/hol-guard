@@ -67,7 +67,7 @@ export function connectorSetupLinkFromSearch(search: string): ConnectorSetupLink
  * undecided, or one whose allow was recorded for an earlier version of the file.
  */
 export function connectorSetupMatch(
-  item: Pick<LocalCliItem, "identity_hash" | "state" | "stale">,
+  item: Pick<LocalCliItem, "identity_hash" | "state" | "stale" | "surface">,
   link: ConnectorSetupLink,
 ): ConnectorSetupMatch {
   if (item.identity_hash !== link.identityHash) return "identity_changed";
@@ -75,9 +75,12 @@ export function connectorSetupMatch(
   return allowedEarlierVersion(item) ? "reallow" : "decided";
 }
 
-/** Allowed on this device, but for an earlier version of the file, so the allow no longer applies. */
-export function allowedEarlierVersion(item: Pick<LocalCliItem, "state" | "stale">): boolean {
-  return item.state === "allowed" && item.stale === true;
+/**
+ * A CLI allowed on this device for an earlier version of its file, so the allow no longer applies.
+ * A changed MCP server or package.json can bring new tools or scripts, so it keeps its full review.
+ */
+export function allowedEarlierVersion(item: Pick<LocalCliItem, "state" | "stale" | "surface">): boolean {
+  return item.surface === "cli" && item.state === "allowed" && item.stale === true;
 }
 
 /** Whether a setup link may set this connector up and release the requests held on it. */

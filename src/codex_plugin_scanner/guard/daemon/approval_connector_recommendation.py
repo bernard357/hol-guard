@@ -44,14 +44,17 @@ def _stored_connector(store: object, cli_id: str, identity_hash: str) -> Mapping
 
 
 def _awaiting_setup(item: Mapping[str, object]) -> bool:
-    """No decision on this device yet, or an allow recorded for an earlier version of the file.
+    """No decision on this device yet, or a CLI allowed for an earlier version of its file.
 
     A content-bound allow stops applying once the file changes, so the held
     calls wait on the same setup as a connector never decided. A block stays a
-    decision: its held calls keep their normal review.
+    decision: its held calls keep their normal review. A changed MCP server or
+    package.json can bring new tools or scripts, so it keeps its full review.
     """
 
-    return item.get("state") == "unset" or (item.get("state") == "allowed" and item.get("stale") is True)
+    if item.get("state") == "unset":
+        return True
+    return item.get("state") == "allowed" and item.get("stale") is True and item.get("surface") == "cli"
 
 
 def pending_connector_group_rows(store: object, identity_hash: str) -> tuple[list[Mapping[str, object]], bool]:

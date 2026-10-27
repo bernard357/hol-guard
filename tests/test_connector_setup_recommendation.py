@@ -121,9 +121,14 @@ def _resident_caution(monkeypatch: pytest.MonkeyPatch) -> list[tuple[frozenset[s
 
 
 def _items(
-    monkeypatch: pytest.MonkeyPatch, *, state: str = "unset", identity_hash: str = _HASH, stale: bool = False
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    state: str = "unset",
+    identity_hash: str = _HASH,
+    stale: bool = False,
+    surface: str = "cli",
 ) -> None:
-    item = {"cli_id": _CLI_ID, "identity_hash": identity_hash, "surface": "cli", "state": state, "stale": stale}
+    item = {"cli_id": _CLI_ID, "identity_hash": identity_hash, "surface": surface, "state": state, "stale": stale}
     monkeypatch.setattr(recommendation, "listed_public_items", lambda _store: [item])
 
 
@@ -276,6 +281,13 @@ def test_an_earlier_block_stays_a_decision(monkeypatch: pytest.MonkeyPatch) -> N
     _items(monkeypatch, state="blocked", stale=True)
 
     assert _build(_approval(_hint())) is None
+
+
+@pytest.mark.parametrize("surface", ["mcp", "package-scripts"])
+def test_a_changed_server_or_package_keeps_its_full_review(monkeypatch: pytest.MonkeyPatch, surface: str) -> None:
+    _items(monkeypatch, state="allowed", stale=True, surface=surface)
+
+    assert _build(_approval(_hint(surface=surface))) is None
 
 
 def test_gone_when_the_stored_identity_changed(monkeypatch: pytest.MonkeyPatch) -> None:
