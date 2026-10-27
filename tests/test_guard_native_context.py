@@ -392,6 +392,34 @@ def test_native_context_digest_caps_every_attempt_by_a_hard_deadline(
     assert all(budget <= 250 for budget in budgets)
 
 
+def test_native_context_digest_spent_hard_deadline_records_no_resident_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deadline gone before the first attempt never asks the resident or blames it."""
+
+    calls: list[object] = []
+    failures: list[object] = []
+    monkeypatch.setattr(native_context, "native_runtime_status", lambda: _status())
+    monkeypatch.setattr(native_context, "ensure_resident_prerequisite", lambda _home: True)
+    monkeypatch.setattr(native_context, "_isolated_environment", lambda: {})
+    monkeypatch.setattr(native_context, "native_resident_client_ready", lambda _executable, _home: True)
+    monkeypatch.setattr(native_context, "native_resident_client_request", lambda *a, **k: calls.append(k))
+    monkeypatch.setattr(native_context, "native_record_resident_failure", lambda *a, **k: failures.append(k))
+    guard_home = tmp_path / "guard-home"
+    guard_home.mkdir()
+    assert (
+        native_context.native_context_digest(
+            "launch_argv_digest",
+            {"argv": ["a"]},
+            guard_home=guard_home,
+            hard_deadline_monotonic=time.monotonic() - 1.0,
+        )
+        is None
+    )
+    assert calls == []
+    assert failures == []
+
+
 def test_native_context_digest_does_not_retry_other_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failure more time cannot fix must fail once, not twice."""
 

@@ -595,6 +595,11 @@ def native_context_digest(
         # code distinguishes after the retry.
         budget_seconds = retry_budget_seconds
         deadline_monotonic = _capped_deadline(budget_seconds, hard_deadline_monotonic)
+    if output is None and attempts == 0:
+        # The caller's hard deadline ran out before the resident was asked: no
+        # client call happened, so neither its failure code nor a resident
+        # failure record describes this.
+        return _digest_failed("native_context_digest_deadline_spent")
     if output is None:
         # The client's own code ("native_client_timed_out",
         # "native_client_pool_exhausted", ...) is the actionable half of this.
