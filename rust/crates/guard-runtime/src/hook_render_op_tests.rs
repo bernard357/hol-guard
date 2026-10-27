@@ -76,14 +76,15 @@ fn oversized_request_is_rejected() {
 fn cli_hook_emit_refuses_a_document_larger_than_a_response() {
     // A character the answer carries as two bytes is written `\u00e9` in the
     // printed document and escaped a second time when that document travels
-    // as a JSON string, so it leaves as seven. An answer well inside the
-    // answer budget can render a document no caller could ever read.
-    let reason = "\u{e9}".repeat(700_000);
+    // as a JSON string, so it leaves as seven - against the six the same
+    // character costs in the canonical request the budget is measured on.
+    // An answer well inside the answer budget can therefore render a document
+    // no caller could ever read.
+    let reason = "\u{e9}".repeat(600_000);
     let response_json = serde_json::to_string(&json!({
         "policy_action": "block", "reason": reason,
     }))
     .expect("answer");
-    assert!(response_json.len() < guard_contracts::HOOK_RENDER_CLI_EMIT_MAX_BYTES);
     let mut req = request("cli_hook_emit");
     req.harness = "cursor".to_owned();
     req.cli = Some(json!({
@@ -91,6 +92,14 @@ fn cli_hook_emit_refuses_a_document_larger_than_a_response() {
         "response_json": response_json.clone(),
         "document": true,
     }));
+    // The request budget is read off the canonical serialization, not the
+    // answer's own bytes, so measure the premise the way the op does: this
+    // request is one the op accepts, and only its document is too large.
+    crate::package_authority_op::request_digest_with_limit(
+        &req,
+        guard_contracts::hook_render_max_bytes("cli_hook_emit"),
+    )
+    .expect("the request stays inside its own budget");
     let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
     assert_eq!(result.status, "error");
     assert_eq!(result.code, "native_hook_render_document_too_large");
