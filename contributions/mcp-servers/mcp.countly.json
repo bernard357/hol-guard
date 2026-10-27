@@ -7,9 +7,9 @@
   "trustClass": "external",
   "activation": "opt-in",
   "publisher": {
-    "id": "hol",
-    "displayName": "HOL",
-    "url": "https://hol.org"
+    "id": "countly.com",
+    "displayName": "Countly",
+    "url": "https://countly.com"
   },
   "icon": {
     "kind": "none"
