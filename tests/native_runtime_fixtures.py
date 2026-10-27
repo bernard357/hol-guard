@@ -140,6 +140,22 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
 
 
 @pytest.fixture
+def native_bridge_render(native_hook_force: Path, _native_context_home: Path) -> Callable[..., tuple[str, str, int]]:
+    """Render a daemon answer the way the bounded bridge prints it, through the resident."""
+
+    from codex_plugin_scanner.guard.native_hook_render import native_cli_hook_emit
+
+    def render(response: dict[str, object], *, harness: str, event_name: str) -> tuple[str, str, int]:
+        rendered = native_cli_hook_emit(
+            harness, response, event_name=event_name, guard_home=_native_context_home, bridge=True
+        )
+        assert rendered is not None
+        return str(rendered["stdout"]), str(rendered["stderr"]), int(rendered["exit_code"])
+
+    return render
+
+
+@pytest.fixture
 def native_signal_composition(
     native_hook_force: Path,
     _native_context_home: Path,

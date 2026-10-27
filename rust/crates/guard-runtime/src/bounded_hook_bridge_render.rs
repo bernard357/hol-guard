@@ -333,15 +333,20 @@ fn zcode_exit_blocks(policy_action: &str, event_name: &str) -> bool {
     RESTRICTIVE.contains(&policy_action)
 }
 
-/// `_should_exit_block`. Grok reaches it only from the `hol-guard hook`
-/// command; its bridge answers through `bounded_hook_bridge_grok`.
+/// `_should_exit_block`. Grok, Pi and OMP reach it from the `hol-guard hook`
+/// command and from the Python bridge's daemon answer; Grok's own bridge
+/// answers through `bounded_hook_bridge_grok`.
 fn should_exit_block(harness: &str, event_name: &str, policy_action: &str) -> bool {
     let compact = compact(event_name);
     let blocking = matches!(
         compact.as_str(),
         "pretooluse" | "userpromptsubmit" | "pretoolcall"
     ) || (harness == "devin" && compact == "permissionrequest");
-    if !matches!(harness, "grok" | "kimi" | "zcode" | "devin") || !blocking {
+    if !matches!(
+        harness,
+        "grok" | "kimi" | "hermes" | "pi" | "omp" | "zcode" | "devin"
+    ) || !blocking
+    {
         return false;
     }
     if harness == "zcode" {
@@ -579,8 +584,9 @@ pub(crate) fn rendered(
     }
 }
 
-/// `_daemon_response_to_native` for a native harness. `None` when the
-/// answer carries a value Python would render through `repr`.
+/// `_daemon_response_to_native` for a harness whose bridge prints the
+/// daemon's answer. `None` when the answer carries a value Python would
+/// render through `repr`.
 pub(crate) fn daemon_response_to_native(
     daemon_response: &[(String, PyVal)],
     harness: &str,
@@ -646,9 +652,35 @@ pub(crate) fn daemon_response_to_native(
                 &reason
             };
             payload.push(("reason".to_owned(), text(shown)));
+            if harness == "codex" {
+                // Codex stops the turn on `continue: false` and shows the
+                // reason to the model as context.
+                payload.push(("continue".to_owned(), PyVal::Bool(false)));
+                payload.push(("stopReason".to_owned(), text(shown)));
+                payload.push((
+                    "hookSpecificOutput".to_owned(),
+                    str_dict(vec![
+                        ("hookEventName", text(event_name)),
+                        ("additionalContext", text(shown)),
+                    ]),
+                ));
+            }
+        } else if matches!(harness, "claude-code" | "codex") {
+            payload.push((
+                "hookSpecificOutput".to_owned(),
+                str_dict(vec![("hookEventName", text(event_name))]),
+            ));
         }
     } else {
         let decision = native_permission_decision(harness, &action);
+        if harness == "codex" && event_name == "PreToolUse" && decision.is_none() {
+            // Codex reads empty output as no opinion on the call.
+            return Some(Rendered {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+            });
+        }
         let mut hook_specific = vec![("hookEventName".to_owned(), text(event_name))];
         if let Some(decision) = decision {
             hook_specific.push(("permissionDecision".to_owned(), text(decision)));
