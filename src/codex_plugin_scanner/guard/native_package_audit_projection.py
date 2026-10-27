@@ -15,7 +15,7 @@ import socket
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from .native_context import _resolve_digest_home
 from .native_package_approval_hash import _transport
@@ -257,7 +257,7 @@ def _valid_coordinate(item: object) -> bool:
     return isinstance(item, list) and len(item) == 3 and all(isinstance(part, str) for part in item)
 
 
-def _count(value: object) -> bool:
+def _count(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
