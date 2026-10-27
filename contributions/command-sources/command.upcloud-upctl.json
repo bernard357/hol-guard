@@ -1,0 +1,114 @@
+{
+  "extension": {
+    "action_classes": [
+      "UpCloud CLI account-wide resource purge"
+    ],
+    "aliases": [],
+    "conflicts": [],
+    "delegated_protection": null,
+    "dependencies": [],
+    "description": "Reviews the hidden experimental `upctl all purge` command, which can delete resources throughout the currently selected UpCloud account, disable termination protection during cleanup, and retry non-404 deletion errors. `upctl all list` remains outside this extension rule. This is an opt-in HOL-authored integration, not an UpCloud-supported plugin.",
+    "ecosystem_ids": [
+      "upcloud-cli"
+    ],
+    "executables": [
+      "upctl"
+    ],
+    "extension_id": "command.upcloud-upctl",
+    "homepage": "https://github.com/UpCloudLtd/upcloud-cli",
+    "icon": {
+      "kind": "none"
+    },
+    "license": "MIT",
+    "name": "UpCloud upctl purge command protection",
+    "permissions": [
+      {
+        "action_classes": [
+          "UpCloud CLI account-wide resource purge"
+        ],
+        "baseline_floor": "review",
+        "configurable": true,
+        "conflicts": [],
+        "default_enabled": true,
+        "dependencies": [],
+        "deprecated": false,
+        "description": "Requires local review for `upctl all purge` including filtered forms. The command can force-delete UpCloud resources, clear termination protection, and retry until the calling CI job times out.",
+        "example_command": "upctl all purge --include 'ci-test-*' --exclude 'persistent-*'",
+        "family": null,
+        "fixed_reason": null,
+        "implementation_version": "1.0.0",
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "label": "Purge UpCloud account resources",
+        "permission_id": "command.upcloud-upctl.permission.purge",
+        "replacement_permission_id": null,
+        "risk_tier": "critical",
+        "safer_guidance": [
+          "Use `upctl all list` with matching filters to preview targets.",
+          "Prefer a dedicated test account, and protect production resources by policy before proceeding."
+        ],
+        "typed_capabilities": []
+      }
+    ],
+    "project_markers": [],
+    "publisher": {
+      "display_name": "HOL",
+      "id": "hol",
+      "url": "https://hol.org/guard"
+    },
+    "reference_urls": [
+      "https://github.com/UpCloudLtd/upcloud-cli/blob/main/internal/commands/all/purge.go",
+      "https://github.com/UpCloudLtd/upcloud-cli/blob/main/internal/commands/all/all.go"
+    ],
+    "required": false,
+    "risk_classes": [
+      "destructive_shell",
+      "network_egress"
+    ],
+    "rules": [
+      {
+        "action_classes": [
+          "UpCloud CLI account-wide resource purge"
+        ],
+        "default_mode": "review",
+        "description": "Requires local review for `upctl all purge` including filtered forms. The command can force-delete UpCloud resources, clear termination protection, and retry until the calling CI job times out.",
+        "family": null,
+        "matcher": {
+          "op": "leading-subcommand.v1",
+          "config": {
+            "executables": [
+              "upctl",
+              "upctl.exe"
+            ],
+            "subcommands": [
+              "all",
+              "purge"
+            ]
+          }
+        },
+        "native_capability": null,
+        "permission_id": "command.upcloud-upctl.permission.purge",
+        "risk_classes": [
+          "destructive_shell",
+          "network_egress"
+        ],
+        "rule_id": "command.upcloud-upctl.purge",
+        "rule_version": "1.0.0",
+        "safe_variants": [],
+        "safer_alternatives": [
+          "Use `upctl all list` with matching filters to preview targets.",
+          "Prefer a dedicated test account, and protect production resources by policy before proceeding."
+        ],
+        "severity": "critical",
+        "title": "Purge UpCloud account resources"
+      }
+    ],
+    "safer_alternatives": [
+      "Inspect the selected account and filters with `upctl all list` before any purge.",
+      "Scope cleanup with `--include` and `--exclude` and consider a dedicated nonproduction UpCloud account."
+    ],
+    "source": "built-in",
+    "version": "1.0.0"
+  },
+  "schema": "guard.command-extension-source.v1"
+}
