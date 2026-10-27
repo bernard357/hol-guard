@@ -440,7 +440,6 @@
     "src/codex_plugin_scanner/guard/native_archive_acquisition.py",
     "src/codex_plugin_scanner/guard/native_direct_tool_context.py",
     "src/codex_plugin_scanner/guard/native_cli_runtime_support.py",
-    "src/codex_plugin_scanner/guard/native_approval_protocol.py",
     "src/codex_plugin_scanner/guard/native_context.py",
     "src/codex_plugin_scanner/guard/native_context_budget.py",
     "src/codex_plugin_scanner/guard/native_local_cli_identity.py",

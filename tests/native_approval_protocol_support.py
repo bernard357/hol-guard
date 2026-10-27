@@ -1,4 +1,4 @@
-"""Bounded Python boundary types for the Rust native approval protocol.
+"""Bounded Python decoders for the Rust native approval protocol, for tests.
 
 This module only validates transport shape.  It never signs, verifies, or
 assigns approval semantics to a challenge or artifact.
