@@ -142,7 +142,7 @@ fn a_parent_swapped_for_a_symlink_after_resolution_is_not_followed() {
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("main.py"), "private\n").unwrap();
     let context = workspace_context(&workspace.cwd).unwrap();
-    let target = resolve_target("safe/main.py", &context, None).unwrap();
+    let target = resolve_target("safe/main.py", &context, None, deadline()).unwrap();
     fs::rename(&safe, workspace.cwd.join("safe-original")).unwrap();
     symlink(&outside, &safe).unwrap();
     let relative = target.strip_prefix(&context.repository).unwrap();
@@ -171,7 +171,16 @@ fn hard_links_sockets_and_non_utf8_targets_are_not_read() {
     fs::write(workspace.cwd.join("main.py"), "safe\n").unwrap();
     fs::hard_link(workspace.cwd.join("main.py"), workspace.cwd.join("twin.py")).unwrap();
     fs::write(workspace.cwd.join("binary.py"), [0xff, 0xfe, b'\n']).unwrap();
-    let _socket = std::os::unix::net::UnixListener::bind(workspace.cwd.join("socket.py")).unwrap();
+    // macOS caps a bound socket path at 104 bytes, which a temporary
+    // directory plus this workspace's own depth already reaches, so bind the
+    // socket under a short root and move it into place.
+    let short = tempfile::Builder::new()
+        .prefix("g")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let bound = short.path().join("s");
+    let _socket = std::os::unix::net::UnixListener::bind(&bound).unwrap();
+    fs::rename(&bound, workspace.cwd.join("socket.py")).unwrap();
     for name in ["main.py", "twin.py", "binary.py", "socket.py"] {
         assert_eq!(
             run(&workspace, &["head", "-1", name]).unwrap_err(),
@@ -251,30 +260,36 @@ fn the_gitdir_marker_matches_only_its_one_line_shape() {
 }
 
 #[test]
-fn lines_split_at_every_boundary_python_reads() {
-    assert_eq!(
-        split_lines_keepends("a\r\nb\rc\x0bd\u{2028}e\u{85}f\x1cg"),
-        [
-            "a\r\n",
-            "b\r",
-            "c\x0b",
-            "d\u{2028}",
-            "e\u{85}",
-            "f\x1c",
-            "g"
-        ]
-    );
-    assert_eq!(split_lines_keepends("\n\n"), ["\n", "\n"]);
-    assert!(split_lines_keepends("").is_empty());
+fn a_loosely_spelled_working_directory_is_not_read() {
+    let workspace = workspace();
+    let canonical = workspace.cwd.to_str().unwrap().to_owned();
+    for cwd in [
+        format!("{canonical}/"),
+        canonical.replacen("/service", "/./service", 1),
+        canonical.replacen("/service", "//service", 1),
+    ] {
+        assert_eq!(
+            execute(&argv(&["pwd"]), &cwd, None).unwrap_err(),
+            Failure::Unavailable,
+            "{cwd}"
+        );
+    }
 }
 
+fn deadline() -> Instant {
+    Instant::now() + EXECUTION_BUDGET
+}
+
+/// The resident's workers are shared, so a read that has already spent its
+/// budget gives the worker back instead of finishing the file.
 #[test]
-fn slices_clamp_like_python_slicing() {
-    let lines = ["1\n", "2\n", "3\n"];
-    let leading = VerifiedReadSelectionV1::LeadingLines { count: 9 };
-    let trailing = VerifiedReadSelectionV1::TrailingLines { count: 2 };
-    let range = VerifiedReadSelectionV1::LineRange { start: 5, end: 9 };
-    assert_eq!(selected(&lines, &leading), lines);
-    assert_eq!(selected(&lines, &trailing), ["2\n", "3\n"]);
-    assert!(selected(&lines, &range).is_empty());
+fn a_read_past_its_budget_gives_up_the_worker() {
+    let workspace = workspace();
+    fs::write(workspace.cwd.join("main.py"), "one\ntwo\n").unwrap();
+    let context = workspace_context(&workspace.cwd).unwrap();
+    assert_eq!(
+        read_target("main.py", &context, None, Instant::now()).unwrap_err(),
+        Failure::Unavailable
+    );
+    assert!(read_target("main.py", &context, None, deadline()).is_ok());
 }

@@ -19,6 +19,8 @@ use guard_command::effect_decision::{effect_decision_to_payload, FinalDispositio
 use guard_command::verified_read_decision::verified_workspace_read_decision;
 use guard_command::verified_read_plan::verified_read_plan;
 use guard_contracts::VerifiedReadSelectionV1;
+
+use crate::verified_read_lines::selected;
 use nix::fcntl::{open, openat, OFlag};
 use nix::sys::stat::Mode;
 use serde_json::{json, Value};
@@ -34,6 +36,12 @@ pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const MAX_GIT_FILE_BYTES: u64 = 4_096;
 const SECRET_CHECK_BUDGET: Duration = Duration::from_secs(2);
+/// How long one verified read may hold a worker of the resident's bounded
+/// pool. A read that cannot finish inside it falls back to ordinary review.
+/// The budget is checked between steps and between chunks; a filesystem that
+/// blocks inside a single syscall cannot be interrupted from here.
+const EXECUTION_BUDGET: Duration = Duration::from_secs(5);
+const READ_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Why a verified read did not happen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +69,14 @@ impl From<nix::Error> for Failure {
 
 type Outcome<T> = Result<T, Failure>;
 
+/// Stop a read that has outlived its budget rather than hold the worker.
+fn within(deadline: Instant) -> Outcome<()> {
+    if Instant::now() >= deadline {
+        return Err(Failure::Unavailable);
+    }
+    Ok(())
+}
+
 /// What a completed read hands back to the host.
 #[derive(Debug)]
 pub(crate) struct ReadOutcome {
@@ -86,6 +102,7 @@ struct ReadOutput {
 
 /// `try_execute_verified_local_read`: perform one bounded read in `cwd`.
 pub(crate) fn execute(argv: &[String], cwd: &str, home_dir: Option<&str>) -> Outcome<ReadOutcome> {
+    let deadline = Instant::now() + EXECUTION_BUDGET;
     let plan = verified_read_plan(argv).map_err(|_| Failure::Refused)?;
     let context = workspace_context(Path::new(cwd))?;
     let output = match &plan.selection {
@@ -96,8 +113,8 @@ pub(crate) fn execute(argv: &[String], cwd: &str, home_dir: Option<&str>) -> Out
         },
         selection => {
             let value = plan.target.as_deref().ok_or(Failure::Refused)?;
-            let (text, target) = read_target(value, &context, home_dir)?;
-            let stdout = selected(&split_lines_keepends(&text), selection).concat();
+            let (text, target) = read_target(value, &context, home_dir, deadline)?;
+            let stdout = selected(&text, selection).to_owned();
             ReadOutput {
                 operation_id: plan.operation_id.clone(),
                 stdout,
@@ -108,6 +125,7 @@ pub(crate) fn execute(argv: &[String], cwd: &str, home_dir: Option<&str>) -> Out
     if output.stdout.len() > MAX_OUTPUT_BYTES {
         return Err(Failure::Unavailable);
     }
+    within(deadline)?;
     if workspace_context(Path::new(cwd))? != context {
         return Err(Failure::Unavailable);
     }
@@ -132,7 +150,10 @@ fn workspace_context(cwd: &Path) -> Outcome<WorkspaceContext> {
         return Err(Failure::Unavailable);
     }
     let metadata = fs::symlink_metadata(cwd)?;
-    if !metadata.is_dir() || fs::canonicalize(cwd)? != cwd {
+    // Path equality compares components, so `/repo/./x`, `/repo//x` and
+    // `/repo/x/` all equal the canonical path; the bytes must match too,
+    // because the working directory is echoed to the caller verbatim.
+    if !metadata.is_dir() || fs::canonicalize(cwd)?.as_os_str() != cwd.as_os_str() {
         return Err(Failure::Unavailable);
     }
     for candidate in cwd.ancestors() {
@@ -221,8 +242,9 @@ fn read_target(
     value: &str,
     context: &WorkspaceContext,
     home_dir: Option<&str>,
+    deadline: Instant,
 ) -> Outcome<(String, Value)> {
-    let target = resolve_target(value, context, home_dir)?;
+    let target = resolve_target(value, context, home_dir, deadline)?;
     let relative = target
         .strip_prefix(&context.repository)
         .map_err(|_| Failure::Refused)?;
@@ -233,11 +255,17 @@ fn read_target(
     }
     let identity = stable_file_identity(&metadata)?;
     let mut payload = Vec::new();
-    (&mut file)
-        .take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut payload)?;
-    if payload.len() as u64 > MAX_FILE_BYTES {
-        return Err(Failure::Unavailable);
+    let mut chunk = [0u8; READ_CHUNK_BYTES];
+    loop {
+        within(deadline)?;
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        if payload.len() as u64 + read as u64 > MAX_FILE_BYTES {
+            return Err(Failure::Unavailable);
+        }
+        payload.extend_from_slice(&chunk[..read]);
     }
     if stable_file_identity(&file.metadata()?)? != identity {
         return Err(Failure::Unavailable);
@@ -254,9 +282,10 @@ fn resolve_target(
     value: &str,
     context: &WorkspaceContext,
     home_dir: Option<&str>,
+    deadline: Instant,
 ) -> Outcome<PathBuf> {
     let lexical = context.cwd.join(value);
-    if is_secret_path(value, &context.cwd, home_dir)? {
+    if is_secret_path(value, &context.cwd, home_dir, deadline)? {
         return Err(Failure::Refused);
     }
     reject_symlink_components(&lexical, &context.repository)?;
@@ -264,19 +293,24 @@ fn resolve_target(
     let relative = target
         .strip_prefix(&context.repository)
         .map_err(|_| Failure::Refused)?;
-    if is_secret_path(posix(relative)?, &context.repository, home_dir)? {
+    if is_secret_path(posix(relative)?, &context.repository, home_dir, deadline)? {
         return Err(Failure::Refused);
     }
     Ok(target)
 }
 
 /// `classify_secret_path`, answered by the same tables the hook path reads.
-fn is_secret_path(value: &str, cwd: &Path, home_dir: Option<&str>) -> Outcome<bool> {
+fn is_secret_path(
+    value: &str,
+    cwd: &Path,
+    home_dir: Option<&str>,
+    deadline: Instant,
+) -> Outcome<bool> {
     let cwd = cwd.to_str().ok_or(Failure::Unavailable)?;
     let answer = guard_command::content_sensitivity::evaluate(
         "path",
         &json!({"path": value, "cwd": cwd, "home_dir": home_dir}),
-        Instant::now() + SECRET_CHECK_BUDGET,
+        deadline.min(Instant::now() + SECRET_CHECK_BUDGET),
     )
     .map_err(|_| Failure::Unavailable)?;
     match answer.get("ok") {
@@ -357,47 +391,6 @@ fn directory_target(path: &Path, context: &WorkspaceContext) -> Outcome<Value> {
 fn posix(relative: &Path) -> Outcome<&str> {
     let text = relative.to_str().ok_or(Failure::Unavailable)?;
     Ok(if text.is_empty() { "." } else { text })
-}
-
-/// `str.splitlines(keepends=True)`, with every line boundary Python reads.
-pub(crate) fn split_lines_keepends(text: &str) -> Vec<&str> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut characters = text.char_indices().peekable();
-    while let Some((index, character)) = characters.next() {
-        let end = match character {
-            '\r' if characters.peek().is_some_and(|(_, next)| *next == '\n') => {
-                characters.next();
-                index + 2
-            }
-            '\r' | '\n' | '\x0b' | '\x0c' | '\x1c' | '\x1d' | '\x1e' | '\u{85}' | '\u{2028}'
-            | '\u{2029}' => index + character.len_utf8(),
-            _ => continue,
-        };
-        lines.push(&text[start..end]);
-        start = end;
-    }
-    if start < text.len() {
-        lines.push(&text[start..]);
-    }
-    lines
-}
-
-/// `_selected`: the slice of lines the plan allows.
-pub(crate) fn selected<'a>(lines: &[&'a str], selection: &VerifiedReadSelectionV1) -> Vec<&'a str> {
-    let total = lines.len();
-    let (from, to) = match selection {
-        VerifiedReadSelectionV1::WorkingDirectory {} => (0, 0),
-        VerifiedReadSelectionV1::LeadingLines { count } => (0, total.min(*count as usize)),
-        VerifiedReadSelectionV1::TrailingLines { count } => {
-            (total.saturating_sub(*count as usize), total)
-        }
-        VerifiedReadSelectionV1::LineRange { start, end } => (
-            total.min((*start as usize).saturating_sub(1)),
-            total.min(*end as usize),
-        ),
-    };
-    lines[from..to.max(from)].to_vec()
 }
 
 fn optional_regular_file_digest(path: &Path) -> Outcome<String> {
