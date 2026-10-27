@@ -116,7 +116,9 @@ export function checkedSummary(
   // lastScanAtMs also moves when a run fails, so it cannot stand in for a finished check.
   if (assessment === undefined && pending) return "No check has finished yet.";
   const earlier = assessment !== undefined && pending && newestRun?.runId !== assessment.runId;
-  const atMs = assessment?.finishedAtMs ?? (earlier ? null : worktree.lastScanAtMs);
+  // The two endpoints are read separately, so a finished run can arrive before its assessment.
+  const runAtMs = newestRun?.state === "completed" || newestRun?.state === "partial" ? newestRun.finishedAtMs : null;
+  const atMs = assessment?.finishedAtMs ?? (earlier ? null : (runAtMs ?? worktree.lastScanAtMs));
   if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
   const when = formatRelativeTime(new Date(atMs).toISOString());
   return earlier ? `Showing results from the check ${when.replace(/^Yesterday/, "yesterday")}.` : `Checked ${when}`;

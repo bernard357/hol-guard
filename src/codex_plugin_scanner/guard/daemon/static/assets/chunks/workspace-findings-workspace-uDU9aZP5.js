@@ -1118,7 +1118,8 @@ function checkedSummary(worktree, newestRun, assessment) {
   const pending = newestRun?.state === "running" || newestRun?.state === "queued" || newestRun?.state === "failed";
   if (assessment === void 0 && pending) return "No check has finished yet.";
   const earlier = assessment !== void 0 && pending && newestRun?.runId !== assessment.runId;
-  const atMs = assessment?.finishedAtMs ?? (earlier ? null : worktree.lastScanAtMs);
+  const runAtMs = newestRun?.state === "completed" || newestRun?.state === "partial" ? newestRun.finishedAtMs : null;
+  const atMs = assessment?.finishedAtMs ?? (earlier ? null : runAtMs ?? worktree.lastScanAtMs);
   if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
   const when = formatRelativeTime(new Date(atMs).toISOString());
   return earlier ? `Showing results from the check ${when.replace(/^Yesterday/, "yesterday")}.` : `Checked ${when}`;

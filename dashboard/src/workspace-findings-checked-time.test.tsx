@@ -69,6 +69,11 @@ assert.equal(
 );
 assert.equal(checkedSummary(worktree, completedRun, undefined), "Checked 5m ago");
 assert.equal(
+  checkedSummary(worktree, { ...completedRun, finishedAtMs: assessedAt }, undefined),
+  "Checked 2h ago",
+  "a finished run whose assessment has not loaded yet shows its own finish time, not the last attempt",
+);
+assert.equal(
   checkedSummary({ ...worktree, lastScanAtMs: null }, undefined, undefined),
   "Waiting for the first check.",
 );
