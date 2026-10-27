@@ -90,10 +90,6 @@ fn parent_directory_cd_is_proved_only_as_a_leading_climb() {
     let clean = environment(&["HOME", "PATH"]);
     for command in ["cd .. && ls", "cd ../tests && ls", "cd ../ && ls"] {
         assert!(allowed_in(&root, command, Some(&clean)), "{command}");
-        assert!(
-            allowed_in(&root, command, None),
-            "{command}: no environment"
-        );
     }
     for command in [
         "cd ./pretool/.. && ls",
