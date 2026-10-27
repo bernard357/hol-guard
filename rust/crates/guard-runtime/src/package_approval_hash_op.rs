@@ -3,10 +3,12 @@
 //! that `local_supply_chain.py` used to compute in Python.
 //!
 //! The caller hydrates only facts it alone can read (the bound `GuardConfig`
-//! view, the Python-built execution context, the extension-control digest and
-//! the cached feed snapshot hash). The runtime reads the advisory cache and the
-//! workspace manifests itself, composes the action, builds the approval
-//! identity and returns the token; callers never recompute any of it.
+//! view, the Python-built execution context and the extension-control digest).
+//! The cached feed snapshot hash is still accepted but not bound: a feed
+//! refresh only matters when it changes the matched advisory ids. The runtime
+//! reads the advisory cache and the workspace manifests itself, composes the
+//! action, builds the approval identity and returns the token; callers never
+//! recompute any of it.
 
 use guard_command::action_lattice::most_restrictive_guard_action;
 use guard_command::effect_decision::GuardAction;
@@ -110,6 +112,84 @@ fn parse_execution_context(value: Option<&Value>) -> Result<PackageExecutionCont
     })
 }
 
+/// Cloud transport fallbacks say where the evidence came from, not what the
+/// policy is. The action they produce is already in `decision` and
+/// `policy_action`, so leaving them out keeps a timeout from voiding approvals.
+const EVIDENCE_SOURCE_REASON_CODES: [&str; 5] = [
+    "cloud_auth_error",
+    "cloud_http_error",
+    "cloud_invalid_response",
+    "cloud_timeout",
+    "cloud_validation_error",
+];
+
+/// Per-package fields that name the package or carry its verdict. Scores, fix
+/// suggestions and reason text are left out: a feed refresh rewrites them
+/// without changing what is installed or what Guard decided about it.
+const PACKAGE_POLICY_KEYS: [&str; 15] = [
+    "alias",
+    "decision",
+    "dependencyPath",
+    "direct",
+    "ecosystem",
+    "name",
+    "namespace",
+    "packageManager",
+    "relatedAdvisoryIds",
+    "requestedVersion",
+    "resolvedVersion",
+    "ruleId",
+    "sourceIdentity",
+    "sourceRepository",
+    "sourceRevisionKind",
+];
+
+/// Sorted, deduplicated reason codes. Messages are presentation text and may
+/// change between bundle refreshes without the verdict changing.
+fn policy_reason_codes(reasons: &Value) -> Vec<String> {
+    let mut codes = reasons
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|reason| reason.get("code").and_then(Value::as_str))
+        .filter(|code| !EVIDENCE_SOURCE_REASON_CODES.contains(code))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    codes.sort();
+    codes.dedup();
+    codes
+}
+
+fn policy_packages(packages: &Value) -> Value {
+    let Some(items) = packages.as_array() else {
+        return packages.clone();
+    };
+    let project = |package: &Value| -> Value {
+        let Some(map) = package.as_object() else {
+            return package.clone();
+        };
+        let mut projected = Map::new();
+        for key in PACKAGE_POLICY_KEYS {
+            if let Some(value) = map.get(key) {
+                projected.insert(key.to_owned(), value.clone());
+            }
+        }
+        if let Some(reasons) = map.get("reasons") {
+            projected.insert(
+                "reason_codes".to_owned(),
+                json!(policy_reason_codes(reasons)),
+            );
+        }
+        Value::Object(projected)
+    };
+    Value::Array(items.iter().map(project).collect())
+}
+
+/// The policy half of the approval context. Bundle and feed revisions are left
+/// out on purpose: Guard Cloud refreshes them hourly, and a refresh that does
+/// not change a verdict, a matched rule or the matched advisories must not
+/// void a saved approval.
 fn policy_context(
     request: &PackageApprovalHashRequestV1,
     current_action: GuardAction,
@@ -118,25 +198,22 @@ fn policy_context(
     let evaluation = &request.evaluation;
     let mut feed = Map::new();
     for key in [
-        "bundle_version",
         "decision",
         "enforcement",
         "entitlement_state",
         "exception_id",
         "matched_rule_id",
-        "packages",
         "policy_action",
-        "policy_version",
-        "reasons",
     ] {
         feed.insert(key.to_owned(), field(evaluation, key).clone());
     }
     feed.insert(
-        "feed_snapshot_hash".to_owned(),
-        request
-            .feed_snapshot_hash
-            .clone()
-            .map_or(Value::Null, Value::String),
+        "packages".to_owned(),
+        policy_packages(field(evaluation, "packages")),
+    );
+    feed.insert(
+        "reason_codes".to_owned(),
+        json!(policy_reason_codes(field(evaluation, "reasons"))),
     );
     feed.insert("matched_advisory_ids".to_owned(), json!(matched_ids));
     json!({

@@ -361,6 +361,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
+            ResidentOperationV1::CommandCapability(request) => {
+                crate::command_capability_op::evaluate_command_capability_request(&request)
+            }
             ResidentOperationV1::ContainedWrapperPlan(request) => {
                 crate::contained_wrapper_plan_op::evaluate_contained_wrapper_plan_request(&request)
             }
@@ -756,9 +759,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                 "status": "ready",
                 "protocol_version": crate::RESIDENT_PROTOCOL_VERSION,
             })),
-            ResidentOperationV1::Shutdown(_request) => {
-                crate::managed_resident::request_shutdown();
-                encode_response(&serde_json::json!({"status": "stopping"}))
+            ResidentOperationV1::Shutdown(request) => {
+                crate::managed_resident::answer_shutdown(&request, policy_store)
+                    .and_then(|response| encode_response(&response))
             }
         },
         ResidentRequestV1::Hook(request) => {

@@ -280,3 +280,85 @@ fn run_command_rejects_unknown_ops_fields_and_schemas() {
         assert!(run_command(request.to_string().as_bytes()).is_err());
     }
 }
+
+fn postures(posture: &str, mode: &str, overrides: Value) -> HarnessPostureConfigV1 {
+    HarnessPostureConfigV1 {
+        protection_posture: posture.to_owned(),
+        mode: mode.to_owned(),
+        security_level: "balanced".to_owned(),
+        harness_postures: serde_json::from_value(overrides).unwrap(),
+    }
+}
+
+#[test]
+fn an_observing_install_reads_as_watch_whatever_its_posture_says() {
+    let resolved = harness_postures(&postures("extra_careful", "observe", json!({})));
+    assert_eq!(resolved["baseline"], "watch");
+    assert_eq!(resolved["effective"]["codex"], "watch");
+}
+
+#[test]
+fn an_override_never_weakens_a_stricter_baseline() {
+    let resolved = harness_postures(&postures(
+        "extra_careful",
+        "enforce",
+        json!({"codex": "protected"}),
+    ));
+    assert_eq!(resolved["effective"]["codex"], "extra_careful");
+    assert_eq!(resolved["views"]["codex"]["posture"], "extra_careful");
+    assert_eq!(resolved["views"]["codex"]["security_level"], "strict");
+}
+
+#[test]
+fn a_watch_override_is_honored_under_any_baseline() {
+    let resolved = harness_postures(&postures(
+        "extra_careful",
+        "enforce",
+        json!({"codex": "watch"}),
+    ));
+    assert_eq!(resolved["effective"]["codex"], "watch");
+    assert_eq!(resolved["views"]["codex"]["mode"], "observe");
+    // Watch leaves the level alone rather than loosening it.
+    assert_eq!(resolved["views"]["codex"]["security_level"], "balanced");
+}
+
+#[test]
+fn a_stricter_override_turns_protection_back_on_under_a_global_watch() {
+    let resolved = harness_postures(&postures(
+        "watch",
+        "observe",
+        json!({"codex": "extra_careful"}),
+    ));
+    assert_eq!(resolved["baseline"], "watch");
+    assert_eq!(resolved["effective"]["codex"], "extra_careful");
+    assert_eq!(resolved["views"]["codex"]["mode"], "enforce");
+}
+
+#[test]
+fn a_harness_without_an_override_has_no_view_of_its_own() {
+    let resolved = harness_postures(&postures(
+        "protected",
+        "enforce",
+        json!({"codex": "extra_careful"}),
+    ));
+    assert_eq!(resolved["effective"]["claude-code"], "protected");
+    assert!(resolved["views"].get("claude-code").is_none());
+}
+
+#[test]
+fn every_registered_harness_resolves_to_a_posture() {
+    let resolved = harness_postures(&postures("protected", "enforce", json!({})));
+    let effective = object(resolved["effective"].clone());
+    assert_eq!(
+        effective.len(),
+        guard_command::harness_identity::REGISTERED_HARNESS_COUNT
+    );
+    assert!(effective.values().all(|posture| posture == "protected"));
+}
+
+#[test]
+fn the_posture_op_needs_its_facts() {
+    let request: Request =
+        serde_json::from_value(json!({"schema": SCHEMA, "op": "harness_postures"})).unwrap();
+    assert_eq!(resolve(&request).unwrap_err(), INVALID);
+}

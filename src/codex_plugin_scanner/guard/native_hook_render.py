@@ -141,13 +141,13 @@ def native_cli_hook_emit(
         response_json = json.dumps(dict(response), ensure_ascii=True, separators=(",", ":"))
     except (TypeError, ValueError):
         return None
-    rendered = native_render_cli(
-        "cli_hook_emit",
-        harness,
-        {"event_name": event_name, "response_json": response_json},
-        guard_home=guard_home,
-        deadline=deadline,
-    )
+    params: dict[str, object] = {"event_name": event_name, "response_json": response_json}
+    if guard_home is not None:
+        # The store this command reads. An authority block's recovery line
+        # names it, so a person pasting the command repairs this install and
+        # not whichever one the bare command would find.
+        params["guard_home"] = str(guard_home)
+    rendered = native_render_cli("cli_hook_emit", harness, params, guard_home=guard_home, deadline=deadline)
     return rendered[1] if rendered is not None else None
 
 

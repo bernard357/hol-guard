@@ -7,10 +7,13 @@
 //! of them decides a verdict: the daemon's answer is reshaped for the
 //! harness, and a failure is the fixed fail-closed payload.
 
+use std::path::Path;
+
 use guard_contracts::GuardAction;
 
 use crate::blocked_request_mode::is_unlinked_connector_setup_reason;
 use crate::bounded_hook_bridge_hermes::hermes_bridge_response;
+use crate::bounded_hook_bridge_remediation::zcode_authority_block_reason;
 use crate::claude_hook_bridge_render::py_strip;
 use crate::hook_env_stamp::{backslash_surrogates, dumps, set_member};
 use crate::pyjson::PyVal;
@@ -25,8 +28,6 @@ pub(crate) const FAILURE_REASON: &str =
     "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal.";
 const PROMPT_UNAVAILABLE_REASON: &str = "HOL Guard could not complete native prompt review safely.";
 const PROMPT_UNAVAILABLE_REASON_CODE: &str = "native_prompt_unavailable";
-const AUTHORITY_BLOCK_REASON_MARKER: &str = "native command extension policy";
-const AUTHORITY_BLOCK_REMEDIATION: &str = " Run `hol-guard command controls recover-authority` in a terminal to restore the protected control floor.";
 
 const EVENT_NAME_KEYS: [&str; 6] = [
     "hook_event_name",
@@ -317,17 +318,6 @@ pub(crate) fn failure_output_for(
     (rendered, code)
 }
 
-/// `zcode_authority_block_reason`.
-fn zcode_authority_block_reason(reason: &str) -> String {
-    if reason.contains(AUTHORITY_BLOCK_REASON_MARKER)
-        && !reason.contains("hol-guard command controls")
-    {
-        format!("{reason}{AUTHORITY_BLOCK_REMEDIATION}")
-    } else {
-        reason.to_owned()
-    }
-}
-
 /// `zcode_hook_process_exit(policy_action=..., event_name=...) == 2`.
 fn zcode_exit_blocks(policy_action: &str, event_name: &str) -> bool {
     let event_name = if event_name.is_empty() {
@@ -596,6 +586,7 @@ pub(crate) fn daemon_response_to_native(
     harness: &str,
     event_name: &str,
     unmap: bool,
+    guard_home: Option<&Path>,
 ) -> Option<Rendered> {
     if harness == "hermes" {
         return Some(hermes_bridge_response(daemon_response, unmap));
@@ -623,7 +614,7 @@ pub(crate) fn daemon_response_to_native(
             let reason =
                 reason.unwrap_or_else(|| format!("HOL Guard blocked this action ({action})"));
             stderr = if harness == "zcode" {
-                zcode_authority_block_reason(&reason)
+                zcode_authority_block_reason(&reason, guard_home)
             } else {
                 reason
             };
@@ -703,11 +694,14 @@ pub(crate) fn daemon_response_to_native(
         }
     }
     let stderr = if blocks && harness == "zcode" {
-        zcode_authority_block_reason(if reason.is_empty() {
-            &default_reason
-        } else {
-            &reason
-        })
+        zcode_authority_block_reason(
+            if reason.is_empty() {
+                &default_reason
+            } else {
+                &reason
+            },
+            guard_home,
+        )
     } else if blocks && matches!(harness, "kimi" | "devin") {
         reason
     } else {

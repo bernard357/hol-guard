@@ -46,7 +46,6 @@ from . import commands_hook as _commands_hook
 from . import commands_remove_hooks as _commands_remove_hooks
 from . import commands_repair as _commands_repair
 from . import commands_router as _commands_router
-from . import commands_isolation as _commands_isolation
 
 _SOURCE_MODULES: tuple[ModuleType, ...] = (
     __commands_shared,
@@ -85,7 +84,6 @@ _SOURCE_MODULES: tuple[ModuleType, ...] = (
     _commands_remove_hooks,
     _commands_repair,
     _commands_router,
-    _commands_isolation,
 )
 
 

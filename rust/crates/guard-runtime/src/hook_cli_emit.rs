@@ -8,6 +8,8 @@
 //! action that decides its exit status. Nothing here decides a verdict: the
 //! daemon already did, and this reads which one it gave.
 
+use std::path::Path;
+
 use guard_command::hook_responses::Object;
 use serde_json::{json, Value};
 
@@ -56,6 +58,7 @@ fn bridge_output(
     event_name: &str,
     response: &[(String, PyVal)],
     unmap: bool,
+    guard_home: Option<&Path>,
 ) -> Option<Rendered> {
     if harness == "copilot" && has_key(response, "behavior") && is_permission_event(event_name) {
         // Already Copilot's permission wire document (its fail-safe deny
@@ -74,7 +77,7 @@ fn bridge_output(
             });
         }
     }
-    daemon_response_to_native(response, harness, event_name, unmap)
+    daemon_response_to_native(response, harness, event_name, unmap, guard_home)
 }
 
 /// The policy action a non-bridge harness's exit status follows. A notice
@@ -91,11 +94,15 @@ fn exit_policy_action(harness: &str, event_name: &str, response: &[(String, PyVa
 
 /// The `cli_hook_emit` document for `harness` (canonical) and the daemon's
 /// answer as compact JSON text. `None` for text that is not one JSON object
-/// or an answer the bridge renderer cannot reproduce.
+/// or an answer the bridge renderer cannot reproduce. `guard_home` is the
+/// store the caller's command names, so an authority block's recovery line
+/// names that store too; `None` leaves the bare command the default home
+/// already answers.
 pub(crate) fn cli_hook_emit_document(
     harness: &str,
     event_name: &str,
     response_json: &str,
+    guard_home: Option<&Path>,
 ) -> Option<Object> {
     let parsed = pyjson::parse_mapping_lone_surrogates(response_json).ok()?;
     if parsed.mapped && parsed.collision {
@@ -108,7 +115,7 @@ pub(crate) fn cli_hook_emit_document(
         document.insert("policy_action".into(), Value::String(action));
         return Some(document);
     }
-    let output = bridge_output(harness, event_name, response, parsed.mapped)?;
+    let output = bridge_output(harness, event_name, response, parsed.mapped, guard_home)?;
     document.insert("stdout".into(), Value::String(output.stdout));
     document.insert("stderr".into(), Value::String(output.stderr));
     document.insert("exit_code".into(), json!(output.exit_code));

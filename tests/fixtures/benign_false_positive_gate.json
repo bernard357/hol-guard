@@ -264,6 +264,159 @@
       "expect": "not_allow"
     },
     {
+      "id": "guard-approvals-approve-help",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --help"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "guard-approvals-approve-help-short",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve -h"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-reason-takes-help",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve req-1 --reason --help"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-home-override",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --home /tmp/evil --help"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-home-assignment",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --home=/tmp/evil --help"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-guard-home-assignment",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --guard-home=/tmp/evil --help"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-workspace-assignment",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --workspace=/tmp/evil --help"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-home-abbreviation",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --hom /tmp/evil --help"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-guard-approvals-approve-help-workspace-abbreviation",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "hol-guard approvals approve --work /tmp/evil --help"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
       "id": "guard-approval-decision-wait",
       "fix_area": "shell",
       "harnesses": [
@@ -5909,6 +6062,74 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "queue-ln-s-relative-sibling-node-modules",
+      "fix_area": "queue",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/web/node_modules web/node_modules"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "queue-ln-s-relative-sibling-node-modules-from-package-dir",
+      "fix_area": "queue",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/dashboard/node_modules node_modules"
+      },
+      "cwd": "worktree_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-ln-s-relative-git-directory-into-worktree",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../parent-repo/.git web/gitlink"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-ln-s-relative-escape-to-home-ssh",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ln -s ../../../home/.ssh web/sshlink"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
     },
     {
       "id": "neg-cp-recursive-to-ssh",
@@ -11613,6 +11834,41 @@
       },
       "cwd": "org",
       "expect": "allow"
+    },
+    {
+      "id": "session-git-worktree-remove-absent-sibling",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree remove ../app-portal-fix"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "negative-git-worktree-remove-registered-by-suffix",
+      "fix_area": "negative",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "omp",
+        "zcode",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree remove app-portal-fix"
+      },
+      "cwd": "org_app",
+      "contained_ok": true,
+      "expect": "not_allow"
     },
     {
       "id": "session-git-worktree-add-missing-private-temporary-parent",
@@ -29396,6 +29652,166 @@
         "command": "gh pr list --json number | jq 'limit(1; .[])'"
       },
       "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "read-repo-codex-plugin-manifest",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.codex-plugin/plugin.json"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "read-repo-well-known-agent-card",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.well-known/agent-card.json"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "read-repo-workflow-named-for-a-tool",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.github/workflows/docker.yml"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "read-repo-well-known-agent-document",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.well-known/agent.json"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-read-repo-git-hook-body",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.git/hooks/pre-commit.sh"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-read-repo-hidden-credential-store-name",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.codex-plugin/credentials.json"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-read-repo-hidden-compiled-blob",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.codex-plugin/runtime.node"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-read-repo-hidden-tool-tree",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.cursor/mcp.json"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-read-repo-dotfile-spelled-as-a-directory",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.dockerignore/notes.md"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-read-repo-hidden-credential-directory-source-name",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${ORG}/app-portal/.secrets/read.py"
+      },
+      "cwd": "org_app",
       "expect": "not_allow"
     }
   ],
