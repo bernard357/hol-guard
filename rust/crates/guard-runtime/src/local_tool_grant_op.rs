@@ -117,18 +117,12 @@ fn eligibility(scanner_evidence: &Value) -> Option<Eligibility> {
             Some(Value::String(text)) if text == VERIFIED_FILES || text == PACKAGE_PROFILE => text,
             Some(_) => continue,
         };
-        let (
-            Some(tool_name),
-            Some(tool_identity_hash),
-            Some(capability),
-            Some(read_only_reason),
-        ) = (
+        let (Some(tool_name), Some(tool_identity_hash), Some(capability), Some(read_only_reason)) = (
             nonempty(entry.get("tool_name")),
             nonempty(entry.get("tool_identity_hash")),
             nonempty(entry.get("capability")),
             nonempty(entry.get("read_only_reason")),
-        )
-        else {
+        ) else {
             continue;
         };
         if entry.get("eligible") != Some(&Value::Bool(true)) || !is_sha256(&tool_identity_hash) {

@@ -198,7 +198,9 @@ fn the_version_target_is_filed_under_the_capability_independent_digest() {
     assert_eq!(answer["selection"]["expires_at"], Value::Null);
     assert_eq!(
         answer["selection"]["decision"]["artifact_id"],
-        json!(format!("local-tool-grant:v1:{IDENTITY}:version:{ANY_DIGEST}"))
+        json!(format!(
+            "local-tool-grant:v1:{IDENTITY}:version:{ANY_DIGEST}"
+        ))
     );
     assert_eq!(answer["selection"]["decision"]["expires_at"], Value::Null);
 }
