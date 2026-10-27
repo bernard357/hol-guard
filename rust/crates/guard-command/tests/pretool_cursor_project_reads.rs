@@ -83,25 +83,33 @@ impl Fixture {
     }
 
     fn read(&self, harness: &str, path: &str, conversation: Option<&str>) -> PreToolResultV1 {
-        let mut payload = json!({
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Read",
-            "tool_input": {"file_path": path, "path": path},
-            "file_path": path,
-        });
+        let mut payload = read_payload(path);
         if let Some(conversation) = conversation {
             payload["conversation_id"] = Value::from(conversation);
         }
+        self.evaluate(harness, &payload, &self.home)
+    }
+
+    fn evaluate(&self, harness: &str, payload: &Value, home: &Path) -> PreToolResultV1 {
         evaluate_pre_tool_envelope_with_context(
             harness,
             "PreToolUse",
-            &payload,
+            payload,
             None,
             None,
-            self.home.to_str(),
+            home.to_str(),
             self.workspace.to_str(),
         )
     }
+}
+
+fn read_payload(path: &str) -> Value {
+    json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": path, "path": path},
+        "file_path": path,
+    })
 }
 
 fn allowed(result: &PreToolResultV1) -> bool {
@@ -148,6 +156,52 @@ fn cursor_reads_only_its_own_conversation_transcript() {
         &other,
         Some(OWN_CONVERSATION)
     )));
+}
+
+#[test]
+fn conflicting_conversation_ids_admit_no_transcript() {
+    let fixture = Fixture::new("conflict");
+    const OTHER: &str = "9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a";
+    for (id, alias, allowed_read) in [
+        (OWN_CONVERSATION, OWN_CONVERSATION, true),
+        (OWN_CONVERSATION, OTHER, false),
+        (OTHER, OWN_CONVERSATION, false),
+    ] {
+        for transcript in [OWN_CONVERSATION, OTHER] {
+            let path = fixture.own(&format!(
+                "agent-transcripts/{transcript}/compaction/INDEX.md"
+            ));
+            let mut payload = read_payload(&path);
+            payload["conversation_id"] = Value::from(id);
+            payload["conversationId"] = Value::from(alias);
+            let result = fixture.evaluate("cursor", &payload, &fixture.home);
+            assert_eq!(
+                allowed(&result),
+                allowed_read && transcript == OWN_CONVERSATION,
+                "{id} / {alias} reading {transcript}: {}",
+                result.reason_code
+            );
+        }
+    }
+}
+
+#[test]
+fn cursor_reads_through_a_linked_home() {
+    let fixture = Fixture::new("linked-home");
+    let link = fixture.home.with_file_name("home-link");
+    std::os::unix::fs::symlink(&fixture.home, &link).unwrap();
+    let relative = fixture
+        .project_dir(&fixture.workspace)
+        .strip_prefix(&fixture.home)
+        .unwrap()
+        .join("terminals/120467.txt");
+    for path in [
+        format!("~/{}", relative.display()),
+        link.join(&relative).to_string_lossy().into_owned(),
+    ] {
+        let result = fixture.evaluate("cursor", &read_payload(&path), &link);
+        assert!(allowed(&result), "{path}: {}", result.reason_code);
+    }
 }
 
 #[test]

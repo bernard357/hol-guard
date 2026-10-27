@@ -38,8 +38,9 @@ pub(super) fn evaluate(
     {
         return None;
     }
-    let home = canonical(Path::new(home_dir?))?;
-    let target = exact_target(&signals.path_values[0], home_dir)?;
+    let declared_home = Path::new(home_dir?);
+    let home = canonical(declared_home)?;
+    let target = exact_target(&signals.path_values[0], declared_home, &home)?;
     let cursor = home.join(".cursor");
     let relative = target.strip_prefix(&cursor).ok()?;
     let parts = relative
@@ -83,12 +84,17 @@ pub(super) fn evaluate(
 
 /// The file `value` names when the name is already its own canonical path: an
 /// absolute (or `~`) spelling with no `.`/`..` component and no link anywhere
-/// along it, holding a bounded regular file with no credential-shaped name.
-fn exact_target(value: &str, home_dir: Option<&str>) -> Option<PathBuf> {
-    let spelled = match super::super::read_paths::expand_home_read_path(value, home_dir) {
+/// below the home directory, holding a bounded regular file with no
+/// credential-shaped name. A home that is itself a link is read through its
+/// resolved location, so only links inside it disqualify the read.
+fn exact_target(value: &str, declared_home: &Path, home: &Path) -> Option<PathBuf> {
+    let mut spelled = match super::super::read_paths::expand_home_read_path(value, home.to_str()) {
         Some(expanded) => PathBuf::from(expanded),
         None => PathBuf::from(value),
     };
+    if let Ok(rest) = spelled.strip_prefix(declared_home) {
+        spelled = home.join(rest);
+    }
     if !spelled.is_absolute()
         || spelled
             .components()
@@ -132,19 +138,27 @@ fn project_leaf(rest: &[&str], conversation: Option<&str>) -> bool {
     }
 }
 
-/// The conversation the hook payload belongs to, when it names a plausible id.
+/// The conversation the hook payload belongs to, when every spelling of the
+/// field present names the same plausible id.
 fn conversation_id(payload: &Value) -> Option<&str> {
-    ["conversation_id", "conversationId"]
-        .iter()
-        .find_map(|key| payload.get(key).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|id| {
-            !id.is_empty()
-                && id.len() <= 128
-                && id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
+    let mut found: Option<&str> = None;
+    for key in ["conversation_id", "conversationId"] {
+        let Some(value) = payload.get(key) else {
+            continue;
+        };
+        let id = value.as_str()?.trim();
+        if id.is_empty()
+            || id.len() > 128
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || found.is_some_and(|earlier| earlier != id)
+        {
+            return None;
+        }
+        found = Some(id);
+    }
+    found
 }
 
 /// The project directory names Cursor gives the session workspace: its path
