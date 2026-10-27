@@ -356,7 +356,8 @@ def test_store_initializes_receipt_schema_marker_and_recorded_at_index(tmp_path:
     assert "idx_native_hook_decision_receipts_recorded_at" in indexes
 
 
-def test_post_tool_edge_decoder_requires_receipt_bound_to_result() -> None:
+def test_post_tool_edge_decoder_requires_a_receipt() -> None:
+    # Whether the receipt records this result is the edge's own check now.
     result = {
         "decision": "allow",
         "model_output_action": "allow_original",
@@ -381,7 +382,3 @@ def test_post_tool_edge_decoder_requires_receipt_bound_to_result() -> None:
     missing_receipt = dict(edge)
     del missing_receipt["receipt"]
     assert response_from_payload(missing_receipt) is None
-
-    mutated_result = dict(edge)
-    mutated_result["result"] = {**result, "decision": "deny"}
-    assert response_from_payload(mutated_result) is None

@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli.commands_support_runtime_artifacts import _codex_post_tool_output_artifact
 from codex_plugin_scanner.guard.native_codex_tool_output import codex_tool_output_native
 from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
+from tests.live_hook_review_support import assert_secret_output_held, live_post_tool_flag
 from tests.native_command_test_support import inspect_command_native_test as inspect_command
 
 # Windows rejects ASCII newlines in filenames; keep an unusual Unicode separator
@@ -124,25 +124,22 @@ def test_git_pathspec_selection_changes_post_tool_approval_identity(git_reposito
         "tool_input": {"command": command},
         "tool_response": {"stdout": f"TOKEN={credential_fixture}\n"},
     }
-    first = _codex_post_tool_output_artifact(
+    first = live_post_tool_flag(
         payload=payload,
-        config_path=str(git_repository / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=git_repository,
     )
     _write(git_repository / "nested" / ".env", "SECOND=fixture\n")
     _git(git_repository, "add", "nested/.env")
-    second = _codex_post_tool_output_artifact(
+    second = live_post_tool_flag(
         payload=payload,
-        config_path=str(git_repository / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=git_repository,
     )
 
-    assert first is not None
-    assert second is not None
-    assert first.artifact_id != second.artifact_id
-    assert first.metadata["git_pathspec_selection_identity"] != second.metadata["git_pathspec_selection_identity"]
+    # Both selections stay held. The live output block carries no approval
+    # identity; the identity change itself is pinned by
+    # test_git_pathspec_identity_binds_index_and_worktree_state.
+    assert_secret_output_held(first)
+    assert_secret_output_held(second)
 
 
 _DIFF_ENV_COMMAND = "git diff -- ':(top,glob)**/*.env' | sed -n '1,40p'"

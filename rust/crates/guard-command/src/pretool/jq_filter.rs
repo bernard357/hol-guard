@@ -9,15 +9,19 @@
 //! `map(.number)`), an object or array built from admitted filters, or a
 //! parenthesised group. Stages may compare two such operands against each
 //! other or against a plain literal, combine comparisons with `and`/`or`, and
-//! fall back to a second filter with `//`.
+//! fall back to a second filter with `//`. A stage may also be a bare
+//! format such as `@tsv` or `@base64`, which only renders the value as text.
 //!
 //! Every form here is a pure function of the value read: none of them reaches
 //! the environment, further input, files or modules, and the characters that
 //! would let one do so are refused outright. `$` (variable bindings, `$ENV`,
-//! `$__loc__`), `@` (format strings), `;` (which every multi-argument and
+//! `$__loc__`), `@` outside a bare rendering format (so `@sh` and a
+//! `@fmt "string"` template stay out), `;` (which every multi-argument and
 //! binding builtin needs: `def`, `reduce`, `foreach`, `limit`, `range`,
 //! `getpath`), string interpolation, a `,` or `:` outside a bracket, computed
 //! object keys, and every builtin outside the lists below are all rejected.
+//! A shorthand object entry (`{number, title}`) names a field of the value
+//! read, so it is admitted under the same key rules as `{number: .number}`.
 
 const MAX_STAGES: usize = 8;
 
@@ -95,6 +99,12 @@ const FILTER_BUILTINS: &[&str] = &[
     "sort_by",
     "unique_by",
     "with_entries",
+];
+
+/// Format strings that only render the value read as text. `@sh` is left
+/// out: its output is shell-quoted words meant to be run, which is not a read.
+const FORMATS: &[&str] = &[
+    "base32", "base32d", "base64", "base64d", "csv", "html", "json", "text", "tsv", "uri",
 ];
 
 /// Comparisons, longest spelling first so `<=` is never read as `<`.
@@ -227,11 +237,23 @@ fn stage(part: &str) -> bool {
         || object(part)
         || array(part)
         || group(part)
+        || format(part)
+}
+
+/// `@tsv`, `@base64`: a bare rendering format, applied to the value read.
+fn format(stage: &str) -> bool {
+    stage.strip_prefix('@').is_some_and(rendering_format)
+}
+
+/// Whether `name` is a format that only renders the value read as text.
+pub(crate) fn rendering_format(name: &str) -> bool {
+    FORMATS.contains(&name)
 }
 
 /// Outside string literals only names, projections, spaces, call and group
 /// parentheses, comparison operators, the `+` and `-` a number literal
-/// uses, `//` and bracket punctuation may appear; inside one only printable
+/// uses, `//`, a `@` that opens a known rendering format, and bracket
+/// punctuation may appear; inside one only printable
 /// ASCII and the `\n`, `\t` and `\\`
 /// escapes, so neither `\(` interpolation nor an escaped quote can appear.
 /// Brackets must balance and close in the kind they opened.
@@ -258,6 +280,16 @@ fn valid_characters(filter: &str) -> bool {
             }
             b':' if open.last() == Some(&b'{') => {}
             b',' if !open.is_empty() => {}
+            b'@' => {
+                let name = filter[index + 1..]
+                    .split(|value: char| !value.is_ascii_alphanumeric())
+                    .next()
+                    .unwrap_or_default();
+                if !FORMATS.contains(&name) {
+                    return false;
+                }
+                index += name.len();
+            }
             byte if byte.is_ascii_alphanumeric()
                 || matches!(
                     byte,
@@ -313,7 +345,8 @@ fn split_marker<'a>(text: &'a str, marker: &[u8]) -> Option<Vec<&'a str>> {
 }
 
 /// `{"a": .x | has("y"), b: .z}`: every entry is a name or plain string key
-/// and an admitted filter. Shorthand (`{a}`) and computed keys are rejected.
+/// and an admitted filter, or a shorthand entry (`{a}`, `{"a b"}`) that reads
+/// the field of that name. Computed and `$`-variable keys are rejected.
 fn object(stage: &str) -> bool {
     let Some(inner) = stage
         .strip_prefix('{')
@@ -328,10 +361,11 @@ fn object(stage: &str) -> bool {
         let Some(colon) = split_marker(entry, b":") else {
             return false;
         };
-        let [key, value] = colon.as_slice() else {
-            return false;
-        };
-        object_key(key) && pipeline(value)
+        match colon.as_slice() {
+            [key] => object_key(key),
+            [key, value] => object_key(key) && pipeline(value),
+            _ => false,
+        }
     })
 }
 

@@ -5,9 +5,9 @@ Guard's own hook bridges run in the native runtime
 ``codex_hook_bridge_transport.rs``). These Python clients send hook requests
 through the same identity challenge for the installed SLO session, the
 installed-wheel probes (``ci/native_runtime/installed_hook_client.py`` loads
-this file by path) and the daemon transport tests. Only the installed
-package's authenticated daemon state reader is imported, so this file loads
-under ``python -I`` against an installed wheel.
+this file by path) and the daemon transport tests. It imports only the
+standard library and ``daemon_hook_auth.py``, which the installed-wheel probes
+register before loading this file, so it loads under ``python -I``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from codex_plugin_scanner.guard.adapters._modules.codex.codex_daemon_hook_auth import (
+from scripts.daemon_hook_auth import (
     _assert_loopback_http_url,
     _authenticated_state,
     _daemon_auth_token,

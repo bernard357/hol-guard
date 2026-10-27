@@ -236,6 +236,8 @@ def _contract_failures(root: Path) -> list[str]:
             (
                 "pre-tool-command-authority-v1",
                 "pre-tool-generic-authority-v1",
+                # The edge checks its own answer; Python trusts it only then.
+                "edge-self-check-v1",
                 # The resident PreToolUse frame carries the command model
                 # request, now wrapped in the envelope that adds the path
                 # context the lane runs in.
@@ -244,7 +246,7 @@ def _contract_failures(root: Path) -> list[str]:
         ),
         (
             root / "rust/crates/guard-runtime/src/edge.rs",
-            ("evaluate_pre_tool_envelope", "guard-pre-tool-result.v1"),
+            ("evaluate_pre_tool_envelope", "edge_result_check::validate_pre_tool_result"),
         ),
         (
             # PostToolUse is decided by the same native edge: the Rust review,
@@ -290,7 +292,14 @@ def _bridge_failures(root: Path) -> list[str]:
     failures.extend(
         required_tokens(
             root / "src/codex_plugin_scanner/guard/native_hook_edge.py",
-            ("guard-pre-tool-result.v1", "pre-tool-generic-authority-v1", "_decode_pre_tool_result"),
+            ("pre-tool-generic-authority-v1", "edge-self-check-v1"),
+        )
+    )
+    # The edge checks its own pre-tool result and receipt before it answers.
+    failures.extend(
+        required_tokens(
+            root / "rust/crates/guard-runtime/src/edge_result_check.rs",
+            ("guard-pre-tool-result.v1", "fn pre_tool_result(", "fn receipt_agrees("),
         )
     )
     command_review = function_node(command_bridge, "review_pre_tool_native")

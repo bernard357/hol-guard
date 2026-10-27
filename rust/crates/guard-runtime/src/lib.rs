@@ -280,6 +280,7 @@ mod extension_control_op;
 mod extension_control_prepared_op;
 mod extension_control_preview_op;
 mod extension_control_proof;
+mod extension_control_terminal_op;
 mod extension_coverage_hint;
 #[path = "adapters/detection/gemini_detect.rs"]
 mod gemini_detect;
@@ -716,6 +717,7 @@ mod project_identity;
 mod project_identity_op;
 mod prompt_analyze_op;
 mod protect_request_op;
+mod protection_health_report_op;
 use guard_runtime_pyjson as pyjson;
 #[cfg(test)]
 mod registry_vectors_tests;

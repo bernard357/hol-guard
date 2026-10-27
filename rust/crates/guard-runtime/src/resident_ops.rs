@@ -352,6 +352,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
+            ResidentOperationV1::ExtensionControlTerminal(request) => {
+                crate::extension_control_terminal_op::evaluate_extension_control_terminal_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::HookRender(request) => {
                 crate::hook_render_op::evaluate_hook_render_request(&request)
             }
@@ -770,6 +775,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             }
             ResidentOperationV1::AibomReportSummaries(request) => {
                 crate::aibom_report_summaries_op::evaluate_aibom_report_summaries(&request)
+            }
+            ResidentOperationV1::ProtectionHealthReport(request) => {
+                crate::protection_health_report_op::evaluate_protection_health_report(&request)
             }
             // Diagnostic correlation only: the lineage never authorizes an action.
             ResidentOperationV1::RetryLineageCapture(request) => {

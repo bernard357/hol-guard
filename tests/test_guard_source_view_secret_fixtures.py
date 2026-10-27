@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli import commands as guard_commands_module
 from codex_plugin_scanner.guard.native_codex_tool_output import codex_tool_output_native
 from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
+from tests.live_hook_review_support import LIVE_REVIEWS_RETIRED_ALLOW, live_post_tool_flag
 
 
 def _secret_like_source_name(command: str, *, cwd: Path | None = None) -> bool:
@@ -29,28 +29,27 @@ def _write_text(path: Path, contents: str) -> None:
     ),
 )
 def test_codex_non_shell_post_tool_secret_output_is_blocked(
-    tmp_path: Path,
+    live_hook_root: Path,
     tool_name: str,
     tool_input: dict[str, str],
 ) -> None:
     token = "".join(("gh", "p_")) + "a" * 30
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": tool_name,
             "tool_input": tool_input,
             "tool_response": {"stdout": f"token={token}"},
         },
-        config_path=str(tmp_path / ".codex" / "config.toml"),
-        source_scope="workspace",
-        cwd=tmp_path,
-        home_dir=tmp_path,
+        cwd=live_hook_root,
+        home_dir=live_hook_root,
     )
 
     assert artifact is not None
 
 
-def test_codex_source_view_allows_placeholder_private_key_fixture_output(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
+@LIVE_REVIEWS_RETIRED_ALLOW
+def test_codex_source_view_allows_placeholder_private_key_fixture_output(live_hook_root: Path) -> None:
+    workspace_dir = live_hook_root / "workspace"
     source_file = workspace_dir / "tests" / "test_connect_fixture.py"
     _write_text(
         source_file,
@@ -63,22 +62,20 @@ def test_codex_source_view_allows_placeholder_private_key_fixture_output(tmp_pat
         command,
         cwd=workspace_dir,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "tool_response": {"stdout": source_file.read_text(encoding="utf-8")},
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
 
     assert artifact is None
 
 
-def test_codex_source_view_allows_oauth_token_service_source_output(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
+def test_codex_source_view_allows_oauth_token_service_source_output(live_hook_root: Path) -> None:
+    workspace_dir = live_hook_root / "workspace"
     source_file = workspace_dir / "src" / "oauth-token-service.ts"
     source_contents = (
         "export class OAuthTokenService {\n"
@@ -95,23 +92,21 @@ def test_codex_source_view_allows_oauth_token_service_source_output(tmp_path: Pa
         command,
         cwd=workspace_dir,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "tool_response": {"stdout": source_contents},
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
 
     assert artifact is None
 
 
-def test_codex_source_view_allows_medium_examples_from_symlinked_skill(tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
+def test_codex_source_view_allows_medium_examples_from_symlinked_skill(live_hook_root: Path) -> None:
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
     real_skill = workspace_dir / ".agents" / "skills" / "guard-dev-testing"
     skill_file = real_skill / "SKILL.md"
     _write_text(skill_file, "secret = get_secret('deployment-config')\nsecret['data'] = merged\n")
@@ -125,14 +120,12 @@ def test_codex_source_view_allows_medium_examples_from_symlinked_skill(tmp_path:
         cwd=workspace_dir,
         home_dir=home_dir,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "tool_response": {"stdout": skill_file.read_text(encoding="utf-8")},
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
         home_dir=home_dir,
     )
@@ -158,8 +151,8 @@ def test_codex_source_view_exact_secret_stem_stays_secret_with_cwd(tmp_path: Pat
     )
 
 
-def test_codex_source_view_still_blocks_real_private_key_output(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
+def test_codex_source_view_still_blocks_real_private_key_output(live_hook_root: Path) -> None:
+    workspace_dir = live_hook_root / "workspace"
     source_file = workspace_dir / "tests" / "test_connect_fixture.py"
     _write_text(
         source_file,
@@ -173,14 +166,12 @@ def test_codex_source_view_still_blocks_real_private_key_output(tmp_path: Path) 
 
     command = "sed -n '1,20p' tests/test_connect_fixture.py"
 
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "tool_response": {"stdout": source_file.read_text(encoding="utf-8")},
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
 

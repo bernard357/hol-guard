@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from .native_approval_errors import resident_refusal_code
-from .native_decision_receipt import receipt_matches_edge, valid_prompt_risk_classes
 from .native_resident_client import (
     native_resident_client_request,
     record_native_resident_client_failure_code,
@@ -25,83 +24,11 @@ from .native_runtime_resilience import (
 _EDGE_FEATURE = "hook-envelope-v2"
 _CLIENT_FEATURE = "native-resident-client-v1"
 _RESPONSE_FEATURE = "hook-harness-response-v1"
+# Python no longer re-checks the edge result or receipt; only a resident that
+# checks its own answer may be trusted with it.
+_SELF_CHECK_FEATURE = "edge-self-check-v1"
 _UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
-_GENERIC_PRE_TOOL_SCHEMA = "guard-pre-tool-result.v1"
-_GENERIC_PRE_TOOL_ACTION_SCHEMA = "guard-pre-tool-action.v1"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
-_MAX_RESULT_TEXT = 2_048
-_PRE_TOOL_ACTION_TYPES = {
-    "command",
-    "file_read",
-    "file_write",
-    "package",
-    "mcp_tool",
-    "network",
-    "process_service",
-    "browser",
-    "config",
-    "prompt",
-    "harness",
-    "unknown",
-}
-_PRE_TOOL_OPERATIONS = {
-    "execute",
-    "read",
-    "write",
-    "install",
-    "call",
-    "request",
-    "start",
-    "stop",
-    "navigate",
-    "set",
-    "submit",
-    "unknown",
-}
-_PRE_TOOL_ACTION_OPERATIONS = {
-    "command": {"execute"},
-    "file_read": {"read"},
-    "file_write": {"write"},
-    "package": {"install"},
-    "mcp_tool": {"call"},
-    "network": {"request"},
-    "process_service": {"start", "stop"},
-    "browser": {"navigate"},
-    "config": {"set"},
-    "prompt": {"submit"},
-    "harness": {"start", "stop", "set", "read"},
-    "unknown": {"unknown"},
-}
-_PRE_TOOL_RESULT_KEYS = {
-    "schema",
-    "version",
-    "authority",
-    "action",
-    "decision",
-    "policy_action",
-    "minimum_action",
-    "reason_code",
-    "reason",
-    "explicitly_benign",
-}
-_PRE_TOOL_POLICY_ACTIONS = {
-    "allow",
-    "warn",
-    "review",
-    "require-reapproval",
-    "sandbox-required",
-    "block",
-}
-_PRE_TOOL_ACTION_KEYS = {
-    "schema",
-    "version",
-    "harness",
-    "event",
-    "action_type",
-    "operation",
-    "bounded",
-    "sensitive_target",
-}
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -109,92 +36,6 @@ def _capture_deadline(deadline: float | None) -> tuple[float, int]:
     effective_deadline = deadline if deadline is not None else now + 0.75
     budget_ms = max(1, min(9_000, int((effective_deadline - now) * 1_000)))
     return effective_deadline, budget_ms
-
-
-def _valid_pre_tool_result_fields(result: dict[str, Any]) -> bool:
-    decision = result.get("decision")
-    policy_action = result.get("policy_action")
-    reason_code = result.get("reason_code")
-    reason = result.get("reason")
-    minimum_action = result.get("minimum_action")
-    return not (
-        result.get("schema") != _GENERIC_PRE_TOOL_SCHEMA
-        or result.get("version") != 1
-        or result.get("authority") != "rust"
-        or not isinstance(decision, str)
-        or decision not in {"allow", "deny"}
-        or not isinstance(policy_action, str)
-        or policy_action not in _PRE_TOOL_POLICY_ACTIONS
-        or minimum_action != policy_action
-        or not isinstance(reason_code, str)
-        or not reason_code
-        or len(reason_code) > _MAX_RESULT_TEXT
-        or not isinstance(reason, str)
-        or not reason
-        or len(reason) > _MAX_RESULT_TEXT
-        or not isinstance(result.get("explicitly_benign"), bool)
-    )
-
-
-def _valid_pre_tool_action(action: dict[str, Any], *, harness: str, event: str) -> bool:
-    action_type = action.get("action_type")
-    operation = action.get("operation")
-    action_harness = action.get("harness")
-    if (
-        action.get("schema") != _GENERIC_PRE_TOOL_ACTION_SCHEMA
-        or action.get("version") != 1
-        or action_harness != harness
-        or action.get("event") != event
-        or (event == "UserPromptSubmit" and action_type != "prompt")
-        or not isinstance(action_type, str)
-        or action_type not in _PRE_TOOL_ACTION_TYPES
-        or not isinstance(operation, str)
-        or operation not in _PRE_TOOL_OPERATIONS
-        or not isinstance(action_harness, str)
-        or not action_harness
-        or len(action_harness) > 64
-        or not isinstance(action.get("bounded"), bool)
-        or not isinstance(action.get("sensitive_target"), bool)
-    ):
-        return False
-    return operation in _PRE_TOOL_ACTION_OPERATIONS[action_type]
-
-
-def _decode_pre_tool_result(result: object, *, harness: str, event: str = "PreToolUse") -> bool:
-    if (
-        not isinstance(result, dict)
-        or not set(result).issuperset(_PRE_TOOL_RESULT_KEYS)
-        or set(result) - _PRE_TOOL_RESULT_KEYS - {"command_extensions", "prompt_risk_classes"}
-    ):
-        return False
-    if "prompt_risk_classes" in result and (
-        event != "UserPromptSubmit" or not valid_prompt_risk_classes(result["prompt_risk_classes"])
-    ):
-        return False
-    if "command_extensions" in result:
-        from .native_command_observations import validate_native_command_observations
-
-        extensions = validate_native_command_observations(result["command_extensions"])
-        if extensions is None:
-            return False
-        # The floor for an uncertain match is Rust's to choose; a structurally
-        # valid receipt is trusted rather than second-guessed here.
-        if extensions["evaluation_error"] is not None and result.get("minimum_action") != "block":
-            return False
-    if not _valid_pre_tool_result_fields(result):
-        return False
-    action = result.get("action")
-    if not isinstance(action, dict) or set(action) != _PRE_TOOL_ACTION_KEYS:
-        return False
-    if not _valid_pre_tool_action(action, harness=harness, event=event):
-        return False
-    decision = result["decision"]
-    minimum_action = result["minimum_action"]
-    if result["explicitly_benign"] != (decision == "allow" and minimum_action == "allow"):
-        return False
-    # `warn` is an allow-with-warning floor. All stronger actions remain
-    # denying floors; this keeps the Python edge purely mechanical.
-    return decision == ("allow" if minimum_action in {"allow", "warn"} else "deny")
 
 
 def _native_error_code(payload: object) -> str | None:
@@ -231,22 +72,11 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or not isinstance(payload.get("harness_response"), dict)
     ):
         return None
-    if event_name in {"PreToolUse", "UserPromptSubmit"} and not _decode_pre_tool_result(
-        payload["result"], harness=payload["harness"], event=event_name
-    ):
-        return None
-    if event_name == "UserPromptSubmit" and payload_kind != "inline":
-        return None
-    if event_name == "PreToolUse" and payload_kind == "encrypted_payload_ref":
-        return None
-    if "containment_route" in payload and (
-        not isinstance(payload["containment_route"], str)
-        or payload["containment_route"] not in {"none", "sink", "grant"}
-        or (event_name != "PreToolUse" and payload["containment_route"] != "none")
-    ):
+    route = payload.get("containment_route", "none")
+    if not isinstance(route, str) or route not in {"none", "sink", "grant"}:
         return None
     receipt = payload.get("receipt")
-    if not receipt_matches_edge(payload, receipt):
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("request_id"), str):
         return None
     return payload
 
@@ -340,7 +170,7 @@ def review_raw_hook_native(
         return record_native_hook_result("native_fail_safe", None)
     status = runtime_status if runtime_status is not None else native_runtime_status()
     event_key = event.strip().lower().replace("_", "").replace("-", "")
-    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE}
+    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE, _SELF_CHECK_FEATURE}
     if event_key in {
         "pretool",
         "pretooluse",

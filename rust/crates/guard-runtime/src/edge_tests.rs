@@ -493,3 +493,6 @@ mod prompt_notice_tests;
 
 #[path = "edge_watch_tests.rs"]
 mod watch_tests;
+
+#[path = "edge_result_check_tests.rs"]
+mod result_check_tests;

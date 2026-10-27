@@ -197,35 +197,6 @@ def test_tool_action_reply_keeps_embedded_command_text(monkeypatch: pytest.Monke
     assert "secret\n" in texts
 
 
-def test_post_tool_review_outage_blocks_the_post_tool_artifact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from codex_plugin_scanner.guard.cli import commands_support_runtime_artifacts as artifacts
-    from codex_plugin_scanner.guard.native_codex_tool_output import ToolOutputAnswer
-
-    def down(*_args: object, **_kwargs: object) -> ToolOutputAnswer:
-        return ToolOutputAnswer(False, None, "native_codex_tool_output_unavailable")
-
-    monkeypatch.setattr(artifacts, "codex_tool_output_native", down)
-    result = artifacts._hook_runtime_artifact(
-        harness="codex",
-        payload={
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": "cat ~/.ssh/id_rsa",
-                "commands": ["cat ~/.ssh/id_rsa"],
-            },
-        },
-        workspace=tmp_path,
-        home_dir=tmp_path,
-        guard_home=tmp_path / "guard",
-        action_envelope=None,
-    )
-    assert result is not None
-    assert result.metadata["guard_default_action"] == "block"
-    assert result.metadata["native_command_evaluation_status"] == "unavailable"
-    assert result.metadata.get("command_text") != "Bash"
-
-
 def test_resident_outage_is_not_a_read_only_post_tool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from codex_plugin_scanner.guard.native_codex_tool_output import ToolOutputAnswer
     from tests import codex_read_only_inspection as codex

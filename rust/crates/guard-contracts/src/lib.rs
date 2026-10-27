@@ -27,6 +27,8 @@ mod extension_control_prepared;
 pub use extension_control_prepared::*;
 mod extension_control_preview;
 pub use extension_control_preview::*;
+mod extension_control_terminal;
+pub use extension_control_terminal::*;
 mod github_cli_classify;
 pub use github_cli_classify::*;
 mod github_workflow_prepare;
@@ -312,6 +314,8 @@ mod supply_chain_bundle_verify;
 pub use supply_chain_bundle_verify::*;
 mod trust_attestation_verify;
 pub use trust_attestation_verify::*;
+mod protection_health_report;
+pub use protection_health_report::*;
 
 pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 pub const GUARD_HOOK_ENVELOPE_V2_SCHEMA: &str = "guard-hook-envelope.v2";

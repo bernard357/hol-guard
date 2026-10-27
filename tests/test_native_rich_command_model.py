@@ -308,40 +308,6 @@ def test_explicit_inspection_home_identity_outage_returns_blocked_diagnostic(mon
     assert result["command_model"] is None
 
 
-@pytest.mark.parametrize("harness", ["codex", "codex-alias"])
-@pytest.mark.parametrize(
-    "error_type",
-    ["command-model", "sensitive-request"],
-)
-def test_runtime_artifact_native_outage_does_not_reparse_or_fabricate_identity(
-    monkeypatch, tmp_path, harness, error_type
-):
-    from codex_plugin_scanner.guard.cli import commands_support_runtime_artifacts as artifacts
-    from codex_plugin_scanner.guard.native_sensitive_request import NativeSensitiveRequestError
-
-    monkeypatch.setattr(artifacts, "_canonical_harness_name", lambda _: "codex")
-
-    def forbidden(*args, **kwargs):
-        if error_type == "sensitive-request":
-            raise NativeSensitiveRequestError("native_sensitive_request_unavailable")
-        raise client.NativeCommandModelError("native_rich_command_model_unavailable")
-
-    monkeypatch.setattr(artifacts, "_hook_runtime_artifact_with_native", forbidden)
-    result = artifacts._hook_runtime_artifact(
-        harness=harness,
-        payload={"hook_event_name": "PreToolUse", "tool_name": "Shell", "tool_input": {"command": "echo hi"}},
-        workspace=tmp_path,
-        home_dir=tmp_path,
-        guard_home=tmp_path / "guard",
-        action_envelope=None,
-    )
-    assert result is not None
-    assert result.harness == "codex"
-    assert result.metadata["native_command_evaluation_status"] == "unavailable"
-    assert result.metadata["guard_default_action"] == "block"
-    assert "command_security_identity" not in result.metadata
-
-
 @pytest.mark.parametrize("error_type", [client.NativeCommandModelError, ValueError])
 def test_command_id_resolution_never_converts_parser_errors_to_root_tokens(monkeypatch, tmp_path, error_type):
     from types import SimpleNamespace

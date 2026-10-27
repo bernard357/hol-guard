@@ -267,13 +267,11 @@
    "class": "python_transport",
    "paths": [
     "src/codex_plugin_scanner/guard/adapters/*argv*.py",
-    "src/codex_plugin_scanner/guard/adapters/_modules/*/*auth*.py",
     "src/codex_plugin_scanner/guard/adapters/*bridge*.py",
     "src/codex_plugin_scanner/guard/adapters/*resume*.py",
     "src/codex_plugin_scanner/guard/adapters/_modules/*/*resume*.py",
     "src/codex_plugin_scanner/guard/adapters/*script_template*.py",
     "src/codex_plugin_scanner/guard/adapters/_modules/*/*script_template*.py",
-    "src/codex_plugin_scanner/guard/adapters/_modules/*/*transport*.py",
     "src/codex_plugin_scanner/guard/adapters/hook_python*.py",
     "src/codex_plugin_scanner/guard/codex_hook_launch_runtime.py",
     "src/codex_plugin_scanner/guard/codex_hook_process_runtime.py",
@@ -396,6 +394,7 @@
     "src/codex_plugin_scanner/guard/native_hook_adapter.py",
     "src/codex_plugin_scanner/guard/native_hook_adapter_wire.py",
     "src/codex_plugin_scanner/guard/native_composio_role.py",
+    "src/codex_plugin_scanner/guard/native_extension_control_terminal.py",
     "src/codex_plugin_scanner/guard/native_mcp_tool_policy.py",
     "src/codex_plugin_scanner/guard/native_mcp_extension_input.py",
     "src/codex_plugin_scanner/guard/native_git_execution_safety.py",
@@ -470,7 +469,8 @@
     "src/codex_plugin_scanner/guard/native_bash_reply.py",
     "src/codex_plugin_scanner/guard/native_bash_review_preflight.py",
     "src/codex_plugin_scanner/guard/native_inventory_url_redaction.py",
-    "src/codex_plugin_scanner/guard/native_contained_wrapper_plan.py"
+    "src/codex_plugin_scanner/guard/native_contained_wrapper_plan.py",
+    "src/codex_plugin_scanner/guard/native_protection_health.py"
    ],
    "current": "mechanical bounded guard-hook-envelope.v2 and guard-archive-inspection.v1 serialization, package-bound native invocation, typed result decoding, and harness response projection; the archive-inspection lease is owned inside the native worker; skill-directory identity and discovery use the existing resident operation with lossless OS paths, request-bound replies and a monotonic transport budget",
    "target": "minimal launcher, serialization, and response projection only"

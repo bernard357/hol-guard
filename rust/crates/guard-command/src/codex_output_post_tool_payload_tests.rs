@@ -288,3 +288,85 @@ fn a_flattened_response_is_not_repeated_whatever_its_key_order() {
     let input = Input::parse(&body).unwrap();
     assert_eq!(input.response_text, "B\nA\nA");
 }
+
+/// A held Kubernetes secret read names its source family, whichever payload
+/// field carried the command: `command`, an `argv` list, a one-item
+/// `command_args` list, or a `commands` list where the read comes later.
+#[test]
+fn a_kubernetes_secret_read_names_its_source_in_every_payload_shape() {
+    let dump = "# Check the actual decoded values for the network-related keys\n\
+        kubectl --kubeconfig /Users/example/workspace/kubeconfig \\\n  \
+        -n cloud-portal-staging get secret cloud-portal-env -o jsonpath='{.data}' 2>&1 | python3 -c \"\n\
+        import json, sys, base64\n\
+        data = json.loads(sys.stdin.read())\n\
+        for k in ['HEDERA_NETWORK']:\n    \
+        print(base64.b64decode(data[k]).decode('utf-8'))\n\
+        \" 2>&1\n";
+    let pod = "kubectl exec -n ns pod-1 -- printenv GUARD_GITHUB_APP_PRIVATE_KEY";
+    let resource = "kubectl get secret prod -o yaml";
+    let cases = [
+        (
+            "command",
+            json!({ "command": pod }),
+            "Kubernetes pod environment",
+        ),
+        (
+            "wrapped",
+            json!({ "command": format!("bash -lc \"{pod}\"") }),
+            "Kubernetes pod environment",
+        ),
+        (
+            "argv",
+            json!({ "argv": ["bash", "-lc", dump] }),
+            "Kubernetes Secret resource",
+        ),
+        (
+            "command-args",
+            json!({ "command_args": [resource] }),
+            "Kubernetes Secret resource",
+        ),
+        (
+            "commands",
+            json!({ "commands": [resource] }),
+            "Kubernetes Secret resource",
+        ),
+        (
+            "later-commands",
+            json!({ "commands": ["echo ok", resource] }),
+            "Kubernetes Secret resource",
+        ),
+        (
+            "volume",
+            json!({ "command": "kubectl exec pod-1 -- sh -c \"cat /etc/secrets/token\"" }),
+            "Kubernetes secret volume",
+        ),
+    ];
+    for (name, tool_input, family) in cases {
+        let root = scratch(&format!("kubernetes-{name}"));
+        let home = root.join("home");
+        let mut body = output_body(tool_input);
+        body["response_text"] = json!(format!(
+            "{fence}BEGIN RSA PRIVATE KEY{fence}\nMIIE{}\n{fence}END RSA PRIVATE KEY{fence}\n",
+            "A".repeat(64),
+            fence = "-----"
+        ));
+        body["cwd"] = json!(root.to_string_lossy());
+        body["home_dir"] = json!(home.to_string_lossy());
+        let ctx = Ctx::new(&Host, &root.to_string_lossy(), &home.to_string_lossy());
+        let answer = super::review_post_tool_output(&ctx, &body)
+            .unwrap_or_else(|_| panic!("{name}: review refused"));
+        let answer: Value = serde_json::from_str(&answer).unwrap();
+        let metadata: std::collections::HashMap<String, Value> = answer["artifact"]["metadata"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: output not held: {answer}"))
+            .iter()
+            .map(|pair| (pair[0].as_str().unwrap().to_owned(), pair[1].clone()))
+            .collect();
+        assert_eq!(
+            metadata["action_class"],
+            json!("Kubernetes secret read command"),
+            "{name}"
+        );
+        assert_eq!(metadata["secret_source_family"], json!(family), "{name}");
+    }
+}

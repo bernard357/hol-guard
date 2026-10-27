@@ -34,6 +34,9 @@ pub(super) struct GenericSignals {
     pub(super) retrieval_arguments_only: bool,
     /// Set after extraction, from the tool's own input; see `generic_github`.
     pub(super) github_read_only: bool,
+    /// Set after extraction: Grok's camel-case copy of the call differs from
+    /// the snake-case one, or Grok marked the input truncated.
+    pub(super) mirrored_input_unproven: bool,
     pub(super) prompt_present: bool,
     pub(super) env_reference: bool,
     pub(super) benign_prompt: bool,
