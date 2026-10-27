@@ -96,6 +96,7 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "native-policy-in-memory-v1".into(),
         "native-policy-snapshot-build-v1".into(),
         "native-policy-snapshot-inspect-v1".into(),
+        "native-policy-snapshot-materialize-v1".into(),
         "native-business-policy-retained-floor-v1".into(),
         "native-business-policy-document-compile-v1".into(),
         "native-guard-config-load-v1".into(),

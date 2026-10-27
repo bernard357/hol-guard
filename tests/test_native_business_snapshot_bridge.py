@@ -32,6 +32,17 @@ def build(home: Path, business: dict[str, object]) -> dict[str, object]:
     )
 
 
+def cache_path(home: Path) -> Path:
+    return home / "native-runtime" / api.NATIVE_POLICY_SNAPSHOT_CACHE_NAME
+
+
+def plant_cache(home: Path, snapshot: dict[str, object]) -> None:
+    path = cache_path(home)
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    path.write_bytes(api.snapshot_bytes_v3(snapshot))
+    path.chmod(0o600)
+
+
 def test_business_content_requires_native_consumer_without_python_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -165,11 +176,11 @@ def test_native_business_builder_preserves_binding_and_cache_authentication(
     home.mkdir(mode=0o700)
     snapshot = build(home, binding())
     assert snapshot["business_policy"] == binding()
-    api._write_v3_snapshot_cache(home, snapshot)
-    cached = api._read_v3_snapshot_cache(home, verifier_key=b"k" * 32)
+    plant_cache(home, snapshot)
+    cached = api._read_v3_snapshot_file(cache_path(home), verifier_key=b"k" * 32)
     assert cached is not None and cached[0] == snapshot
     with pytest.raises(api.NativePolicySnapshotError, match="integrity_invalid"):
-        api._read_v3_snapshot_cache(home, verifier_key=b"z" * 32)
+        api._read_v3_snapshot_file(cache_path(home), verifier_key=b"z" * 32)
 
 
 def test_native_business_content_success_does_not_authenticate_forged_mac(
@@ -181,9 +192,9 @@ def test_native_business_content_success_does_not_authenticate_forged_mac(
     snapshot = build(home, binding())
     snapshot["integrity"]["mac"] = "0" * 64
     validate_business_snapshot_content(snapshot)
-    api._write_v3_snapshot_cache(home, snapshot)
+    plant_cache(home, snapshot)
     with pytest.raises(api.NativePolicySnapshotError, match="integrity_invalid"):
-        api._read_v3_snapshot_cache(home, verifier_key=b"k" * 32)
+        api._read_v3_snapshot_file(cache_path(home), verifier_key=b"k" * 32)
 
 
 def test_full_source_identity_and_fixed_expiry_survive_python_bridge(
@@ -316,7 +327,9 @@ def test_business_transport_receives_real_native_ack_without_provider_dispatch(
         )
         assert snapshot["business_policy"] == business
         assert resident_generation >= snapshot["generation"]
-        cached = api._read_v3_snapshot_cache(home, verifier_key=api.derive_native_policy_verifier_key(b"m" * 32))
+        cached = api._read_v3_snapshot_file(
+            cache_path(home), verifier_key=api.derive_native_policy_verifier_key(b"m" * 32)
+        )
         assert cached is not None and cached[0] == snapshot
         # Verify the native-written combined record through both Python
         # readers; a copied MAC formula alone is not cross-runtime evidence.
@@ -358,5 +371,7 @@ def test_business_cache_requires_removal_authority_and_cannot_be_skipped_for_old
     with pytest.raises(api.NativePolicySnapshotError, match="consumer_unavailable"):
         api.native_policy_snapshot_v3(**inputs)
     monkeypatch.setenv("HOL_GUARD_NATIVE", "force")
-    preserved = api._read_v3_snapshot_cache(home, verifier_key=api.derive_native_policy_verifier_key(b"m" * 32))
+    preserved = api._read_v3_snapshot_file(
+        cache_path(home), verifier_key=api.derive_native_policy_verifier_key(b"m" * 32)
+    )
     assert preserved is not None and preserved[0] == first
