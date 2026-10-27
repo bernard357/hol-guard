@@ -5,12 +5,7 @@
     "gauntlet-python-inline-version-check@cursor": "native_command_review_required",
     "gauntlet-python-local-test-script@cursor": "native_command_review_required",
     "pytest-quiet@cursor": "native_command_review_required",
-    "session-rm-workspace-file@cursor": "native_command_extension_review",
-    "observed-cat-02@codex": "native_command_review_required",
-    "observed-grep-27@claude-code": "native_command_review_required",
-    "observed-ls-29@zcode": "native_command_review_required",
-    "observed-rg-10@zcode": "native_command_review_required",
-    "observed-rg-29@codex": "native_command_review_required"
+    "session-rm-workspace-file@cursor": "native_command_extension_review"
   },
   "cases": [
     {
@@ -29751,19 +29746,6 @@
       "expect": "allow"
     },
     {
-      "id": "observed-cat-02",
-      "fix_area": "shell",
-      "harnesses": [
-        "codex"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "cat ${HOME}/.audit-trail/notes.md && cat ${HOME}/.codex/skills/.system/../.. 2>/dev/null"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
       "id": "observed-ls-37",
       "fix_area": "shell",
       "harnesses": [
@@ -30232,19 +30214,6 @@
       "expect": "allow"
     },
     {
-      "id": "observed-rg-10",
-      "fix_area": "shell",
-      "harnesses": [
-        "zcode"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "rg -n \"hol-guard\" ${HOME}/.zshrc | head -20"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
       "id": "observed-ls-10",
       "fix_area": "shell",
       "harnesses": [
@@ -30492,19 +30461,6 @@
       "expect": "allow"
     },
     {
-      "id": "observed-rg-29",
-      "fix_area": "shell",
-      "harnesses": [
-        "codex"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "rg --files -g 'notes.md' -g 'README.md' -g 'pyproject.toml' -g 'uv.lock' -g 'package.json' ${PRIVATE_TMP} ${HOME}/.codex/skills/audit-trail"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
       "id": "observed-git-12",
       "fix_area": "git",
       "harnesses": [
@@ -30682,19 +30638,6 @@
       "tool": "shell",
       "tool_input": {
         "command": "rg -ln \"WorkspaceRecord\" ${WORKTREE}"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
-      "id": "observed-ls-19",
-      "fix_area": "shell",
-      "harnesses": [
-        "zcode"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "ls ${WORKTREE}/.report-lane/web-client/ 2>/dev/null; ls ${HOME}/.report-lane/web-client/ 2>/dev/null"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -31103,19 +31046,6 @@
       "expect": "allow"
     },
     {
-      "id": "observed-ls-29",
-      "fix_area": "shell",
-      "harnesses": [
-        "zcode"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "ls /opt/homebrew/var/postgresql@16/ | head; ls ${PRIVATE_TMP}* /opt/homebrew/var/postgresql@16/.web-client* 2>&1 | head -4"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
       "id": "observed-cat-06",
       "fix_area": "shell",
       "harnesses": [
@@ -31285,19 +31215,6 @@
       "expect": "allow"
     },
     {
-      "id": "observed-grep-27",
-      "fix_area": "shell",
-      "harnesses": [
-        "claude-code"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "grep -n -i \"guard\" ${HOME}/.claude/settings.json"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
       "id": "observed-git-30",
       "fix_area": "git",
       "harnesses": [
@@ -31449,19 +31366,6 @@
       "tool": "shell",
       "tool_input": {
         "command": "grep -rln \"signup-funnel\" ${WORKTREE}/"
-      },
-      "cwd": "worktree",
-      "expect": "allow"
-    },
-    {
-      "id": "observed-which-01",
-      "fix_area": "shell",
-      "harnesses": [
-        "zcode"
-      ],
-      "tool": "shell",
-      "tool_input": {
-        "command": "which guard hol-guard 2>/dev/null; ls ${HOME}/.audit-trail/ 2>/dev/null; ls ${WORKTREE} other-project/WorkspaceRecord\\ web-client/logs 2>/dev/null | tail -3; ls ${PRIVATE_TMP}* 2>/dev/null | tail -3"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -31734,12 +31638,7 @@
     "gauntlet-python-inline-version-check@cursor": "unassigned",
     "gauntlet-python-local-test-script@cursor": "unassigned",
     "pytest-quiet@cursor": "unassigned",
-    "session-rm-workspace-file@cursor": "unassigned",
-    "observed-cat-02@codex": "unassigned",
-    "observed-grep-27@claude-code": "unassigned",
-    "observed-ls-29@zcode": "unassigned",
-    "observed-rg-10@zcode": "unassigned",
-    "observed-rg-29@codex": "unassigned"
+    "session-rm-workspace-file@cursor": "unassigned"
   },
   "pending_always": {}
 }

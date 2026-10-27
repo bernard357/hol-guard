@@ -25,6 +25,11 @@ Usage:
         --reasons reasons.json > cases.json
 
 Review the result before merging: this tool decides that a row *reads*, not that it was benign.
+Then run the gate over the merged fixture. An approval queue holds both false positives and
+approvals of the secrets boundary working as designed, and no static classifier here can tell the
+two apart, so a generated case whose routing still interrupts is dropped rather than asserted as
+``expect: allow``. Those rows belong in false-positive triage, not in a fixture that claims the
+work is already quiet.
 """
 
 from __future__ import annotations
