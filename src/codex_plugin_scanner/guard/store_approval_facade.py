@@ -64,7 +64,9 @@ class StoreApprovalsMixin:
         # owner's error.
         args: dict[str, object] = {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown}
         if claude_review is not None:
-            args["claude_review"] = claude_review
+            args["claude_review"] = claude_review["review"]
+            args["integrity_key_b64"] = claude_review["integrity_key_b64"]
+            args["integrity_key_id"] = claude_review["integrity_key_id"]
         try:
             request_id = self._native_store_call(
                 "add_approval_request" if claude_review is None else "add_claude_approval_request",

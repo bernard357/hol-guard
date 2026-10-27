@@ -30,7 +30,9 @@ use zeroize::Zeroizing;
 use crate::guard_store_approval_write::{add_approval_request, add_native_review_approval_request};
 use crate::guard_store_args::Args;
 use crate::guard_store_db::{StoreError, StoreResult};
-use crate::hook_authority_state_op::direct_record::claude_record_notice_direct;
+use crate::hook_authority_state_op::direct_record::{
+    claude_record_notice_current_key, claude_record_notice_direct,
+};
 use crate::hook_direct::saved_decision::review_queue::notice::{
     review_notice, APPROVAL_CODE_BYTES,
 };
@@ -89,18 +91,28 @@ pub(crate) fn add_claude_approval_request(
     let review = Args(args.object("claude_review")?);
     let request_id = add_approval_request(connection, source, args)?;
     if request_id.is_string() {
-        let _ = record_review_notice(connection, &review, args.str("now")?);
+        let _ = record_review_notice(connection, args, &review, args.str("now")?);
     }
     Ok(request_id)
 }
 
 /// The notice the retired `record_claude_permission_notice_for_native_review`
-/// sent, signed under the key the worker read for the store. `None` when no
-/// notice is recorded.
-fn record_review_notice(connection: &Connection, review: &Args, now: &str) -> Option<()> {
+/// sent, signed under the key the worker read for the store. The key travels
+/// in the top-level `integrity_key_b64` and `integrity_key_id` args, which the
+/// request digest leaves out. `None` when no notice is recorded.
+///
+/// The worker holds the current key, so a row signed under a rotated key is
+/// cleaned up and re-signed here rather than deferred, as the retired
+/// `claude_record_notice` op did.
+fn record_review_notice(
+    connection: &Connection,
+    args: &Args,
+    review: &Args,
+    now: &str,
+) -> Option<()> {
     let key =
-        Zeroizing::new(Base64UrlUnpadded::decode_vec(review.str("integrity_key_b64").ok()?).ok()?);
-    let key_id = review.str("integrity_key_id").ok()?;
+        Zeroizing::new(Base64UrlUnpadded::decode_vec(args.str("integrity_key_b64").ok()?).ok()?);
+    let key_id = args.str("integrity_key_id").ok()?;
     if key.is_empty() || key_id.is_empty() {
         return None;
     }
@@ -117,7 +129,7 @@ fn record_review_notice(connection: &Connection, review: &Args, now: &str) -> Op
         &hex::encode(code),
     )
     .ok()??;
-    claude_record_notice_direct(
+    claude_record_notice_current_key(
         connection,
         &key,
         key_id,
@@ -125,8 +137,8 @@ fn record_review_notice(connection: &Connection, review: &Args, now: &str) -> Op
         &notice.session_id,
         notice.tool_name.as_deref(),
         &Value::Object(notice.payload),
-    )
-    .ok()
+    );
+    Some(())
 }
 
 #[cfg(test)]

@@ -206,8 +206,12 @@ fn a_foreign_notice_without_a_pending_index_stays() {
 }
 
 /// The daemon worker's `add_claude_approval_request` for the first recorded
-/// notice scenario, with `review` edits applied to its `claude_review` facts.
-fn daemon_write(fixture: &Fixture, edit: impl FnOnce(&mut Map<String, Value>)) -> Value {
+/// notice scenario, with edits applied to its `claude_review` facts and its
+/// top-level args.
+fn daemon_write(
+    fixture: &Fixture,
+    edit: impl FnOnce(&mut Map<String, Value>, &mut Map<String, Value>),
+) -> Value {
     let notices: Value = serde_json::from_str(NOTICE_VECTORS).unwrap();
     let scenario = &notices["scenarios"][0];
     let mut review = json!({
@@ -217,16 +221,19 @@ fn daemon_write(fixture: &Fixture, edit: impl FnOnce(&mut Map<String, Value>)) -
         "review_binding": scenario["binding"],
         "config_path": scenario["workspace"],
         "source_scope": "project",
-        "integrity_key_b64": Base64UrlUnpadded::encode_string(&KEY),
-        "integrity_key_id": KEY_ID,
     })
     .as_object()
     .unwrap()
     .clone();
-    edit(&mut review);
     let mut args = Map::new();
     args.insert("request".to_owned(), fixture.request.clone());
     args.insert("now".to_owned(), fixture.call["now"].clone());
+    args.insert(
+        "integrity_key_b64".to_owned(),
+        json!(Base64UrlUnpadded::encode_string(&KEY)),
+    );
+    args.insert("integrity_key_id".to_owned(), json!(KEY_ID));
+    edit(&mut review, &mut args);
     args.insert("claude_review".to_owned(), Value::Object(review));
     let request = GuardStoreRequestV1 {
         schema: GUARD_STORE_REQUEST_SCHEMA.to_owned(),
@@ -267,7 +274,7 @@ fn recorded_without_code(fixture: &Fixture) -> Map<String, Value> {
 #[test]
 fn the_daemon_queue_records_the_python_notice() {
     let fixture = fixture("claude-daemon-review");
-    let reply = daemon_write(&fixture, |_| {});
+    let reply = daemon_write(&fixture, |_, _| {});
     assert_eq!(reply["status"], "ok", "{reply}");
     assert_eq!(reply["payload"], fixture.request["request_id"]);
     assert_eq!(unsigned_notice(&fixture), recorded_without_code(&fixture));
@@ -280,7 +287,7 @@ fn the_daemon_queue_records_the_python_notice() {
 #[test]
 fn a_review_outside_a_workspace_names_the_guard_home() {
     let fixture = fixture("claude-daemon-review-home");
-    let reply = daemon_write(&fixture, |review| {
+    let reply = daemon_write(&fixture, |review, _| {
         review.insert("config_path".to_owned(), json!("/home/user/.hol-guard"));
         review.insert("source_scope".to_owned(), json!("harness"));
     });
@@ -300,7 +307,10 @@ fn a_notice_the_daemon_cannot_record_leaves_the_review_queued() {
         ("unreadable-reason", "reason"),
     ] {
         let fixture = fixture(&format!("claude-daemon-review-{tag}"));
-        let reply = daemon_write(&fixture, |review| match edit {
+        let reply = daemon_write(&fixture, |review, args| match edit {
+            "integrity_key_b64" => {
+                args.remove(edit);
+            }
             "session_id" => {
                 review["hook_payload"]
                     .as_object_mut()
@@ -325,7 +335,7 @@ fn a_notice_the_daemon_cannot_record_leaves_the_review_queued() {
 }
 
 #[test]
-fn a_foreign_notice_row_leaves_the_daemon_review_queued() {
+fn a_foreign_notice_row_is_re_signed_under_the_daemon_key() {
     let fixture = fixture("claude-daemon-review-foreign");
     let connection = Connection::open(fixture.home.join("guard.db")).unwrap();
     let foreign = json!({"session_id": "sess-1", "integrity": {"integrity_key_id": "rotated"}});
@@ -339,9 +349,14 @@ fn a_foreign_notice_row_leaves_the_daemon_review_queued() {
             ],
         )
         .unwrap();
-    let reply = daemon_write(&fixture, |_| {});
+    let reply = daemon_write(&fixture, |_, _| {});
     assert_eq!(reply["status"], "ok", "{reply}");
     assert_eq!(count(&connection, "approval_requests"), 1, "review stays");
+    assert_eq!(
+        unsigned_notice(&fixture),
+        recorded_without_code(&fixture),
+        "the stale row heals and the notice is recorded"
+    );
     drop(connection);
     let _ = std::fs::remove_dir_all(&fixture.home);
 }
