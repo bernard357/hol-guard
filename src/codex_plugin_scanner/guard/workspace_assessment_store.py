@@ -296,9 +296,9 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
         raise ValueError("invalid workspace assessment outcome state")
     # Only one run of a worktree runs at a time, so its last run stays put.
     previous = latest_assessed_run(store, run.keys)
-    outcome = keep_package_identities(outcome, previous)
+    outcome, settled = keep_package_identities(outcome, previous, store=store)
     if outcome.state == "partial":
-        outcome = carry_unchecked_findings(outcome, previous)
+        outcome = carry_unchecked_findings(outcome, previous, settled)
     coverage_json = _bounded_json(dict(outcome.coverage or {}), MAX_COVERAGE_JSON_BYTES)
     findings_json = _bounded_json([dict(item) for item in outcome.findings], MAX_FINDINGS_JSON_BYTES)
     with store._connect() as connection:

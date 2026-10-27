@@ -2,7 +2,8 @@
 
 The resident owns the pure projections of a workspace supply-chain audit: the
 receipt authority map, advisory-alias enrichment from the cached bundle, the CI
-severity gate and the empty-inventory outcome. This module only transports one
+severity gate, the empty-inventory outcome and the supply-chain findings of a
+workspace assessment run. This module only transports one
 request and strictly validates the reply. A missing, mismatched or malformed
 answer raises :class:`NativePackageAuditProjectionError`; there is no Python
 fallback.
@@ -11,7 +12,8 @@ fallback.
 from __future__ import annotations
 
 import socket
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,12 +24,47 @@ _FEATURE = "package-audit-projection-v1"
 _RECEIPT_KEYS = frozenset({"policy_decision", "capabilities_summary", "artifact_name", "scanner_evidence"})
 _CI_KEYS = frozenset({"matched", "matched_packages", "threshold"})
 _ACTIONS = frozenset({"allow", "warn", "review", "block"})
+_FINDING_KEYS = frozenset(
+    {
+        "finding_id",
+        "source_kind",
+        "detector",
+        "severity",
+        "decision",
+        "ecosystem",
+        "package_name",
+        "package_version",
+        "fix_version",
+        "rule_ids",
+        "advisory_ids",
+        "validation_state",
+        "lifecycle_state",
+    }
+)
+# The workspace projection reads only these; the rest of the audit stays local.
+_PROJECTED_KEYS = ("evaluation", "audit_status", "lockfile_warnings")
+_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info", "unknown"})
+_FINDING_DECISIONS = frozenset({"block", "ask", "warn"})
 # Matches PACKAGE_AUDIT_PROJECTION_MAX_BYTES; stays under the resident client frame limit.
 _MAX_REQUEST_BYTES = 5 * 1024 * 1024
 
 
 class NativePackageAuditProjectionError(RuntimeError):
     """No authoritative native audit projection was available."""
+
+
+@dataclass(frozen=True)
+class SupplyChainProjection:
+    """The supply-chain findings of one local audit and what it could not check.
+
+    ``listed`` is ``None`` when the audit stopped early or warned about a
+    lockfile, since its package list may then be short.
+    """
+
+    findings: list[dict[str, object]]
+    listed: frozenset[tuple[str, str, str]] | None
+    unresolved: int
+    unchecked: int
 
 
 def _guard_home(store: Any | None) -> Path:
@@ -134,6 +171,102 @@ def native_empty_audit_outcome(
     if set(payload) != {"audit_outcome", "message"} or not isinstance(outcome, str) or not isinstance(message, str):
         raise NativePackageAuditProjectionError("Native empty audit outcome invalid")
     return outcome, message
+
+
+def native_workspace_package_findings(
+    worktree_key: str, payload: Mapping[str, object], *, store: Any | None
+) -> SupplyChainProjection:
+    """Return the resident's supply-chain findings for a workspace audit, most severe first."""
+
+    projected = {key: payload[key] for key in _PROJECTED_KEYS if key in payload}
+    reply = _send({"query": "workspace_findings", "worktree_key": worktree_key, "payload": projected}, store)
+    findings, listed = reply.get("findings"), reply.get("listed")
+    unresolved, unchecked = reply.get("unresolved"), reply.get("unchecked")
+    if (
+        set(reply) != {"findings", "listed", "unresolved", "unchecked"}
+        or not isinstance(findings, list)
+        or not all(_valid_finding(item) for item in findings)
+        or not (listed is None or (isinstance(listed, list) and all(_valid_coordinate(item) for item in listed)))
+        or not _count(unresolved)
+        or not _count(unchecked)
+    ):
+        raise NativePackageAuditProjectionError("Native workspace package findings invalid")
+    return SupplyChainProjection(
+        findings=findings,
+        listed=None if listed is None else frozenset(tuple(item) for item in listed),
+        unresolved=unresolved,
+        unchecked=unchecked,
+    )
+
+
+def native_package_identities(
+    findings: Sequence[Mapping[str, object]],
+    earlier: Sequence[object],
+    listed: frozenset[tuple[str, str, str]] | None,
+    *,
+    store: Any | None,
+) -> tuple[list[object], list[bool]]:
+    """Return the id each finding keeps from ``earlier`` and which earlier packages are settled.
+
+    Both lists are aligned with their input: ``finding_ids`` with ``findings``
+    and ``settled`` with ``earlier``.
+    """
+
+    query: dict[str, object] = {
+        "query": "package_identities",
+        "findings": [dict(item) for item in findings],
+        "earlier": list(earlier),
+    }
+    if listed is not None:
+        query["listed"] = sorted(list(item) for item in listed)
+    reply = _send(query, store)
+    finding_ids, settled = reply.get("finding_ids"), reply.get("settled")
+    if (
+        set(reply) != {"finding_ids", "settled"}
+        or not isinstance(finding_ids, list)
+        or len(finding_ids) != len(findings)
+        or not isinstance(settled, list)
+        or len(settled) != len(earlier)
+        or not all(isinstance(item, bool) for item in settled)
+    ):
+        raise NativePackageAuditProjectionError("Native package identities invalid")
+    return finding_ids, settled
+
+
+def _valid_finding(item: object) -> bool:
+    return (
+        isinstance(item, dict)
+        and set(item) == _FINDING_KEYS
+        and _text(item["finding_id"])
+        and item["source_kind"] == "supply_chain"
+        and item["detector"] == "supply_chain_local_v1"
+        and item["severity"] in _SEVERITIES
+        and item["decision"] in _FINDING_DECISIONS
+        and _text(item["ecosystem"])
+        and _text(item["package_name"])
+        and (item["package_version"] is None or _text(item["package_version"]))
+        and (item["fix_version"] is None or _text(item["fix_version"]))
+        and _texts(item["rule_ids"])
+        and _texts(item["advisory_ids"])
+        and item["validation_state"] == "confirmed"
+        and item["lifecycle_state"] == "open"
+    )
+
+
+def _valid_coordinate(item: object) -> bool:
+    return isinstance(item, list) and len(item) == 3 and all(isinstance(part, str) for part in item)
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _text(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _texts(value: object) -> bool:
+    return isinstance(value, list) and all(_text(item) for item in value)
 
 
 def _machine_name() -> str | None:
