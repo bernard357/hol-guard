@@ -36,6 +36,7 @@ _CALL = BoundCall(
     max_request_bytes=1024 * 1024,
     timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     check_circuit=True,
+    transport_failure="unavailable",
 )
 
 

@@ -199,7 +199,9 @@ class BoundCall:
     the UTF-8 envelope for non-ASCII text. ``refusal`` is raised for a request
     the encoder or a healthy resident refused, when the bridge tells those
     apart from an outage. ``check_circuit`` skips the call while the shared
-    availability circuit is open.
+    availability circuit is open. ``clock_after_prerequisite`` gives the
+    resident its whole transport window once setup is done, for bridges that
+    never charged provisioning to it.
     """
 
     operation: str
@@ -214,6 +216,7 @@ class BoundCall:
     bound_canonical: bool = False
     check_circuit: bool = False
     transport_failure: str = "resident_unavailable"
+    clock_after_prerequisite: bool = False
 
     @property
     def invalid(self) -> str:
@@ -318,6 +321,13 @@ def bound_resident_call(
         raise spec.error(f"{spec.prefix}_prerequisite_unavailable") from error
     if not prerequisite:
         raise spec.error(prerequisite_unavailable_code(f"{spec.prefix}_prerequisite_unavailable", home))
+    if spec.clock_after_prerequisite:
+        # Runtime status and provisioning ran before this point. These bridges used
+        # to start their allowance here, so charging that setup to the transport
+        # would hand the resident a shorter window than the operation is budgeted.
+        started_at = time.monotonic()
+        local_deadline = started_at + (spec.timeout_seconds if timeout_seconds is None else timeout_seconds)
+        deadline = local_deadline if deadline_monotonic is None else min(local_deadline, deadline_monotonic)
     if cold_start and not native_resident_client_ready(status.identity.path, home):
         local_deadline += _COLD_START_ALLOWANCE_SECONDS
         deadline = local_deadline if deadline_monotonic is None else min(local_deadline, deadline_monotonic)

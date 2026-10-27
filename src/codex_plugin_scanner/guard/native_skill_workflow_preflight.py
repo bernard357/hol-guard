@@ -51,6 +51,7 @@ _CALL = BoundCall(
     error=NativeSkillWorkflowPreflightError,
     sha_prefix="sha256:",
     bound_canonical=True,
+    clock_after_prerequisite=True,
 )
 
 

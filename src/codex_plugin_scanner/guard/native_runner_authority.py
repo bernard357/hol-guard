@@ -52,6 +52,7 @@ _CALL = BoundCall(
     error=NativeRunnerAuthorityError,
     refusal=NativeRunnerAuthorityRefusalError,
     sha_prefix="",
+    clock_after_prerequisite=True,
 )
 
 

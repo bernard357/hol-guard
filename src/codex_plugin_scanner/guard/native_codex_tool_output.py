@@ -46,6 +46,7 @@ _CALL = BoundCall(
     max_request_bytes=256 * 1024,
     timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     check_circuit=True,
+    transport_failure="unavailable",
 )
 _LARGE_CALL = replace(_CALL, max_request_bytes=_MAX_POST_TOOL_REQUEST_BYTES)
 _UNAVAILABLE = "native_codex_tool_output_unavailable"

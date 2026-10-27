@@ -27,6 +27,7 @@ _CALL = BoundCall(
     max_request_bytes=16 * 1024,
     timeout_seconds=2.0,
     check_circuit=True,
+    transport_failure="unavailable",
 )
 _ROLES = frozenset({"discovery", "batch", "workbench", "connections", "unknown"})
 _REQUEST_IDS = itertools.count()

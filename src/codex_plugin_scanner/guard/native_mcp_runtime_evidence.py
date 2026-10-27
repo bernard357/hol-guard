@@ -44,6 +44,7 @@ _CALL = BoundCall(
     error=NativeMcpRuntimeEvidenceError,
     sha_prefix="",
     bound_canonical=True,
+    clock_after_prerequisite=True,
 )
 
 

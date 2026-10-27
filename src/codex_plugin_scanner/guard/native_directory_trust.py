@@ -64,6 +64,7 @@ _CALL = BoundCall(
     timeout_seconds=_TIMEOUT_SECONDS,
     error=NativeDirectoryTrustError,
     transport_failure="unavailable",
+    clock_after_prerequisite=True,
 )
 
 

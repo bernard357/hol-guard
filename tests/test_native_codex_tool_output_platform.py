@@ -40,3 +40,32 @@ def test_unencodable_post_tool_body_is_a_typed_denial(monkeypatch: pytest.Monkey
     answer = bridge.codex_tool_output_native("post_tool_output", body={"tool_response": value})
     assert answer.allowed is False
     assert answer.error_code == "native_codex_tool_output_invalid"
+
+
+def test_a_transport_failure_keeps_the_bridge_s_own_unavailable_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Callers and the recorded health reason both name ``native_codex_tool_output_unavailable``."""
+
+    features = {resident._RESIDENT_PROTOCOL_FEATURE, bridge._CALL.feature}
+    status = SimpleNamespace(
+        available=True,
+        compatible=True,
+        identity=SimpleNamespace(sha256="sha256:test", path="/nonexistent/hol-guard-runtime"),
+        capabilities=SimpleNamespace(features=features),
+    )
+    recorded: list[str] = []
+    monkeypatch.setattr(bridge, "_platform_is_supported", lambda: True)
+    monkeypatch.setattr(resident, "native_runtime_status", lambda **_kwargs: status)
+    monkeypatch.setattr(resident, "_resolve_digest_home", lambda _home: None)
+    monkeypatch.setattr(resident, "native_runtime_health_snapshot", lambda *_args: SimpleNamespace(circuit_open=False))
+    monkeypatch.setattr(resident, "ensure_resident_prerequisite", lambda _home: True)
+    monkeypatch.setattr(resident, "native_resident_client_ready", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        resident,
+        "native_record_resident_failure",
+        lambda *_a, reason, **_k: recorded.append(reason),
+    )
+    monkeypatch.setattr(resident, "native_resident_client_request", lambda **_kwargs: None)
+    answer = bridge.codex_tool_output_native("read_only_inspection", command="cat src/a.py")
+    assert answer.allowed is False
+    assert answer.error_code == "native_codex_tool_output_unavailable"
+    assert recorded == ["native_codex_tool_output_unavailable"]

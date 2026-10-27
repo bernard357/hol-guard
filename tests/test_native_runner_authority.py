@@ -395,3 +395,49 @@ def test_receipt_projection_batches_under_the_envelope_cap(tmp_path: Path) -> No
     for row in rows:
         evidence = json.loads(row["scanner_evidence_json"])
         assert (evidence[-1] == _EVIDENCE) == (row["artifact_id"] == "wanted")
+
+
+def test_prerequisite_setup_does_not_shorten_the_resident_s_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Provisioning runs before the transport clock, as it did before the shared helper."""
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.now = 1_000.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    _force_available(monkeypatch)
+    monkeypatch.setattr(resident, "time", clock)
+
+    def slow_prerequisite(_home: object) -> bool:
+        clock.now += 0.75
+        return True
+
+    monkeypatch.setattr(resident, "ensure_resident_prerequisite", slow_prerequisite)
+    allowances: list[float] = []
+    budgets: list[int] = []
+
+    def capture(*, payload: bytes, deadline_monotonic: float, **_: object) -> bytes:
+        envelope = json.loads(payload)
+        budgets.append(envelope["deadline_budget_ms"])
+        allowances.append(deadline_monotonic - clock.now)
+        request = envelope["request"]
+        return json.dumps(
+            {
+                "schema": module._RESULT_SCHEMA,
+                "request_id": request["request_id"],
+                "request_sha256": resident._canonical_request_sha256(request),
+                "status": "ok",
+                "code": "ok",
+                "payload": {},
+            }
+        ).encode()
+
+    monkeypatch.setattr(resident, "native_resident_client_request", capture)
+    assert native_runner_authority("detector_composition", {"signals": []}, tmp_path) == {}
+    assert budgets == [5000]
+    assert allowances == [5.0]
