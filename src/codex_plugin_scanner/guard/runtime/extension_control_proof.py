@@ -27,6 +27,7 @@ from ..approval_gate import (
 )
 from ..native_extension_control import NativeExtensionControlError, enrollment_digest, mutation_digest
 from ..native_extension_control_terminal import native_extension_control_terminal_verdict
+from ..native_resident_decision import ResidentCallError
 from .extension_control_contract import ExtensionControlLayer
 
 EXTENSION_CONTROL_PROOF_ACTION = "commit-layers"
@@ -39,6 +40,7 @@ _ENROLLMENT_CONFIRMATION_PREFIX = "ENROLL EXTENSION CONTROL"
 _REMOTE_TERMINAL_REFUSAL = "extension control enrollment requires a local terminal"
 _INTERACTIVE_TERMINAL_REFUSAL = "extension control enrollment requires an interactive local terminal"
 _SINGLE_TERMINAL_REFUSAL = "extension control enrollment requires one interactive local terminal"
+_RUNTIME_TERMINAL_REFUSAL = "extension control enrollment could not reach the Guard runtime"
 # The resident names the refusal it reached; this module only renders it.
 _TERMINAL_REFUSALS = {
     "remote_terminal": _REMOTE_TERMINAL_REFUSAL,
@@ -143,6 +145,22 @@ def _current_login_name() -> str | None:
         return None
 
 
+def _login_records(output: str | None, login_name: str | None) -> str | None:
+    """``who``'s lines for ``login_name``, in the order it printed them.
+
+    A shared host prints a record per login, and the whole table has to fit the
+    resident's request bound. The resident reads only the records whose first
+    column is this login name, and none at all without one, so dropping the
+    rest bounds the request without deciding anything.
+    """
+
+    if output is None:
+        return None
+    if login_name is None:
+        return ""
+    return "".join(f"{line}\n" for line in output.splitlines() if line.split()[:1] == [login_name])
+
+
 def _probe_output(command: tuple[str, ...]) -> str | None:
     """What ``command`` printed, or ``None`` when it could not be run.
 
@@ -210,8 +228,9 @@ def _posix_terminal_signals(descriptor: int | None) -> dict[str, object]:
             terminal_name = os.ttyname(stdin_descriptor)
     signals["terminal_name"] = terminal_name
     signals["controlling_terminal_is_tty"] = os.isatty(descriptor)
-    signals["login_name"] = _current_login_name()
-    signals["who_output"] = _probe_output(("/usr/bin/who",))
+    login_name = _current_login_name()
+    signals["login_name"] = login_name
+    signals["who_output"] = _login_records(_probe_output(("/usr/bin/who",)), login_name)
     signals["logind_remote"] = _probe_output(
         ("/usr/bin/loginctl", "show-session", "self", "--property=Remote", "--value")
     )
@@ -344,17 +363,21 @@ def _require_resident_local_terminal(
 ) -> None:
     """Refuse unless the resident places this session at the local keyboard."""
 
-    verdict = native_extension_control_terminal_verdict(
-        remote_environment=tuple(name for name in _REMOTE_TERMINAL_ENVIRONMENT if os.environ.get(name)),
-        posix=posix,
-        windows=windows,
-        guard_home=guard_home,
-    )
+    try:
+        verdict = native_extension_control_terminal_verdict(
+            remote_environment=tuple(name for name in _REMOTE_TERMINAL_ENVIRONMENT if os.environ.get(name)),
+            posix=posix,
+            windows=windows,
+            guard_home=guard_home,
+        )
+    except ResidentCallError as outage:
+        # An outage placed the session nowhere, so the enrollment is still
+        # refused. Naming the runtime keeps an operator who is at the keyboard
+        # from being told they are somewhere else.
+        raise ExtensionControlProofError(f"{_RUNTIME_TERMINAL_REFUSAL} ({outage})") from outage
     if verdict == "local":
         return
-    # A session the resident could not place is not a local one. Without a
-    # verdict there is nothing to confirm an enrollment through.
-    raise ExtensionControlProofError(_TERMINAL_REFUSALS.get(verdict or "", _REMOTE_TERMINAL_REFUSAL))
+    raise ExtensionControlProofError(_TERMINAL_REFUSALS.get(verdict, _REMOTE_TERMINAL_REFUSAL))
 
 
 def _require_windows_local_terminal_confirmation(

@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from codex_plugin_scanner.guard.approval_gate import ApprovalGateError, ApprovalGateInput, update_settings
+from codex_plugin_scanner.guard.native_resident_decision import ResidentCallError
 from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
 from codex_plugin_scanner.guard.runtime.extension_control_contract import (
     CONTROL_SCHEMA_VERSION,
@@ -175,17 +176,26 @@ class _OpenStringIO(io.StringIO):
         return None
 
 
-def _record_verdict(monkeypatch: pytest.MonkeyPatch, verdict: str | None) -> list[dict[str, object]]:
+def _record_verdict(monkeypatch: pytest.MonkeyPatch, verdict: str) -> list[dict[str, object]]:
     """Answer every resident call with ``verdict`` and keep what was asked."""
 
     asked: list[dict[str, object]] = []
 
-    def resident(**request: object) -> str | None:
+    def resident(**request: object) -> str:
         asked.append(request)
         return verdict
 
     monkeypatch.setattr(f"{_MODULE}.native_extension_control_terminal_verdict", resident)
     return asked
+
+
+def _record_outage(monkeypatch: pytest.MonkeyPatch, code: str) -> None:
+    """Fail every resident call the way an unreachable runtime does."""
+
+    def resident(**_request: object) -> str:
+        raise ResidentCallError(code)
+
+    monkeypatch.setattr(f"{_MODULE}.native_extension_control_terminal_verdict", resident)
 
 
 def _probe_runner(
@@ -261,11 +271,10 @@ def test_enrollment_reports_every_remote_terminal_variable_to_the_resident(
         ("remote_terminal", "extension control enrollment requires a local terminal"),
         ("interactive_local_terminal", "extension control enrollment requires an interactive local terminal"),
         ("single_terminal", "extension control enrollment requires one interactive local terminal"),
-        (None, "extension control enrollment requires a local terminal"),
     ),
 )
 def test_each_resident_verdict_renders_its_own_refusal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str | None, message: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: str, message: str
 ) -> None:
     enrollment = _enrollment()
     _without_remote_terminal_environment(monkeypatch)
@@ -276,6 +285,66 @@ def test_each_resident_verdict_renders_its_own_refusal(
         _require_local_terminal_confirmation(tmp_path, enrollment)
 
     assert str(refusal.value) == message
+
+
+def test_who_output_forwards_only_this_login_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    enrollment = _enrollment()
+    _without_remote_terminal_environment(monkeypatch)
+    _patch_posix_session(monkeypatch)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _probe_runner(
+            who_output=(
+                "other-user pts/1 2026-10-10 09:01 (10.0.0.4)\n"
+                "local-admin pts/0 2026-10-10 09:07\n"
+                "other-user pts/2 2026-10-10 09:09 (10.0.0.5)\n"
+                "local-admin pts/3 2026-10-10 09:11\n"
+            )
+        ),
+    )
+    asked = _record_verdict(monkeypatch, "local")
+
+    _require_local_terminal_confirmation(tmp_path, enrollment)
+
+    posix = asked[0]["posix"]
+    assert isinstance(posix, dict)
+    assert posix["who_output"] == "local-admin pts/0 2026-10-10 09:07\nlocal-admin pts/3 2026-10-10 09:11\n"
+
+
+def test_who_output_is_dropped_when_the_login_name_is_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enrollment = _enrollment()
+    _without_remote_terminal_environment(monkeypatch)
+    _patch_posix_session(monkeypatch)
+    monkeypatch.setattr(f"{_MODULE}._current_login_name", lambda: None)
+    asked = _record_verdict(monkeypatch, "local")
+
+    _require_local_terminal_confirmation(tmp_path, enrollment)
+
+    posix = asked[0]["posix"]
+    assert isinstance(posix, dict)
+    # Without a login name the resident reads no record at all, so forwarding
+    # the table would only spend the request bound.
+    assert posix["login_name"] is None
+    assert posix["who_output"] == ""
+
+
+def test_an_unreachable_runtime_refuses_without_calling_the_session_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    enrollment = _enrollment()
+    _without_remote_terminal_environment(monkeypatch)
+    _patch_posix_session(monkeypatch)
+    _record_outage(monkeypatch, "native_extension_control_terminal_unavailable")
+
+    with pytest.raises(ExtensionControlProofError) as refusal:
+        _require_local_terminal_confirmation(tmp_path, enrollment)
+
+    assert str(refusal.value) == (
+        "extension control enrollment could not reach the Guard runtime (native_extension_control_terminal_unavailable)"
+    )
 
 
 def test_a_local_verdict_confirms_through_the_controlling_terminal(
