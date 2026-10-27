@@ -78,9 +78,7 @@ fn every_combination_of_check_statuses_lands_where_the_grammar_says() {
         );
         assert_eq!(
             report.evidence_gap,
-            combination
-                .iter()
-                .any(|status| *status == ProtectionCheckStatus::Unknown),
+            combination.contains(&ProtectionCheckStatus::Unknown),
             "combination {combination:?} disagrees with its own evidence gap"
         );
     }
