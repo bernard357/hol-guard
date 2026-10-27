@@ -7,6 +7,7 @@ the resident receives a separately prepared pack set and signed policy first.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -151,8 +152,10 @@ def optional_command_catalog(request, monkeypatch, tmp_path):
         global_lockdown=False,
         managed_global_lockdown=False,
         health=AuthorityHealth.PROTECTED,
+        never_enrolled=False,
     ):
         assert health is AuthorityHealth.PROTECTED
+        assert not never_enrolled
         if not delivery:
             delivery.append(request.getfixturevalue("mcp_policy_delivery"))
             monkeypatch.setattr(mcp_policy_catalog_fixture, "_DELIVERY", delivery)
@@ -209,15 +212,23 @@ def optional_command_catalog(request, monkeypatch, tmp_path):
                 home_dir=shell_home,
                 source_ref_external_allowed=False,
                 observe_mode=False,
-                deadline=None,
+                # Without a deadline the edge allows 0.75 s, which a cold resident
+                # on a loaded Windows runner can miss.
+                deadline=time.monotonic() + 5,
                 policy_snapshot=published_snapshots[guard_home],
             )
             assert edge is not None, "authenticated optional command resident unavailable"
             payload = dict(edge["result"])
             # The hook default leaves 250 ms; loaded Windows runners need the full second.
-            model = native_command_model.review_command_model_native(
-                command, guard_home=guard_home, timeout_seconds=1.0
-            )
+            # The call caps itself at that second, which a busy resident on a loaded
+            # runner can still miss, so a miss is retried before the fixture fails.
+            model = None
+            for _attempt in range(3):
+                model = native_command_model.review_command_model_native(
+                    command, guard_home=guard_home, timeout_seconds=1.0
+                )
+                if model is not None:
+                    break
             assert model is not None, "native command model unavailable"
             payload["command_model"] = model
             admitted = _BINDINGS[guard_home]

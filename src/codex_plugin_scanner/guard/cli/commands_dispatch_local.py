@@ -483,24 +483,34 @@ def _run_guard_protect_command(
             harness=harness,
         ),
     )
+    wait_result: dict[str, object] | None = None
     if (
         bool(getattr(args, "package_shim_ui", False))
         and not bool(getattr(args, "json", False))
         and config.approval_wait_timeout_seconds > 0
     ):
+        from .protect_inline_approval import inline_package_approval
+
+        wait_result = inline_package_approval(
+            payload,
+            store=store,
+            workspace=protect_workspace,
+            timeout_seconds=config.approval_wait_timeout_seconds,
+        )
         approval_request_ids = payload.get("approval_request_ids")
         request_ids = [
             str(item)
             for item in (approval_request_ids if isinstance(approval_request_ids, list) else [])
             if isinstance(item, str) and item
         ]
-        if request_ids:
+        if wait_result is None and request_ids:
             _emit_package_shim_pending_approval_status()
             wait_result = wait_for_approval_requests(
                 store=store,
                 request_ids=request_ids,
                 timeout_seconds=config.approval_wait_timeout_seconds,
             )
+        if wait_result is not None:
             payload["approval_wait"] = wait_result
             wait_items = wait_result.get("items")
             resolved_items = [
@@ -608,12 +618,51 @@ def _run_guard_network_command(
     input_text: str | None = None,
     output_stream: TextIO | None = None,
 ) -> int:
+    from ..runtime.network_protection_bundle import NETWORK_PROTECTION_SYNC_STATE_KEY, network_protection_status
+
     command = getattr(args, "network_command", None) or "status"
+    if command == "sync":
+        store = _require_guard_store(store)
+        try:
+            summary = sync_network_protection_bundle(store)
+        except (RuntimeError, ValueError) as error:
+            from .commands_support_service import _guard_sync_failure_message
+
+            message = str(error)
+            if isinstance(error, GuardSyncNotConfiguredError):
+                message = _guard_sync_failure_message(error)
+            _emit("network-sync", {"synced": False, "error": message}, getattr(args, "json", False))
+            return 1
+        _emit("network-sync", {"synced": True, **summary}, getattr(args, "json", False))
+        return 0
+    if command == "check":
+        return _run_guard_network_check(args, guard_home=guard_home)
     if command != "status":
         raise ValueError(f"unsupported network command: {command}")
-    payload = load_network_status_payload(guard_home=guard_home, config=config)
+    payload = dict(load_network_status_payload(guard_home=guard_home, config=config))
+    if store is not None:
+        payload["protection_bundle"] = network_protection_status(
+            store.get_sync_payload(NETWORK_PROTECTION_SYNC_STATE_KEY)
+        )
     _emit("network", payload, getattr(args, "json", False))
     return 0
+
+def _run_guard_network_check(args: argparse.Namespace, *, guard_home: Path | None) -> int:
+    from ..native_runner_authority import NativeRunnerAuthorityError, native_runner_authority
+
+    url = str(getattr(args, "url", "") or "").strip()
+    home = guard_home if guard_home is not None else resolve_guard_home(None)
+    try:
+        verdict = native_runner_authority("network_check", {"guard_home": str(home), "url": url})
+    except NativeRunnerAuthorityError as error:
+        _emit("network-check", {"url": url, "error": str(error)}, getattr(args, "json", False))
+        return 1
+    payload: dict[str, object] = {"url": url, **verdict}
+    _emit("network-check", payload, getattr(args, "json", False))
+    if not verdict.get("valid_url", False):
+        return 2
+    return 0
+
 
 def _run_guard_init_command(
     args: argparse.Namespace,

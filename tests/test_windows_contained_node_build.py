@@ -13,9 +13,8 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard import native_restricted_pytest as transport
-from codex_plugin_scanner.guard.adapters.zcode_contained_tests import platform_contains
+from codex_plugin_scanner.guard.native_hook_containment_route import native_containment_sink
 from codex_plugin_scanner.guard.runtime import restricted_node_tool
-from codex_plugin_scanner.guard.runtime.contained_wrapper import peel_contained_wrapper
 from codex_plugin_scanner.guard.runtime.restricted_pytest_model import RestrictedPytestError
 
 NODE = r"C:\Users\tester\tools\node\node.exe"
@@ -178,6 +177,9 @@ def test_windows_refuses_package_scripts_before_planning(windows, tmp_path, comm
         (["./node_modules/.bin/eslint", ".", "--max-warnings", "0"], "eslint", None),
         (["npx", "tsc", "--noEmit"], "tsc", None),
         (["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"], "tsc", None),
+        (["npm", "exec", "tsc", "--noEmit"], "tsc", None),
+        (["npm", "x", "--", "eslint", "src"], "eslint", None),
+        (["yarn", "exec", "prettier", "--check", "src"], "prettier", None),
         (["npx", "prettier", "--check", "src"], "prettier", None),
         (["bunx", "prettier", "-l", "."], "prettier", None),
         (
@@ -295,25 +297,22 @@ def test_windows_build_runs_through_the_native_runner(windows, monkeypatch, tmp_
     assert not (app / "node_modules/.vite-temp").exists()
 
 
-def test_windows_contains_every_staged_node_profile(monkeypatch):
+def test_windows_contains_every_staged_node_profile(containment_resident, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    assert platform_contains({"required_execution_profile": PROFILE})
-    assert platform_contains({"required_execution_profile": TOOL_PROFILE})
-    assert not platform_contains({"required_execution_profile": "package-test-readonly-v1"})
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "vite build"}}
 
+    def sink(reason: str, profile: str) -> tuple[str | None, str | None]:
+        receipt = {
+            "decision": "deny",
+            "policy_action": "sandbox-required",
+            "reason_code": reason,
+            "required_execution_profile": profile,
+        }
+        return native_containment_sink(
+            receipt, harness="claude-code", bridge=False, payload=payload, guard_home=containment_resident
+        )
 
-def test_windows_peels_a_relative_cd_into_the_workspace(monkeypatch, tmp_path):
-    app = _project(tmp_path)
-    command = "cd dashboard && ./node_modules/.bin/vite build 2>&1 | tail -15"
-    monkeypatch.setattr(sys, "platform", "win32")
-    core, directory, output = peel_contained_wrapper(command, workspace=tmp_path, cwd=tmp_path)
-    assert core == "./node_modules/.bin/vite build"
-    assert directory == app.resolve()
-    assert output is not None
-    assert (output.kind, output.count, output.merge_stderr) == ("tail", 15, True)
-    for refused in ("cd dashboard; ./node_modules/.bin/vite build", "cd .. && ./node_modules/.bin/vite build"):
-        with pytest.raises((ValueError, OSError)):
-            peel_contained_wrapper(refused, workspace=tmp_path, cwd=tmp_path)
-    monkeypatch.setattr(sys, "platform", "darwin")
-    with pytest.raises(ValueError):
-        peel_contained_wrapper(command, workspace=tmp_path, cwd=tmp_path)
+    assert sink("native_node_build_output_containment_required", PROFILE) == (PROFILE, None)
+    assert sink("native_node_tool_readonly_containment_required", TOOL_PROFILE) == (TOOL_PROFILE, None)
+    package = sink("native_package_test_readonly_containment_required", "package-test-readonly-v1")
+    assert package == (None, "platform_has_no_sink")

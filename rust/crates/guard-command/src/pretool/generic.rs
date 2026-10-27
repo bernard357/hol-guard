@@ -19,6 +19,8 @@ mod extract;
 mod omp;
 #[path = "generic_omp_bash_cwd.rs"]
 mod omp_bash_cwd;
+#[path = "generic_read_decisions.rs"]
+mod read_decisions;
 
 /// Resolve the host's tool-level directory for an execution-owner preview.
 /// This is path observation only; the owner must still judge current policy.
@@ -76,6 +78,21 @@ pub fn venv_activation_target(command: &str, context: super::PathContext<'_>) ->
     venv_activation_projection::project(command, context)
 }
 
+/// The command the pre-tool pass answered for, when it read through the
+/// call's own wrapping, or `None` when the call is its own answer. A trailing
+/// subshell or brace group runs exactly the command list inside it and is
+/// decided as that list, and an activation hands its verdict to the command
+/// after it. A sink that plans the call again from its snapshot plans this
+/// text: the group's own text models no command, so `(.venv/bin/pytest -q)`
+/// reached the pytest planner with its parenthesis still attached. A group
+/// whose flattened list would run more than the group does, such as
+/// `false && (a; b)`, keeps its own text: the sink executes what it plans.
+pub fn contained_target(command: &str, context: super::PathContext<'_>) -> Option<String> {
+    let ungrouped = super::runnable_ungrouped_command_list(command);
+    let text = ungrouped.as_deref().unwrap_or(command);
+    venv_activation_target(text, context).or(ungrouped)
+}
+
 /// Bounded caller-supplied context, never authenticated provider facts.
 pub struct UntrustedCommandContext {
     pub command: Option<String>,
@@ -92,6 +109,31 @@ pub fn extract_untrusted_command_context(
         command: signals.command,
         business_action_present: signals.business_action_present,
     })
+}
+
+/// Destinations a tool call names: URL-valued arguments plus explicit
+/// `http(s)://` URLs in its command text. Empty when the payload cannot be
+/// read; that payload already gets the extraction failure's own decision.
+pub fn network_targets(payload: &Value, limit: usize) -> Vec<String> {
+    let Ok(signals) = extract_generic_signals(payload) else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for target in signals.url_values.into_iter().chain(
+        signals
+            .command
+            .as_deref()
+            .map(|command| crate::network_url::urls_in_text(command, limit))
+            .unwrap_or_default(),
+    ) {
+        if targets.len() >= limit {
+            break;
+        }
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    targets
 }
 
 #[path = "agent_metadata.rs"]
@@ -185,6 +227,7 @@ pub fn evaluate_pre_tool_envelope_with_context(
             shell_home_matches: false,
             ripgrep_config_absent: false,
             psql_environment: Default::default(),
+            creates_nothing: false,
         },
         None,
     )
@@ -337,7 +380,7 @@ fn omp_bash_cwd_missing(harness: &str, event: &str) -> PreToolResultV1 {
             false,
         ),
         "block",
-        evaluate::MISSING_PATH,
+        read_decisions::MISSING_PATH,
         "HOL Guard did not run this command because its working directory does not exist. Check the directory, for example by listing its parent, and try again with the correct one.",
     )
 }
@@ -469,7 +512,7 @@ fn evaluate_envelope(
         .command
         .as_deref()
         .filter(|_| !search_scope_proven && !apply_patch_proven)
-        .and_then(|command| venv_activation_projection::project(command, context))
+        .and_then(|command| venv_activation_projection::verdict_target(command, context))
     {
         let projected_payload = payload_with_command(
             payload,
@@ -523,8 +566,15 @@ fn evaluate_envelope(
             );
             // Inert settings cannot widen what an extension rule already
             // allows, but a rule that gates the plain form keeps its own
-            // fail-closed answer for wrapped forms.
-            if projected.minimum_action == "allow" || !extension_rule_matched(&projected) {
+            // fail-closed answer for wrapped forms. An ordinary value rides
+            // only an exact proof; contained execution would drop it, so the
+            // reviewed projection below judges every other verdict.
+            if projected.minimum_action == "allow"
+                || (!extension_rule_matched(&projected)
+                    && !env_prefix_projection::removes_values(
+                        signals.command.as_deref().unwrap_or_default(),
+                    ))
+            {
                 return projected;
             }
         }
@@ -731,8 +781,8 @@ fn evaluate_envelope(
             // The edit cannot apply, so stopping it costs nothing. Saying why
             // lets the agent fix the path instead of waiting on an approval.
             super::omp_hashline_writes::HashlineEdit::MissingTarget(path) => {
-                let mut result = generic_result(action, "block", evaluate::MISSING_PATH, "");
-                result.reason = evaluate::missing_path_reason(
+                let mut result = generic_result(action, "block", read_decisions::MISSING_PATH, "");
+                result.reason = read_decisions::missing_path_reason(
                     "HOL Guard did not run this edit because a file it names does not exist. Check the path, for example by listing its parent directory, and try again with the correct one.",
                     "edit",
                     Some(&path),
@@ -872,6 +922,14 @@ fn evaluate_envelope(
             result.minimum_action.as_str(),
             "allow" | "warn" | "review"
         )
+        && !git_read_order_settled_by_allow(
+            controls,
+            command_model,
+            &result,
+            floor_context,
+            deadline,
+            execution_environment,
+        )
     {
         result.minimum_action = "require-reapproval".into();
         result.policy_action = "require-reapproval".into();
@@ -895,26 +953,25 @@ fn evaluate_envelope(
         )
     });
     // macOS runs every credential-filtering profile. Windows runs the Python
-    // and Node evaluation profiles, the Vite build and the read-only Node
-    // tools (lint, typecheck and format checks) in an AppContainer, for
-    // harnesses whose shell runs a sink command written for it: Claude Code
-    // (Git Bash) and the Pi family (a bash implementation) take the
-    // POSIX-quoted one for all of them, Codex a PowerShell one for the Python
-    // profile only. Only harnesses that rewrite into the contained sink get
-    // the receipt; others would see a bare deny.
-    let windows_contained = match contained_test_reason {
-        Some("native_python_eval_readonly_containment_required") => {
-            matches!(harness, "claude-code" | "codex" | "omp" | "oh-my-pi" | "pi")
-        }
-        Some(
-            "native_node_build_output_containment_required"
-            | "native_node_tool_readonly_containment_required"
-            | "native_node_eval_readonly_containment_required",
-        ) => {
-            matches!(harness, "claude-code" | "omp" | "oh-my-pi" | "pi")
-        }
-        _ => false,
-    };
+    // and Node evaluation profiles, the read-only pytest profile, the Vite
+    // build and the read-only Node tools (lint, typecheck and format checks)
+    // in an AppContainer, for harnesses whose shell runs a sink command
+    // written for it: Claude Code (Git Bash) and the Pi family (a bash
+    // implementation) take the POSIX-quoted one, Codex a PowerShell one. The
+    // sink command names only the profile, so every profile routes the same
+    // way. Only harnesses that rewrite into the contained sink get the
+    // receipt; others would see a bare deny.
+    let windows_contained =
+        matches!(
+            contained_test_reason,
+            Some(
+                "native_python_eval_readonly_containment_required"
+                    | "native_node_build_output_containment_required"
+                    | "native_node_tool_readonly_containment_required"
+                    | "native_node_eval_readonly_containment_required"
+                    | "native_pytest_readonly_containment_required"
+            )
+        ) && matches!(harness, "claude-code" | "codex" | "omp" | "oh-my-pi" | "pi");
     if (cfg!(target_os = "macos") || (cfg!(windows) && windows_contained))
         && event == "PreToolUse"
         && matches!(
@@ -1002,6 +1059,7 @@ fn evaluate_envelope(
     super::git_remote_ops::settle_fast_forward(
         &mut result,
         command_model,
+        controls,
         super::PathContext {
             home_dir,
             cwd,
@@ -1061,6 +1119,51 @@ fn extension_rule_matched(result: &PreToolResultV1) -> bool {
             .iter()
             .any(|row| !row.effective_segment_indexes.is_empty())
     })
+}
+
+/// Whether the user's extension permissions settle a Git floor that rests on
+/// the order of the command's steps alone.
+///
+/// That floor has two meanings. A Git read whose own configuration names a
+/// pager, diff driver or textconv helper, or whose configuration could not be
+/// read, has a program Guard cannot see waiting for it, and keeps its review
+/// however much the user allowed. The other meaning is narrower: every Git
+/// read in the command was proven helper-free against the configuration Guard
+/// read for it, and what is unproven is only that an earlier step leaves that
+/// configuration as the read found it. That is a judgment of the command's
+/// shape, which a user who allowed each of its steps has already settled, the
+/// same way an explicit Allow settles the shape judgments the controls
+/// themselves raise.
+///
+/// The floor is raised after the controls run, so it cannot read the Allow off
+/// the result's reason and asks the controls instead. `minimum_action` must
+/// still be plain allow: anything the controls or an earlier Rust proof raised
+/// — unsettled extension uncertainty among it — means the Allow did not carry
+/// the command, and the floor stands.
+fn git_read_order_settled_by_allow(
+    controls: Option<&CompiledNativeCommandControls>,
+    command_model: Option<&crate::CanonicalCommandV1>,
+    result: &PreToolResultV1,
+    context: super::PathContext<'_>,
+    deadline: Option<Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
+    let (Some(controls), Some(model), Some(observations)) =
+        (controls, command_model, result.command_extensions.as_ref())
+    else {
+        return false;
+    };
+    result.minimum_action == "allow"
+        && result.action.bounded
+        && !result.action.sensitive_target
+        && super::git_read_floor::unsettled_steps_before_reads(
+            model,
+            context,
+            deadline,
+            execution_environment,
+        )
+        .is_some()
+        && controls.explicit_allow_covers_command(model, observations, context)
 }
 
 /// The Git floor's reason when every Git read was proven helper-free on its

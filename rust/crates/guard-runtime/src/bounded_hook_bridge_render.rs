@@ -7,10 +7,13 @@
 //! of them decides a verdict: the daemon's answer is reshaped for the
 //! harness, and a failure is the fixed fail-closed payload.
 
+use std::path::Path;
+
 use guard_contracts::GuardAction;
 
 use crate::blocked_request_mode::is_unlinked_connector_setup_reason;
 use crate::bounded_hook_bridge_hermes::hermes_bridge_response;
+use crate::bounded_hook_bridge_remediation::zcode_authority_block_reason;
 use crate::claude_hook_bridge_render::py_strip;
 use crate::hook_env_stamp::{backslash_surrogates, dumps, set_member};
 use crate::pyjson::PyVal;
@@ -25,8 +28,6 @@ pub(crate) const FAILURE_REASON: &str =
     "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal.";
 const PROMPT_UNAVAILABLE_REASON: &str = "HOL Guard could not complete native prompt review safely.";
 const PROMPT_UNAVAILABLE_REASON_CODE: &str = "native_prompt_unavailable";
-const AUTHORITY_BLOCK_REASON_MARKER: &str = "native command extension policy";
-const AUTHORITY_BLOCK_REMEDIATION: &str = " Run `hol-guard command controls recover-authority` in a terminal to restore the protected control floor.";
 
 const EVENT_NAME_KEYS: [&str; 6] = [
     "hook_event_name",
@@ -63,8 +64,9 @@ const LIFECYCLE_COMPACT_EVENTS: [&str; 13] = [
     "userpromptsubmitted",
     "subagentend",
 ];
-const REVIEW_CANNOT_FINISH_REASON_CODES: [&str; 24] = [
+const REVIEW_CANNOT_FINISH_REASON_CODES: [&str; 25] = [
     "native_policy_not_ready",
+    "native_policy_update_in_progress",
     "native_hook_event_unavailable",
     "native_pre_tool_unavailable",
     "native_post_tool_unavailable",
@@ -178,7 +180,7 @@ fn event_pauses_when_unavailable(event_name: &str) -> bool {
     !(compact == "posttooluse" || compact == "posttool" || compact.starts_with("after"))
 }
 
-fn is_permission_event(event_name: &str) -> bool {
+pub(crate) fn is_permission_event(event_name: &str) -> bool {
     matches!(
         compact_stripped(event_name).as_str(),
         "permissionrequest" | "permissionrequestv2" | "copilotpermissionrequest"
@@ -316,17 +318,6 @@ pub(crate) fn failure_output_for(
     (rendered, code)
 }
 
-/// `zcode_authority_block_reason`.
-fn zcode_authority_block_reason(reason: &str) -> String {
-    if reason.contains(AUTHORITY_BLOCK_REASON_MARKER)
-        && !reason.contains("hol-guard command controls")
-    {
-        format!("{reason}{AUTHORITY_BLOCK_REMEDIATION}")
-    } else {
-        reason.to_owned()
-    }
-}
-
 /// `zcode_hook_process_exit(policy_action=..., event_name=...) == 2`.
 fn zcode_exit_blocks(policy_action: &str, event_name: &str) -> bool {
     let event_name = if event_name.is_empty() {
@@ -342,14 +333,15 @@ fn zcode_exit_blocks(policy_action: &str, event_name: &str) -> bool {
     RESTRICTIVE.contains(&policy_action)
 }
 
-/// `_should_exit_block`.
+/// `_should_exit_block`. Grok reaches it only from the `hol-guard hook`
+/// command; its bridge answers through `bounded_hook_bridge_grok`.
 fn should_exit_block(harness: &str, event_name: &str, policy_action: &str) -> bool {
     let compact = compact(event_name);
     let blocking = matches!(
         compact.as_str(),
         "pretooluse" | "userpromptsubmit" | "pretoolcall"
     ) || (harness == "devin" && compact == "permissionrequest");
-    if !matches!(harness, "kimi" | "zcode" | "devin") || !blocking {
+    if !matches!(harness, "grok" | "kimi" | "zcode" | "devin") || !blocking {
         return false;
     }
     if harness == "zcode" {
@@ -377,7 +369,7 @@ pub(crate) fn member<'a>(entries: &'a [(String, PyVal)], key: &str) -> Option<&'
 
 /// `_consistent_native_response`: the aligned response and the policy
 /// action that decides the exit code.
-fn consistent_native_response(
+pub(crate) fn consistent_native_response(
     daemon_response: &[(String, PyVal)],
     harness: &str,
     event_name: &str,
@@ -442,7 +434,7 @@ fn consistent_native_response(
                 set_member(entries, "permissionDecision", text(word));
             }
         }
-        if harness == "openclaw" && top.is_none() {
+        if matches!(harness, "grok" | "openclaw") && top.is_none() {
             top = Some("deny".to_owned());
             set_member(&mut response, "decision", text("deny"));
         }
@@ -529,7 +521,7 @@ fn first_truthy_text(response: &[(String, PyVal)], keys: &[&str]) -> Option<Stri
 }
 
 /// `_policy_action_from_daemon`.
-fn policy_action_from_daemon(response: &[(String, PyVal)], event_name: &str) -> String {
+pub(crate) fn policy_action_from_daemon(response: &[(String, PyVal)], event_name: &str) -> String {
     if let Some(action) = member(response, "policy_action")
         .and_then(PyVal::as_str)
         .map(py_strip)
@@ -594,6 +586,7 @@ pub(crate) fn daemon_response_to_native(
     harness: &str,
     event_name: &str,
     unmap: bool,
+    guard_home: Option<&Path>,
 ) -> Option<Rendered> {
     if harness == "hermes" {
         return Some(hermes_bridge_response(daemon_response, unmap));
@@ -621,7 +614,7 @@ pub(crate) fn daemon_response_to_native(
             let reason =
                 reason.unwrap_or_else(|| format!("HOL Guard blocked this action ({action})"));
             stderr = if harness == "zcode" {
-                zcode_authority_block_reason(&reason)
+                zcode_authority_block_reason(&reason, guard_home)
             } else {
                 reason
             };
@@ -669,7 +662,7 @@ pub(crate) fn daemon_response_to_native(
             }
         }
         payload.push(("hookSpecificOutput".to_owned(), PyVal::Dict(hook_specific)));
-        if let (Some(decision), "openclaw") = (decision, harness) {
+        if let (Some(decision), "grok" | "openclaw") = (decision, harness) {
             let word = if decision == "allow" { "allow" } else { "deny" };
             payload.push(("decision".to_owned(), text(word)));
             payload.push(("policy_action".to_owned(), text(&action)));
@@ -701,11 +694,14 @@ pub(crate) fn daemon_response_to_native(
         }
     }
     let stderr = if blocks && harness == "zcode" {
-        zcode_authority_block_reason(if reason.is_empty() {
-            &default_reason
-        } else {
-            &reason
-        })
+        zcode_authority_block_reason(
+            if reason.is_empty() {
+                &default_reason
+            } else {
+                &reason
+            },
+            guard_home,
+        )
     } else if blocks && matches!(harness, "kimi" | "devin") {
         reason
     } else {

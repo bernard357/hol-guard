@@ -65,68 +65,6 @@ pub(super) fn workspace_is_broad_or_sensitive(workspace: &Path) -> bool {
     workspace_is_broad_or_sensitive_for_home(workspace, None)
 }
 
-pub(super) fn workspace_is_broad_or_sensitive_for_home(
-    workspace: &Path,
-    home: Option<&Path>,
-) -> bool {
-    let broad_roots: HashSet<PathBuf> = [
-        "/",
-        "/Users",
-        "/etc",
-        "/home",
-        "/private",
-        "/private/tmp",
-        "/private/var",
-        "/tmp",
-        "/var",
-        "/var/tmp",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .collect();
-    if broad_roots.contains(workspace) {
-        return true;
-    }
-    // The caller home is an extra root. It must not replace the account home
-    // from the password database, or a different `$HOME` would hide that root.
-    let mut homes = Vec::new();
-    if let Some(host) = host_home_directory() {
-        homes.push(host);
-    }
-    if let Some(path) = home {
-        let caller = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        if !homes.iter().any(|existing| existing == &caller) {
-            homes.push(caller);
-        }
-    }
-    if homes.is_empty() {
-        return true;
-    }
-    homes
-        .iter()
-        .any(|home| sensitive_under_home(workspace, home))
-}
-
-fn sensitive_under_home(workspace: &Path, home: &Path) -> bool {
-    if workspace == home
-        || home
-            .ancestors()
-            .skip(1)
-            .any(|ancestor| ancestor == workspace)
-    {
-        return true;
-    }
-    let Ok(relative) = workspace.strip_prefix(home) else {
-        return false;
-    };
-    match relative.components().next() {
-        Some(component) => {
-            SENSITIVE_HOME_ROOT_NAMES.contains(component.as_os_str().to_string_lossy().as_ref())
-        }
-        None => false,
-    }
-}
-
 /// `_resolve_cwd` (:105-121).
 #[allow(dead_code)]
 pub(super) fn resolve_cwd(cwd: &Path, workspace: &Path) -> Result<PathBuf, RestrictedPytestError> {
@@ -238,48 +176,9 @@ pub(super) fn validate_pytest_args(args: &[String]) -> Result<(), RestrictedPyte
     Ok(())
 }
 
-/// `_python_args_target_pytest` (:171-194).
-pub(super) fn python_args_target_pytest(args: &[String]) -> bool {
-    let mut index = 0usize;
-    while index < args.len() {
-        let item = &args[index];
-        if item == "--" {
-            return false;
-        }
-        if item == "-c"
-            || item == "--command"
-            || item.starts_with("-c")
-            || item.starts_with("--command=")
-        {
-            return false;
-        }
-        if item == "-m" {
-            return args
-                .get(index + 1)
-                .map(|next| next.split('.').next() == Some("pytest"))
-                .unwrap_or(false);
-        }
-        if item.starts_with("-m") && item.len() > 2 {
-            return item[2..].split('.').next() == Some("pytest");
-        }
-        if matches!(item.as_str(), "-W" | "-X" | "--check-hash-based-pycs") {
-            index += 2;
-            continue;
-        }
-        if item.starts_with("-W")
-            || item.starts_with("-X")
-            || item.starts_with("--check-hash-based-pycs=")
-        {
-            index += 1;
-            continue;
-        }
-        if !item.starts_with('-') {
-            return false;
-        }
-        index += 1;
-    }
-    false
-}
+/// The Windows planner reads the same argv, so the reading lives in a
+/// module both platforms compile.
+pub use crate::pytest_argv::python_args_target_pytest;
 
 /// `_resolve_executable` (:195-218).
 pub(super) fn resolve_executable(

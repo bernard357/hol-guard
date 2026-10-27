@@ -69,6 +69,12 @@ def _arch() -> str:
     return "unknown"
 
 
+def device_display_name(store: GuardStore, label: str) -> str:
+    """The machine name Guard Cloud shows; see ``GuardStore.device_display_name``."""
+
+    return store.device_display_name(label)
+
+
 def machine_section(*, include_os_version: bool, hash_key: bytes) -> dict[str, object]:
     os_name = _os_name()
     hostname = platform.node().strip().lower()
@@ -158,7 +164,7 @@ def _effectively_paused(config: GuardConfig | None, harness: str) -> bool:
 
     try:
         return effective_harness_posture(config, harness) == "watch"
-    except Exception:  # pragma: no cover - defensive, config shape is owned elsewhere
+    except (AttributeError, TypeError):  # pragma: no cover - config shape is owned elsewhere
         return False
 
 

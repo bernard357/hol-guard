@@ -153,16 +153,17 @@ def _request(operation: str, wire_input: Mapping[str, Any], expected: type | tup
     )
 
 
-def venv_activation_target(command: str, *, cwd: Path | None = None, home_dir: Path | None = None) -> str | None:
-    """The command a virtualenv activation hands its verdict to, as the pre-tool pass read it.
+def contained_target(command: str, *, cwd: Path | None = None, home_dir: Path | None = None) -> str | None:
+    """The command the pre-tool pass answered for, when it read through the call's own wrapping.
 
-    The native scan owns the reading: the activation has to resolve to a
-    marked environment's own script, its text has to bound the programs it can
-    run, and only then does the command after it carry the verdict.
+    The native scan owns the reading: a trailing subshell or brace group is the
+    command list inside it, and an activation has to resolve to a marked
+    environment's own script, its text has to bound the programs it can run,
+    and only then does the command after it carry the verdict.
     """
     try:
         value = restricted_native(
-            "venv_activation_target",
+            "contained_target",
             {"text": command, "cwd": cwd, "home": home_dir},
             (str, type(None)),
         )
@@ -211,9 +212,10 @@ def decode_native_plan(result: dict[str, Any], profiles: tuple[str, ...]):
         or result["profile_version"] not in profiles
         or not (
             result["backend"] in {"macos-seatbelt", "linux-bubblewrap"}
-            # The Windows runner contains an installed Python interpreter, or
-            # a staged local Node tool: a Vite build, or a lint, typecheck or
-            # format check that publishes nothing back.
+            # The Windows runner contains an installed Python interpreter, a
+            # virtual environment's own interpreter running the project's
+            # tests, or a staged local Node tool: a Vite build, or a lint,
+            # typecheck or format check that publishes nothing back.
             or (
                 result["backend"] == "windows-appcontainer"
                 and sys.platform == "win32"
@@ -223,6 +225,7 @@ def decode_native_plan(result: dict[str, Any], profiles: tuple[str, ...]):
                     "node-eval-readonly-v1",
                     "node-build-output-v1",
                     "node-tool-readonly-v1",
+                    "pytest-readonly-v2",
                 }
             )
         )

@@ -643,6 +643,9 @@ pub struct GuardConfig {
     /// `harness_risk_actions` (config.py :419).
     pub harness_risk_actions:
         Option<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>>,
+    /// `harness_postures` (config.py :421), canonically keyed as
+    /// `coerce_loaded_harness_postures` leaves them.
+    pub harness_postures: Option<std::collections::BTreeMap<String, String>>,
     /// `managed_policy_status` (config.py :426).
     pub managed_policy_status: String,
     /// `managed_policy_hash` (config.py :427).
@@ -1083,6 +1086,7 @@ pub const VALID_RISK_ACTION_KEYS: &[&str] = &[
     "package_custom_registry",
     "package_install",
     "low_trust_artifact",
+    "runtime_known_vulnerable",
 ];
 
 /// `DEFAULT_SECURITY_LEVEL` (config.py).
@@ -1449,115 +1453,19 @@ pub fn write_package_firewall_refresh_state(guard_home: &Path, last_attempt: f64
 // Posture — `build_local_supply_chain_posture` + internals.
 // ---------------------------------------------------------------------------
 
-/// `.runtime.supply_chain_support._SUPPORT_LEVELS` — ported verbatim.
-/// TODO(deps): dedup once `supply_chain_support` lands in Rust.
-static SUPPORT_LEVELS: LazyLock<
-    BTreeMap<&'static str, (&'static str, &'static str, &'static str)>,
-> = LazyLock::new(|| {
-    [
-        ("npm", ("npm", "protected", "Protected")),
-        ("pypi", ("PyPI", "protected", "Protected")),
-        ("cargo", ("Cargo", "beta", "Beta")),
-        ("go", ("Go modules", "beta", "Beta")),
-        ("maven", ("Maven/Gradle", "beta", "Beta")),
-        ("packagist", ("Composer", "beta", "Beta")),
-        ("rubygems", ("RubyGems", "beta", "Beta")),
-        (
-            "homebrew",
-            ("Homebrew formulae", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "homebrew-cask",
-            ("Homebrew Casks", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "homebrew-tap",
-            ("Homebrew taps", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "docker",
-            ("Docker base images", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "github-actions",
-            ("GitHub Actions", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "system",
-            ("System packages", "monitor-only", "Monitor-only"),
-        ),
-        (
-            "unsupported",
-            ("Unsupported managers", "monitor-only", "Monitor-only"),
-        ),
-    ]
-    .into_iter()
-    .collect()
-});
+/// `ecosystem_support_metadata` — the shared port in `supply_chain_support`.
+///
+/// This module carried its own copy of the table and of Python's
+/// `str.title()` fallback until that module landed. The copy split the
+/// fallback on spaces alone, so an unknown ecosystem written with any other
+/// separator kept its lower-case letters where `title()` capitalises them.
+pub use crate::supply_chain_support::ecosystem_support_metadata;
 
-static SUPPORT_ORDER: &[&str] = &[
-    "npm",
-    "pypi",
-    "cargo",
-    "go",
-    "maven",
-    "packagist",
-    "rubygems",
-    "homebrew",
-    "homebrew-cask",
-    "homebrew-tap",
-    "docker",
-    "github-actions",
-    "system",
-    "unsupported",
-];
-
-/// `ecosystem_support_metadata`.
-pub fn ecosystem_support_metadata(ecosystem: &str) -> Map<String, Value> {
-    let (display_name, support_level, support_label) =
-        SUPPORT_LEVELS.get(ecosystem).copied().unwrap_or({
-            (
-                "", // computed below
-                "monitor-only",
-                "Monitor-only",
-            )
-        });
-    let display_name = if display_name.is_empty() {
-        // `ecosystem.replace("-", " ").title()` — Python `str.title()` per word.
-        ecosystem
-            .replace('-', " ")
-            .split(' ')
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    Some(first) => {
-                        first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
-                    }
-                    None => String::new(),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        display_name.to_string()
-    };
-    let mut out = Map::new();
-    out.insert("display_name".into(), json!(display_name));
-    out.insert("support_level".into(), json!(support_level));
-    out.insert("support_label".into(), json!(support_label));
-    out
-}
-
-/// `ecosystem_support_matrix`.
+/// `ecosystem_support_matrix`, as the JSON values this module's callers read.
 pub fn ecosystem_support_matrix() -> Vec<Value> {
-    SUPPORT_ORDER
-        .iter()
-        .map(|ecosystem| {
-            let mut row = Map::new();
-            row.insert("ecosystem".into(), json!(ecosystem));
-            row.extend(ecosystem_support_metadata(ecosystem));
-            Value::Object(row)
-        })
+    crate::supply_chain_support::ecosystem_support_matrix()
+        .into_iter()
+        .map(Value::Object)
         .collect()
 }
 
@@ -1662,6 +1570,24 @@ pub fn resolve_risk_action(
     if !VALID_RISK_ACTION_KEYS.contains(&risk_class) {
         return None;
     }
+    let resolved = resolve_configured_risk_action(config, risk_class, harness);
+    if harness_posture_override(config, harness) == Some("extra_careful") {
+        // A per-harness Extra careful override only ever strengthens.
+        return stricter_risk_action(
+            resolved,
+            posture_risk_actions("extra_careful").and_then(|rows| rows.get(risk_class).cloned()),
+        );
+    }
+    resolved
+}
+
+/// The explicit-then-default half of `resolve_risk_action`, before the
+/// per-harness Extra careful floor.
+fn resolve_configured_risk_action(
+    config: &GuardConfig,
+    risk_class: &str,
+    harness: Option<&str>,
+) -> Option<String> {
     if let Some(h) = harness {
         if let Some(harness_map) = config.harness_risk_actions.as_ref() {
             if let Some(inner) = harness_map.get(h) {
@@ -1677,6 +1603,38 @@ pub fn resolve_risk_action(
         }
     }
     posture_or_level_defaults(config).get(risk_class).cloned()
+}
+
+/// `harness_posture.harness_posture_override` (:120-126) against the mirror.
+/// `runtime_harness_key` resolves a registered id or alias and otherwise falls
+/// back to the normalized name, so an unregistered harness simply matches no
+/// override.
+fn harness_posture_override<'a>(config: &'a GuardConfig, harness: Option<&str>) -> Option<&'a str> {
+    let raw = harness?;
+    let postures = config.harness_postures.as_ref()?;
+    let normalized = raw.trim().to_lowercase().replace('_', "-");
+    if normalized.is_empty() {
+        return None;
+    }
+    let key =
+        crate::harness_identity::canonical_harness_id(&normalized).unwrap_or(normalized.as_str());
+    postures.get(key).map(String::as_str)
+}
+
+/// `harness_posture.stricter_risk_action` (:209-214).
+fn stricter_risk_action(base: Option<String>, floor: Option<String>) -> Option<String> {
+    match (base, floor) {
+        (None, floor) => floor,
+        (base, None) => base,
+        (Some(base), Some(floor)) => Some(
+            crate::action_lattice::most_restrictive_guard_action(
+                &[Value::String(base), Value::String(floor)],
+                crate::effect_decision::GuardAction::Block,
+            )
+            .as_str()
+            .to_owned(),
+        ),
+    }
 }
 
 /// `_posture_or_level_defaults` (config.py :1053-1058).
@@ -1720,6 +1678,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "warn"),
+                ("runtime_known_vulnerable", "warn"),
             ],
         ),
         (
@@ -1745,6 +1704,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "warn"),
+                ("runtime_known_vulnerable", "warn"),
             ],
         ),
         (
@@ -1770,6 +1730,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
         (
@@ -1795,6 +1756,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "block"),
             ],
         ),
         (
@@ -1820,6 +1782,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "block"),
                 ("package_install", "block"),
                 ("low_trust_artifact", "block"),
+                ("runtime_known_vulnerable", "block"),
             ],
         ),
         (
@@ -1845,6 +1808,7 @@ fn security_level_risk_rows(level: &str) -> &'static [(&'static str, &'static st
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
     ];
@@ -1897,6 +1861,7 @@ fn posture_risk_rows(posture: &str) -> Option<&'static [(&'static str, &'static 
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
         (
@@ -1922,6 +1887,7 @@ fn posture_risk_rows(posture: &str) -> Option<&'static [(&'static str, &'static 
                 ("package_custom_registry", "allow"),
                 ("package_install", "allow"),
                 ("low_trust_artifact", "require-reapproval"),
+                ("runtime_known_vulnerable", "require-reapproval"),
             ],
         ),
     ];
@@ -2112,33 +2078,23 @@ pub fn build_supply_chain_status_payload(
     payload
 }
 
-/// `_build_package_manager_protection` (:3171-3190).
+/// `_build_package_manager_protection`: the resident's protection projection.
+///
+/// The shape and the "which detected managers are unprotected" rule live in
+/// [`crate::shims::package_shim_protection_from_status`]; this only supplies
+/// the dashboard status and the default shim directory.
 pub fn build_package_manager_protection(
     store: &dyn SupplyChainStore,
     shims: &dyn ShimsApi,
 ) -> Map<String, Value> {
     let home_dir = expand_tilde_inner(Path::new("~"));
-    let status = dict_payload(Some(&shims.package_shim_dashboard_status(
-        &home_dir,
-        None,
-        store.guard_home(),
-    )))
+    let guard_home = store.guard_home();
+    let status = dict_payload(Some(
+        &shims.package_shim_dashboard_status(&home_dir, None, guard_home),
+    ))
     .unwrap_or_default();
-    let managed = status
-        .get("managed")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let supported_managers = shims.package_shim_supported_managers();
-    let mut protection = Map::new();
-    protection.insert("managed".into(), json!(managed));
-    protection.insert("supported_managers".into(), json!(supported_managers));
-    if let Some(s) = status.get("state") {
-        protection.insert("state".into(), s.clone());
-    }
-    if let Some(s) = status.get("detail") {
-        protection.insert("detail".into(), s.clone());
-    }
-    protection
+    let default_shim_dir = guard_home.join("package-shims").join("bin");
+    crate::shims::package_shim_protection_from_status(&status, &default_shim_dir.to_string_lossy())
 }
 
 /// `_call_sync_with_optional_auth_context` — retries with refreshed auth when
@@ -5498,124 +5454,16 @@ fn is_package_request_artifact(artifact_id: Option<&str>, artifact_type: Option<
 // ---------------------------------------------------------------------------
 
 /// `runtime.package_protect_projection.resolve_local_supply_chain_harness`.
-#[allow(dead_code)]
+///
+/// The attribution itself lives in [`crate::harness_attribution`], which
+/// mirrors `runtime/harness_attribution.py`. The slug feeds request identity,
+/// receipts, and user-facing attribution only; policy scoping stays keyed on
+/// the synthetic guard-cli artifact harness, which the invoking process cannot
+/// influence.
 fn resolve_local_supply_chain_harness() -> String {
-    resolve_environment_harness()
-        .or_else(resolve_parent_process_harness)
+    crate::harness_attribution::resolve_environment_harness()
+        .or_else(crate::harness_attribution::resolve_parent_process_harness)
         .unwrap_or_else(|| LOCAL_SUPPLY_CHAIN_HARNESS.to_string())
-}
-
-/// `runtime.harness_attribution.resolve_environment_harness`.
-#[allow(dead_code)]
-fn resolve_environment_harness() -> Option<String> {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    resolve_environment_harness_from(&env)
-}
-
-#[allow(dead_code)]
-fn resolve_environment_harness_from(
-    env: &std::collections::HashMap<String, String>,
-) -> Option<String> {
-    // HOL_GUARD_ORIGIN_HARNESS takes precedence — an explicit override.
-    if let Some(v) = env.get("HOL_GUARD_ORIGIN_HARNESS") {
-        let v = v.trim().to_string();
-        if !v.is_empty() {
-            return Some(v);
-        }
-    }
-    // Presence-only markers — the harness runtime injects these into the
-    // environment of every command it spawns.
-    static MARKERS: &[(&[&str], &str)] = &[
-        (
-            &[
-                "CURSOR_VERSION",
-                "CURSOR_PROJECT_DIR",
-                "CURSOR_TRACE_ID",
-                "CURSOR_SESSION_ID",
-                "CURSOR_TRANSCRIPT_PATH",
-            ],
-            "cursor",
-        ),
-        (&["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"], "claude-code"),
-        (&["CODEX_SANDBOX", "CODEX_THREAD_ID"], "codex"),
-        (&["GROK_AGENT", "GROK_SESSION_ID"], "grok"),
-        (&["OPENCODE_CONFIG_CONTENT"], "opencode"),
-        (&["DEVIN_PROJECT_DIR"], "devin"),
-    ];
-    for (keys, slug) in MARKERS {
-        if keys.iter().any(|k| env.contains_key(*k)) {
-            return Some(slug.to_string());
-        }
-    }
-    None
-}
-
-/// `runtime.harness_attribution.resolve_parent_process_harness` — inspect the
-/// process tree for known harness executable names (best-effort, never used
-/// for authorization).
-#[allow(dead_code)]
-fn resolve_parent_process_harness() -> Option<String> {
-    let output = std::process::Command::new("/bin/ps")
-        .args(["-axo", "pid=,ppid=,comm="])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut parents: std::collections::HashMap<u32, (u32, String)> =
-        std::collections::HashMap::new();
-    let mut self_pid = std::process::id();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let pid: u32 = match parts.next()?.parse() {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let ppid: u32 = match parts.next()?.parse() {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let comm: String = parts.collect::<Vec<_>>().join(" ");
-        parents.insert(pid, (ppid, comm));
-    }
-    static PROCESS_HARNESSES: &[(&str, &str)] = &[
-        ("codex", "codex"),
-        ("claude", "claude-code"),
-        ("cursor", "cursor"),
-        ("cursor-agent", "cursor"),
-        ("zcode", "zcode"),
-        ("zcode-cli", "zcode"),
-        ("grok", "grok"),
-        ("pi", "pi"),
-        ("omp", "omp"),
-        ("opencode", "opencode"),
-        ("devin", "devin"),
-    ];
-    let mut visited = std::collections::HashSet::new();
-    loop {
-        let Some(&(ppid, ref comm)) = parents.get(&self_pid) else {
-            break;
-        };
-        if !visited.insert(self_pid) {
-            break;
-        }
-        if ppid == self_pid {
-            break;
-        }
-        self_pid = ppid;
-        let name = comm.rsplit('/').next().unwrap_or(comm);
-        for (proc_name, slug) in PROCESS_HARNESSES {
-            if name == *proc_name {
-                return Some(slug.to_string());
-            }
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------

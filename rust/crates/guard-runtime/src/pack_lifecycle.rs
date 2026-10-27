@@ -5,16 +5,27 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 mod current;
+mod distribution;
 mod floor;
 mod installed_asset;
+pub(crate) mod location;
 mod migration;
 mod offline;
+mod record;
 mod release;
+mod release_transport;
 mod selection;
 #[cfg(test)]
 mod tests;
 mod version;
 use floor::{decode, encode, Floor};
+
+const COMPARE: &str = "https://api.github.com/repos/hashgraph-online/hol-guard/compare/";
+
+/// The API URL GitHub echoes for a compare of `base...head` by full SHA.
+pub(super) fn compare_url(base: &str, head: &str) -> String {
+    format!("{COMPARE}{base}...{head}")
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +61,34 @@ impl Identity {
     }
 }
 
+/// The floor an install starts from: the verified installed release and
+/// nothing else. Enrollment and a startup that finds no record at all both
+/// derive it here, so the two cannot drift apart.
+fn enrolled(candidate: Identity, key: &[u8]) -> Result<Value, String> {
+    candidate.validate()?;
+    if candidate.profile != "installed" {
+        return Err("pack_lifecycle_enrollment_requires_release".into());
+    }
+    Ok(json!({"record": encode(&Floor {
+        schema: "guard.command-pack-floor.v1".into(),
+        source: candidate.source.clone(),
+        authority: candidate.authority,
+        revocation: candidate.revocation,
+        installed: Some(candidate),
+        remote: None,
+    }, key)?, "stamp": "guard.command-pack-enrolled.v1"}))
+}
+
+/// The floor enrollment derives for `candidate`, for tests of the records
+/// that carry one.
+#[cfg(test)]
+pub(crate) fn enrolled_floor(candidate: &Value, key: &[u8]) -> String {
+    enrolled(parse(candidate).unwrap(), key).unwrap()["record"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 fn parse<T: serde::de::DeserializeOwned>(value: &Value) -> Result<T, String> {
     serde_json::from_value(value.clone()).map_err(|_| "pack_lifecycle_invalid".into())
 }
@@ -81,12 +120,14 @@ pub(super) fn transition(
     }
     // Authenticated installed package releases have their own monotonic
     // authority. They do not publish a remote Root or move its ancestry cursor.
+    // GitHub's compare response names no head commit; it echoes the requested
+    // range in `url`, so that is what binds the evidence to this candidate.
     if candidate.profile == "remote"
         && candidate.source != floor.source
         && !(ancestry["status"] == "ahead"
             && ancestry["base_commit"]["sha"] == floor.source
             && ancestry["merge_base_commit"]["sha"] == floor.source
-            && ancestry["head_commit"]["sha"] == candidate.source
+            && ancestry["url"] == compare_url(&floor.source, &candidate.source)
             && ancestry["behind_by"].as_u64() == Some(0)
             && ancestry["ahead_by"].as_u64().is_some_and(|n| n > 0))
     {
@@ -111,11 +152,20 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
     if input["kind"] == "installed-asset" {
         return installed_asset::fetch(input);
     }
+    if input["kind"] == "object" {
+        return crate::delivery_object::evaluate(input);
+    }
     if input["kind"] == "preparation" {
         return crate::pack_preparation::evaluate(input);
     }
     if input["kind"] == "offline" {
         return offline::evaluate(input);
+    }
+    if input["kind"] == "distribution" {
+        return distribution::evaluate(input);
+    }
+    if input["kind"] == "release-transport" {
+        return release_transport::evaluate(input);
     }
     if input["kind"] == "active-security" {
         return crate::active_pack_security::evaluate(input);
@@ -127,8 +177,14 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
         return selection::select(input);
     }
     if kind == "fallback" {
-        return if input["profile"] == "installed"
-            && input["reason"] == crate::pack_preparation::UNAVAILABLE
+        // A committed subset reports the same typed unavailability when its
+        // cached policy is gone. Re-preparing from the published root is the
+        // same authenticated route the installed profile already takes, and it
+        // is the only way a saved policy survives an evicted cache.
+        return if matches!(
+            input["profile"].as_str(),
+            Some("installed") | Some("committed-subset")
+        ) && input["reason"] == crate::pack_preparation::UNAVAILABLE
         {
             Ok(json!({"profile":"remote"}))
         } else {
@@ -175,6 +231,9 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
     if key.len() != 32 {
         return Err("pack_lifecycle_key_invalid".into());
     }
+    if kind == "record" {
+        return record::evaluate(input, &key);
+    }
     if kind == "migrate" {
         return migration::migrate(input, &key);
     }
@@ -184,16 +243,7 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
     if kind == "enroll" {
         // Only the installed capability adapter exposes this under an exclusive
         // lease. Ordinary preparation cannot enroll/recreate protected state.
-        let candidate = release::identity(input)?;
-        candidate.validate()?;
-        if candidate.profile != "installed" {
-            return Err("pack_lifecycle_enrollment_requires_release".into());
-        }
-        return Ok(json!({"record": encode(&Floor {
-            schema: "guard.command-pack-floor.v1".into(), source: candidate.source.clone(),
-            authority: candidate.authority, revocation: candidate.revocation,
-            installed: Some(candidate), remote: None,
-        }, &key)?,"stamp":"guard.command-pack-enrolled.v1"}));
+        return enrolled(release::identity(input)?, &key);
     }
     let encoded = input["floor"]
         .as_str()
@@ -212,27 +262,43 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
             let installed: Option<Identity> = parse(&input["installed"])?;
             let mut admission = floor.clone();
             let mut installed_usable = false;
-            if let Some(installed) = installed
-                .as_ref()
-                .filter(|i| i.source == floor.source || floor.installed.as_ref() != Some(*i))
-            {
-                match transition(&floor, installed, &input["ancestry"]) {
-                    Ok(next) => {
-                        admission = next;
-                        installed_usable = true;
-                    }
-                    Err(code) if code == "pack_lifecycle_source_ancestry_required" => {
-                        if !input["ancestry"].is_null() {
-                            return Err(code);
+            if let Some(installed) = installed.as_ref() {
+                if floor.installed.as_ref() == Some(installed)
+                    && installed.authority >= floor.authority
+                    && installed.revocation >= floor.revocation
+                {
+                    // This floor already admitted exactly this release, so it
+                    // stays usable without re-deriving it. Re-deriving it was
+                    // the only reason a steady-state preview fell through to
+                    // the remote profile, which needs the network for every
+                    // saved policy; the floor itself does not move here. A
+                    // remote publication that raised the epochs past it sends
+                    // it through `transition`, which refuses the rollback.
+                    installed_usable = true;
+                } else {
+                    match transition(&floor, installed, &input["ancestry"]) {
+                        Ok(next) => {
+                            admission = next;
+                            installed_usable = true;
                         }
-                        return Ok(json!({"lineage_source":installed.source}));
+                        Err(code) if code == "pack_lifecycle_source_ancestry_required" => {
+                            if !input["ancestry"].is_null() {
+                                return Err(code);
+                            }
+                            return Ok(json!({"lineage_source":installed.source}));
+                        }
+                        // A release the floor will not admit is not fatal to
+                        // planning: preparation falls back to the published
+                        // root, which carries its own authority.
+                        Err(code)
+                            if matches!(
+                                code.as_str(),
+                                "pack_lifecycle_epoch_rollback"
+                                    | "pack_lifecycle_version_rollback"
+                                    | "pack_lifecycle_version_reused"
+                            ) => {}
+                        Err(code) => return Err(code),
                     }
-                    Err(code)
-                        if matches!(
-                            code.as_str(),
-                            "pack_lifecycle_epoch_rollback" | "pack_lifecycle_version_rollback"
-                        ) => {}
-                    Err(code) => return Err(code),
                 }
             }
             let admission_floor = encode(&admission, &key)?;
@@ -303,8 +369,11 @@ pub(super) fn evaluate(input: &Value) -> Result<Value, String> {
     }
 }
 
+/// The request is held to the stdin frame every runtime subcommand reads. Each
+/// operation bounds its own fields, and a signed provenance statement within
+/// its bound can grow past a smaller frame once its quotes are escaped.
 pub(super) fn run(bytes: &[u8]) -> Result<Value, String> {
-    if bytes.len() > 1024 * 1024 {
+    if bytes.len() > crate::MAX_NATIVE_REQUEST_BYTES {
         return Err("pack_lifecycle_request_too_large".into());
     }
     let input: Value = serde_json::from_slice(bytes).map_err(|_| "pack_lifecycle_invalid")?;

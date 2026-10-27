@@ -223,13 +223,13 @@ pub(super) fn evaluate_signals(
     }
     if action_type == PreToolActionTypeV1::FileRead
         && event == "PreToolUse"
-        && harness == "omp"
-        && signals.tool_name.as_deref() == Some("read")
         && !signals.sensitive_target
         && signals.url_values.is_empty()
         && signals.command.is_none()
         && signals.path_values.len() == 1
-        && super::super::safe_reads::bounded_omp_directory_read_target(
+        && super::super::read_paths::omp_targets::bounded_directory_read_tool_target(
+            harness,
+            signals.tool_name.as_deref(),
             &signals.path_values[0],
             home_dir,
             cwd,
@@ -422,29 +422,42 @@ pub(super) fn evaluate_signals(
             "The Rust authority proved this web fetch or search is a plain request for public web content; the installed network setting decides the outcome.",
         );
     }
-    if action_type == PreToolActionTypeV1::FileRead
-        && event == "PreToolUse"
-        && matches!(signals.tool_name.as_deref(), Some("Read" | "read"))
-        && !signals.sensitive_target
-        && signals.url_values.is_empty()
-        && signals.command.is_none()
-        && signals.path_values.len() == 1
-        && super::super::safe_reads::missing_read_target(
-            &signals.path_values[0],
-            home_dir,
-            cwd,
-            harness == "omp",
-        )
-    {
-        // Nothing exists to read, so stopping the call costs nothing. Saying
-        // why lets the agent fix the path instead of waiting on an approval.
-        let mut result = generic_result(action, "block", MISSING_PATH, "");
-        result.reason = missing_path_reason(
-            "HOL Guard did not run this read because the path does not exist. Check the path, for example by listing its parent directory, and try again with the correct one.",
-            "read",
-            Some(&signals.path_values[0]),
-        );
-        return result;
+    match super::read_decisions::classify(
+        harness,
+        event,
+        action_type,
+        operation,
+        signals,
+        home_dir,
+        cwd,
+    ) {
+        Some(super::read_decisions::ReadDecision::MissingInRegisteredWorktree) => {
+            return generic_result(
+                action,
+                "allow",
+                "native_missing_worktree_read",
+                super::read_decisions::MISSING_WORKTREE_READ_REASON,
+            );
+        }
+        Some(super::read_decisions::ReadDecision::MissingPath) => {
+            let mut result =
+                generic_result(action, "block", super::read_decisions::MISSING_PATH, "");
+            result.reason = super::read_decisions::missing_path_reason(
+                super::read_decisions::MISSING_READ_FALLBACK,
+                "read",
+                Some(&signals.path_values[0]),
+            );
+            return result;
+        }
+        Some(super::read_decisions::ReadDecision::HarnessResult) => {
+            return generic_result(
+                action,
+                "allow",
+                "native_harness_result_read",
+                super::read_decisions::HARNESS_RESULT_READ_REASON,
+            );
+        }
+        None => {}
     }
     let (reason_code, mut reason) = review_reason(action_type);
     if action_type == PreToolActionTypeV1::Unknown
@@ -468,30 +481,6 @@ pub(super) fn evaluate_signals(
 }
 
 const EVAL_REVIEW_REASON: &str = "HOL Guard requires review because code run by eval can start processes, change files or reach the network, and Guard cannot check what it will do before it runs. Run shell commands with the bash tool instead, where Guard checks each command.";
-
-pub(super) const MISSING_PATH: &str = "native_missing_path";
-
-/// Why a call that names a missing path did not run. It names the path when
-/// the path prints safely, and says where a relative one is read from:
-/// agents that ran commands in another folder retry the same relative path.
-/// Otherwise it keeps `fallback`.
-pub(super) fn missing_path_reason(fallback: &str, action: &str, path: Option<&str>) -> String {
-    let Some(path) = path.filter(|path| {
-        !path.is_empty()
-            && path.chars().count() <= 512
-            && !path.contains(|c: char| c.is_control() || c == '`')
-    }) else {
-        return fallback.to_owned();
-    };
-    format!(
-        "HOL Guard did not run this {action} because `{path}` does not exist.{} Check the path, for example by listing its parent directory, and try again with the correct one.",
-        if path.starts_with(['/', '~']) {
-            ""
-        } else {
-            " A relative path is read from the session folder, not from the folder of an earlier command."
-        }
-    )
-}
 
 /// Whether the tool opens the files it is handed and nothing else. `grep`,
 /// `glob` and the listing tools are file reads too, but they fall back to a

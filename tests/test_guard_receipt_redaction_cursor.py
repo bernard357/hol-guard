@@ -18,7 +18,7 @@ from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     load_policy_bundle_verification_keys,
 )
 from codex_plugin_scanner.guard.runtime.actions import GuardActionEnvelope
-from codex_plugin_scanner.guard.runtime.local_request_snapshots import (
+from codex_plugin_scanner.guard.runtime.cloud_review_sync import (
     _resolve_cloud_receipt_redaction_level as _resolve_snapshot_redaction_level,
 )
 from codex_plugin_scanner.guard.runtime.runner import (
@@ -637,7 +637,9 @@ def test_relaxed_redaction_sync_adds_recent_blocked_command_detail_backfill(tmp_
         "receipts": 1,
         "queried": 1,
         "before_rowid": 1,
-        "complete": True,
+        # A page that came back short may be one the store shortened to a size
+        # the runtime can reply with, so only an empty page ends the walk.
+        "complete": False,
     }
 
 

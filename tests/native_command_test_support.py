@@ -36,7 +36,6 @@ from codex_plugin_scanner.guard.runtime.extension_control_contract import (
 from codex_plugin_scanner.guard.runtime.extension_control_runtime import (
     ExtensionControlRuntimeSnapshot,
     _layer_payload,
-    current_extension_control_snapshot,
 )
 from codex_plugin_scanner.guard.runtime.native_command_evaluation import NativeCommandEvaluation
 
@@ -142,7 +141,6 @@ def real_native_command_evaluation(
 ) -> NativeCommandEvaluation:
     if controls is not None and extension_control_layers is not None:
         raise ValueError("provide controls or extension control layers, not both")
-    active_snapshot = current_extension_control_snapshot()
     global_lockdown = False
     managed_global_lockdown = False
     if extension_control_layers is not None:
@@ -164,34 +162,8 @@ def real_native_command_evaluation(
         managed_global_lockdown = any(
             layer.global_lockdown for layer in extension_control_layers if layer.kind is ControlLayerKind.SIGNED_CLOUD
         )
-    elif controls is None:
-        global_lockdown = active_snapshot is not None and any(
-            layer.global_lockdown for layer in active_snapshot.layers if layer.kind is ControlLayerKind.LOCAL_ADMIN
-        )
-        managed_global_lockdown = active_snapshot is not None and any(
-            layer.global_lockdown for layer in active_snapshot.layers if layer.kind is ControlLayerKind.SIGNED_CLOUD
-        )
-        controls = (
-            tuple(
-                (control.target.kind.value, control.target.target_id, control.state.value)
-                for layer in active_snapshot.layers
-                if layer.kind is ControlLayerKind.LOCAL_ADMIN
-                for control in layer.controls
-            )
-            if active_snapshot is not None
-            else ()
-        )
-        managed_controls = (
-            tuple(
-                (control.target.kind.value, control.target.target_id, control.state.value)
-                for layer in active_snapshot.layers
-                if layer.kind is ControlLayerKind.SIGNED_CLOUD
-                for control in layer.controls
-            )
-            if active_snapshot is not None
-            else ()
-        )
     else:
+        controls = () if controls is None else controls
         managed_controls = ()
     fixture = real_native_review_fixture(
         command,
@@ -201,7 +173,7 @@ def real_native_command_evaluation(
         managed_controls=managed_controls,
         global_lockdown=global_lockdown,
         managed_global_lockdown=managed_global_lockdown,
-        health=active_snapshot.health if active_snapshot is not None else AuthorityHealth.PROTECTED,
+        health=AuthorityHealth.PROTECTED,
     )
     return project_native_review_fixture(
         fixture,
@@ -362,6 +334,7 @@ def real_native_review_fixture(
     global_lockdown: bool = False,
     managed_global_lockdown: bool = False,
     health: AuthorityHealth = AuthorityHealth.PROTECTED,
+    never_enrolled: bool = False,
 ) -> RealNativeReviewFixture:
     """Return the complete native result and its unchanged control binding.
 
@@ -380,6 +353,7 @@ def real_native_review_fixture(
         global_lockdown=global_lockdown,
         managed_global_lockdown=managed_global_lockdown,
         health=health,
+        never_enrolled=never_enrolled,
     )[0]
 
 
@@ -416,8 +390,14 @@ def real_native_review_fixtures(
     global_lockdown: bool = False,
     managed_global_lockdown: bool = False,
     health: AuthorityHealth = AuthorityHealth.PROTECTED,
+    never_enrolled: bool = False,
 ) -> tuple[RealNativeReviewFixture, ...]:
-    """Return bounded native evaluations with their unmodified offline binding."""
+    """Return bounded native evaluations with their unmodified offline binding.
+
+    ``never_enrolled`` binds the snapshot a fresh install has: unenrolled with no
+    layers at revision zero, where packaged protection still applies. ``health``
+    unenrolled alone models a lost authority instead, which blocks everything.
+    """
 
     if not 1 <= len(commands) <= 256:
         raise ValueError("native review batches must contain between 1 and 256 commands")
@@ -438,6 +418,7 @@ def real_native_review_fixtures(
         # therefore be fixed when the evidence is produced, never swapped on a
         # snapshot afterwards.
         **({"health": health.value} if health is not AuthorityHealth.PROTECTED else {}),
+        **({"never_enrolled": True} if never_enrolled else {}),
         "cases": [{"id": f"case-{index}", "command": command} for index, command in enumerate(commands)],
     }
     if cwd is not None and home_dir is not None:
@@ -460,9 +441,9 @@ def real_native_review_fixtures(
     binding = result["control_binding"]
     assert binding["program_digest"] == BUILT_IN_COMMAND_EXTENSION_REGISTRY.program_digest
     assert binding["catalog_digest"] == BUILT_IN_COMMAND_EXTENSION_REGISTRY.catalog_digest
-    assert binding["revision"] == 1
+    assert binding["revision"] == int(not never_enrolled)
     assert binding["managed_revision"] == int(bool(managed_controls) or managed_global_lockdown)
-    layer_specs = [(ControlLayerKind.LOCAL_ADMIN, controls, global_lockdown)]
+    layer_specs = [] if never_enrolled else [(ControlLayerKind.LOCAL_ADMIN, controls, global_lockdown)]
     if managed_controls or managed_global_lockdown:
         layer_specs.append((ControlLayerKind.SIGNED_CLOUD, managed_controls, managed_global_lockdown))
     layers = tuple(

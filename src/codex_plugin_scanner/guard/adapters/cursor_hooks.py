@@ -16,14 +16,10 @@ from ._modules.cursor.cursor_hook_events import unsupported_cursor_hook_events
 from ._modules.cursor.cursor_hook_guard_cli import HOOK_SCRIPT_TEMPLATE_RESOLVER
 from ._modules.cursor.cursor_hook_payload import (
     _validated_hol_guard_src_path,
-    cursor_hook_requires_approval_center_queue,
-    cursor_hook_response_from_guard,
-    cursor_hook_should_block,
     cursor_hook_would_prompt_user,
     prepare_cursor_hook_payload,
 )
 from ._modules.cursor.cursor_hook_script_template_head import HOOK_SCRIPT_TEMPLATE_HEAD
-from ._modules.cursor.cursor_hook_script_template_native_reply import HOOK_SCRIPT_TEMPLATE_NATIVE_REPLY
 from ._modules.cursor.cursor_hook_script_template_reason import HOOK_SCRIPT_TEMPLATE_REASON
 from ._modules.cursor.cursor_hook_script_template_tail import HOOK_SCRIPT_TEMPLATE_TAIL
 from .adapter_safe_output import write_text_at_authorized_path
@@ -56,11 +52,7 @@ if TYPE_CHECKING:
     from ..runtime_transition import TransitionFile
 
 _HOOK_SCRIPT_TEMPLATE = (
-    HOOK_SCRIPT_TEMPLATE_HEAD
-    + HOOK_SCRIPT_TEMPLATE_REASON
-    + HOOK_SCRIPT_TEMPLATE_NATIVE_REPLY
-    + HOOK_SCRIPT_TEMPLATE_RESOLVER
-    + HOOK_SCRIPT_TEMPLATE_TAIL
+    HOOK_SCRIPT_TEMPLATE_HEAD + HOOK_SCRIPT_TEMPLATE_REASON + HOOK_SCRIPT_TEMPLATE_RESOLVER + HOOK_SCRIPT_TEMPLATE_TAIL
 )
 _INHERIT_ENV_KEYS = (
     "PATH",
@@ -632,10 +624,7 @@ __all__ = [
     "_resolve_guard_cli_command",
     "_strip_managed_hook_entries",
     "_validated_hol_guard_src_path",
-    "cursor_hook_requires_approval_center_queue",
-    "cursor_hook_response_from_guard",
     "cursor_hook_script_source",
-    "cursor_hook_should_block",
     "cursor_hook_would_prompt_user",
     "cursor_hooks_path",
     "cursor_native_hook_state",

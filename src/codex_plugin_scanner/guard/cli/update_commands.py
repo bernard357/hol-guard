@@ -92,12 +92,20 @@ from .update_native_wheel import (
 from .update_opencode import _refresh_opencode_pretool_plugin
 from .update_release_candidates import newest_live_pypi_version, newest_pypi_version, select_live_release
 from .update_repair_notes import attach_repair_notes
+from .update_resident_barrier import release_before_post_update_repair, subprocess_failure_summary
 from .update_retirement import retire_native_resident_for_home
 from .update_subprocess import (
     InstalledDistribution,
     TrustedUpdateContext,
     UpdateSubprocessError,
     build_trusted_update_context,
+)
+from .windows_arm64_python import REASON_CODE as WINDOWS_ARM64_REASON_CODE
+from .windows_arm64_python import (
+    native_windows_arm64_python,
+    wheel_less_dependency_build_failed,
+    x64_python_candidates,
+    x64_python_route_message,
 )
 
 _TRUSTED_UPDATE_FAILURE_MESSAGES = {
@@ -895,12 +903,7 @@ def _run_guard_update_unlocked(
         payload["resulting_version"] = current_version
         payload["message"] = already_current_update_message(version_check)
         newer_runtime = (
-            _verified_newer_guard_daemon(
-                context.guard_home,
-                minimum_version=current_version,
-            )
-            if context is not None
-            else None
+            _verified_newer_guard_daemon(context.guard_home, minimum_version=current_version) if context else None
         )
         if newer_runtime is not None:
             payload["daemon_refresh"] = newer_runtime
@@ -911,6 +914,7 @@ def _run_guard_update_unlocked(
             )
             return payload, 0
         # Skip force-reinstall/upgrade noise when PyPI already reports current.
+        release_before_post_update_repair(resident_update_lock, _bundled_runtime_candidate())
         package_shims, package_shim_note = _refresh_package_shims_after_update(
             context=context,
             dry_run=dry_run,
@@ -1079,6 +1083,15 @@ def _run_guard_update_unlocked(
                 )
                 payload.pop("retry_command", None)
                 return payload, 0
+            if native_windows_arm64_python() and wheel_less_dependency_build_failed(installer_output):
+                payload["status"] = "blocked"
+                payload["changed"] = False
+                payload["reason_code"] = WINDOWS_ARM64_REASON_CODE
+                payload["message"] = x64_python_route_message(installer, x64_python_candidates())
+                payload.pop("retry_command", None)
+                if trusted_wheel is not None:
+                    _retain_local_wheel_staging(payload)
+                return finish_update((payload, 1))
             conflict_message = _dependency_conflict_message(
                 installer_output,
             )
@@ -1220,6 +1233,7 @@ def _run_guard_update_unlocked(
             )
             payload["changed"] = True
             finalization_exit_code = 1
+    release_before_post_update_repair(resident_update_lock, _bundled_runtime_candidate())
     daemon_refresh: dict[str, object] | None = None
     if context is not None:
         daemon_refresh, daemon_refresh_note = refresh_guard_daemon_after_update(
@@ -2621,7 +2635,7 @@ def _refresh_package_shims_after_update(
     if result.output_limited:
         return None, "Could not refresh package firewall shims during update: update_installer_output_limit"
     if result.returncode != 0:
-        details = stderr or stdout or f"exit code {result.returncode}"
+        details = subprocess_failure_summary(stderr or stdout) or f"exit code {result.returncode}"
         return None, f"Could not refresh package firewall shims during update: {details}"
     try:
         refresh_payload = json.loads(stdout) if stdout else {}

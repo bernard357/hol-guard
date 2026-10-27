@@ -18,6 +18,7 @@ from ..approvals import ApprovalRequestAlreadyResolvedError, ApprovalRequestNotF
 from ..native_approval_scope import ApprovalScopeUnavailableError
 from ..native_daemon_route import NativeDaemonRouteError, native_resolve_request
 from ..native_resident_revival import native_route_unavailable_body
+from .background_diagnostics import failure_detail, record_background_event
 from .command_activity_api import handle_command_activity_feedback
 from .extension_control_api import ExtensionControlApiError
 from .harness_version_api import WRITE_PATHS as HARNESS_VERSION_WRITE_PATHS
@@ -25,7 +26,9 @@ from .harness_version_api import handle_harness_version_write
 from .local_approval_continuation import apply_local_approval_continuation
 from .local_cli_http import handle_local_cli_post
 from .manager import repair_approval_center_locator
+from .plugin_updates_http import handle_plugin_updates_dismiss
 from .server_common import _now
+from .workspace_assessment_api import handle_workspace_assessment_post
 
 _AUDIT_REMEDIATION_ACTIONS = {"package_shim_path"}
 
@@ -84,7 +87,27 @@ class _ControlPostRoutes:
                         require_fresh_totp=self._request_uses_protection_repair_session(),
                     )
                 else:
-                    response = self._daemon_server().extension_control_api.refresh()
+                    # The dashboard posts here when the catalog it read and the
+                    # effective controls it read name different catalogs. Only
+                    # the daemon-wide refresh recaptures the active activation
+                    # and rebinds the control API to it; the service's own
+                    # refresh re-reads for the registry it is already bound to,
+                    # which cannot close that gap. It reads under the authority
+                    # lease and commits nothing, and keeps the installed
+                    # snapshot when the read fails.
+                    try:
+                        self._daemon_server().refresh_extension_control_runtime()
+                    except Exception as error:
+                        # A refresh that cannot run is the state this endpoint
+                        # exists to recover from, so failing the request would
+                        # leave the page with no way forward. Record it and
+                        # serve what the runtime holds; the page compares the
+                        # catalog digests again and retries on its own ladder.
+                        record_background_event("extension_control_refresh_failed", failure_detail(error))
+                    # The refresh above already re-read durable authority under
+                    # the lease. Taking it again here would make this repair
+                    # wait on a second lock for an answer it just installed.
+                    response = self._daemon_server().extension_control_api.effective(reread=False)
             except ExtensionControlApiError as error:
                 self._write_json(error.to_payload(), status=error.status)
                 return
@@ -199,6 +222,9 @@ class _ControlPostRoutes:
         if parsed.path == "/v1/update/reconnect/prepare":
             self._handle_dashboard_reconnect_prepare()
             return
+        if parsed.path == "/v1/plugins/updates/dismiss":
+            handle_plugin_updates_dismiss(self, payload)
+            return
         if parsed.path == "/v1/update/channel":
             self._handle_update_channel(payload)
             return
@@ -229,6 +255,8 @@ class _ControlPostRoutes:
                 self._run_package_firewall_mutation(action, handle_package_action)
             else:
                 handle_package_action()
+            return
+        if handle_workspace_assessment_post(self, parsed.path, payload):
             return
         if parsed.path == "/v1/supply-chain/choose-folder":
             self._handle_supply_chain_choose_folder()

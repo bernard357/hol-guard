@@ -8,15 +8,14 @@ widened by exactly that grant, and refuses one that changed before launch.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from codex_plugin_scanner.guard import local_cli_hook as client
+from codex_plugin_scanner.guard import native_hook_containment_route as containment_route
 from codex_plugin_scanner.guard.adapters import zcode_contained_tests
-from codex_plugin_scanner.guard.cli import commands_hook_native_containment as cli_route
 from codex_plugin_scanner.guard.daemon import hook_contained_grant as routing
 from codex_plugin_scanner.guard.runtime import restricted_workspace as workspace_sink
 from codex_plugin_scanner.guard.runtime import restricted_workspace_grant_lookup as lookup
@@ -197,11 +196,8 @@ def test_daemon_turns_a_granted_outside_roots_review_into_the_sandbox(
 @pytest.mark.parametrize(
     ("result", "answer"),
     [
-        (_review(reason_code="native_policy_review"), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE)),
-        (_review(minimum_action="allow"), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE)),
-        (_review(policy_action="require-reapproval"), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE)),
-        (_review(action={"action_type": "package"}), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE)),
-        (_review(action={"action_type": "guard_control"}), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE)),
+        # Which reviews reach the grant at all is the resident's route answer:
+        # see test_the_resident_route_matches_the_retired_python_edge.
         # A grant the resident could not route: the review it was holding stands.
         (_review(), (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, None)),
         (_review(), ("block", None, None)),
@@ -223,37 +219,31 @@ def test_daemon_keeps_every_other_review(
 
 
 def test_daemon_routes_the_grant_and_answers_the_sink_with_the_receipt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    containment_resident: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(containment_route, "host_platform", lambda: "macos")
     _decides(monkeypatch, (client.ALLOW_CONTAINED_WITH_GRANT, CONTAINED, ROUTE))
     rendered: list[dict[str, object]] = []
     monkeypatch.setattr(
         routing, "render_pre_tool", lambda harness, verdict, **kwargs: rendered.append(dict(verdict)) or receipt()
     )
     monkeypatch.setattr(zcode_contained_tests, "route_zcode_containment", lambda response, **kwargs: {"routed": True})
-    common = {"harness": "omp", "guard_home": tmp_path, "home_dir": tmp_path, "workspace": tmp_path}
+    common = {"harness": "claude-code", "guard_home": tmp_path, "home_dir": tmp_path, "workspace": tmp_path}
     routed = routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **common)
     assert routed == {"routed": True}
     assert rendered[0]["policy_action"] == "sandbox-required"
     receipt_only = payload("lanectl status") | {"guard_containment_receipt_only": True}
     assert routing.granted_containment_response(object(), _review(), payload=receipt_only, **common) == receipt()
+    # The sink re-authorizing gets the receipt whatever the harness.
+    omp = common | {"harness": "omp"}
+    assert routing.granted_containment_response(object(), _review(), payload=receipt_only, **omp) == receipt()
+    # A harness the sink does not route keeps its review.
+    assert routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **omp) is None
     # A call the sink cannot take keeps its review.
     monkeypatch.setattr(zcode_contained_tests, "route_zcode_containment", lambda response, **kwargs: response)
     assert (
         routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **common) is None
     )
-
-
-def test_direct_cli_hook_routes_a_granted_review(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cli_route, "granted_containment_response", lambda store, result, **kwargs: {"routed": True})
-    monkeypatch.setattr(cli_route, "record_pre_hook_command_activity_best_effort", lambda **kwargs: None)
-    edge = {"event_name": "PreToolUse", "harness": "omp", "result": _review()}
-    context = SimpleNamespace(guard_home=tmp_path, home_dir=tmp_path)
-    stream = io.StringIO()
-    assert cli_route.emit_native_containment_route(edge, payload(), context, tmp_path, stream, object()) == 0  # type: ignore[arg-type]
-    assert stream.getvalue().strip() == '{"routed":true}'
-    monkeypatch.setattr(cli_route, "granted_containment_response", lambda store, result, **kwargs: None)
-    assert cli_route.emit_native_containment_route(edge, payload(), context, tmp_path, io.StringIO(), object()) is None  # type: ignore[arg-type]
 
 
 def _granted_plan(workspace: Path, **changes: object) -> dict[str, object]:

@@ -19,7 +19,7 @@
 use guard_command::command_action_risk_classes::risk_classes_for_command_action;
 use guard_contracts::{
     normalize_guard_action_result, GuardAction, HookArtifactFactsRequestV1,
-    HookArtifactFactsResultV1, HookArtifactV1, PolicyArtifactFactsV1,
+    HookArtifactFactsResultV1, HookArtifactV1, MetadataStampV1, PolicyArtifactFactsV1,
     HOOK_ARTIFACT_FACTS_MAX_ARTIFACTS, HOOK_ARTIFACT_FACTS_MAX_BYTES,
     HOOK_ARTIFACT_FACTS_REQUEST_SCHEMA, HOOK_ARTIFACT_FACTS_RESULT_SCHEMA,
 };
@@ -69,11 +69,12 @@ pub(crate) fn evaluate_request(request: &HookArtifactFactsRequestV1) -> Value {
 pub(crate) fn evaluate(artifact: &HookArtifactV1) -> Value {
     let empty = Map::new();
     let metadata = artifact.metadata.as_object().unwrap_or(&empty);
+    let permission_allow = explicit_permission_allow(metadata);
     let facts = PolicyArtifactFactsV1 {
         hard_block: prompt_requires_hard_block(metadata),
         configured_override: artifact.configured_override.clone(),
         command_action_floor: command_action_floor(metadata),
-        explicit_permission_allow: explicit_permission_allow(metadata),
+        explicit_permission_allow: permission_allow,
         risk_classes: risk_classes(&artifact.artifact_type, metadata),
         pytest_restricted_sandbox: pytest_restricted_sandbox(metadata),
         shell_local_script_review: metadata.get("reason_code").and_then(Value::as_str)
@@ -87,8 +88,95 @@ pub(crate) fn evaluate(artifact: &HookArtifactV1) -> Value {
             .and_then(Value::as_str)
             .map(str::to_owned),
         skill_is_known_bad: skill_is_known_bad(metadata),
+        skip_native_floor: skip_native_floor(&artifact.artifact_type, permission_allow),
+        content_sha256: artifact
+            .metadata_stamp
+            .as_ref()
+            .map(|stamp| content_sha256(artifact, metadata, stamp)),
     };
     serde_json::to_value(facts).unwrap_or(Value::Null)
+}
+
+/// `consumer.service.artifact_hash` over the artifact its caller asked about.
+///
+/// The digest covers the metadata as it stood before the caller's stamp, not
+/// the metadata the facts above are read from: a hook fixes the approval
+/// identity before it stamps its runtime posture onto the artifact, and a
+/// saved approval keyed by the stamped metadata would stop matching the
+/// moment a signal appeared.
+fn content_sha256(
+    artifact: &HookArtifactV1,
+    metadata: &Map<String, Value>,
+    stamp: &MetadataStampV1,
+) -> String {
+    let mut payload = Map::new();
+    for (field, value) in [
+        ("artifact_id", &artifact.artifact_id),
+        ("name", &artifact.name),
+        ("harness", &artifact.harness),
+        ("artifact_type", &artifact.artifact_type),
+        ("source_scope", &artifact.source_scope),
+        ("config_path", &artifact.config_path),
+    ] {
+        payload.insert(field.to_owned(), Value::String(value.clone()));
+    }
+    for (field, value) in [
+        ("command", &artifact.command),
+        ("url", &artifact.url),
+        ("transport", &artifact.transport),
+        ("publisher", &artifact.publisher),
+    ] {
+        payload.insert(
+            field.to_owned(),
+            value.clone().map_or(Value::Null, Value::String),
+        );
+    }
+    payload.insert(
+        "args".to_owned(),
+        Value::Array(
+            artifact
+                .args
+                .iter()
+                .map(|arg| Value::String(arg.clone()))
+                .collect(),
+        ),
+    );
+    payload.insert(
+        "metadata".to_owned(),
+        Value::Object(unstamped_metadata(metadata, stamp)),
+    );
+    guard_command::artifact_hash::artifact_hash(&payload)
+}
+
+/// The metadata the artifact carried before the caller stamped it.
+///
+/// Dropping the keys the stamp introduced and putting back the values it
+/// overwrote recovers that metadata from the copy already on the wire, so a
+/// large metadata is not sent twice to answer both questions.
+fn unstamped_metadata(
+    metadata: &Map<String, Value>,
+    stamp: &MetadataStampV1,
+) -> Map<String, Value> {
+    let mut identity = metadata.clone();
+    for key in &stamp.added {
+        identity.remove(key);
+    }
+    for (key, value) in &stamp.replaced {
+        identity.insert(key.clone(), value.clone());
+    }
+    identity
+}
+
+/// Whether the native command floor stays out of this artifact's verdict.
+///
+/// A `package_request` is decided by the package evaluator, the fail-closed
+/// semantic authority for installs: an unproven-command review floor would
+/// pause every install whatever its supply-chain verdict. A verified
+/// explicit-permission allow was already adjudicated against the published
+/// control layer for this exact command, so a control-blind floor could only
+/// re-raise the cataloged risk the grant accepted.
+fn skip_native_floor(artifact_type: &str, explicit_permission_allow: bool) -> bool {
+    artifact_type == "package_request" || explicit_permission_allow
 }
 
 /// `_typed_text`: a present non-string setting normalizes to the unknown

@@ -24,6 +24,9 @@ import { deriveProtectionStatus } from "./model/protection-presentation";
 import { CustomExtensionsSection } from "./custom-extensions-section";
 import type { LocalCliItem } from "../local-cli-api";
 import { LocalCliDetail } from "./local-clis-panel";
+import { CustomExtensionReviewModal } from "./local-cli-review-modal";
+import { FRESH_TOTP_REQUIRED_MESSAGE, isFreshTotpRequired } from "./local-cli-panel-copy";
+import { LocalCliApiError } from "../local-cli-api";
 
 assert.equal(PROTECTION_TERMS.navigation, "Extensions");
 assert.equal(PROTECTION_TERMS.pageTitle, "Extensions");
@@ -119,6 +122,15 @@ assert.doesNotMatch(mismatch.detail, /open it again|[Tt]ry again/);
 assert.match(mismatch.detail, /Install the latest version/);
 assert.equal(mismatch.reference, "catalog_snapshot_mismatch");
 
+// A preparation that has failed on every recent attempt is deterministic, so
+// restarting the same install reproduces it. This card must not offer a retry.
+const preparationFailed = protectionCenterLoadError("catalog_read_preparation_failed");
+assert.doesNotMatch(preparationFailed.detail, /catalog_read_preparation_failed/);
+assert.doesNotMatch(preparationFailed.detail, /open it again|[Tt]ry again/);
+assert.match(preparationFailed.detail, /Install the latest version/);
+assert.match(preparationFailed.detail, /daemon\.log/);
+assert.equal(preparationFailed.reference, "catalog_read_preparation_failed");
+
 const expired = protectionCenterLoadError("catalog_snapshot_expired");
 assert.doesNotMatch(expired.detail, /partial/);
 assert.match(expired.detail, /Load it again/);
@@ -131,7 +143,7 @@ assert.equal(protectionCenterLoadError("catalog mismatch").reference, undefined)
 
 // The card already states that local protection continues, so the detail must
 // not repeat it.
-for (const message of ["unauthorized", "catalog_read_model_unavailable", "catalog_read_transport_failed", "catalog_snapshot_expired", "catalog_snapshot_mismatch", "catalog mismatch"]) {
+for (const message of ["unauthorized", "catalog_read_model_unavailable", "catalog_read_transport_failed", "catalog_snapshot_expired", "catalog_snapshot_mismatch", "catalog_read_preparation_failed", "catalog mismatch"]) {
   assert.doesNotMatch(protectionCenterLoadError(message).detail, /[Ll]ocal protection/);
 }
 
@@ -324,6 +336,51 @@ const customMixed = renderToStaticMarkup(createElement(CustomExtensionsSection, 
 assert.match(customMixed, /Needs review · 1/);
 assert.match(customMixed, /Reviewed · 1/);
 assert.doesNotMatch(customMixed, /custom-extensions-empty/);
+
+// A recent authenticator proof lasts about a minute and can lapse while the
+// save dialog is open. Once a save is refused for a missing code, the dialog
+// must show the code field again instead of "recently confirmed" (#5594).
+const recentTotpGate = {
+  enabled: true, configured: true, cooldown_seconds: 0, cooldown_active: false, cooldown_expires_at: null,
+  locked_until: null, fail_closed: false, strict_all_decisions: false,
+  totp_enabled: true, totp_pending: false, totp_recent_satisfied: true,
+};
+const saveDialog = (requireFreshTotp: boolean) => renderToStaticMarkup(createElement(CustomExtensionReviewModal, {
+  item: { ...baseCustomExtension, state: "allowed" },
+  nextState: "allowed",
+  commandChanges: [],
+  providerUpdates: [],
+  busy: false,
+  error: requireFreshTotp ? FRESH_TOTP_REQUIRED_MESSAGE : null,
+  approvalGate: recentTotpGate,
+  requireFreshTotp,
+  onCancel: () => undefined,
+  onConfirm: () => undefined,
+}));
+assert.match(saveDialog(false), /Recently confirmed with your authenticator/);
+assert.doesNotMatch(saveDialog(false), /Authenticator code/);
+assert.match(saveDialog(true), /Authenticator code/);
+assert.match(saveDialog(true), /inputMode="numeric"|inputmode="numeric"/);
+assert.doesNotMatch(saveDialog(true), /Recently confirmed with your authenticator/);
+assert.equal(isFreshTotpRequired(new LocalCliApiError("approval_gate_totp_required", "TOTP code is required.")), true);
+assert.equal(isFreshTotpRequired(new LocalCliApiError("revision_conflict", "Changed.")), false);
+assert.equal(isFreshTotpRequired(new Error("TOTP code is required.")), false);
+
+// One MCP server configured in two apps is two rows. Each names its app
+// beside the server name, and the status line stays whole.
+const customPerApp = renderToStaticMarkup(createElement(CustomExtensionsSection, {
+  items: [
+    { ...baseCustomExtension, cli_id: "local-cli.mcp-claude", name: "truenas-pilot", source_label: "Claude Code" },
+    { ...baseCustomExtension, cli_id: "local-cli.mcp-omp", name: "truenas-pilot", source_label: "Oh My Pi" },
+  ],
+  onOpen: () => undefined, onAdd: () => undefined,
+}));
+assert.match(customPerApp, /data-testid="extension-row-source"[^>]*>Claude Code</);
+assert.match(customPerApp, /data-testid="extension-row-source"[^>]*>Oh My Pi</);
+assert.equal(
+  customPerApp.match(/>Detected · Permissions not configured\. Inspect this connection\.</g)?.length,
+  2,
+);
 
 // When the section search is visible it must render in its own row below the
 // header: the Add action closes the header row and a bounded search label

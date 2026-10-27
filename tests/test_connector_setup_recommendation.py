@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +22,7 @@ from codex_plugin_scanner.guard.models import GuardApprovalRequest
 from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
 from codex_plugin_scanner.guard.runtime.extension_allow_hint import (
     CONNECTOR_SETUP_HINT_SCHEMA,
-    connector_setup_hint,
+    connector_setup_deep_link,
     validated_connector_setup_hint,
     validated_extension_allow_hint,
 )
@@ -36,7 +38,18 @@ _CONNECTOR = SetupConnector(cli_id=_CLI_ID, identity_hash=_HASH, name="lanectl",
 
 
 def _hint(**overrides: object) -> dict[str, object]:
-    hint = connector_setup_hint(cli_id=_CLI_ID, identity_hash=_HASH, display_name="lanectl", surface="cli")
+    hint = validated_connector_setup_hint(
+        {
+            "schema": CONNECTOR_SETUP_HINT_SCHEMA,
+            "identity_hash": _HASH,
+            "cli_id": _CLI_ID,
+            "surface": "cli",
+            "display_name": "lanectl",
+            "deep_link": connector_setup_deep_link(_CLI_ID),
+            "card_recommendation": {"state": "allowed", "capabilities": []},
+            "risk_classes": [],
+        }
+    )
     assert hint is not None
     return {**hint, **overrides}
 
@@ -75,6 +88,36 @@ class _Store:
         if name.startswith(("upsert_", "set_", "write_", "apply_", "record_", "resolve_")):
             raise AssertionError(f"recommendation must not write: {name}")
         raise AttributeError(name)
+
+
+# What the resident answers for a caution query; its own tests pin the set.
+_RESIDENT_CAUTION = frozenset(
+    {
+        "credential_exfiltration",
+        "data_flow_exfiltration",
+        "destructive",
+        "dynamic_execution",
+        "encoded_execution",
+        "financial_transaction",
+        "local_secret_read",
+        "policy_bypass",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def _resident_caution(monkeypatch: pytest.MonkeyPatch) -> list[tuple[frozenset[str], Path | None]]:
+    """Answer caution queries as the resident would, recording what was asked and of which home."""
+
+    asked: list[tuple[frozenset[str], Path | None]] = []
+
+    def answer(risk_classes: Iterable[str], *, guard_home: Path | None = None) -> frozenset[str]:
+        classes = frozenset(risk_classes)
+        asked.append((classes, guard_home))
+        return classes & _RESIDENT_CAUTION
+
+    monkeypatch.setattr(recommendation, "native_caution_risk_classes", answer)
+    return asked
 
 
 def _items(monkeypatch: pytest.MonkeyPatch, *, state: str = "unset", identity_hash: str = _HASH) -> None:
@@ -122,38 +165,61 @@ def test_malformed_hints_are_dropped(override: dict[str, object]) -> None:
     assert validated_connector_setup_hint(_hint(**override)) is None
 
 
-def test_queue_time_hint_is_the_connector_for_a_setup_review(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unexpected(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a setup review has no extension permission to hint")
+def test_queue_time_hint_asks_the_resident_for_the_connector(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[dict[str, object]] = []
 
-    monkeypatch.setattr(native_review_allow_hint, "native_review_extension_allow_hint", unexpected)
+    def ask(payload: object, **kwargs: object) -> dict[str, object]:
+        asked.append({"payload": payload, **kwargs})
+        return _hint()
 
-    hint = native_review_allow_hint.native_review_hint(
-        object(), {}, {"reason_code": "native_command_review_required"}, None, None, None, _CONNECTOR
-    )
+    monkeypatch.setattr(native_review_allow_hint, "_ask_review_hint", ask)
+    store = SimpleNamespace(guard_home=Path("guard-home"))
+    paused = {"reason_code": "native_command_review_required"}
+
+    hint = native_review_allow_hint.native_review_hint(store, {}, paused, None, None, None, _CONNECTOR)
 
     assert hint == _hint()
+    # A setup review carries no extension evidence, yet still asks: the
+    # connector hint names only the connector and what the evidence observed.
+    assert asked[0]["connector"] is _CONNECTOR
+    assert asked[0]["paused"] == paused
 
 
-def test_queue_time_hint_takes_risk_classes_from_observed_rules() -> None:
-    native_result = {
-        "reason_code": "native_command_review_required",
-        "command_extensions": {
-            "observations": [{"rule_id": "command.api-gateway.delete"}, {"rule_id": "command.unknown.rule"}, "bad"],
-        },
+def test_the_connector_rides_in_the_query_and_its_answer_is_shape_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict[str, object]] = []
+
+    def decide(query: dict[str, object], _home: object, _fields: object, validate, **_kwargs: object) -> None:
+        sent.append(query)
+        validate({"hint": _hint()})
+
+    monkeypatch.setattr(native_review_allow_hint, "_decide", decide)
+    store = SimpleNamespace(guard_home=Path("guard-home"))
+
+    hint = native_review_allow_hint.native_review_hint(store, {}, {}, None, None, None, _CONNECTOR)
+
+    assert hint == _hint()
+    assert sent[0]["connector"] == {
+        "cli_id": _CLI_ID,
+        "identity_hash": _HASH,
+        "name": "lanectl",
+        "surface": "cli",
+        "queue_group_id": _GROUP,
     }
+    assert sent[0]["paused"] == {}
 
-    hint = native_review_allow_hint.native_review_hint(object(), {}, native_result, None, None, None, _CONNECTOR)
-
-    assert hint is not None
-    assert hint["risk_classes"] == ["destructive", "destructive_shell", "network_egress"]
+    # An extension hint is not a connector hint, so the answer means none.
+    monkeypatch.setattr(
+        native_review_allow_hint,
+        "_decide",
+        lambda _q, _h, _f, validate, **_k: validate({"hint": {"schema": "guard.extension-allow-hint.v1"}}),
+    )
+    assert native_review_allow_hint.native_review_hint(store, {}, {}, None, None, None, _CONNECTOR) is None
 
 
 def test_a_pending_delete_keeps_caution_through_the_full_path(monkeypatch: pytest.MonkeyPatch) -> None:
     _items(monkeypatch)
-    native_result = {"command_extensions": {"observations": [{"rule_id": "command.api-gateway.delete"}]}}
-    hint = native_review_allow_hint.native_review_hint(object(), {}, native_result, None, None, None, _CONNECTOR)
-    assert hint is not None
+    # The resident records ``destructive`` for a destructive shell rule it observed.
+    hint = _hint(risk_classes=["destructive", "destructive_shell", "network_egress"])
 
     result = _build(_approval(hint))
 
@@ -163,9 +229,13 @@ def test_a_pending_delete_keeps_caution_through_the_full_path(monkeypatch: pytes
 
 def test_queue_time_hint_without_a_connector_is_the_extension_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = {"schema": "guard.extension-allow-hint.v1"}
-    monkeypatch.setattr(native_review_allow_hint, "native_review_extension_allow_hint", lambda *_a, **_k: sentinel)
+    monkeypatch.setattr(native_review_allow_hint, "_ask_review_hint", lambda *_a, **_k: sentinel)
+    store = SimpleNamespace(guard_home=Path("guard-home"))
 
-    assert native_review_allow_hint.native_review_hint(object(), {}, {}, None, None, None, None) is sentinel
+    assert (
+        native_review_allow_hint.native_review_hint(store, {}, {"command_extensions": {}}, None, None, None, None)
+        is sentinel
+    )
 
 
 def test_available_while_the_connector_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,6 +299,40 @@ def test_caution_when_any_grouped_row_carries_a_caution_class(monkeypatch: pytes
     assert result is not None
     assert result["caution"] is True
     assert result["caution_risk_classes"] == ["destructive"]
+
+
+def test_the_resident_of_the_stores_home_decides_the_caution(
+    monkeypatch: pytest.MonkeyPatch, _resident_caution: list[tuple[frozenset[str], Path | None]], tmp_path: Path
+) -> None:
+    _items(monkeypatch)
+    store = _Store({"req-2": _hint(risk_classes=["destructive"])})
+    store.guard_home = tmp_path  # type: ignore[attr-defined]
+
+    result = _build(_approval(_hint()), store)
+
+    assert result is not None and result["caution_risk_classes"] == ["destructive"]
+    assert _resident_caution == [(frozenset({"destructive"}), tmp_path)]
+
+
+def test_no_resident_answer_means_no_recommendation_never_no_caution(monkeypatch: pytest.MonkeyPatch) -> None:
+    from codex_plugin_scanner.guard.daemon.approval_extension_recommendation import (
+        NativeApprovalExtensionRecommendationError,
+    )
+
+    _items(monkeypatch)
+
+    def unavailable(_risk_classes: Iterable[str], *, guard_home: Path | None = None) -> frozenset[str]:
+        raise NativeApprovalExtensionRecommendationError("native_approval_extension_recommendation_unavailable")
+
+    monkeypatch.setattr(recommendation, "native_caution_risk_classes", unavailable)
+    store = _Store({"req-2": _hint(risk_classes=["destructive"])})
+
+    assert (
+        safe_connector_recommendation(
+            _approval(_hint()), store=store, snapshot=_snapshot(), approval_gate_configured=lambda: True
+        )
+        is None
+    )
 
 
 def test_caution_reads_grouped_rows_past_the_first_page(monkeypatch: pytest.MonkeyPatch) -> None:

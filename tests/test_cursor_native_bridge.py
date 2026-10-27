@@ -325,29 +325,20 @@ def test_client_never_gains_time_from_the_handoff(tmp_path: Path, monkeypatch: p
     assert started <= deadline <= started + timeout
 
 
-@pytest.mark.parametrize(
-    ("body", "taken"),
-    [
-        ('{"policy_action":"review","approval_url":"http://127.0.0.1:4781/approvals/req-1"}', True),
-        ('{"policy_action":"block"}', True),
-        ('{"policy_action":"allow"}', False),
-        ('{"policy_action":"maybe"}', False),
-        ("[]", False),
-        ("{", False),
-        (None, False),
-    ],
-)
-def test_client_takes_only_a_restrictive_daemon_reply_from_the_bridge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str | None, taken: bool
+@pytest.mark.parametrize("raw", ["99999999", "9" * 5000, "9" * 400], ids=["ordinary", "int_limit", "float_overflow"])
+def test_client_exhausted_native_handoff_deadline_is_exact_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
-    namespace = _client(tmp_path)
-    flag = namespace["_NATIVE_DAEMON_REPLY_FLAG"]
-    argv = [sys.argv[0], "--cursor-hook-event", "beforeShellExecution", flag]
-    monkeypatch.setattr(sys, "argv", argv if body is None else [*argv, body])
+    started = 122.888386772
+    monkeypatch.setattr("time.monotonic", lambda: started)
+    monkeypatch.setenv("HOL_GUARD_BOUNDED_NATIVE_ELAPSED_MS", raw)
 
-    reply = namespace["_native_daemon_reply_from_argv"]()
+    client = _client(tmp_path)
 
-    assert reply == ((0, body, "") if taken else None)
+    assert client["GUARD_HOOK_TIMEOUT_SECONDS"] == 8
+    assert client["_HOOK_STARTED_MONOTONIC"] == started
+    assert client["_HOOK_DEADLINE_MONOTONIC"] == started
+    assert "HOL_GUARD_BOUNDED_NATIVE_ELAPSED_MS" not in client["os"].environ
 
 
 def _run_after_client(tmp_path: Path, raw: str, body: str) -> tuple[dict[str, object], str, int]:

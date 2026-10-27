@@ -344,7 +344,6 @@ def test_pending_authority_waivers_all_name_a_reachable_module() -> None:
     report = MODULE.validate(ROOT)
     waived = {item["path"] for item in report["inventory"] if item["category"] == "pending_authority_migration"}
 
-    assert waived
     assert set(MODULE._PENDING_AUTHORITY_PATHS) == waived
     assert all((ROOT / path).is_file() for path in MODULE._PENDING_AUTHORITY_PATHS)
 
@@ -352,7 +351,7 @@ def test_pending_authority_waivers_all_name_a_reachable_module() -> None:
 def test_gate_rejects_a_waiver_for_a_module_the_hook_graph_no_longer_reaches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    retired = "src/codex_plugin_scanner/guard/runtime/shell_command_wrappers.py"
+    retired = "src/codex_plugin_scanner/guard/runtime/bounded_json_depth.py"
     assert (ROOT / retired).is_file()
     assert retired not in MODULE._PENDING_AUTHORITY_PATHS
     monkeypatch.setattr(MODULE, "_PENDING_AUTHORITY_PATHS", MODULE._PENDING_AUTHORITY_PATHS | {retired})

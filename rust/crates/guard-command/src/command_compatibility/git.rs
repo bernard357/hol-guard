@@ -86,6 +86,15 @@ fn bounded_inspection(arguments: &[String]) -> bool {
         // A stash listing and a `show` of one entry print; every other
         // stash spelling moves work and keeps its workspace attribution.
         || (command == "stash" && crate::pretool::git_stash_reads::read_form(rest))
+        // A submodule status prints the recorded commit of each submodule the
+        // superproject's index names; the recursive walk and every other
+        // submodule spelling move work and keep their attribution.
+        || (command == "submodule" && crate::pretool::git_submodule_reads::read_form(rest))
+        // A bisect session's log and a note's listing print; every other
+        // spelling of either moves a ref, writes the notes ref or runs a
+        // program the text names, and keeps its attribution.
+        || (matches!(command.as_str(), "bisect" | "notes")
+            && crate::pretool::git_side_record_reads::read_form(command, rest))
 }
 
 /// A staged-index diff that prints to stdout like `git diff HEAD`, which the
@@ -140,9 +149,11 @@ fn read_only_plumbing(arguments: &[String]) -> bool {
     match command.as_str() {
         "rev-parse" | "merge-base" | "show-ref" | "ls-tree" | "for-each-ref" => true,
         "cat-file" => crate::pretool::git_object_reads::read_form(command, rest),
-        // Both listings only print, and their grammars already exclude the
+        // These listings only print, and their grammars already exclude the
         // forms that run a configured program; the read proof still decides.
-        "shortlog" | "check-ignore" => crate::pretool::git_listing_reads::read_form(command, rest),
+        "shortlog" | "check-ignore" | "count-objects" | "check-attr" | "sparse-checkout" => {
+            crate::pretool::git_listing_reads::read_form(command, rest)
+        }
         "rev-list" => !rest.iter().any(|argument| {
             matches!(argument.as_str(), "--output" | "-o") || argument.starts_with("--output=")
         }),
@@ -186,7 +197,7 @@ pub(super) fn inspection_arguments<'a>(
             "status" | "diff" | "log" | "show" | "blame" | "describe" | "reflog" | "branch"
             | "hash-object" | "rev-parse" | "merge-base" | "ls-files" | "remote" | "worktree"
             | "config" | "grep" | "ls-tree" | "cat-file" | "show-ref" | "for-each-ref" | "rev-list"
-            | "shortlog" | "check-ignore",
+            | "shortlog" | "check-ignore" | "count-objects" | "check-attr",
         ) => true,
         // A tag listing, a clean preview and a patch check only print, but the
         // same three subcommands also write a tag, remove a file and patch the
@@ -198,6 +209,17 @@ pub(super) fn inspection_arguments<'a>(
         // `stash` reaches the worktree in every spelling but the two that
         // print: a listing and a `show` of one entry.
         Some("stash") => crate::pretool::git_stash_reads::read_form(&remaining[1..]),
+        Some("submodule") => crate::pretool::git_submodule_reads::read_form(&remaining[1..]),
+        // A bisect session and a commit's notes each print in one grammar and
+        // write in every other, so each is admitted only in that grammar.
+        Some(record @ ("bisect" | "notes")) => {
+            crate::pretool::git_side_record_reads::read_form(record, &remaining[1..])
+        }
+        // `sparse-checkout` prints the patterns the tree is narrowed to in one
+        // spelling and changes that narrowing in every other.
+        Some("sparse-checkout") => {
+            crate::pretool::git_listing_reads::read_form("sparse-checkout", &remaining[1..])
+        }
         _ => false,
     };
     admitted.then_some(remaining)
@@ -205,6 +227,12 @@ pub(super) fn inspection_arguments<'a>(
 
 pub(super) fn fetch_origin_shaped(arguments: &[String]) -> bool {
     git_fetch::origin_shaped_arguments(arguments)
+}
+
+/// Whether a refresh's operands name a reach the proof can follow, and whether
+/// that reach is every configured remote rather than `origin` alone.
+pub(super) fn fetch_reach(arguments: &[String]) -> Option<bool> {
+    git_fetch::reach(arguments).map(|reach| reach == git_fetch::Reach::EveryRemote)
 }
 
 pub(super) fn routed_arguments<'a>(
@@ -298,10 +326,17 @@ fn routed<'a>(
             }
             without_repository = true;
         }
-        // Like `cd`, an absolute Windows target must be its exact canonical spelling.
+        // Like `cd`, an absolute Windows target must be its exact canonical
+        // spelling. A route that only prints `fatal:` is admitted for a
+        // directory that is not there, which has no canonical spelling of its
+        // own, so there the proof holds the deepest name that does exist.
         #[cfg(windows)]
         if std::path::Path::new(target).is_absolute()
-            && !crate::pretool::directory_targets::exact_existing_drive_target(target)
+            && !if without_repository {
+                crate::pretool::directory_targets::exact_drive_target_with_absent_tail(target)
+            } else {
+                crate::pretool::directory_targets::exact_existing_drive_target(target)
+            }
         {
             return None;
         }
@@ -451,8 +486,8 @@ pub(super) fn observe_with_contexts(
         // A trailing `2>&1` only merges the fetch's progress into stdout.
         let stripped = crate::pretool::without_stderr_merge(segment);
         let refresh = stripped.as_ref().unwrap_or(segment);
-        let plain = git_fetch::plain_origin_refresh(refresh, command_index)
-            || (routed_remote && git_fetch::routed_origin_refresh(refresh, command_index));
+        let plain = git_fetch::plain_refresh(refresh, command_index).is_some()
+            || (routed_remote && git_fetch::routed_refresh(refresh, command_index).is_some());
         if !(plain && crate::pretool::verified_origin_operation(refresh, proof_context)) {
             result.rule("command.git.unverified-fetch", index, !plain);
         }

@@ -14,7 +14,7 @@ import pytest
 
 from codex_plugin_scanner.guard.approval_scope_support import request_scope_contract
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution
-from codex_plugin_scanner.guard.daemon.hook_native_exact_action import native_exact_action, native_launch_evidence
+from codex_plugin_scanner.guard.daemon.hook_native_exact_action import native_exact_action
 from codex_plugin_scanner.guard.daemon.hook_native_saved_approval import (
     EXACT_ACTION_CONTEXT_TOKEN_KEY,
     native_saved_decision_response,
@@ -24,7 +24,7 @@ from codex_plugin_scanner.guard.models import GuardAction, PolicyDecision
 from codex_plugin_scanner.guard.native_decision_receipt import canonical_receipt_bytes
 from codex_plugin_scanner.guard.store import GuardStore
 from tests import native_launch_evidence_helpers
-from tests.native_launch_evidence_helpers import _inventory, _permission
+from tests.native_launch_evidence_helpers import _inventory, _permission, native_launch_evidence
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
 _HARNESS = "claude-code"
@@ -558,13 +558,20 @@ def test_native_review_derives_the_exact_action_token_once(
     worker, store = _hook_worker(tmp_path, monkeypatch, result, receipt)
     calls: list[str | None] = []
     real = hook_native_saved_approval.native_exact_action
+    real_evidence = hook_native_review_approval.native_review_evidence
 
     def counting(**kwargs: Any) -> tuple[str | None, str | None]:
         decision = real(**kwargs)
         calls.append(decision[0])
         return decision
 
+    def counting_evidence(**kwargs: Any) -> tuple[str | None, str | None, str | None]:
+        evidence = real_evidence(**kwargs)
+        calls.append(evidence[1])
+        return evidence
+
     monkeypatch.setattr(hook_native_review_approval, "native_exact_action", counting)
+    monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
     monkeypatch.setattr(hook_native_saved_approval, "native_exact_action", counting)
     payload: dict[str, object] = {
         "hook_event_name": "PreToolUse",

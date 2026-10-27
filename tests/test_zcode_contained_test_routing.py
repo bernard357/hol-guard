@@ -12,10 +12,12 @@ import pytest
 
 from codex_plugin_scanner.cli import _build_parser, _resolve_legacy_args
 from codex_plugin_scanner.guard.adapters.zcode_contained_tests import (
+    cleanup_stale_windows_requests,
     cleanup_stale_zcode_requests,
     contained_zcode_response,
     route_zcode_containment,
 )
+from codex_plugin_scanner.guard.native_hook_containment_route import ContainmentSink
 from codex_plugin_scanner.guard.runtime.contained_test_hook import read_contained_test_request
 
 
@@ -26,7 +28,7 @@ from codex_plugin_scanner.guard.runtime.contained_test_hook import read_containe
         ("claude-code", ("hook_event_name", "tool_name", "tool_input")),
     ],
 )
-def test_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypatch, harness, keys):
+def test_routes_multifile_vitest_to_authenticated_sink(containment_resident, tmp_path, monkeypatch, harness, keys):
     monkeypatch.setattr(sys, "platform", "darwin")
     event_key, tool_key, input_key = keys
     payload = {
@@ -77,7 +79,7 @@ def test_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypatch, ha
         {"reason_code": "native_destructive_command"},
     ],
 )
-def test_zcode_does_not_rewrite_unproven_or_denied_requests(tmp_path, monkeypatch, change):
+def test_zcode_does_not_rewrite_unproven_or_denied_requests(containment_resident, tmp_path, monkeypatch, change):
     monkeypatch.setattr(sys, "platform", "darwin")
     receipt = {
         "decision": "deny",
@@ -86,11 +88,15 @@ def test_zcode_does_not_rewrite_unproven_or_denied_requests(tmp_path, monkeypatc
         "required_execution_profile": "vitest-readonly-v1",
         **change,
     }
-    assert contained_zcode_response(receipt, input_text="{}", config={"harness": "zcode"}, cli_args=[]) is None
+    payload = {"hookEventName": "PreToolUse", "toolName": "Bash", "cwd": str(tmp_path), "toolInput": {"command": "x"}}
+    assert (
+        contained_zcode_response(receipt, input_text=json.dumps(payload), config={"harness": "zcode"}, cli_args=[])
+        is None
+    )
 
 
 @pytest.mark.parametrize("harness", ["cursor", "omp", None])
-def test_harnesses_without_updated_input_are_never_rewritten(monkeypatch, harness):
+def test_harnesses_without_updated_input_are_never_rewritten(containment_resident, tmp_path, monkeypatch, harness):
     monkeypatch.setattr(sys, "platform", "darwin")
     receipt = {
         "decision": "deny",
@@ -98,10 +104,14 @@ def test_harnesses_without_updated_input_are_never_rewritten(monkeypatch, harnes
         "reason_code": "native_vitest_readonly_containment_required",
         "required_execution_profile": "vitest-readonly-v1",
     }
-    assert contained_zcode_response(receipt, input_text="{}", config={"harness": harness}, cli_args=[]) is None
+    payload = {"hookEventName": "PreToolUse", "toolName": "Bash", "cwd": str(tmp_path), "toolInput": {"command": "x"}}
+    assert (
+        contained_zcode_response(receipt, input_text=json.dumps(payload), config={"harness": harness}, cli_args=[])
+        is None
+    )
 
 
-def test_execution_sink_receives_original_containment_receipt(tmp_path):
+def test_execution_sink_receives_original_containment_receipt(containment_resident, tmp_path):
     receipt = {
         "decision": "deny",
         "policy_action": "sandbox-required",
@@ -148,7 +158,7 @@ def test_stale_snapshot_cleanup_preserves_fresh_requests_and_symlinks(tmp_path, 
 
 
 @pytest.fixture
-def routing_inputs(tmp_path, monkeypatch):
+def routing_inputs(containment_resident, tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     # All adapter snapshots in these tests are isolated from the real temp root.
     import tempfile
@@ -267,8 +277,9 @@ def test_authority_edge_returns_routed_response_or_original(monkeypatch, tmp_pat
         return routed
 
     monkeypatch.setattr(adapter, "contained_zcode_response", route)
+    sink = ContainmentSink("vitest-readonly-v1", None)
     assert route_zcode_containment(
-        original, harness="zcode", payload={}, guard_home=tmp_path, home_dir=tmp_path, workspace=tmp_path
+        original, harness="zcode", payload={}, guard_home=tmp_path, home_dir=tmp_path, workspace=tmp_path, sink=sink
     ) is (original if routed is None else routed)
 
 
@@ -283,64 +294,13 @@ def test_cleanup_failure_does_not_interrupt_routing(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("edge_patch", "routed", "expected"),
-    [
-        ({}, {"hookSpecificOutput": {"permissionDecision": "allow"}}, 0),
-        ({}, None, None),
-        ({"recording_only": True}, {"hookSpecificOutput": {}}, None),
-        ({"event_name": "PostToolUse"}, {"hookSpecificOutput": {}}, None),
-        ({"result": {"minimum_action": "review"}}, {"hookSpecificOutput": {}}, None),
-    ],
-)
-def test_cli_fallback_applies_the_same_containment_rewrite(monkeypatch, tmp_path, edge_patch, routed, expected):
-    """With the daemon down, `guard hook` must still route eligible tests to the sink."""
-    import io
-    from types import SimpleNamespace
-
-    from codex_plugin_scanner.guard.cli import commands_hook_native_containment as cli_route
-
-    edge = {
-        "event_name": "PreToolUse",
-        "harness": "claude-code",
-        "recording_only": False,
-        "result": {"minimum_action": "sandbox-required"},
-        **edge_patch,
-    }
-    receipt = {"decision": "deny"}
-    monkeypatch.setattr(cli_route, "render_pre_tool", lambda harness, result, guard_home=None: receipt)
-
-    def route(response, **kwargs):
-        assert response is receipt
-        assert kwargs["harness"] == "claude-code"
-        assert kwargs["workspace"] == tmp_path
-        return receipt if routed is None else routed
-
-    monkeypatch.setattr(cli_route, "route_zcode_containment", route)
-    recorded: list[dict[str, object]] = []
-    monkeypatch.setattr(cli_route, "record_pre_hook_command_activity_best_effort", lambda **kw: recorded.append(kw))
-    edge["receipt"] = {"decision_id": "native-receipt-1"}
-    stream = io.StringIO()
-    context = SimpleNamespace(guard_home=tmp_path, home_dir=tmp_path)
-    store = object()
-    assert cli_route.emit_native_containment_route(edge, {}, context, tmp_path, stream, store) == expected
-    assert (json.loads(stream.getvalue()) if stream.getvalue() else None) == (routed if expected == 0 else None)
-    if expected == 0:
-        # The daemon records the routed PreToolUse; the CLI fallback must leave the same history.
-        assert len(recorded) == 1
-        assert recorded[0]["store"] is store and recorded[0]["receipt_id"] == "native-receipt-1"
-        assert recorded[0]["event"] == "PreToolUse" and recorded[0]["harness"] == "claude-code"
-    else:
-        assert recorded == []
-
-
-@pytest.mark.parametrize(
     ("reason", "profile", "routed"),
     [
         ("native_workspace_containment_required", "workspace-contained-v1", True),
         ("native_vitest_readonly_containment_required", "vitest-readonly-v1", False),
     ],
 )
-def test_linux_routes_only_the_workspace_sandbox(tmp_path, monkeypatch, reason, profile, routed):
+def test_linux_routes_only_the_workspace_sandbox(containment_resident, tmp_path, monkeypatch, reason, profile, routed):
     import tempfile
 
     monkeypatch.setattr(sys, "platform", "linux")
@@ -382,3 +342,25 @@ def test_windows_sink_bootstrap_has_no_escaped_backslashes(tmp_path, monkeypatch
     assert windows[:-1] == unchanged[:-1]
     assert "\\" not in windows[-1]
     assert repr(str(package_root.resolve()).replace("\\", "/")) in windows[-1]
+
+
+def test_windows_reclaims_only_day_old_snapshots(tmp_path):
+    old = time.time() - 2 * 86_400
+
+    def make(name: str, aged: bool) -> Path:
+        directory = tmp_path / name
+        directory.mkdir()
+        request = directory / "request.json"
+        request.write_text("{}")
+        if aged:
+            os.utime(request, (old, old))
+            os.utime(directory, (old, old))
+        return directory
+
+    stale = make("hol-guard-contained-test-stale", True)
+    fresh = make("hol-guard-contained-test-fresh", False)
+    other = make("unrelated-stale", True)
+    cleanup_stale_windows_requests(tmp_path, time.time() - 86_400)
+    assert not stale.exists()
+    assert (fresh / "request.json").exists()
+    assert (other / "request.json").exists()

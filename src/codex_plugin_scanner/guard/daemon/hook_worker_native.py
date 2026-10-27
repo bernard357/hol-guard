@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -10,7 +9,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..cli.commands_support_command_activity import hook_post_succeeded
 from ..native_codex_binding_capture import CodexBindingCaptureWriter
-from ..native_policy_snapshot_constants import NativePolicySnapshotError
+from ..native_hook_containment_route import edge_containment_route
+from ..native_hook_decision import NativeHookDecisionError
 from ..native_policy_snapshot_harness_postures import recording_only_for_binding
 from ..native_resident_client import (
     native_resident_client_failure_code,
@@ -35,7 +35,6 @@ from .hook_native_review_approval import (
     pause_native_pre_tool_for_approval,
     record_claude_permission_notice_for_native_review,
 )
-from .hook_native_review_fence import native_review_fence, published_binding_token
 from .hook_policy_fence_window import POLICY_SOURCE_FENCE_ERRORS, PolicySourceFenceBusyError
 from .hook_worker_native_review import (
     CONTROL_BINDING_REFRESH_ERRORS,
@@ -56,67 +55,6 @@ def _edge_harness_response(edge: Mapping[str, object]) -> dict[str, object]:
 
 
 _NATIVE_PRE_TOOL_APPROVAL_ACTIONS = frozenset({"review", "require-reapproval"})
-
-
-_CLAUDE_SECRET_READ_NATIVE_CLASSES = frozenset({"local_env_read", "sensitive_material"})
-
-
-def _claude_native_prompt_brand(
-    response: dict[str, object],
-    native_result: Mapping[str, object],
-) -> dict[str, object]:
-    """Overlay the Python-owned Claude approval presentation on a native prompt result.
-
-    Rust decides the action; this only re-derives the branded system message and
-    approval briefing copy that the hook surfaces to Claude Code users.
-    """
-    from ..cli.commands_support_prompts import (
-        _claude_prompt_additional_context,
-        _claude_prompt_system_message,
-    )
-    from ..models import GuardArtifact
-
-    raw_classes = native_result.get("prompt_risk_classes")
-    request_classes = (
-        [
-            "secret_read" if item in _CLAUDE_SECRET_READ_NATIVE_CLASSES else item
-            for item in raw_classes
-            if isinstance(item, str) and item
-        ]
-        if isinstance(raw_classes, list)
-        else []
-    )
-    artifact = GuardArtifact(
-        artifact_id="claude-code:native-prompt:session",
-        name="user prompt",
-        harness="claude-code",
-        artifact_type="prompt_request",
-        source_scope="harness",
-        config_path="",
-        metadata={"prompt_request_classes": request_classes},
-    )
-    policy_action = str(native_result.get("minimum_action") or "")
-    native_reason = str(native_result.get("reason") or "")
-    system_message = _claude_prompt_system_message(
-        event_name="UserPromptSubmit",
-        policy_action=policy_action,
-        artifact=artifact,
-        native_reason=lambda: native_reason,
-    )
-    if system_message:
-        response["systemMessage"] = system_message
-    additional_context = _claude_prompt_additional_context(
-        harness="claude-code",
-        event_name="UserPromptSubmit",
-        policy_action=policy_action,
-        artifact=artifact,
-        native_reason=native_reason,
-    )
-    if additional_context:
-        hook_output = response.get("hookSpecificOutput")
-        if isinstance(hook_output, dict):
-            hook_output["additionalContext"] = additional_context
-    return response
 
 
 class _HookWorkerMetrics(Protocol):
@@ -179,6 +117,25 @@ class _HookWorkerNativeHost(Protocol):
     ) -> StructuredOutputResolution: ...
 
 
+def withholds_structured_destination(*, harness: str, event_name: str) -> bool:
+    """Return whether this hook can carry a managed structured destination."""
+
+    return event_name == "PostToolUse" and canonical_harness_name(harness) in {"pi", "omp"}
+
+
+def withhold_structured_destination(response: dict[str, object]) -> dict[str, object]:
+    """Withhold the structured destination on an answer without native proof."""
+
+    return {
+        **response,
+        "structured_content_mediation": StructuredContentMediation(
+            action="withhold",
+            reason_code="structured_native_edge_unavailable",
+            native_decision_id=None,
+        ).to_harness_json(),
+    }
+
+
 def _record_native_pre_activity(
     host: _HookWorkerNativeHost,
     harness: str,
@@ -215,6 +172,27 @@ def _record_native_pre_activity(
     return response
 
 
+def _containment_outage(
+    host: _HookWorkerNativeHost,
+    payload: dict[str, object],
+    harness: str,
+    error: NativeHookDecisionError,
+    guard_home: Path,
+    deadline: float | None,
+) -> tuple[dict[str, object], bool]:
+    """The host outage answer when the resident does not route a PreToolUse call."""
+    response = _record_unavailable_native(
+        host,
+        payload,
+        harness=harness,
+        event_name="PreToolUse",
+        reason_code=error.code,
+        guard_home=guard_home,
+        deadline=deadline,
+    )
+    return (response, False)
+
+
 def _record_unavailable_native(
     host: _HookWorkerNativeHost,
     payload: dict[str, object],
@@ -222,17 +200,13 @@ def _record_unavailable_native(
     harness: str,
     event_name: str,
     reason_code: str,
-    workspace: Path | None,
-    home_dir: Path,
     guard_home: Path,
-    recording_only: bool,
     watch_continue: bool = False,
     deadline: float | None = None,
     reason: str | None = None,
 ) -> dict[str, object]:
     failure_code = native_resident_client_failure_code()
     response = availability_harness_response(
-        payload,
         harness=harness,
         event_name=event_name,
         reason_code=reason_code,
@@ -241,10 +215,6 @@ def _record_unavailable_native(
             failure_code,
             "HOL Guard could not complete the native hook decision safely.",
         ),
-        workspace=workspace,
-        home_dir=home_dir,
-        guard_home=guard_home,
-        recording_only=recording_only,
         prompt_reason=reason or native_unavailable_reason(failure_code, "") or None,
     )
     if watch_continue and event_name == "PreToolUse":
@@ -380,7 +350,7 @@ class HookWorkerNativeMixin:
         structured destination keeps the existing availability response.
         """
 
-        if event_name != "PostToolUse" or canonical_harness_name(harness) not in {"pi", "omp"}:
+        if not withholds_structured_destination(harness=harness, event_name=event_name):
             return response
         # Unavailable-edge callers supply their one resolution. The successful
         # edge uses a separate initial read and a post-scan revocation check.
@@ -391,14 +361,7 @@ class HookWorkerNativeMixin:
         )
         if not resolved.required:
             return response
-        return {
-            **response,
-            "structured_content_mediation": StructuredContentMediation(
-                action="withhold",
-                reason_code="structured_native_edge_unavailable",
-                native_decision_id=None,
-            ).to_harness_json(),
-        }
+        return withhold_structured_destination(response)
 
     def _review_native_edge(
         self: _HookWorkerNativeHost,
@@ -527,10 +490,7 @@ class HookWorkerNativeMixin:
                         harness=harness,
                         event_name=event_name,
                         reason_code=reason_code,
-                        workspace=workspace,
-                        home_dir=home_dir,
                         guard_home=guard_home,
-                        recording_only=recording_only,
                     ),
                     harness=harness,
                     event_name=event_name,
@@ -561,10 +521,7 @@ class HookWorkerNativeMixin:
                         harness=harness,
                         event_name=event_name,
                         reason_code="native_hook_edge_invalid_response",
-                        workspace=workspace,
-                        home_dir=home_dir,
                         guard_home=guard_home,
-                        recording_only=recording_only,
                     ),
                     harness=harness,
                     event_name=event_name,
@@ -587,18 +544,12 @@ class HookWorkerNativeMixin:
                         harness=native_harness,
                         event_name=native_event,
                         reason_code="native_hook_edge_invalid_response",
-                        workspace=workspace,
-                        home_dir=home_dir,
                         guard_home=guard_home,
-                        recording_only=recording_only,
                     ),
                     False,
                 )
-            response = _edge_harness_response(edge)
-            if not recording_only and native_harness.strip().lower().replace("_", "-") == "claude-code":
-                with suppress(Exception):
-                    response = _claude_native_prompt_brand(response, native_result)
-            return (response, True)
+            # The edge already carries Guard's Claude Code notice outside Watch.
+            return (_edge_harness_response(edge), True)
         if native_event == "PreToolUse":
             with suppress(Exception):
                 observe_native_pre_tool_cli(self.store, payload=payload, workspace=workspace, home_dir=home_dir)
@@ -611,16 +562,31 @@ class HookWorkerNativeMixin:
                         ),
                         True,
                     )
-            contained = granted_containment_response(
-                self.store,
-                native_result,
-                harness=native_harness,
-                payload=payload,
-                guard_home=guard_home,
-                home_dir=home_dir,
-                workspace=workspace,
-                deadline=deadline,
-            )
+            try:
+                # The resident routes the call, as on the CLI path; without its
+                # answer the host gets the outage shape, never a route picked here.
+                containment = edge_containment_route(
+                    edge,
+                    native_result,
+                    event_name=native_event,
+                    recording_only=recording_only,
+                    guard_home=guard_home,
+                    deadline=deadline,
+                )
+                contained = None
+                if containment == "grant":
+                    contained = granted_containment_response(
+                        self.store,
+                        native_result,
+                        harness=native_harness,
+                        payload=payload,
+                        guard_home=guard_home,
+                        home_dir=home_dir,
+                        workspace=workspace,
+                        deadline=deadline,
+                    )
+            except NativeHookDecisionError as error:
+                return _containment_outage(self, payload, native_harness, error, guard_home, deadline)
             if contained is not None:
                 return (_record_native_pre_activity(self, native_harness, payload, contained, accepted_receipt), True)
             action = str(native_result.get("minimum_action") or "")
@@ -674,16 +640,24 @@ class HookWorkerNativeMixin:
                 )
             from ..adapters.zcode_contained_tests import route_zcode_containment
 
-            rendered = route_zcode_containment(
+            rendered = (
                 render_pre_tool(native_harness, native_result, guard_home=guard_home, deadline=deadline)
                 if native_result and not isinstance(edge.get("harness_response"), dict)
-                else _edge_harness_response(edge),
-                harness=native_harness,
-                payload=payload,
-                guard_home=guard_home,
-                home_dir=home_dir,
-                workspace=workspace,
+                else _edge_harness_response(edge)
             )
+            if containment == "sink":
+                try:
+                    rendered = route_zcode_containment(
+                        rendered,
+                        harness=native_harness,
+                        payload=payload,
+                        guard_home=guard_home,
+                        home_dir=home_dir,
+                        workspace=workspace,
+                        deadline=deadline,
+                    )
+                except NativeHookDecisionError as error:
+                    return _containment_outage(self, payload, native_harness, error, guard_home, deadline)
             return (
                 _record_native_pre_activity(
                     self,
@@ -715,144 +689,6 @@ class HookWorkerNativeMixin:
         if mediation is not None and mediation != native_result.get("structured_content_mediation"):
             response["structured_content_mediation"] = mediation
         return (response, True)
-
-    def review_native_edge_decision(
-        self: _HookWorkerNativeHost,
-        *,
-        payload: dict[str, object],
-        harness: str,
-        default_harness: str,
-        home_dir: Path,
-        guard_home: Path,
-        workspace: Path | None,
-        deadline: float | None = None,
-        edge_budget_seconds: float | None = None,
-    ) -> dict[str, object]:
-        """Return the raw native edge decision for the CLI presentation path.
-
-        Unlike ``review_http_payload``, this performs no harness rendering and
-        no approval queueing; the CLI pipeline owns presentation and approval
-        persistence. The returned mapping carries ``result`` (the typed edge
-        decision), the validated ``receipt``, and ``recording_only`` posture.
-        ``failure_reason_code`` is set when the runtime cannot answer or the
-        event is outside native scope.
-        """
-        event_name = self._hook_event_name(payload)
-        policy_snapshot = self._native_policy_snapshot(workspace, deadline=deadline)
-        recording_only = recording_only_for_binding(policy_snapshot, harness)
-        fenced: bool | None = None
-        if deadline is None and edge_budget_seconds is not None:
-            # The budget starts after policy readiness, which keeps its own
-            # wait; it bounds only the native evaluation and fails closed.
-            deadline = time.monotonic() + edge_budget_seconds
-
-        def unavailable(reason_code: str) -> dict[str, object]:
-            # The CLI path owns presentation, but evidence persistence stays
-            # worker-owned so the daemon and CLI deliveries of the same
-            # fail-safe record identical activity.
-            _record_unavailable_native(
-                self,
-                payload,
-                harness=harness,
-                event_name=event_name,
-                reason_code=reason_code,
-                workspace=workspace,
-                home_dir=home_dir,
-                guard_home=guard_home,
-                recording_only=recording_only,
-            )
-            return {
-                "event_name": event_name,
-                "harness": harness,
-                "result": None,
-                "receipt": None,
-                "recording_only": recording_only,
-                "failure_reason_code": reason_code,
-            }
-
-        unleased_binding: tuple[object, ...] | None = None
-        try:
-            with native_review_fence(
-                policy_snapshot=policy_snapshot,
-                event_name=event_name,
-                recording_only=recording_only,
-                guard_home=guard_home,
-                deadline=deadline,
-            ) as fenced:
-                if fenced is None:
-                    unleased_binding = published_binding_token(self.policy_snapshot_publisher)
-                from ..runtime_transition_hook_probe import transition_hook_probe
-
-                probe = transition_hook_probe(payload)
-                edge = self._review_raw_hook_native(
-                    payload=payload,
-                    harness=harness,
-                    event=event_name,
-                    guard_home=guard_home,
-                    home_dir=home_dir,
-                    cwd=workspace,
-                    source_ref_external_allowed=default_harness.strip().lower().replace("_", "-") in {"pi", "omp"},
-                    observe_mode=recording_only,
-                    deadline=deadline,
-                    policy_snapshot=policy_snapshot,
-                    **({"request_id": probe[1]} if probe is not None else {}),
-                )
-                # A completed edge is kept rather than reported unavailable:
-                # discarding it would ask about ordinary work and would drop a
-                # deny the native review had already reached. A deadline that
-                # passed while it was being reached says the host was busy, not
-                # that the answer is wrong.
-        except TimeoutError:
-            return unavailable("native_review_deadline_exceeded")
-        except (OSError, NativePolicySnapshotError):
-            if fenced is False:
-                raise
-            return unavailable("native_command_control_fence_unavailable")
-        if fenced is None and (
-            unleased_binding is None or published_binding_token(self.policy_snapshot_publisher) != unleased_binding
-        ):
-            # This edge was reached without the lease and a control mutation
-            # published across it. Honouring it could allow a command, or claim
-            # a saved approval, against the policy the user is replacing.
-            return unavailable("native_command_control_fence_unavailable")
-        if edge is None:
-            if event_name == "PostToolUse":
-                self._record_post_tool_activity(
-                    harness=harness,
-                    payload=payload,
-                    succeeded=hook_post_succeeded(event_name, payload),
-                )
-            reason_code = {
-                "PostToolUse": "native_post_tool_unavailable",
-                "PreToolUse": "native_pre_tool_unavailable",
-            }.get(event_name, "native_hook_event_unavailable")
-            return unavailable(reason_code)
-        native_result = edge["result"]
-        if not isinstance(native_result, Mapping):
-            return unavailable("native_hook_edge_invalid_response")
-        receipt = self._record_native_decision_receipt(edge.get("receipt"))
-        native_event = str(edge["event_name"])
-        native_harness = str(edge["harness"])
-        native_result = self._apply_structured_mediation(
-            native_result,
-            payload=payload,
-            native_harness=native_harness,
-            native_event=native_event,
-            accepted_receipt=receipt,
-            guard_home=guard_home,
-            workspace=workspace,
-            deadline=deadline,
-            recording_only=recording_only,
-        )
-        self.metrics.record_route("native_resident")
-        return {
-            "event_name": native_event,
-            "harness": native_harness,
-            "result": native_result,
-            "receipt": dict(receipt) if isinstance(receipt, Mapping) else None,
-            "recording_only": recording_only,
-            "failure_reason_code": None,
-        }
 
     def _record_native_decision_receipt(self: _HookWorkerNativeHost, receipt: object) -> Mapping[str, object] | None:
         """Accept only a validated Rust receipt; persistence remains best-effort."""

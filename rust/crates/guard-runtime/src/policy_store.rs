@@ -50,6 +50,8 @@ pub(crate) mod policy_store_direct_lane;
 mod policy_store_migration;
 #[path = "policy_store_persistence.rs"]
 mod policy_store_persistence;
+#[path = "policy_store_publisher_binding.rs"]
+mod policy_store_publisher_binding;
 #[path = "policy_store_push.rs"]
 mod policy_store_push;
 #[path = "policy_store_request.rs"]
@@ -81,7 +83,8 @@ use approval_v4_authority::ApprovalV4Authority;
 pub(crate) use policy_store_approval::ApprovalPolicyFence;
 use policy_store_authority::*;
 use policy_store_persistence::*;
-use policy_store_validation::{read_verifier_key, validate_private_directory};
+pub(crate) use policy_store_validation::read_verifier_key;
+use policy_store_validation::validate_private_directory;
 
 #[cfg(test)]
 #[path = "policy_store_scope_tests.rs"]

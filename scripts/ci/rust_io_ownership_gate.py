@@ -102,14 +102,8 @@ ROOTS: Final = (
     ),
     RootSpec("src/codex_plugin_scanner/guard/native_hook_edge.py", "review_raw_hook_native"),
     RootSpec("src/codex_plugin_scanner/guard/native_resident_client.py", "native_resident_client_request"),
-    RootSpec(
-        "src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py",
-        "try_native_hook_authority",
-    ),
-    RootSpec(
-        "src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py",
-        "route_native_hook",
-    ),
+    RootSpec("src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py", "try_native_hook_authority"),
+    RootSpec("src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py", "route_native_hook"),
 )
 
 

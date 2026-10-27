@@ -36,6 +36,11 @@ from codex_plugin_scanner.guard.runtime.exact_cloud_review import EXACT_CLOUD_RE
 from codex_plugin_scanner.guard.store import GuardStore
 
 
+@pytest.fixture(autouse=True)
+def _capability_runtime(native_command_capability_runtime: Path) -> None:
+    """Every capability verdict asserted here comes from the compiled runtime."""
+
+
 def _connected_store(tmp_path: Path) -> GuardStore:
     store = GuardStore(tmp_path / "guard-home")
     dpop = generate_dpop_key_pair()

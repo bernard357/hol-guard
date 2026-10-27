@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+use crate::hook_artifact_compose_policy_tail::PolicyCompositionQueryV1;
+use crate::is_python_space;
+
 /// Schema discriminator for the request.
 pub const HOOK_ARTIFACT_COMPOSE_REQUEST_SCHEMA: &str = "guard-hook-artifact-compose-request.v1";
 /// Schema discriminator for the result.
@@ -105,6 +108,9 @@ pub enum HookArtifactComposeQueryV1 {
     /// Calibrate a base policy action against a detector run's risk and
     /// false-positive signals.
     SignalComposition(Box<SignalCompositionQueryV1>),
+    /// The settled verdict's `policy_composition` trace and receipt
+    /// `approval_source`.
+    PolicyComposition(Box<PolicyCompositionQueryV1>),
 }
 
 /// The store rows the package-firewall entitlement is resolved from.
@@ -222,6 +228,23 @@ pub struct PolicyArtifactFactsV1 {
     #[serde(default)]
     pub action_class: Option<String>,
     pub skill_is_known_bad: bool,
+    /// The native command floor does not run for this artifact: a package
+    /// request is decided by the package evaluator, and a verified
+    /// explicit-permission allow was already adjudicated against the
+    /// published control layer. The artifact facts answer it so the caller
+    /// need not read the artifact to decide whether to ask for the floor.
+    #[serde(default)]
+    pub skip_native_floor: bool,
+    /// The digest a saved approval for this artifact is keyed by, present
+    /// only when the caller asked the facts op for it.
+    ///
+    /// No composition reads this: it is the artifact's approval identity, not
+    /// a fact a verdict turns on. It rides with the facts because the caller
+    /// that needs the digest is the hook that already asks for them, and a
+    /// second request for one SHA-256 would put the resident on the hook's
+    /// critical path again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
 }
 
 impl PolicyArtifactFactsV1 {
@@ -232,26 +255,6 @@ impl PolicyArtifactFactsV1 {
             .trim_matches(is_python_space)
             .eq_ignore_ascii_case("strong")
     }
-}
-
-/// What `str.strip()` removes. Rust's own `trim` leaves the C1 and the
-/// information separators in place, so confidence text padded with them would
-/// read as a weaker confidence than the one the artifact reported.
-fn is_python_space(ch: char) -> bool {
-    matches!(
-        ch,
-        '\u{09}'..='\u{0d}'
-            | ' '
-            | '\u{1c}'..='\u{1f}'
-            | '\u{85}'
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'..='\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -277,6 +280,12 @@ pub struct NativeEdgeFactsV1 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyStackQueryV1 {
+    /// The hook event this evaluation runs for.
+    pub event_name: String,
+    /// The runtime artifact's type.
+    pub artifact_type: String,
+    /// The request carries a raw shell command a local tool grant could name.
+    pub has_raw_command: bool,
     pub policy_config: PolicyConfigFactsV1,
     pub runtime: PolicyArtifactFactsV1,
     pub approval_context: PolicyArtifactFactsV1,

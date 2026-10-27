@@ -46,10 +46,7 @@ fn repository(name: &str) -> (FixtureCleanup, PathBuf, PathBuf) {
     let unique = format!(
         "{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     );
     let root = std::fs::canonicalize("/tmp")
         .unwrap()
@@ -111,7 +108,9 @@ fn assert_reviewed(home: &Path, cwd: &Path, command: &str) {
     assert_ne!(result.minimum_action, "allow", "{command}");
 }
 
-/// Without `-b` Git checks the reference out detached and creates no branch.
+/// Without `-b` Git checks the reference out detached and creates no branch,
+/// except with no reference at all, where it names a branch after the
+/// destination and starts it at `HEAD`.
 #[test]
 fn detached_worktree_add_needs_a_reference() {
     let (_cleanup, home, repository) = repository("detached");
@@ -119,12 +118,12 @@ fn detached_worktree_add_needs_a_reference() {
         "git worktree add ../app-review origin/main",
         "git worktree add ../app-review refs/heads/main",
         "git worktree add --detach ../app-review origin/main",
+        // Git names the new branch after the directory and starts it at HEAD.
+        "git worktree add ../app-review",
     ] {
         assert_allowed(&home, &repository, command);
     }
     for command in [
-        // Git names a new branch after the directory.
-        "git worktree add ../app-review",
         "git worktree add -b review --detach ../app-review origin/main",
         "git worktree add ../service origin/main",
         "git worktree add ../link/review origin/main",
@@ -132,6 +131,26 @@ fn detached_worktree_add_needs_a_reference() {
     ] {
         assert_reviewed(&home, &repository, command);
     }
+}
+
+/// The implied branch is only HEAD's tree while no branch of that name exists
+/// and `worktree.guessRemote` is off; either would check out something the
+/// proof never read.
+#[test]
+fn an_implied_branch_name_must_be_free_and_unguessed() {
+    let (_cleanup, home, repository) = repository("implied");
+    let command = "git worktree add ../app-review";
+    assert_allowed(&home, &repository, command);
+    git(&home, &repository, &["branch", "app-review"]);
+    assert_reviewed(&home, &repository, command);
+    git(&home, &repository, &["branch", "--delete", "app-review"]);
+    assert_allowed(&home, &repository, command);
+    git(
+        &home,
+        &repository,
+        &["config", "worktree.guessRemote", "true"],
+    );
+    assert_reviewed(&home, &repository, command);
 }
 
 /// Reads in the checkout the command itself creates share the repository's
@@ -301,8 +320,6 @@ fn existing_branch_worktree_add_neighbours_stay_reviewed() {
     let (_cleanup, home, repository) = repository("existing-branch-reviewed");
     git(&home, &repository, &["branch", "feat/discovery-fix"]);
     for command in [
-        // Git would create a tracking branch or fail.
-        "git worktree add ../app-discovery-fix missing-branch",
         "git worktree add -B feat/discovery-fix ../app-discovery-fix origin/main",
         "git worktree add -f ../app-discovery-fix feat/discovery-fix",
         "git worktree add --force ../app-discovery-fix feat/discovery-fix",

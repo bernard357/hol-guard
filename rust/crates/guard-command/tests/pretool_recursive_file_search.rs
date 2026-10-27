@@ -13,10 +13,7 @@ impl Drop for FixtureDirectory {
 
 #[test]
 fn recursive_search_exclusions_prove_only_unread_descendants() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("exclusions-{}-{nonce}", std::process::id()));
@@ -100,10 +97,7 @@ fn recursive_search_exclusions_prove_only_unread_descendants() {
 
 #[test]
 fn recursive_search_checks_every_reachable_path() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("fixture-{}-{nonce}", std::process::id()));
@@ -193,7 +187,10 @@ fn recursive_search_checks_every_reachable_path() {
             ("grep -rn -- ordinary __tests__/".to_owned(), true),
             ("grep -rn ordinary .".to_owned(), false),
             ("grep -rn ordinary".to_owned(), false),
-            ("grep -rn ordinary src/missing.ts".to_owned(), false),
+            // The name is not there, so the walk opens nothing at all. An
+            // absent root is admitted the same way an absent operand is for
+            // `rg` and `find`.
+            ("grep -rn ordinary src/missing.ts".to_owned(), true),
             ("grep -rn ordinary src/alias.ts".to_owned(), false),
             ("grep -rn ordinary src/one.ts .env".to_owned(), false),
         ] {
@@ -217,10 +214,7 @@ fn recursive_search_checks_every_reachable_path() {
 
 #[test]
 fn recursive_search_reads_feature_directories_but_not_credential_stores() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("features-{}-{nonce}", std::process::id()));
@@ -268,10 +262,7 @@ fn recursive_search_reads_feature_directories_but_not_credential_stores() {
 
 #[test]
 fn recursive_search_source_globs_are_not_mistaken_for_env_files() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("source-globs-{}-{nonce}", std::process::id()));
@@ -326,10 +317,7 @@ fn recursive_search_source_globs_are_not_mistaken_for_env_files() {
 /// writes `node_modules/.bin` full of shims pointing back into the packages.
 #[test]
 fn a_package_store_is_walked_for_what_the_search_actually_reads() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("package-store-{}-{nonce}", std::process::id()));
@@ -392,10 +380,7 @@ fn a_package_store_is_walked_for_what_the_search_actually_reads() {
 /// and what it hands back is not something the walk could have proven.
 #[test]
 fn a_recursive_search_over_a_pipe_still_asks() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/recursive-file-search")
         .join(format!("pipe-{}-{nonce}", std::process::id()));

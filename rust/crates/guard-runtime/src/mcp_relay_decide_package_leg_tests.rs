@@ -60,6 +60,7 @@ fn view() -> HarnessView {
         "harness_actions": Value::Null,
         "risk_actions": {},
         "harness_risk_actions": {},
+        "harness_postures": {},
         "security_level": "balanced",
         "protection_posture": "balanced",
         "protection_posture_explicit": false,
@@ -90,7 +91,8 @@ fn leg(edit: impl FnOnce(&mut McpRelayDecideRequestV1)) -> Result<Packaged, &'st
     let mut request = request();
     edit(&mut request);
     let view = view();
-    let identity = identity(&request, &view, CONTROL.to_owned()).expect("the identity is built");
+    let identity =
+        identity(&request, &view, CONTROL.to_owned(), None).expect("the identity is built");
     let subject = subject::subject(&request, &identity, &view).expect("the subject is built");
     let inputs = package_inputs(
         &request,

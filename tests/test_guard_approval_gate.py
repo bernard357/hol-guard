@@ -52,8 +52,9 @@ from codex_plugin_scanner.guard.proxy.runtime_mcp import RuntimeMcpGuardProxy
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.runtime.self_approval import _AGENT_ENV_MARKERS
 from codex_plugin_scanner.guard.store import GuardStore
-from codex_plugin_scanner.guard.totp import TotpSecretStore, _temporary_atomic_path, totp_code_at_counter
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
+from tests.guard_totp_support import read_totp_secret, totp_code_at_counter
+from tests.native_permission_plan_stub import answer_persist_plans
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
 from tests.support.network import stub_authenticated_urlopen
 
@@ -237,23 +238,6 @@ def _enable_totp(store: GuardStore, *, now: str) -> str:
         now=now,
     )
     return secret
-
-
-def test_totp_atomic_temp_paths_are_random(tmp_path: Path) -> None:
-    target_path = tmp_path / "guard-home" / "totp-secrets" / "seed.secret"
-    first = _temporary_atomic_path(target_path)
-    second = _temporary_atomic_path(target_path)
-    try:
-        assert first != second
-        assert first.parent == target_path.parent
-        assert second.parent == target_path.parent
-        assert first.name != f"{target_path.name}.tmp"
-        assert second.name != f"{target_path.name}.tmp"
-    finally:
-        if first.exists():
-            first.unlink()
-        if second.exists():
-            second.unlink()
 
 
 def test_approval_gate_missing_password_fails_closed(tmp_path: Path) -> None:
@@ -1338,7 +1322,7 @@ def test_approval_gate_cli_totp_commands_round_trip(tmp_path: Path) -> None:
 
     state = json.loads((store.guard_home / "approval-gate.json").read_text(encoding="utf-8"))
     pending_secret_id = str(state["totp_pending_secret_id"])
-    secret = TotpSecretStore(store.guard_home).get_secret(pending_secret_id)
+    secret = read_totp_secret(store.guard_home, pending_secret_id)
     assert secret is not None
 
     verify_counter = _counter(datetime.now(timezone.utc).isoformat())
@@ -2121,7 +2105,10 @@ def test_approval_gate_runtime_mcp_remembered_inline_allow_queues_fallback(
     assert store.list_policy_decisions("codex") == []
 
 
-def test_approval_gate_native_permission_persistence_cannot_bypass(tmp_path: Path) -> None:
+def test_approval_gate_native_permission_persistence_cannot_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer_persist_plans(monkeypatch)
     store = _store(tmp_path)
     _enable_gate(store)
 
@@ -2138,7 +2125,10 @@ def test_approval_gate_native_permission_persistence_cannot_bypass(tmp_path: Pat
     assert store.list_policy_decisions("claude-code") == []
 
 
-def test_approval_gate_native_permission_failure_queues_guard_fallback(tmp_path: Path) -> None:
+def test_approval_gate_native_permission_failure_queues_guard_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer_persist_plans(monkeypatch)
     store = _store(tmp_path)
     _enable_gate(store)
     artifact = GuardArtifact(

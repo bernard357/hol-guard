@@ -248,17 +248,10 @@ def _cursor_availability_response(
 ) -> tuple[dict[str, object], int]:
     if deadline_monotonic is not None and _remaining_seconds(deadline_monotonic) <= 0:
         return _cursor_unavailable_response(hook_event_name)
-    workspace_path = Path(workspace) if workspace else None
     try:
         from codex_plugin_scanner.guard.daemon.hook_availability_policy import cursor_fallback_permission
 
-        return cursor_fallback_permission(
-            payload,
-            hook_event_name=hook_event_name,
-            workspace=workspace_path,
-            guard_home=Path(GUARD_HOME),
-            recording_only=False,
-        )
+        return cursor_fallback_permission(hook_event_name=hook_event_name)
     except ModuleNotFoundError:
         # The isolated hook cannot load the policy package. Deny without guessing.
         return _cursor_unavailable_response(hook_event_name)
@@ -377,14 +370,12 @@ def _main_inner() -> int:
         # Git and pager proofs need the agent's environment, not the daemon's.
         payload_json = stamp_hook_input_text(payload_json)
     deadline_monotonic = _HOOK_DEADLINE_MONOTONIC
-    daemon_result, daemon_failure_kind = _native_daemon_reply_from_argv(), None
-    if daemon_result is None:
-        daemon_result, daemon_failure_kind = _daemon_hook_result(
-            payload_json,
-            deadline_monotonic=deadline_monotonic,
-            workspace=workspace,
-            hook_env_overlay=_daemon_hook_env_overlay(guard_env),
-        )
+    daemon_result, daemon_failure_kind = _daemon_hook_result(
+        payload_json,
+        deadline_monotonic=deadline_monotonic,
+        workspace=workspace,
+        hook_env_overlay=_daemon_hook_env_overlay(guard_env),
+    )
     if daemon_result is None:
         recover_kind = daemon_failure_kind or "transport-failure"
         if recover_kind != "overload":

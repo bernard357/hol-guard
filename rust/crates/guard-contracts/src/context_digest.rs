@@ -171,6 +171,18 @@ pub struct McpToolApprovalHashRequestV1 {
     pub extension_control_digest: Option<String>,
 }
 
+/// One previously authorized guard-run launch plan, as the caller holds it.
+/// Only the fields the prefix prelude reads cross the boundary — the launch
+/// identity and cwd stay with the caller.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GuardRunLaunchPlanV1 {
+    pub adapter_command: Vec<String>,
+    pub execution_command: Vec<String>,
+    pub environment_sha256: String,
+    pub reusable: bool,
+}
+
 /// Sub-operation carried by a single context-digest request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -255,9 +267,10 @@ pub enum ContextDigestKindV1 {
     PackageExecutionContextFromScannerEvidence {
         material: Value,
     },
-    /// Plan signed custom-Extension continuity, record a local override, or
-    /// project stored continuity state. The request carries the store
-    /// snapshot; the answer is in `custom_extension_continuity`.
+    /// Plan signed custom-Extension continuity and answer the commit that
+    /// applies it, record a local override the same way, or project stored
+    /// continuity state. The request carries the store snapshot; the answer is
+    /// in `custom_extension_continuity`.
     CustomExtensionContinuity {
         request: Value,
     },
@@ -370,6 +383,24 @@ pub enum ContextDigestKindV1 {
         #[serde(default)]
         launch_env: Option<BTreeMap<String, String>>,
     },
+    /// `guard_run_launch_plans` — content-bind every previewed adapter launch
+    /// argv in one call. Replaces the Python per-command loop in
+    /// `runtime/guard_run_launch.py`: resolve each launch identity against the
+    /// prepared environment and cwd, stamp reusability, hash the environment
+    /// once, and drop duplicate adapter commands in first-seen order.
+    GuardRunLaunchPlans {
+        adapter_commands: Vec<Vec<String>>,
+        environment: BTreeMap<String, String>,
+        launch_cwd: String,
+    },
+    /// `guard_run_authorized_prefixes` — the pure prelude of
+    /// `_guard_run_finalize_authorized_launch_plan`: require every authorized
+    /// plan reusable and bound to one environment, then recover the
+    /// executable-resolved argv prefixes in first-seen order. Null when no
+    /// prefix set binds; the adapter rebuild itself stays with the caller.
+    GuardRunAuthorizedPrefixes {
+        plans: Vec<GuardRunLaunchPlanV1>,
+    },
     /// Identity post-processors — `runtime_launch_identity_is_reusable`,
     /// `resolved_runtime_launch_executable`, `resolved_runtime_launch_argv`.
     /// `resolved_argv` re-probes shebang bytes, so it runs here where fs is
@@ -474,6 +505,11 @@ pub struct ContextDigestResultV1 {
     /// These kinds always produce it; `Option` keeps it absent on other kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_identity: Option<Value>,
+    /// `guard_run_launch_plans` / `guard_run_authorized_prefixes` output.
+    /// Plans kind: `{"plans": [...]}`. Prefixes kind: `{"prefixes": [[...]]}`
+    /// or explicit `null` when the authorized plans do not bind.
+    #[serde(default)]
+    pub guard_run_launch: Option<Value>,
     /// `approval_context_token_well_formed` verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_context_token_well_formed: Option<bool>,
@@ -500,8 +536,9 @@ pub struct ContextDigestResultV1 {
     /// an identifiable CLI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_cli_identity: Option<LocalCliIdentityV1>,
-    /// `custom_extension_continuity` answer: a plan, a refusal
-    /// (`{"error": message}`), a local override, or public state.
+    /// `custom_extension_continuity` answer: a commit (`writes`,
+    /// `requirements`, and the guards it carries), a refusal
+    /// (`{"error": message}`), a local override commit, or public state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_extension_continuity: Option<Value>,
     /// `managed_controls_policy_fields` answer: `{"ok": projection}` or

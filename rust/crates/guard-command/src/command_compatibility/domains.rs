@@ -7,43 +7,10 @@ use super::{basename, CanonicalCommandV1, CommandSegmentV1, CompatibilityObserva
 mod interpreter;
 #[path = "redirects.rs"]
 mod redirects;
+#[path = "source_names.rs"]
+mod source_names;
 use redirects::Redirect;
-
-const SENSITIVE_PATHS: [&str; 9] = [
-    ".aws/",
-    ".ssh/",
-    ".docker/",
-    ".kube/",
-    ".env",
-    ".netrc",
-    ".npmrc",
-    ".pypirc",
-    ".git-credentials",
-];
-
-/// A credential location named anywhere in the value, even inside prose.
-fn sensitive_path(value: &str) -> bool {
-    let value = value.to_ascii_lowercase().replace('\\', "/");
-    // A dotted read of a port variable (`process.env.PORT`) names no `.env` file.
-    let value = crate::environment_secret_dump::without_node_port_reads(&value);
-    SENSITIVE_PATHS.iter().any(|needle| value.contains(needle))
-}
-
-fn sensitive(value: &str) -> bool {
-    let lowered = value.to_ascii_lowercase();
-    sensitive_path(value)
-        || [
-            "credential",
-            "secret",
-            "password",
-            "api_key",
-            "api-key",
-            "token",
-            "private_key",
-        ]
-        .iter()
-        .any(|needle| lowered.contains(needle))
-}
+use source_names::{sensitive, sensitive_path};
 
 /// A harness or Guard configuration location named anywhere in the value.
 fn names_managed_config(value: &str) -> bool {
@@ -102,6 +69,32 @@ fn docker(segment: &CommandSegmentV1, index: usize, output: &mut CompatibilityOb
         index,
         !direct_sensitive,
     );
+}
+
+/// Whether a `docker` segment carries only inert environment prefixes and a
+/// local/default daemon context, so an explicit `docker-sensitive` Allow may
+/// settle uncertainty about it. Remote hosts, non-default contexts, custom
+/// client configs, TLS flags, and sensitive environment variables stay on
+/// review.
+pub(crate) fn docker_segment_settles_uncertainty(segment: &CommandSegmentV1) -> bool {
+    if basename(segment) != "docker" {
+        return true;
+    }
+    if segment
+        .environment_names
+        .iter()
+        .any(|name| !super::environment::inert_environment_name(name))
+    {
+        return false;
+    }
+    let Some(subcommand_index) =
+        crate::sfrs_docker_args::docker_subcommand_index(&segment.arguments)
+    else {
+        return false;
+    };
+    !crate::sfrs_tool_request::docker_global_context_is_sensitive(
+        &segment.arguments[..subcommand_index],
+    )
 }
 
 /// `get`/`describe` with only well-known global and display options and a plain
@@ -190,7 +183,7 @@ fn plain_non_secret_read(arguments: &[String]) -> bool {
 /// Output formats that render the fetched objects only. The `*-file` formats
 /// (`go-template-file`, `jsonpath-file`, `custom-columns-file`, `template-file`)
 /// read a local file and would print it, so they stay on review.
-fn output_format_reads_no_file(value: &str) -> bool {
+pub(super) fn output_format_reads_no_file(value: &str) -> bool {
     matches!(value, "json" | "yaml" | "name" | "wide")
         || [
             "jsonpath=",
@@ -304,9 +297,13 @@ pub(super) fn observe(
         // A proven read takes no option that sends stdin or a file, so a
         // pipe after it only filters the response. A zero-I/O loopback
         // `nc -z` probe reads no stdin and sends nothing.
+        // A proven local `rsync` copy names two host paths, takes no option
+        // that reaches another host and redirects nothing but to `/dev/null`,
+        // so it sends nothing anywhere.
         let proven_read = (executable == "curl"
             && crate::pretool::curl_reads::proven_read_segment(command, segment, context))
-            || crate::pretool::port_probes::proven_probe_segment(command, segment, context);
+            || crate::pretool::port_probes::proven_probe_segment(command, segment, context)
+            || (executable == "rsync" && crate::pretool::rsync_local::local_copy_segment(segment));
         if (upload || pipeline) && !proven_read {
             output.rule("command.data-protection.file-upload", index, true);
         }
@@ -442,7 +439,11 @@ pub(super) fn observe(
         // Multi-word prose, such as a comment body, still counts when it names
         // a credential location, but words like "token" in it are just text.
         let output_write = write_command || redirect == Redirect::Output || interpreter_write;
-        if (output_write && sensitive(&segment.text))
+        // A write to a project file whose name only reads like a credential,
+        // such as `src/tokenizer.ts`, is the edit the agent was asked to make.
+        if (output_write
+            && sensitive(&segment.text)
+            && !source_names::only_source_file_names(&segment.text, &segment.tokens, &executable))
             || (redirect == Redirect::Stderr
                 && segment.tokens.iter().any(|token| {
                     if token.contains(char::is_whitespace) {

@@ -2,10 +2,11 @@
 //! (`_codex_post_tool_output_artifact`): which command read the output, what
 //! local secrets it references, whether a read-only inspection or focused
 //! pytest run can skip the finding, and the artifact fingerprint and copy.
-//! Python collects the response text and command texts and builds the
-//! artifact around the answer; everything between runs here under one
-//! deadline.
+//! Python collects the response text and builds the artifact around the
+//! answer; everything between, including which commands the payload names,
+//! runs here under one deadline.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,7 @@ use crate::codex_output_commands::{is_focused_pytest_verification, is_read_only_
 use crate::codex_output_entry::{git_pathspec_identity, scope_of};
 use crate::codex_output_env::Ctx;
 use crate::codex_output_inspection_flow::is_read_only_source_inspection;
+use crate::codex_output_post_tool_commands::post_tool_command_texts;
 use crate::codex_output_post_tool_copy::{
     request_summary, runtime_reason, runtime_summary, OutputCopy,
 };
@@ -47,19 +49,37 @@ const DEADLINE: PostToolError = "native_codex_post_tool_deadline_exceeded";
 const MAX_DEADLINE_MS: u64 = 60_000;
 const OUTPUT_CLASS: &str = "credential-looking output";
 const NATIVE_UNAVAILABLE: &str = "shell_cwd_native_unavailable";
-const FIELDS: [&str; 11] = [
+const FIELDS: [&str; 10] = [
     "harness_label",
     "tool_label",
     "tool_name",
     "tool_input",
     "arguments",
     "tool_input_present",
-    "command_texts",
     "response_text",
     "cwd",
     "home_dir",
     "deadline_ms",
 ];
+/// The command texts older clients derive themselves and send along.
+const LEGACY_COMMAND_TEXTS: &str = "command_texts";
+/// The tool response the caller received, sent whole so the text the scan
+/// reads is decided here rather than by whichever caller flattened it.
+const TOOL_RESPONSE: &str = "tool_response";
+/// How deep the walk reads into a tool response before it stops
+/// (`_CODEX_TOOL_RESPONSE_MAX_DEPTH`).
+const MAX_RESPONSE_DEPTH: usize = 5;
+/// How much text one level of the walk keeps
+/// (`_CODEX_TOOL_RESPONSE_TEXT_LIMIT`).
+const MAX_RESPONSE_TEXT: usize = 5 * 1024 * 1024;
+/// The keys whose values a tool response carries its output under.
+const RESPONSE_TEXT_KEYS: [&str; 7] = [
+    "stdout", "stderr", "output", "text", "content", "result", "message",
+];
+const READ_ONLY_PAYLOAD_FIELDS: [&str; 4] = ["tool_name", "tool_input", "cwd", "home_dir"];
+/// The bounds the per-command read-only action holds a client-sent list to.
+const MAX_READ_ONLY_COMMANDS: usize = 256;
+const MAX_READ_ONLY_COMMAND_BYTES: usize = 64 * 1024;
 
 /// One review: the caller facts and the single deadline every step shares.
 pub(crate) struct Run<'r, 'c> {
@@ -107,15 +127,24 @@ fn optional_path(body: &Value, key: &str) -> Result<Option<PyPath>, PostToolErro
 impl Input {
     pub(crate) fn parse(body: &Value) -> Result<Self, PostToolError> {
         let object = body.as_object().ok_or(INVALID)?;
-        if object.len() != FIELDS.len() || !FIELDS.iter().all(|key| object.contains_key(*key)) {
+        let legacy = object.contains_key(LEGACY_COMMAND_TEXTS);
+        let whole_response = object.get(TOOL_RESPONSE);
+        if object.len()
+            != FIELDS.len() + usize::from(legacy) + usize::from(whole_response.is_some())
+            || !FIELDS.iter().all(|key| object.contains_key(*key))
+        {
             return Err(INVALID);
         }
-        let command_texts = body["command_texts"]
-            .as_array()
-            .ok_or(INVALID)?
-            .iter()
-            .map(|item| item.as_str().map(str::to_owned).ok_or(INVALID))
-            .collect::<Result<Vec<_>, _>>()?;
+        let command_texts = if legacy {
+            body[LEGACY_COMMAND_TEXTS]
+                .as_array()
+                .ok_or(INVALID)?
+                .iter()
+                .map(|item| item.as_str().map(str::to_owned).ok_or(INVALID))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            post_tool_command_texts(&body["tool_name"], &body["tool_input"])
+        };
         let deadline_ms = body["deadline_ms"].as_u64().ok_or(INVALID)?;
         if deadline_ms == 0 || deadline_ms > MAX_DEADLINE_MS {
             return Err(INVALID);
@@ -128,7 +157,7 @@ impl Input {
             arguments: body["arguments"].clone(),
             tool_input_present: body["tool_input_present"].as_bool().ok_or(INVALID)?,
             command_texts,
-            response_text: text(body, "response_text")?,
+            response_text: response_text(text(body, "response_text")?, whole_response),
             cwd: optional_path(body, "cwd")?,
             home_dir: optional_path(body, "home_dir")?,
             deadline_ms,
@@ -138,6 +167,90 @@ impl Input {
     pub(crate) fn tool_name(&self) -> &Value {
         &self.tool_name
     }
+}
+
+/// The text one tool response carries, read the way
+/// `_collect_codex_tool_response_text` reads it: the output keys at the top
+/// level, every key below that, and a bounded walk either way.
+fn collected_response_text(value: &Value, depth: usize) -> String {
+    if depth > MAX_RESPONSE_DEPTH {
+        return String::new();
+    }
+    let bounded = |text: String| match text.char_indices().nth(MAX_RESPONSE_TEXT) {
+        Some((at, _)) => text[..at].to_owned(),
+        None => text,
+    };
+    match value {
+        Value::String(text) => bounded(text.clone()),
+        Value::Object(map) => {
+            let mut parts = Vec::new();
+            for (key, child) in map {
+                let named = RESPONSE_TEXT_KEYS.contains(&key.to_lowercase().as_str());
+                if !named && depth == 0 {
+                    continue;
+                }
+                let text = collected_response_text(child, depth + 1);
+                if !text.is_empty() {
+                    parts.push(text);
+                }
+            }
+            bounded(parts.join("\n"))
+        }
+        Value::Array(items) => bounded(
+            items
+                .iter()
+                .map(|item| collected_response_text(item, depth + 1))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+        _ => String::new(),
+    }
+}
+
+/// The text the scan reads. The caller still sends what it flattened, because
+/// it alone knows what it appended to the response (its own captured stdout
+/// among it), but what the response itself says is read here. A caller that
+/// flattened the response differently, or missed part of it, can only widen
+/// what the scan sees, never narrow it.
+fn response_text(supplied: String, whole: Option<&Value>) -> String {
+    let Some(whole) = whole else {
+        return supplied;
+    };
+    let collected = collected_response_text(whole, 0);
+    if collected.is_empty() || already_read(&collected, &supplied) {
+        return supplied;
+    }
+    if supplied.is_empty() {
+        return collected;
+    }
+    format!("{collected}\n{supplied}")
+}
+
+/// Whether the scan would read nothing new by adding `collected`.
+///
+/// The caller's flattening and this walk agree on what they read but not on
+/// the order they read it in: a response map is a `BTreeMap` here, so the walk
+/// follows sorted keys, while the caller follows the order the response was
+/// built in. Comparing the two as whole strings would therefore miss an
+/// ordinary two-key response, and the scan would read every line of it twice.
+/// Each line is checked on its own instead, which also survives the caller
+/// trimming what it sent.
+///
+/// The lines are matched whole, through a set built once over `supplied`. A
+/// substring search would read a 2 MB response once per line of it, long past
+/// the hook deadline, and would also count `token=abc` as read because
+/// `xtoken=abcdef` happens to contain it.
+fn already_read(collected: &str, supplied: &str) -> bool {
+    let supplied: HashSet<&str> = supplied
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    collected
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| supplied.contains(line))
 }
 
 fn os_path(path: Option<&PyPath>) -> Option<PathBuf> {
@@ -285,14 +398,63 @@ fn reviewed_source(run: &Run, input: &Input) -> Result<Source, PostToolError> {
     Ok(chosen)
 }
 
-/// `_codex_post_tool_command_is_read_only_source_inspection`.
-fn post_tool_read_only(ctx: &Ctx, input: &Input) -> bool {
-    let scope = scope_of(ctx, input.cwd.as_ref(), input.home_dir.as_ref());
-    !input.command_texts.is_empty()
-        && input.command_texts.iter().all(|command| {
+/// `_codex_post_tool_command_is_read_only_source_inspection`: every command
+/// is a read-only source inspection or git metadata read.
+pub(crate) fn post_tool_commands_read_only(
+    ctx: &Ctx,
+    commands: &[String],
+    cwd: Option<&PyPath>,
+    home_dir: Option<&PyPath>,
+) -> bool {
+    let scope = scope_of(ctx, cwd, home_dir);
+    !commands.is_empty()
+        && commands.iter().all(|command| {
             is_read_only_source_inspection(command, scope)
                 || is_read_only_git_metadata(command, scope.without_home())
         })
+}
+
+fn post_tool_read_only(ctx: &Ctx, input: &Input) -> bool {
+    post_tool_commands_read_only(
+        ctx,
+        &input.command_texts,
+        input.cwd.as_ref(),
+        input.home_dir.as_ref(),
+    )
+}
+
+/// The same verdict over the commands a post-tool payload names. A payload
+/// naming more or longer commands than a client-sent list may carry is not
+/// read-only, as the bounded per-command action refuses it.
+pub(crate) fn review_post_tool_read_only_payload(
+    ctx: &Ctx,
+    body: &Value,
+) -> Result<bool, PostToolError> {
+    let body = content_sensitivity::decode_input(body)?;
+    let object = body.as_object().ok_or(INVALID)?;
+    if object.len() != READ_ONLY_PAYLOAD_FIELDS.len()
+        || !READ_ONLY_PAYLOAD_FIELDS
+            .iter()
+            .all(|key| object.contains_key(*key))
+    {
+        return Err(INVALID);
+    }
+    let cwd = optional_path(&body, "cwd")?;
+    let home_dir = optional_path(&body, "home_dir")?;
+    let commands = post_tool_command_texts(&body["tool_name"], &body["tool_input"]);
+    if commands.len() > MAX_READ_ONLY_COMMANDS
+        || commands
+            .iter()
+            .any(|command| command.len() > MAX_READ_ONLY_COMMAND_BYTES)
+    {
+        return Ok(false);
+    }
+    Ok(post_tool_commands_read_only(
+        ctx,
+        &commands,
+        cwd.as_ref(),
+        home_dir.as_ref(),
+    ))
 }
 
 /// Review one post-tool payload; the JSON answer text.
@@ -460,3 +622,7 @@ fn upsert(metadata: &mut Vec<(String, Value)>, key: String, value: Value) {
         None => metadata.push((key, value)),
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "codex_output_post_tool_payload_tests.rs"]
+mod payload_tests;

@@ -48,15 +48,15 @@ from pathlib import Path
 import pytest
 
 from ci.gauntlet.edge_clone_fixtures import write_edge_clone
-from ci.gauntlet.fixtures import BENCH_CHECKOUT, BENCH_FILES
+from ci.gauntlet.fixtures import BENCH_CHECKOUT, BENCH_FILES, HOME_TOOLCHAIN_INIT_TEXT
 from ci.gauntlet.realism_fixtures import REVIEW_NOTES, SESSION_SOURCE
 from ci.gauntlet.source_output_fixtures import SOURCES as TOKEN_SOURCES
-from codex_plugin_scanner.guard.adapters import codex_contained_tests
+from tests import codex_containment_route
 from tests.benign_fp_gate_configs import KUBECONFIG, LFS_GITCONFIG
 from tests.benign_fp_gate_connectors import write_connectors
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
 from tests.benign_fp_gate_feature_app import build_feature_app, feature_app_path
-from tests.benign_fp_gate_git import _git, _session_worktree, _stopped_rebase
+from tests.benign_fp_gate_git import _git, _session_worktree, _signed_checkout, _stopped_rebase
 from tests.benign_fp_gate_hooked_clone import hooked_worktree_path, write_hooked_clone
 from tests.benign_fp_gate_long_lived_clone import write_long_lived_clones
 from tests.benign_fp_gate_paths import materialise
@@ -71,6 +71,7 @@ from tests.benign_fp_gate_projects import (
     _node_toolchain,
     _python_toolchain,
     _sibling_test_runner,
+    _vendored_toolchain,
     _write,
 )
 
@@ -90,6 +91,9 @@ class BenignFixture:
     tmp_org: Path
     scratch: Path
     stage: Path
+    # The same worktree named through a linked ancestor, as a macOS host spells
+    # any `/tmp` checkout: `/tmp` resolves to `/private/tmp`.
+    linked_worktree: Path
 
     def cleanup(self) -> None:
         """Remove the directories this fixture created outside its own root."""
@@ -138,6 +142,8 @@ class BenignFixture:
             "${FEATURE_APP}": str(feature_app_path(self.home)),
             # Private directory directly in /tmp holding the files a case stages before its commands.
             "${STAGE}": str(self.stage),
+            # Left unresolved on purpose: the link is what the case is about.
+            "${LINKED_WORKTREE}": str(self.linked_worktree),
         }
 
     def cwd(self, name: str) -> Path:
@@ -157,9 +163,11 @@ class BenignFixture:
             "tmp_org": self.tmp_org,
             "org_rebase": self.org.parent / "app-portal-rebase",
             "org_rebase_exec": self.org.parent / "app-portal-rebase-exec",
+            "signed_app": self.home / "Code" / "signed" / "app-signed",
             # A checkout whose `.gitignore` re-includes a hidden template, as most application repositories do.
             "ignore_negation": self.home / "Code" / "ignore-rules" / "billing-api",
             "feature_app": feature_app_path(self.home),
+            "linked_worktree": self.linked_worktree,
         }[name]
 
 
@@ -208,6 +216,12 @@ def build_fixture(root: Path) -> BenignFixture:
         home / ".nvm/versions/node/v25.2.1/lib/node_modules/inert-pkg/package.json",
         '{\n  "name": "inert-pkg",\n  "version": "3.1.0"\n}\n',
     )
+    # The version manager's own init file, which every Node project sources
+    # before it runs anything. Its shape is the point: helper functions, a
+    # pipeline, and tool names the command itself never spells, so no scan can
+    # call its words a tame set of settings the way it can an activation
+    # script's. Sourcing it still has to reach an approval the user can give.
+    _write(home / ".nvm" / "nvm.sh", HOME_TOOLCHAIN_INIT_TEXT)
     _write(
         home / ".github/workflows/inert-check.yml",
         "name: inert-check\non: [push]\njobs:\n  check:\n    runs-on: ubuntu-latest\n",
@@ -216,6 +230,12 @@ def build_fixture(root: Path) -> BenignFixture:
     # `.config`, and a token-shaped file name in an otherwise ordinary place.
     _write(home / ".config/gcloud/credentials.db", "synthetic fixture\n")
     _write(home / ".agents/skills/x/credentials.json", "{}\n")
+    # A directory of local services an agent runs beside its checkouts. The
+    # running server leaves a hidden socket lock in its run directory, which
+    # is all that separates this tree from any other listing.
+    _write(home / "dev-services" / "compose.yaml", "services:\n  db:\n    image: postgres:16\n")
+    _write(home / "dev-services" / "scripts" / "start.sh", "#!/bin/sh\necho start\n")
+    _write(home / "dev-services" / "pg-run" / ".s.PGSQL.5432.lock", "4242\n")
     _write(home / "other-project" / "notes.md", "Notes kept outside the project.\nretry policy: three attempts.\n")
     _write(home / "other-project" / "src" / "report.ts", "export const reportWindow = 'report-window-marker';\n")
     _write(home / "other-project" / "package.json", '{\n  "name": "@acme/app",\n  "version": "1.0.0"\n}\n')
@@ -270,6 +290,7 @@ def build_fixture(root: Path) -> BenignFixture:
     _bun_lockfile(worktree, _INSTALLED_PACKAGES)
     _python_toolchain(worktree)
     _build_toolchain(worktree)
+    _vendored_toolchain(worktree)
     _write(worktree / "test_calc.py", "assert 1 + 1 == 2\nprint('ok')\n")
     _write(worktree / "scripts" / "rebuild.sh", "#!/bin/sh\necho rebuilt\n")
     # Reply drafted for a PR review conversation, posted with `gh pr comment --body-file`.
@@ -293,6 +314,13 @@ def build_fixture(root: Path) -> BenignFixture:
     # Fresh worktree package whose dependencies are installed only in the canonical checkout.
     _write(parent / "web" / "node_modules" / "left-pad" / "package.json", "{}\n")
     _write(worktree / "web" / "package.json", '{"private": true}\n')
+
+    # The project tree named through a link, the spelling a host hands the hook
+    # whenever an ancestor is a link. Kept beside the real tree so the case does
+    # not depend on how the host spells its own temp directory.
+    linked_projects = root / "linked-projects"
+    linked_projects.symlink_to(root / "projects")
+    linked_worktree = linked_projects / "parent-repo-feature"
 
     # Untracked child repository nested inside the parent working tree.
     nested.mkdir(parents=True)
@@ -384,6 +412,7 @@ def build_fixture(root: Path) -> BenignFixture:
     write_hooked_clone(org, home, _git)
     # Years-old clones gaining sibling worktrees, one with a post-checkout hook.
     write_long_lived_clones(home, _git)
+    _signed_checkout(home)
     _stopped_rebase(org, home, "app-portal-rebase")
     # A rebase started with an `exec` step keeps that program in its saved todo list.
     _stopped_rebase(org, home, "app-portal-rebase-exec", "-x", "true")
@@ -416,6 +445,10 @@ def build_fixture(root: Path) -> BenignFixture:
     _write(tmp_org / "app" / "README.md", "# app\n")
     _write(home / ".nvm" / "versions" / "node" / "v25.2.1" / "lib" / "node_modules" / "npm" / "package.json", "{}\n")
     _write(home / ".bun" / "install" / "global" / "node_modules" / "vite" / "package.json", "{}\n")
+    # A tool directory that keeps a credential store of its own, so a walk of
+    # it would print that store's layout rather than an inventory.
+    _write(home / ".toolbox" / "bin" / "tool.sh", "#!/bin/sh\necho tool\n")
+    _write(home / ".toolbox" / ".aws" / "config", "[default]\nregion = us-east-1\n")
     # Installed dependency and toolchain source under hidden home directories.
     pipx_site = home / ".local" / "pipx" / "venvs" / "tool" / "lib" / "python3.12" / "site-packages"
     _write(pipx_site / "pkg" / "mod.py", "_COLD_START = 0.5\n")
@@ -480,6 +513,7 @@ def build_fixture(root: Path) -> BenignFixture:
         tmp_org,
         scratch,
         stage,
+        linked_worktree,
     )
     _write(fixture.scratch_copy, "export const reportWindow = 'report-window-marker';\n")
     _write(
@@ -498,11 +532,11 @@ def route_codex(result: dict[str, object], payload: dict[str, object], fixture: 
     file goes to the fixture's own directory, which ``cleanup`` removes.
     """
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(codex_contained_tests, "launching_codex_executable", lambda: Path("/usr/local/bin/codex"))
-        patch.setattr(codex_contained_tests, "codex_applies_updated_input", lambda *_args, **_kwargs: True)
+        patch.setattr(codex_containment_route, "launching_codex_executable", lambda: Path("/usr/local/bin/codex"))
+        patch.setattr(codex_containment_route, "codex_applies_updated_input", lambda *_args, **_kwargs: True)
         fixture.contained_requests.mkdir(exist_ok=True)
         patch.setattr(tempfile, "tempdir", str(fixture.contained_requests))
-        return codex_contained_tests.route_codex_containment(
+        return codex_containment_route.route_codex_containment(
             dict(result),
             hook_input=json.dumps(payload),
             guard_home=fixture.guard_home,

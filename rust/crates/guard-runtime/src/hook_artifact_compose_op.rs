@@ -20,6 +20,7 @@ use serde_json::{json, Map, Value};
 use crate::hook_artifact_compose_package_firewall as package_firewall;
 use crate::hook_artifact_compose_package_firewall_entitlement as package_firewall_entitlement;
 use crate::hook_artifact_compose_policy_lookup as lookup;
+use crate::hook_artifact_compose_policy_tail as policy_tail;
 use crate::hook_artifact_compose_prompt as prompt;
 use crate::hook_artifact_compose_reuse as reuse;
 use crate::hook_decision_compose::{edge_action, edge_floor, is_hard};
@@ -106,6 +107,9 @@ pub(crate) fn compose(query: &HookArtifactComposeQueryV1) -> Result<Value, Strin
             package_firewall::package_firewall_access(query)?
         }
         HookArtifactComposeQueryV1::SignalComposition(query) => signal_composition(query)?,
+        HookArtifactComposeQueryV1::PolicyComposition(query) => {
+            policy_tail::policy_composition(query)
+        }
     })
 }
 
@@ -182,6 +186,7 @@ fn native_edge_floor(
                 policy_action: edge.policy_action.clone(),
                 minimum_action: edge.minimum_action.clone(),
                 decision: Value::Null,
+                reason_code: edge.reason_code.clone(),
             };
             edge_floor(Some(&explicit), event)
         }
@@ -190,6 +195,7 @@ fn native_edge_floor(
                 policy_action: edge.policy_action.clone(),
                 minimum_action: edge.minimum_action.clone(),
                 decision: edge.decision.clone(),
+                reason_code: edge.reason_code.clone(),
             };
             if default_action == Some("warn") && is_hard(edge_action(&typed)) {
                 // The edge still masks output already priced as warn-tier evidence.
@@ -306,6 +312,7 @@ fn policy_stack(query: &PolicyStackQueryV1) -> Value {
         "scanner_action": scanner_action.map(GuardAction::as_str),
         "scanner_raised_to_block": scanner_raised_to_block,
         "local_grants_allowed": local_grants_allowed,
+        "local_eligibility_required": policy_tail::local_eligibility_required(query),
         "native_floor": native_floor.map(GuardAction::as_str),
         "normalizer_evidence": normalizer_evidence,
         "risk_signals": risk_signals,
@@ -364,7 +371,16 @@ fn risk_copy(
 
 fn grant_settle(query: &GrantSettleQueryV1) -> Value {
     let current = act(&query.current_action);
-    let granted = act(&query.granted_action);
+    let floor = present(&query.native_floor);
+    // A CLI grant vouches for the CLI a command launches, not for the
+    // privileged wrapper around it: a require-reapproval floor asks for this
+    // exact command to be approved again, so a grant never settles below it.
+    let granted = match floor {
+        Some(GuardAction::RequireReapproval) => {
+            stricter(act(&query.granted_action), GuardAction::RequireReapproval)
+        }
+        _ => act(&query.granted_action),
+    };
     let (mut current, mut policy, mut context) = (
         current,
         act(&query.policy_action),
@@ -379,7 +395,7 @@ fn grant_settle(query: &GrantSettleQueryV1) -> Value {
     // context is re-floored: it binds the identity of the review the floor
     // demanded so saved approvals still match exactly, while re-flooring the
     // policy action would re-flag a settled request forever.
-    if let Some(floor) = present(&query.native_floor) {
+    if let Some(floor) = floor {
         context = stricter(context, floor);
     }
     let mut result = Map::new();

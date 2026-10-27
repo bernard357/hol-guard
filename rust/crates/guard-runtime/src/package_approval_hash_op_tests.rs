@@ -1,5 +1,7 @@
 //! Parity vectors recorded from the legacy Python `local_supply_chain`
-//! approval-hash path before it was deleted.
+//! approval-hash path before it was deleted. Their policy digests were later
+//! recomputed when bundle and feed revisions left the policy context and
+//! reasons were reduced to their codes.
 
 use super::*;
 use guard_contracts::PackageApprovalHashRequestV1;
@@ -12,10 +14,7 @@ struct Workspace(PathBuf);
 
 impl Workspace {
     fn new(name: &str) -> Self {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let nonce = crate::unique_nanos::unique_nanos();
         let root = std::env::temp_dir().join(format!(
             "hol-guard-approval-hash-{name}-{}-{nonce}",
             std::process::id()
@@ -154,4 +153,100 @@ fn rejects_malformed_requests() {
         run(&missing_store).unwrap_err(),
         "native_package_advisory_store_unavailable"
     );
+}
+
+fn advisory_vector() -> Value {
+    let vectors: Vec<Value> = serde_json::from_str(VECTORS).unwrap();
+    vectors
+        .into_iter()
+        .find(|vector| vector["name"] == "advisory_feed_launch_additional")
+        .unwrap()
+}
+
+fn context_token(vector: &Value, name: &str) -> Value {
+    let workspace = Workspace::new(name);
+    run(&request(vector, &workspace, "artifact_hash")).unwrap()["artifact_hash"].clone()
+}
+
+fn scored_vector() -> Value {
+    let mut vector = advisory_vector();
+    let package = &mut vector["request"]["evaluation"]["packages"][0];
+    package["decision"] = json!("warn");
+    package["riskScore"] = json!(41);
+    package["recommendedFixVersion"] = json!("1.3.1");
+    package["relatedAdvisoryIds"] = json!(["GHSA-0001"]);
+    package["reasons"] = json!([
+        {"advisoryId": "GHSA-0001", "code": "advisory", "message": "m", "source": "bundle"},
+    ]);
+    vector
+}
+
+#[test]
+fn feed_refresh_keeps_saved_approval_valid() {
+    let saved = scored_vector();
+    let mut refreshed = saved.clone();
+    let package = &mut refreshed["request"]["evaluation"]["packages"][0];
+    package["riskScore"] = json!(57);
+    package["recommendedFixVersion"] = json!("1.4.0");
+    package["reasons"] = json!([
+        {"advisoryId": "GHSA-0001", "code": "advisory", "message": "stale bundle", "source": "bundle"},
+        {"code": "cloud_validation_error", "message": "invalid reply", "source": "guard-cloud"},
+    ]);
+    let evaluation = &mut refreshed["request"]["evaluation"];
+    evaluation["bundle_version"] = json!("b2");
+    evaluation["policy_version"] = json!("p2");
+    evaluation["reasons"] = json!([
+        {"code": "cloud_timeout", "message": "Guard cloud evaluation timed out, so Guard fell back locally."},
+        {"code": "advisory", "message": "reworded", "severity": "high"},
+        {"code": "advisory", "message": "duplicate", "severity": "high"},
+    ]);
+    refreshed["request"]["feed_snapshot_hash"] = json!("refreshed-snapshot");
+
+    let saved = context_token(&saved, "refresh-saved");
+    let current = context_token(&refreshed, "refresh-current");
+    assert_eq!(
+        crate::context_digest::validate_context_tokens(&saved, &current),
+        None
+    );
+}
+
+#[test]
+fn feed_changes_that_touch_the_verdict_still_require_reapproval() {
+    let saved = scored_vector();
+    let saved_token = context_token(&saved, "verdict-saved");
+
+    let mut new_advisory = saved.clone();
+    new_advisory["advisory_rows"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": "GHSA-0002", "package_url": "pkg:npm/left-pad@1.3.0"}));
+    let mut new_reason = saved.clone();
+    new_reason["request"]["evaluation"]["reasons"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"code": "typosquat", "message": "m", "severity": "high"}));
+    let mut new_rule = saved.clone();
+    new_rule["request"]["evaluation"]["matched_rule_id"] = json!("rule-2");
+    let mut package_verdict = saved.clone();
+    package_verdict["request"]["evaluation"]["packages"][0]["decision"] = json!("block");
+    let mut package_reason = saved.clone();
+    package_reason["request"]["evaluation"]["packages"][0]["reasons"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"code": "malware", "message": "m", "source": "bundle"}));
+
+    for (name, changed) in [
+        ("advisory", new_advisory),
+        ("reason", new_reason),
+        ("rule", new_rule),
+        ("package-verdict", package_verdict),
+        ("package-reason", package_reason),
+    ] {
+        let current = context_token(&changed, name);
+        assert_eq!(
+            crate::context_digest::validate_context_tokens(&saved_token, &current).as_deref(),
+            Some("approval_reuse_policy_changed"),
+            "{name}"
+        );
+    }
 }

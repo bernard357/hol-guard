@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -836,3 +837,17 @@ class TestBuildReceipt:
         ]
         ids = {r.receipt_id for r in receipts}
         assert len(ids) == 5, "Each receipt must have a unique receipt_id"
+
+
+def test_artifact_hash_matches_the_frozen_python_corpus() -> None:
+    # The corpus was recorded from the retired Python hash. Saved approvals are
+    # keyed by these digests, so the native hash must keep spelling them.
+    fixture = Path(__file__).parent / "fixtures" / "artifact-hash-parity.v1.json"
+    corpus = json.loads(fixture.read_text(encoding="utf-8"))
+    drifted = []
+    for case in corpus["cases"]:
+        fields = dict(case["artifact"])
+        fields["args"] = tuple(fields.get("args", ()))
+        if compute_artifact_hash(GuardArtifact(**fields)) != case["expected_sha256"]:
+            drifted.append(case["case"])
+    assert drifted == [], "the native artifact hash no longer matches saved approvals"

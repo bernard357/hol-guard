@@ -7,15 +7,17 @@
 //! components and project the typed result, never a Python-built hash, into
 //! approval evidence.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::context_digest_json::{
     write_canonical_json, write_canonical_json_with_limit, write_json_string,
 };
 use super::context_digest_result_check::{check_result, gated, kind_name};
+pub(crate) use guard_contracts::{is_python_space, python_strip};
 use guard_contracts::{
     ContextDigestComponentsV1, ContextDigestKindV1, ContextDigestRequestV1, ContextDigestResultV1,
     PackageContextComponentV1, PackageContextEvidenceV1, APPROVAL_CONTEXT_TOKEN_PREFIX,
@@ -305,29 +307,6 @@ pub(crate) fn validate_context_tokens(saved: &Value, current: &Value) -> Option<
         }
     }
     None
-}
-
-/// CPython `str.strip()` whitespace set: the ASCII controls 0x09-0x0d and
-/// 0x1c-0x1f plus every Unicode code point whose `isspace` is true.
-pub(crate) fn is_python_space(ch: char) -> bool {
-    matches!(
-        ch,
-        '\u{09}'..='\u{0d}'
-            | ' '
-            | '\u{1c}'..='\u{1f}'
-            | '\u{85}'
-            | '\u{a0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200a}'
-            | '\u{2028}'..='\u{2029}'
-            | '\u{202f}'
-            | '\u{205f}'
-            | '\u{3000}'
-    )
-}
-
-pub(crate) fn python_strip(text: &str) -> &str {
-    text.trim_matches(|ch: char| is_python_space(ch))
 }
 
 pub(crate) fn configured_values_hash(
@@ -731,6 +710,67 @@ fn evaluate_request(
                     )
                 }));
         }
+        ContextDigestKindV1::GuardRunLaunchPlans {
+            adapter_commands,
+            environment,
+            launch_cwd,
+        } => {
+            let plans = observe_value(Phase::ContextGuardRunLaunchPlans, || {
+                let cwd = Path::new(launch_cwd.as_str());
+                let mut seen: Vec<Vec<String>> = Vec::new();
+                let mut built: Vec<Value> = Vec::new();
+                for adapter_command in adapter_commands {
+                    let Some(plan) = guard_command::guard_run_launch::guard_run_plan_for_command(
+                        adapter_command,
+                        environment,
+                        cwd,
+                    ) else {
+                        continue;
+                    };
+                    if seen.contains(&plan.adapter_command) {
+                        continue;
+                    }
+                    seen.push(plan.adapter_command.clone());
+                    built.push(json!({
+                        "adapter_command": plan.adapter_command,
+                        "execution_command": plan.execution_command,
+                        "environment_sha256": plan.environment_sha256,
+                        "identity": plan.identity,
+                        "launch_cwd": plan.launch_cwd.to_string_lossy(),
+                        "reusable": plan.reusable,
+                    }));
+                }
+                json!({ "plans": built })
+            });
+            result.guard_run_launch = Some(plans);
+        }
+        ContextDigestKindV1::GuardRunAuthorizedPrefixes { plans } => {
+            let prefixes = observe_value(Phase::ContextGuardRunAuthorizedPrefixes, || {
+                // The prefix prelude reads only the argv pair, the shared
+                // environment digest and reusability; the identity and cwd stay
+                // with the caller, so bind a single synthetic environment whose
+                // digest is the one the caller recorded.
+                let rebuilt: Vec<guard_command::guard_run_launch::GuardRunLaunchPlan> = plans
+                    .iter()
+                    .map(|plan| guard_command::guard_run_launch::GuardRunLaunchPlan {
+                        adapter_command: plan.adapter_command.clone(),
+                        execution_command: plan.execution_command.clone(),
+                        environment: BTreeMap::new(),
+                        environment_sha256: plan.environment_sha256.clone(),
+                        identity: Value::Null,
+                        launch_cwd: PathBuf::new(),
+                        reusable: plan.reusable,
+                    })
+                    .collect();
+                match guard_command::guard_run_launch::guard_run_authorized_executable_prefixes(
+                    &rebuilt,
+                ) {
+                    Some(prefixes) => json!({ "prefixes": prefixes }),
+                    None => Value::Null,
+                }
+            });
+            result.guard_run_launch = Some(prefixes);
+        }
         ContextDigestKindV1::RuntimeLaunchIdentityMatches {
             expected_identity,
             command,
@@ -866,6 +906,7 @@ fn evaluate_context_digest_request_inner(
         custom_extension_suggestion: None,
         claude_guard_question: None,
         memory_pattern: None,
+        guard_run_launch: None,
     };
     if let Err(code) = evaluate_request(request, &mut result) {
         result.status = "error".to_owned();

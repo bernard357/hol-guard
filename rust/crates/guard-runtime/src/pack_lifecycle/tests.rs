@@ -1,5 +1,8 @@
 use super::*;
 
+mod ancestry;
+mod spilled_history;
+
 fn installed() -> Identity {
     Identity {
         profile: "installed".into(),
@@ -35,7 +38,7 @@ fn separate_profiles_cross_engine_and_source_rollback() {
     next.engine = "4".repeat(64);
     next.root = "5".repeat(64);
     next.source = "b".repeat(40);
-    let evidence = json!({"status":"ahead","base_commit":{"sha":remote.source},"merge_base_commit":{"sha":remote.source},"head_commit":{"sha":next.source},"behind_by":0,"ahead_by":1});
+    let evidence = json!({"status":"ahead","base_commit":{"sha":remote.source},"merge_base_commit":{"sha":remote.source},"url":compare_url(&remote.source, &next.source),"behind_by":0,"ahead_by":1});
     let next_floor = transition(&remote_floor, &next, &evidence).unwrap();
     assert_eq!(next_floor.source, remote_floor.source);
     assert_eq!(next_floor.remote.as_ref().unwrap().version, "100.7");
@@ -187,6 +190,33 @@ fn migration_retains_authenticated_floor_and_never_repairs_stamped_loss() {
     forged["legacy_key"] = json!(hex::encode(key));
     forged["legacy_anchor"] = json!({"record":"{}","digest":"0".repeat(64),"mac":"0".repeat(64)});
     assert!(evaluate(&forged).is_err());
+}
+
+#[test]
+fn migration_enrolls_an_install_that_never_received_a_floor() {
+    // An install whose authority was enrolled before this record existed has
+    // no legacy anchor or snapshot to admit, and nothing else ever creates a
+    // floor for it. Returning no record left those installs failing the floor
+    // gate on every discovery and publication refresh, for good. Startup now
+    // derives the floor from the release evidence it already carries, through
+    // the same enrollment the installed adapter performs -- so unbound
+    // evidence is rejected here exactly as it is there, rather than silently
+    // producing nothing at all.
+    let key = [7u8; 32];
+    let mut startup = json!({"kind":"migrate","key":hex::encode(key),"floor":null,"stamp":null,"release_data":"{}"});
+    assert_eq!(
+        evaluate(&startup).unwrap_err(),
+        "pack_lifecycle_release_invalid"
+    );
+    startup["release_data"] = json!("not json");
+    assert_eq!(
+        evaluate(&startup).unwrap_err(),
+        "pack_lifecycle_release_invalid"
+    );
+    // A retained-floor probe carries no release evidence and is not a startup,
+    // so it still answers without creating or requiring anything.
+    startup["release_data"] = Value::Null;
+    assert_eq!(evaluate(&startup).unwrap()["record"], Value::Null);
 }
 
 fn legacy_envelope(mut value: Value, key: &[u8], purpose: &str) -> Value {
@@ -348,6 +378,55 @@ fn committed_legacy_activation_retains_floor_across_packless_controls() {
 }
 
 #[test]
+fn an_admitted_installed_release_plans_without_the_network_after_the_source_moves() {
+    let key = [5u8; 32];
+    let mut moved = floor();
+    // A remote publication, or the legacy migration, moves the floor's source
+    // cursor while the installed release it already admitted stays put.
+    moved.source = "b".repeat(40);
+    let encoded = encode(&moved, &key).unwrap();
+    let plan = |installed: Value| {
+        evaluate(
+            &json!({"kind":"plan","key":hex::encode(key),"floor":encoded,
+            "selected":["command.external"],"retained":[],"active":Value::Null,
+            "active_engine":Value::Null,"registry":[],"installed":installed}),
+        )
+    };
+    let response = plan(serde_json::to_value(installed()).unwrap()).unwrap();
+    // Before, this planned "remote", so every saved policy needed the network.
+    assert_eq!(response["profile"], "installed");
+    let admitted = decode(response["admission_floor"].as_str().unwrap(), &key).unwrap();
+    assert_eq!(
+        serde_json::to_value(&admitted).unwrap(),
+        serde_json::to_value(&moved).unwrap()
+    );
+    // A release the floor has not admitted still has to earn its admission,
+    // and one that reuses a version degrades to remote instead of failing.
+    let mut reused = installed();
+    reused.root = "9".repeat(64);
+    assert_eq!(
+        plan(serde_json::to_value(&reused).unwrap()).unwrap()["profile"],
+        "remote"
+    );
+    // Once a remote publication raises an epoch past the admitted release,
+    // reusing it would be an epoch rollback, so planning goes remote.
+    for (authority, revocation) in [(1, 0), (0, 1)] {
+        let mut raised = moved.clone();
+        raised.authority += authority;
+        raised.revocation += revocation;
+        let encoded = encode(&raised, &key).unwrap();
+        let response = evaluate(
+            &json!({"kind":"plan","key":hex::encode(key),"floor":encoded,
+            "selected":["command.external"],"retained":[],"active":Value::Null,
+            "active_engine":Value::Null,"registry":[],
+            "installed":serde_json::to_value(installed()).unwrap()}),
+        )
+        .unwrap();
+        assert_eq!(response["profile"], "remote");
+    }
+}
+
+#[test]
 fn selection_uses_existing_composer_and_never_managed_opt_in() {
     let layer = |kind: &str, state: &str| {
         json!({"schema_version":"1.0.0", "catalog_digest":"1".repeat(64),
@@ -378,13 +457,12 @@ fn fallback_to_remote_is_authorized_only_for_installed_typed_unavailability() {
         evaluate(&json!({"kind":"fallback","profile":profile,"reason":reason}))
     };
     let code = crate::pack_preparation::UNAVAILABLE;
-    assert_eq!(
-        request("installed", code).unwrap(),
-        json!({"profile":"remote"})
-    );
+    for profile in ["installed", "committed-subset"] {
+        assert_eq!(request(profile, code).unwrap(), json!({"profile":"remote"}));
+    }
     for (profile, reason) in [
         ("remote", code),
-        ("committed-subset", code),
+        ("committed-subset", "unavailable-pack"),
         ("installed", "unavailable-pack"),
         ("installed", "pack_transfer_budget_exceeded"),
         ("installed", ""),

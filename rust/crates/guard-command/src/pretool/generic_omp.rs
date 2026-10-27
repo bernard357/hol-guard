@@ -271,6 +271,15 @@ fn contained_selector(value: &str) -> bool {
 pub(super) fn modeled_scalar(tool: &str, key: &str, value: &Value) -> bool {
     let bounded = |value: &Value| value.as_u64().is_some_and(|count| count <= 100_000);
     match (tool, key, value) {
+        // Oh My Pi's session-tool wrapper takes a bounded `timeout` beside
+        // the literal intent label `i`, on every tool it wraps. It bounds how
+        // long the call may run and changes nothing about what runs, so the
+        // standalone form of the call is the same call. Without it every
+        // bridged `tool.bash({i, command, timeout})` — the shape code mode
+        // writes — fell through to the unknown-tool review.
+        (_, "timeout", number @ Value::Number(_)) => bounded(number),
+        // A `null` timeout is the default, like an absent key.
+        (_, "timeout", Value::Null) => true,
         ("grep", "case" | "gitignore", Value::Bool(_)) => true,
         ("grep", "skip", Value::Null) => true,
         ("grep", "skip", number @ Value::Number(_)) => bounded(number),
@@ -347,6 +356,24 @@ fn listing(
             && !super::super::sensitive_command(target)
             && !super::super::sensitive_read_path_argument(target)
     };
+    // A name inside a linked worktree this repository registers lists nothing
+    // when nothing is there, and every existing file in that worktree is
+    // already routed, so saying nothing is there reveals no more than a
+    // listing the agent may already run.
+    let registered = |target: &str| {
+        missing(target)
+            && super::super::git_routes::missing_path_in_registered_worktree(target, home, cwd)
+    };
+    if targets
+        .iter()
+        .all(|target| proven(target) || registered(target))
+    {
+        return Some(directory_allow(
+            context,
+            "native_missing_worktree_listing",
+            "The Rust authority proved this listing names a path with nothing behind it inside a linked worktree this repository registers, so it lists nothing and the tool reports the missing path itself.",
+        ));
+    }
     targets
         .iter()
         .all(|target| proven(target) || missing(target))
@@ -361,10 +388,10 @@ fn listing(
                     false,
                 ),
                 "block",
-                super::evaluate::MISSING_PATH,
+                super::read_decisions::MISSING_PATH,
                 "",
             );
-            result.reason = super::evaluate::missing_path_reason(
+            result.reason = super::read_decisions::missing_path_reason(
                 "HOL Guard did not run this listing because its path does not exist. Check the path, for example by listing its parent directory, and try again with the correct one.",
                 "listing",
                 targets.iter().find(|target| !proven(target)).copied(),
@@ -875,6 +902,26 @@ fn grep_scope(
     } else {
         "HOL Guard did not run this search because its path does not exist. Check the path, for example by listing its parent directory, and try again with the correct one."
     };
+    // The same holds for a search: a name inside a registered linked worktree
+    // with nothing behind it searches nothing, and that worktree's existing
+    // files are already in scope.
+    let registered = |target: &str| {
+        missing(target)
+            && !signals.sensitive_target
+            && !super::super::sensitive_command(target)
+            && !super::super::sensitive_read_path_argument(target)
+            && super::super::git_routes::missing_path_in_registered_worktree(target, home, cwd)
+    };
+    if targets
+        .iter()
+        .all(|target| proven(target) || registered(target))
+    {
+        return Some(directory_allow(
+            context,
+            "native_missing_worktree_search",
+            "The Rust authority proved this search names a path with nothing behind it inside a linked worktree this repository registers, so it searches nothing and the tool reports the missing path itself.",
+        ));
+    }
     targets
         .iter()
         .all(|target| proven(target) || missing(target))
@@ -889,10 +936,10 @@ fn grep_scope(
                     false,
                 ),
                 "block",
-                super::evaluate::MISSING_PATH,
+                super::read_decisions::MISSING_PATH,
                 "",
             );
-            result.reason = super::evaluate::missing_path_reason(
+            result.reason = super::read_decisions::missing_path_reason(
                 reason,
                 "search",
                 targets.iter().find(|target| !proven(target)).copied(),

@@ -42,14 +42,6 @@ _MCP_STDIO_SESSION_IO_SCHEMA = "guard-mcp-stdio-session-io-request.v1"
 _MCP_STDIO_SESSION_RESULT_SCHEMA = "guard-mcp-stdio-session-result.v1"
 
 
-def _native_session_feature_available() -> bool:
-    status = native_runtime_status()
-    if not status.available or not status.compatible or status.identity is None or status.capabilities is None:
-        return False
-    features = set(status.capabilities.features)
-    return _RESIDENT_PROTOCOL_FEATURE in features and _MCP_STDIO_SESSION_FEATURE in features
-
-
 # Terminal/vocab statuses each session op may legitimately return. A reported
 # "error"/"exited"/"eof" is a terminal native answer — the caller must see it
 # rather than get None and silently fall back to a Python subprocess.
@@ -148,6 +140,7 @@ def _resident_request(
         "contained_package_script_execute": "guard-contained-package-script-execute-result.v1",
         "contained_workspace_write_execute": "guard-contained-workspace-write-execute-result.v1",
         "containment_health_probe": "guard-containment-health-probe-result.v1",
+        "contained_execute": "guard-contained-execute-result.v1",
     }.get(operation)
     if operation == "cloud_catalog":
         # Producer/completion replies use a strict payload/error union, with
@@ -199,7 +192,11 @@ def _resident_request(
             "codex_request_resume",
             "daemon_route",
             "daemon_handler",
+            "extension_control",
+            "extension_allow_hint",
+            "approval_extension_recommendation",
             "hook_authority_state",
+            "extension_control_authority",
             "hook_render",
             "protect_request",
             "hook_artifact_compose",
@@ -211,6 +208,7 @@ def _resident_request(
             "command_expression_validate",
             "reviewed_invocation_bindings_validate",
             "tool_action_request_identity",
+            "verified_read_plan",
         }:
             accepted = frozenset({"ok", "error"})
         elif operation == "mcp_tool_policy_decide":
@@ -393,7 +391,13 @@ def contained_workspace_write_execute_native(
         operation="contained_workspace_write_execute",
         request=request,
         guard_home=guard_home,
-        timeout_seconds=timeout_seconds,
+        # The request above already hands the write its full execution budget.
+        # Waiting for exactly that long leaves nothing for the resident to spawn
+        # the process, drain its output and frame a reply, so a write that uses
+        # its whole budget would come back as a transport failure and count
+        # toward the shared native-runtime circuit. The contained runners add
+        # the same slack for the same reason.
+        timeout_seconds=timeout_seconds + _CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS,
         required_feature=_CONTAINED_EXECUTION_FEATURE,
     )
     if decoded is None:
@@ -405,6 +409,55 @@ def contained_workspace_write_execute_native(
         return _contained_workspace_write_result(result)
     except (KeyError, TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Contained execute op
+# ---------------------------------------------------------------------------
+
+# The resident spends time on sandbox setup and on reaping a timed-out child on
+# top of the contained process itself, so the transport waits longer than the
+# request's own timeout and the resident, not this client, reports a timeout.
+_CONTAINED_EXECUTE_TRANSPORT_SLACK_SECONDS = 30.0
+
+
+def contained_execute_native(
+    request: Mapping[str, object],
+    policy: Mapping[str, object],
+    *,
+    guard_home: Path,
+    run_id: str,
+) -> dict[str, object] | None:
+    """Run one contained request in the resident and return its evidence.
+
+    ``request`` and ``policy`` are the canonical containment payloads the
+    resident validates; nothing here interprets or re-derives them. ``None``
+    means the resident did not run the request, which every caller must treat
+    as unavailable rather than as a clean run.
+    """
+
+    timeout_seconds = request.get("timeout_seconds")
+    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        return None
+    payload: dict[str, object] = {
+        "schema": "guard-contained-execute-request.v1",
+        "request_id": _request_id("contained_execute"),
+        "request": dict(request),
+        "policy": dict(policy),
+        "guard_home": str(guard_home),
+        "run_id": run_id,
+    }
+    decoded = _resident_request(
+        operation="contained_execute",
+        request=payload,
+        guard_home=guard_home,
+        timeout_seconds=float(timeout_seconds) + _CONTAINED_EXECUTE_TRANSPORT_SLACK_SECONDS,
+        required_feature=_CONTAINED_EXECUTION_FEATURE,
+    )
+    if decoded is None:
+        return None
+    result = decoded.get("result")
+    return result if isinstance(result, dict) else None
 
 
 # ---------------------------------------------------------------------------

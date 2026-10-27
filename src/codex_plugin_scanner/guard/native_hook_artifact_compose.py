@@ -28,9 +28,10 @@ HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE = "hook-artifact-comp
 HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE = "hook-artifact-compose-package-reuse-v1"
 HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE = "hook-artifact-compose-package-firewall-access-v1"
 HOOK_ARTIFACT_COMPOSE_POLICY_LOOKUP_FEATURE = "hook-artifact-compose-policy-lookup-v1"
-HOOK_ARTIFACT_COMPOSE_PROMPT_REASON_FEATURE = "hook-artifact-compose-prompt-reason-v1"
-HOOK_ARTIFACT_COMPOSE_REMEMBERED_RULE_FEATURE = "hook-artifact-compose-remembered-rule-v1"
 HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE = "hook-artifact-compose-signal-composition-v1"
+# Shipped with the policy-tail query kinds; the native artifact facts op is
+# gated on the same feature, since a runtime with one has the other.
+HOOK_ARTIFACT_COMPOSE_POLICY_TAIL_FEATURE = "hook-artifact-compose-policy-tail-v1"
 _REQUEST_SCHEMA = "guard-hook-artifact-compose-request.v1"
 _RESULT_SCHEMA = "guard-hook-artifact-compose-result.v1"
 _RESIDENT_CODE = re.compile(r"^native_hook_artifact_compose_[a-z_]{1,64}$")
@@ -49,50 +50,7 @@ _FIELDS: dict[str, frozenset[str]] = {
             "oauth_payload",
         }
     ),
-    "policy_stack": frozenset(
-        {
-            "policy_config",
-            "runtime",
-            "approval_context",
-            "data_flow_strong",
-            "cli_action",
-            "payload_action_present",
-            "payload_action",
-            "native_floor",
-            "native_edge",
-            "current_action_override_present",
-            "has_package",
-            "package_policy_action",
-            "has_data_flow",
-            "has_scanner",
-            "scanner_action",
-            "has_compound_findings",
-            "artifact_risk_signals",
-            "data_flow_reasons",
-            "artifact_risk_summary",
-            "data_flow_summary",
-            "package_risk_signals",
-            "package_risk_summary",
-            "scanner_risk_signals",
-        }
-    ),
     "config_action": frozenset({"policy_config", "artifact"}),
-    "tool_grant_apply": frozenset(),
-    "grant_settle": frozenset(
-        {"current_action", "policy_action", "approval_context_action", "granted_action", "native_floor"}
-    ),
-    "observe_executable_action": frozenset(
-        {
-            "current_config_action",
-            "current_action_override",
-            "trusted_cli_override",
-            "untrusted_hook_payload_hint",
-            "package_action",
-            "data_flow_action",
-            "scanner_action",
-            "package_evaluation_action",
-        }
-    ),
     "saved_reuse": frozenset(
         {
             "current_action",
@@ -107,7 +65,6 @@ _FIELDS: dict[str, frozenset[str]] = {
             "diagnostic_stored_hash",
         }
     ),
-    "saved_block_reuse": frozenset({"current_action", "policy_action", "stored_artifact_hash"}),
     "trusted_override": frozenset(
         {
             "token_validation_reason",
@@ -137,24 +94,6 @@ _FIELDS: dict[str, frozenset[str]] = {
             "claimed_package_approval_consumed",
         }
     ),
-    "decision_copy": frozenset(
-        {
-            "policy_action",
-            "package",
-            "package_policy_action",
-            "has_compound_findings",
-            "compound_finding_count",
-            "risk_summary",
-            "scanner_raised_to_block",
-            "has_scanner_evidence",
-            "scanner_primary_signal",
-            "base_user_body",
-            "base_harness_message",
-            "base_dashboard_primary_detail",
-            "remembered_rule_reason",
-        }
-    ),
-    "decision_build_copy": frozenset({"copy", "reason", "signals"}),
     "policy_lookup_select": frozenset({"lookups"}),
     "package_reuse_settle": frozenset(
         {
@@ -168,8 +107,6 @@ _FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "package_firewall_access": frozenset({"entitlement", "operation", "has_installed_managers"}),
-    "prompt_request_reason": frozenset({"harness", "prompt_classes", "prompt_summary", "policy_action"}),
-    "remembered_rule_reason": frozenset({"remembered_rules", "integrity_message", "artifact_summary"}),
     "signal_composition": frozenset({"signals", "base_action"}),
 }
 
@@ -180,8 +117,6 @@ _KIND_FEATURES: dict[str, str] = {
     "package_firewall_entitlement": HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE,
     "package_reuse_settle": HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE,
     "policy_lookup_select": HOOK_ARTIFACT_COMPOSE_POLICY_LOOKUP_FEATURE,
-    "prompt_request_reason": HOOK_ARTIFACT_COMPOSE_PROMPT_REASON_FEATURE,
-    "remembered_rule_reason": HOOK_ARTIFACT_COMPOSE_REMEMBERED_RULE_FEATURE,
     "signal_composition": HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE,
 }
 
@@ -195,32 +130,8 @@ _ANSWERS: dict[str, dict[str, str]] = {
         "tier": "s",
         "upgrade_cta": "S",
     },
-    "policy_stack": {
-        "approval_context_config_action": "a",
-        "auto_stop_events": "l",
-        "approval_context_data_flow_action": "A",
-        "approval_context_policy_action": "a",
-        "current_config_action": "a",
-        "data_flow_action": "A",
-        "local_grants_allowed": "b",
-        "native_floor": "A",
-        "normalizer_evidence": "l",
-        "package_policy_action": "A",
-        "policy_action": "a",
-        "requested_policy_action": "S",
-        "risk_signals": "l",
-        "risk_summary": "s",
-        "scanner_action": "A",
-        "scanner_raised_to_block": "b",
-        "trusted_cli_action": "A",
-        "untrusted_payload_action": "A",
-    },
     "config_action": {"action": "a", "auto_stop_events": "l"},
-    "tool_grant_apply": {"approval_context_policy_action": "a", "current_policy_action": "a", "policy_action": "a"},
-    "grant_settle": {"approval_context_policy_action": "a", "current_policy_action": "a", "policy_action": "a"},
-    "observe_executable_action": {"executable_action": "a"},
     "saved_reuse": {"approval_reuse": "d", "approval_reuse_source": "S", "policy_action": "a"},
-    "saved_block_reuse": {"approval_reuse": "d", "policy_action": "a"},
     "trusted_override": {"claim_required": "b", "evidence": "D", "reason_code": "S"},
     "claimed_reuse": {
         "approval_reuse": "d",
@@ -230,8 +141,6 @@ _ANSWERS: dict[str, dict[str, str]] = {
         "trusted_request_override_applied": "b",
         "trusted_request_override_reason": "S",
     },
-    "decision_copy": {"decision_overrides": "d", "risk_headline": "S"},
-    "decision_build_copy": {"decision_v2": "d", "risk_headline": "S"},
     "policy_lookup_select": {
         "authority_revision": "i",
         "decision": "D",
@@ -256,8 +165,6 @@ _ANSWERS: dict[str, dict[str, str]] = {
         "block": "d",
         "operation_allowed": "B",
     },
-    "prompt_request_reason": {"reason": "s"},
-    "remembered_rule_reason": {"reason": "S"},
     "signal_composition": {
         "action": "a",
         "reason": "s",
@@ -302,7 +209,7 @@ class NativeHookComposeError(RuntimeError):
 
 
 class NativeHookComposeValidationError(ValueError):
-    """The bound healthy owner refused invalid decision-copy facts."""
+    """The bound healthy owner refused the facts sent with a query."""
 
 
 def native_hook_compose(kind: str, fields: Mapping[str, object], *, guard_home: Path | None) -> dict[str, object]:
@@ -368,8 +275,7 @@ __all__ = [
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_POLICY_LOOKUP_FEATURE",
-    "HOOK_ARTIFACT_COMPOSE_PROMPT_REASON_FEATURE",
-    "HOOK_ARTIFACT_COMPOSE_REMEMBERED_RULE_FEATURE",
+    "HOOK_ARTIFACT_COMPOSE_POLICY_TAIL_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE",
     "NativeHookComposeError",
     "NativeHookComposeValidationError",
