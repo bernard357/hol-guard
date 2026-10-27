@@ -12,6 +12,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::COMMAND_EFFECT_BATCH_FEATURE,
     guard_contracts::APPROVAL_REUSE_FEATURE,
     guard_contracts::COMPOSIO_ROLE_FEATURE,
+    guard_contracts::PROJECT_IDENTITY_FEATURE,
     guard_contracts::EXTENSION_CONTROL_FEATURE,
     guard_contracts::EXTENSION_ALLOW_HINT_FEATURE,
     crate::hook_direct::saved_decision::review_hint::op::EXTENSION_REVIEW_HINT_FEATURE,

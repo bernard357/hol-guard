@@ -1412,27 +1412,19 @@
   },
   {
    "verdict": "windows-unsupported",
-   "note": "The mirror reproduces a POSIX-rooted resolution only. Off Unix it returns `Unmirrored`, which hands the question to Python rather than answering it wrongly. Fails closed, at the cost of the native fast path on Windows.",
+   "note": "A bare name is resolved against a POSIX-rooted cwd only. Off Unix it returns `Unmirrored`, which the resident answers as no portable identity, so a bare-name workspace on Windows matches only local policy. Fails closed.",
    "file": "rust/crates/guard-runtime/src/project_identity.rs",
    "item": "fn relative_path -- cfg! expression",
    "cfg": "unix",
    "body": "796040e01e80"
   },
   {
+   "verdict": "windows-equivalent",
+   "note": "Maps the same errno set as Windows reports it (`NotFound`, `NotADirectory`) plus the `_IGNORED_WINERRORS` 21, 123 and 1921, so the predicates read false where `pathlib` reads them false; any other error stays unknown.",
    "file": "rust/crates/guard-runtime/src/project_identity.rs",
    "item": "fn ignorable -- non-Unix block",
-   "verdict": "windows-unsupported",
-   "note": "The POSIX errno set that `pathlib` reads as a false predicate has no mapping here, so no error is ignorable and the caller surfaces it.",
    "cfg": "not(unix)",
-   "body": "75b57d7639d8"
-  },
-  {
-   "verdict": "windows-unsupported",
-   "note": "Same as `relative_path`: a `/`-rooted workspace is the only shape the mirror reproduces, and `Unmirrored` defers to Python everywhere else.",
-   "file": "rust/crates/guard-runtime/src/project_identity.rs",
-   "item": "fn workspace_path -- cfg! expression",
-   "cfg": "unix",
-   "body": "d4b82dbb6285"
+   "body": "80fd5f269335"
   },
   {
    "file": "rust/crates/guard-runtime/src/request_context_op.rs",

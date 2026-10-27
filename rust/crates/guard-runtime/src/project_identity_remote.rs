@@ -1,11 +1,11 @@
-//! `_canonical_remote` (`project_identity.py`): the host and path a remote
-//! names, read through `urllib.parse.urlsplit` for a URL and through
+//! The retired Python resolver's `_canonical_remote`: the host and path a
+//! remote names, read through `urllib.parse.urlsplit` for a URL and through
 //! `_SCP_REMOTE_PATTERN` for an scp-style remote.
 //!
 //! `Ok(None)` is a remote the Python function answers with `None`;
 //! `Unmirrored` is one whose Python outcome this reader does not reproduce
-//! exactly (an IPv6 or non-ASCII host, a non-ASCII path whose case the
-//! normalization reads, a port only some Python versions reject).
+//! exactly (a non-ASCII host, a non-ASCII path whose case the normalization
+//! reads, a port only some Python versions reject).
 
 use crate::context_digest::{is_python_space, python_strip};
 use crate::project_identity::{Mirror, Unmirrored};
@@ -63,28 +63,43 @@ fn url_parts(value: &str) -> Mirror<Option<(String, String, String)>> {
         }
         None => ("", rest),
     };
-    // A bracketed (IPv6) host is validated, and a non-ASCII netloc is
-    // NFKC-checked, by version-specific code; neither is reproduced here.
-    if netloc.contains(['[', ']']) || !netloc.is_ascii() {
+    // A non-ASCII netloc is NFKC-checked by version-specific code, which is
+    // not reproduced here.
+    if !netloc.is_ascii() {
         return Err(Unmirrored);
     }
     let path = rest.split('#').next().unwrap_or_default();
     let path = path.split('?').next().unwrap_or_default();
-    // `SplitResult._hostinfo`, unbracketed.
+    // `SplitResult._hostinfo`.
     let hostinfo = netloc.rsplit('@').next().unwrap_or_default();
-    let (hostname, port) = match hostinfo.split_once(':') {
-        Some((hostname, port)) => (hostname, Some(port)),
-        None => (hostinfo, None),
+    let (hostname, port) = if netloc.contains(['[', ']']) {
+        match bracketed_host(netloc, hostinfo) {
+            Some(parts) => parts,
+            // `urlsplit` raises "Invalid IPv6 URL" for a bracket it cannot
+            // read as an IPv6 host.
+            None => return Ok(None),
+        }
+    } else {
+        match hostinfo.split_once(':') {
+            Some((hostname, port)) => (hostname, Some(port)),
+            None => (hostinfo, None),
+        }
     };
     if scheme == "file" || hostname.is_empty() {
-        // project_identity.py:_canonical_remote: a file URL or a URL without
+        // _canonical_remote: a file URL or a URL without
         // a hostname is None.
         return Ok(None);
     }
     // `SplitResult.hostname` keeps a zone's case after `%`, but
-    // project_identity.py:_canonical_remote lowercases all of it again.
+    // _canonical_remote lowercases all of it again.
     let hostname = hostname.to_ascii_lowercase();
-    let mut host = hostname.clone();
+    // _canonical_remote: an IPv6 host keeps its brackets,
+    // so the port after it is never read as part of the address.
+    let mut host = if hostname.contains(':') {
+        format!("[{hostname}]")
+    } else {
+        hostname.clone()
+    };
     // `_hostinfo` reads an empty port as no port.
     match port.filter(|port| !port.is_empty()) {
         None => {}
@@ -94,7 +109,7 @@ fn url_parts(value: &str) -> Mirror<Option<(String, String, String)>> {
             return Err(Unmirrored);
         }
         Some(port) if !port.bytes().all(|byte| byte.is_ascii_digit()) => {
-            // project_identity.py:_canonical_remote: `parsed.port` raises
+            // _canonical_remote: `parsed.port` raises
             // ValueError for a non-numeric port, answered with None.
             return Ok(None);
         }
@@ -104,7 +119,7 @@ fn url_parts(value: &str) -> Mirror<Option<(String, String, String)>> {
                 .then(|| digits.parse::<u32>().unwrap_or(0))
                 .filter(|number| *number <= 65_535)
             else {
-                // project_identity.py:_canonical_remote: a port out of range
+                // _canonical_remote: a port out of range
                 // raises ValueError, answered with None.
                 return Ok(None);
             };
@@ -114,6 +129,23 @@ fn url_parts(value: &str) -> Mirror<Option<(String, String, String)>> {
         }
     }
     Ok(Some((host, hostname, path.to_owned())))
+}
+
+/// A bracketed `hostinfo` as `urlsplit` accepts it: one `[` opening the
+/// host, an IPv6 address up to the one `]`, then nothing or a `:` and the
+/// port. An IPv4 address, a scope zone or an IPvFuture literal inside the
+/// brackets is not a remote host this reads.
+fn bracketed_host<'u>(netloc: &str, hostinfo: &'u str) -> Option<(&'u str, Option<&'u str>)> {
+    if netloc.matches('[').count() != 1 || netloc.matches(']').count() != 1 {
+        return None;
+    }
+    let (address, after) = hostinfo.strip_prefix('[')?.split_once(']')?;
+    address.parse::<std::net::Ipv6Addr>().ok()?;
+    let port = match after {
+        "" => None,
+        after => Some(after.strip_prefix(':')?),
+    };
+    Some((address, port))
 }
 
 /// `_SCP_REMOTE_PATTERN` (`^(?:[^@/]+@)?([^:/]+):(.+)$`): `(host, path)`.
@@ -136,7 +168,7 @@ fn scp_parts(value: &str) -> Option<(&str, &str)> {
 pub(crate) fn canonical_remote(remote: &str) -> Mirror<Option<String>> {
     let value = python_strip(remote);
     if value.is_empty() {
-        // project_identity.py:_canonical_remote: a blank remote is None.
+        // _canonical_remote: a blank remote is None.
         return Ok(None);
     }
     let (host, path_case_host, path) = if value.contains("://") {
@@ -146,7 +178,7 @@ pub(crate) fn canonical_remote(remote: &str) -> Mirror<Option<String>> {
         }
     } else {
         let Some((host, path)) = scp_parts(value) else {
-            // project_identity.py:_canonical_remote: no scp match is None.
+            // _canonical_remote: no scp match is None.
             return Ok(None);
         };
         if !host.is_ascii() {
@@ -176,7 +208,7 @@ pub(crate) fn canonical_remote(remote: &str) -> Mirror<Option<String>> {
         normalized.to_owned()
     };
     if host.is_empty() || normalized.is_empty() {
-        // project_identity.py:_canonical_remote: an empty host or path is
+        // _canonical_remote: an empty host or path is
         // None.
         return Ok(None);
     }
@@ -214,7 +246,23 @@ mod tests {
         assert_eq!(anchor("1h://h/o/r"), Err(Unmirrored));
         assert_eq!(anchor("\u{1}https://h/o/r"), Err(Unmirrored));
         assert_eq!(anchor("https://h:+1/o/r"), Err(Unmirrored));
-        assert_eq!(anchor("ssh://[::1]/o/r"), Err(Unmirrored));
+    }
+
+    #[test]
+    fn ipv6_hosts_keep_their_brackets() {
+        let ok = |remote: &str, want: &str| assert_eq!(anchor(remote), Ok(Some(want.to_owned())));
+        ok("ssh://[::1]/o/r", "remote:[::1]/o/r");
+        ok("ssh://git@[::1]:9418/o/r.git", "remote:[::1]:9418/o/r");
+        ok("ssh://git@[::1:9418]/o/r.git", "remote:[::1:9418]/o/r");
+        ok("ssh://git@[::1]:22/o/r", "remote:[::1]/o/r");
+        ok("https://[FE80::AB]/o/r", "remote:[fe80::ab]/o/r");
+        assert_eq!(anchor("ssh://[::1/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://::1]/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://[1.2.3.4]/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://[fe80::1%25eth0]/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://[v1.x]/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://[::1]x/o/r"), Ok(None));
+        assert_eq!(anchor("ssh://h[::1]/o/r"), Ok(None));
     }
 
     #[test]

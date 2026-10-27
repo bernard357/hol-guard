@@ -10,7 +10,6 @@ from typing import Any, cast
 from .project_identity import (
     enrich_project_identity_metadata,
     is_portable_project_identity,
-    portable_project_identity_revision,
     resolve_portable_project_identity,
 )
 from .store_base import PolicyDecisionLookupResult
@@ -19,33 +18,6 @@ from .store_policy import POLICY_DECISION_LOOKUP_FEATURE as _LOOKUP
 from .store_policy import POLICY_LOOKUP_MEMORY_FEATURE as _MEMORY
 from .store_policy import PORTABLE_COMPOSITION_LOOKUP_FEATURE as _PORTABLE_COMPOSITION
 from .store_policy import RUNTIME_SAVED_REUSE_FEATURE as _SAVED_REUSE
-
-_PROJECT_IDENTITY_CACHE_MAX_ITEMS = 128
-_PROJECT_IDENTITY_CACHE: dict[tuple[str, int], str] = {}
-
-
-def _cached_portable_project_identity(workspace: str) -> str | None:
-    """Cache only successful identities and invalidate on any identity metadata change."""
-    revision = portable_project_identity_revision(workspace)
-    if revision is None:
-        return resolve_portable_project_identity(workspace)
-    cache_key = (workspace, revision)
-    cached = _PROJECT_IDENTITY_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    identity = resolve_portable_project_identity(workspace)
-    if identity is None:
-        return None
-
-    stale_keys = [key for key in _PROJECT_IDENTITY_CACHE if key[0] == workspace]
-    for stale_key in stale_keys:
-        _PROJECT_IDENTITY_CACHE.pop(stale_key, None)
-    if len(_PROJECT_IDENTITY_CACHE) >= _PROJECT_IDENTITY_CACHE_MAX_ITEMS:
-        oldest_key = next(iter(_PROJECT_IDENTITY_CACHE))
-        _PROJECT_IDENTITY_CACHE.pop(oldest_key, None)
-    _PROJECT_IDENTITY_CACHE[cache_key] = identity
-    return identity
 
 
 def _text(value: object) -> str | None:
@@ -357,4 +329,4 @@ class StorePortableProjectMemoryMixin:
         if not isinstance(workspace, str) or not workspace.strip():
             return None
         normalized = workspace.strip()
-        return normalized if is_portable_project_identity(normalized) else _cached_portable_project_identity(normalized)
+        return normalized if is_portable_project_identity(normalized) else resolve_portable_project_identity(normalized)

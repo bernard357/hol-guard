@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from pytest import MonkeyPatch
+import pytest
 
 from codex_plugin_scanner.guard.cli.oauth_client import generate_dpop_key_pair
 from codex_plugin_scanner.guard.policy_bundle_decisions import build_policy_bundle_decisions
@@ -17,6 +17,8 @@ from codex_plugin_scanner.guard.project_identity import (
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
 from tests.policy_store_support import resolve_policy
+
+pytestmark = pytest.mark.usefixtures("native_approval_reuse_runtime")
 
 _NOW = "2026-08-07T20:00:00+00:00"
 _WORKSPACE_ID = "workspace-solo-project-memory"
@@ -179,10 +181,7 @@ def _activate_project_memory_bundle(
     assert applied is not None
 
 
-def test_portable_project_identity_matches_across_clone_locations(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_portable_project_identity_matches_across_clone_locations(tmp_path: Path) -> None:
     first = tmp_path / "first" / "repo"
     second = tmp_path / "second" / "repo"
     other_port = tmp_path / "other-port" / "repo"
@@ -195,11 +194,6 @@ def test_portable_project_identity_matches_across_clone_locations(
     _init_repository(implicit_default, "https://github.com/Owner/Repository.git")
     _init_repository(explicit_default, "https://github.com:443/owner/repository.GIT")
 
-    def reject_subprocess(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise AssertionError("Portable project identity must not launch a subprocess")
-
-    monkeypatch.setattr(subprocess, "run", reject_subprocess)
     first_identity = resolve_portable_project_identity(first)
     second_identity = resolve_portable_project_identity(second)
     other_port_identity = resolve_portable_project_identity(other_port)

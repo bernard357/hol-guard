@@ -9,20 +9,6 @@ const VECTORS: &str = include_str!("../../../../tests/fixtures/portable-project-
 #[cfg(unix)]
 const SCHEMA: &str = "guard.portable-project-identity.vectors.v1";
 
-/// The vectors whose Python identity this resolver answers `Unknown`, each
-/// with the reason the Python outcome is not reproduced.
-#[cfg(unix)]
-const UNKNOWN_ALLOWLIST: [(&str, &str); 2] = [
-    (
-        "remote_ipv6_explicit_port",
-        "a bracketed IPv6 host is validated by version-specific urlsplit code",
-    ),
-    (
-        "remote_ipv6_address_suffix",
-        "a bracketed IPv6 host is validated by version-specific urlsplit code",
-    ),
-];
-
 /// A fresh canonical directory (`/var` is a link on macOS).
 #[cfg(unix)]
 fn scratch(label: &str) -> PathBuf {
@@ -68,7 +54,7 @@ fn materialize(case: &Value, root: &Path) -> String {
 
 #[cfg(unix)]
 #[test]
-fn every_vector_matches_the_python_resolver_or_is_allowlisted() {
+fn every_vector_resolves_to_its_recorded_identity() {
     let vectors: Value = serde_json::from_str(VECTORS).expect("vectors");
     assert_eq!(vectors["schema"], SCHEMA);
     let base = scratch("vectors");
@@ -82,19 +68,12 @@ fn every_vector_matches_the_python_resolver_or_is_allowlisted() {
             (PortableIdentity::Identity(got), Some(want)) if got == want => {}
             (PortableIdentity::Absent, None) => {}
             (PortableIdentity::Unknown, _) => unknown.push(id.to_owned()),
-            (got, want) => failures.push(format!("{id}: resolved {got:?}, Python {want:?}")),
+            (got, want) => failures.push(format!("{id}: resolved {got:?}, recorded {want:?}")),
         }
     }
     fs::remove_dir_all(&base).ok();
     assert!(failures.is_empty(), "{failures:#?}");
-    let allowed: Vec<String> = UNKNOWN_ALLOWLIST
-        .iter()
-        .map(|(id, _)| (*id).to_owned())
-        .collect();
-    assert_eq!(
-        unknown, allowed,
-        "unknown outcomes must be exactly the allowlist"
-    );
+    assert!(unknown.is_empty(), "unsettled vectors: {unknown:#?}");
 }
 
 #[test]
