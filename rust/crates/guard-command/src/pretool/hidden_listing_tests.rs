@@ -412,18 +412,18 @@ fn a_submodule_in_the_checkout_the_session_opened_reads_its_own_documents() {
     // A submodule carries its own `.git`, so the work tree nearest the file is
     // the submodule, not the checkout the session opened. The document is
     // still inside that checkout, and holding it would refuse a vendored
-    // workflow an agent reads while working one directory up.
+    // manifest an agent reads while working one directory up.
     let submodule = repo.join("vendor/lib");
     std::fs::create_dir_all(&submodule).unwrap();
     std::fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/lib\n").unwrap();
-    plant(&submodule.join(".github/workflows/ci.yml"), "on: push\n");
+    plant(&submodule.join(".codex-plugin/plugin.json"), "{}\n");
     assert!(read(
-        &submodule.join(".github/workflows/ci.yml"),
+        &submodule.join(".codex-plugin/plugin.json"),
         &home,
         &repo
     ));
     assert!(read(
-        &submodule.join(".github/workflows/ci.yml"),
+        &submodule.join(".codex-plugin/plugin.json"),
         &home,
         &submodule
     ));
@@ -431,7 +431,7 @@ fn a_submodule_in_the_checkout_the_session_opened_reads_its_own_documents() {
     let sibling = home.join("app-fix");
     std::fs::create_dir_all(sibling.join(".git")).unwrap();
     assert!(!read(
-        &submodule.join(".github/workflows/ci.yml"),
+        &submodule.join(".codex-plugin/plugin.json"),
         &home,
         &sibling
     ));
@@ -456,6 +456,29 @@ fn a_nested_checkout_does_not_open_the_repository_around_it() {
         &home,
         &nested
     ));
+    assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_administrative_directory_named_by_a_gitfile_keeps_its_review() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    // `git init --separate-git-dir` puts the administrative directory inside
+    // the work tree under a name of its own, so the hook bodies and remote
+    // URLs in it are reachable by a path that never spells `.git`. The
+    // pointer names that directory, and naming it is what holds the read.
+    std::fs::create_dir_all(repo.join(".vcs-meta/hooks")).unwrap();
+    std::fs::write(repo.join(".git"), "gitdir: .vcs-meta\n").unwrap();
+    plant(&repo.join(".vcs-meta/hooks/pre-commit.sh"), "#!/bin/sh\n");
+    assert!(!read(
+        &repo.join(".vcs-meta/hooks/pre-commit.sh"),
+        &home,
+        &repo
+    ));
+    // Repository content beside it still reads quietly.
+    plant(&repo.join(".codex-plugin/plugin.json"), "{}\n");
     assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
     std::fs::remove_dir_all(root).unwrap();
 }

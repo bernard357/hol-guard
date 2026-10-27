@@ -124,6 +124,15 @@ fn repository_hidden_below(
     if content_read && !working_in(repository, &home, home_dir, cwd) {
         return false;
     }
+    // A work tree keeps its administrative directory in `.git`, but a `.git`
+    // file names that directory somewhere else, and `--separate-git-dir` is
+    // free to put it inside the work tree under a name of its own. The hook
+    // bodies, author scripts and remote URLs in it are then reachable by a
+    // path that never spells `.git`, so the pointer is read rather than the
+    // name trusted.
+    if content_read && administrative_tree_holds(repository, canonical) {
+        return false;
+    }
     let Ok(below) = canonical.strip_prefix(repository) else {
         return false;
     };
@@ -281,4 +290,49 @@ fn work_tree_from<'a>(directory: &'a Path, home_dir: Option<&str>) -> Option<&'a
 
 fn work_tree_marker(directory: &Path) -> bool {
     std::fs::symlink_metadata(directory.join(".git")).is_ok()
+}
+
+/// Whether `canonical` sits inside the administrative directory a `.git`
+/// *file* at the root of `repository` points at.
+///
+/// A work tree whose `.git` is a directory is answered by the component screen
+/// above and never reaches here. A pointer this rule cannot read in full, or
+/// cannot parse, holds the read: the administrative directory is then unknown,
+/// and an unknown one cannot be shown to be elsewhere.
+fn administrative_tree_holds(repository: &Path, canonical: &Path) -> bool {
+    use std::io::Read;
+
+    let pointer = repository.join(".git");
+    let Ok(metadata) = std::fs::symlink_metadata(&pointer) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    if metadata.len() > 1024 {
+        return true;
+    }
+    let mut content = String::new();
+    if std::fs::File::open(&pointer)
+        .and_then(|file| file.take(1025).read_to_string(&mut content))
+        .is_err()
+    {
+        return true;
+    }
+    let line = content.strip_suffix('\n').unwrap_or(&content);
+    let Some(target) = line.strip_prefix("gitdir: ") else {
+        return true;
+    };
+    if target.is_empty() || target.contains(['\n', '\r', '\0']) {
+        return true;
+    }
+    let target = Path::new(target);
+    let resolved = if target.is_absolute() {
+        std::fs::canonicalize(target)
+    } else {
+        std::fs::canonicalize(repository.join(target))
+    };
+    // A pointer at a directory that does not exist names nothing this read can
+    // reach, so it holds nothing back.
+    resolved.is_ok_and(|resolved| canonical.starts_with(resolved))
 }
