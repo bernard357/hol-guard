@@ -13,7 +13,6 @@ from codex_plugin_scanner.guard.policy_bundle_decisions import build_policy_bund
 from codex_plugin_scanner.guard.policy_bundle_parser import (
     policy_bundle_acceptance_checkpoint,
     policy_bundle_rejection_message,
-    validated_policy_bundle_payload,
 )
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     POLICY_BUNDLE_KEY_PURPOSE,
@@ -30,6 +29,7 @@ from codex_plugin_scanner.guard.runtime.supply_chain_bundle import (
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.synced_policy import synced_policy_bundle_validation
 from tests.guard_review_signing_helpers import review_verification_keys
+from tests.policy_bundle_parser_support import validated_policy_bundle_payload
 from tests.policy_bundle_signing_helpers import (
     TEST_POLICY_BUNDLE_WORKSPACE_ID,
     policy_bundle_test_keyring,

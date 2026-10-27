@@ -53,14 +53,22 @@ fn has_key(entries: &[(String, PyVal)], key: &str) -> bool {
 
 /// What a bridge-rendered harness reads: `None` when the answer carries a
 /// value Python would render through `repr`, which the caller fails closed.
+/// `bridge` is the Python bounded bridge printing the daemon's hook answer,
+/// which writes Copilot's answer through the generic renderer as the native
+/// bridge does.
 fn bridge_output(
     harness: &str,
     event_name: &str,
     response: &[(String, PyVal)],
     unmap: bool,
     guard_home: Option<&Path>,
+    bridge: bool,
 ) -> Option<Rendered> {
-    if harness == "copilot" && has_key(response, "behavior") && is_permission_event(event_name) {
+    if !bridge
+        && harness == "copilot"
+        && has_key(response, "behavior")
+        && is_permission_event(event_name)
+    {
         // Already Copilot's permission wire document (its fail-safe deny
         // among them); the generic renderer would drop the fields it reads.
         return Some(rendered(response, String::new(), 0, unmap));
@@ -97,12 +105,15 @@ fn exit_policy_action(harness: &str, event_name: &str, response: &[(String, PyVa
 /// or an answer the bridge renderer cannot reproduce. `guard_home` is the
 /// store the caller's command names, so an authority block's recovery line
 /// names that store too; `None` leaves the bare command the default home
-/// already answers.
+/// already answers. `bridge` asks for the bounded bridge's own output for
+/// any harness: that bridge prints what the harness reads, whichever
+/// harness it is.
 pub(crate) fn cli_hook_emit_document(
     harness: &str,
     event_name: &str,
     response_json: &str,
     guard_home: Option<&Path>,
+    bridge: bool,
 ) -> Option<Object> {
     let parsed = pyjson::parse_mapping_lone_surrogates(response_json).ok()?;
     if parsed.mapped && parsed.collision {
@@ -110,12 +121,19 @@ pub(crate) fn cli_hook_emit_document(
     }
     let response = parsed.value.as_dict()?;
     let mut document = Object::new();
-    if !BRIDGE_RENDERED_HARNESSES.contains(&harness) {
+    if !bridge && !BRIDGE_RENDERED_HARNESSES.contains(&harness) {
         let action = exit_policy_action(harness, event_name, response);
         document.insert("policy_action".into(), Value::String(action));
         return Some(document);
     }
-    let output = bridge_output(harness, event_name, response, parsed.mapped, guard_home)?;
+    let output = bridge_output(
+        harness,
+        event_name,
+        response,
+        parsed.mapped,
+        guard_home,
+        bridge,
+    )?;
     document.insert("stdout".into(), Value::String(output.stdout));
     document.insert("stderr".into(), Value::String(output.stderr));
     document.insert("exit_code".into(), json!(output.exit_code));

@@ -26,6 +26,7 @@ fn every_vector_reads_as_python_read_it() {
             field(case, "event_name"),
             field(case, "response"),
             None,
+            false,
         )
         .unwrap_or_else(|| panic!("no document for {case}"));
         if let Some(action) = case.get("policy_action") {
@@ -46,6 +47,7 @@ fn a_lone_surrogate_reason_prints_as_its_escape() {
         "PreToolUse",
         r#"{"policy_action":"block","reason":"x\ud800"}"#,
         None,
+        false,
     )
     .expect("document");
     assert_eq!(document["exit_code"], 2);
@@ -66,7 +68,7 @@ fn an_unreadable_answer_has_no_document() {
         ("kimi", r#"{"policy_action":"block","reason":["a"]}"#),
     ] {
         assert!(
-            cli_hook_emit_document(harness, "PreToolUse", text, None).is_none(),
+            cli_hook_emit_document(harness, "PreToolUse", text, None, false).is_none(),
             "{harness} {text}"
         );
     }
@@ -79,7 +81,7 @@ fn grok_reads_an_empty_answer_by_event() {
         ("UserPromptSubmit", 0),
         ("PreToolUse", 2),
     ] {
-        let document = cli_hook_emit_document("grok", event, "{}", None).expect("document");
+        let document = cli_hook_emit_document("grok", event, "{}", None, false).expect("document");
         assert_eq!(document["exit_code"], exit_code, "{event}");
     }
 }
@@ -97,6 +99,7 @@ fn an_authority_block_names_the_store_the_command_reads() {
         "PreToolUse",
         reason,
         Some(Path::new("/synthetic/guards/ci")),
+        false,
     )
     .expect("document");
     let printed = format!(
@@ -109,7 +112,8 @@ fn an_authority_block_names_the_store_the_command_reads() {
         "{printed}"
     );
 
-    let unnamed = cli_hook_emit_document("zcode", "PreToolUse", reason, None).expect("document");
+    let unnamed =
+        cli_hook_emit_document("zcode", "PreToolUse", reason, None, false).expect("document");
     let printed = format!(
         "{}{}",
         unnamed["stdout"].as_str().expect("stdout"),
@@ -120,4 +124,61 @@ fn an_authority_block_names_the_store_the_command_reads() {
         "{printed}"
     );
     assert!(!printed.contains("--guard-home"), "{printed}");
+}
+
+const BRIDGE_VECTORS: &str = include_str!("../testdata/hook_cli_emit/bridge_vectors.json");
+
+#[test]
+fn the_bounded_bridge_prints_what_python_printed() {
+    // `_daemon_response_to_native` rendered the daemon's hook answer for
+    // every harness the Python bounded bridge launches; Codex, Pi, OMP and
+    // Grok had no native reading before this one.
+    let vectors: Value = serde_json::from_str(BRIDGE_VECTORS).expect("vectors");
+    let cases = vectors["render"].as_array().expect("cases");
+    assert!(cases.len() >= 2000, "vector set shrank");
+    for case in cases {
+        let document = cli_hook_emit_document(
+            field(case, "harness"),
+            field(case, "event"),
+            field(case, "response"),
+            None,
+            true,
+        )
+        .unwrap_or_else(|| panic!("no document for {case}"));
+        for key in ["stdout", "stderr", "exit_code"] {
+            assert_eq!(document.get(key), case.get(key), "{key} for {case}");
+        }
+    }
+}
+
+#[test]
+fn the_bounded_bridge_writes_copilot_through_the_generic_renderer() {
+    // The native bridge renders Copilot's answer without the `hol-guard
+    // hook` shortcut for its permission document; the Python bridge does
+    // the same, so both print one thing for one answer.
+    let answer = r#"{"behavior":"deny","policy_action":"block","reason":"nope"}"#;
+    let hook = cli_hook_emit_document("copilot", "PermissionRequest", answer, None, false)
+        .expect("hook document");
+    let bridge = cli_hook_emit_document("copilot", "PermissionRequest", answer, None, true)
+        .expect("bridge document");
+    assert_eq!(hook["stdout"], answer);
+    assert_ne!(bridge["stdout"], hook["stdout"]);
+    assert!(bridge["stdout"]
+        .as_str()
+        .expect("stdout")
+        .contains(r#""permissionDecision":"deny""#));
+}
+
+#[test]
+fn a_bridge_answer_for_any_harness_carries_its_output() {
+    let document = cli_hook_emit_document(
+        "codex",
+        "PreToolUse",
+        r#"{"policy_action":"allow"}"#,
+        None,
+        true,
+    )
+    .expect("document");
+    assert!(document.contains_key("stdout"));
+    assert!(!document.contains_key("policy_action"));
 }

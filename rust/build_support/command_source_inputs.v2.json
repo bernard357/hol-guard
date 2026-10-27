@@ -729,6 +729,7 @@
       "src/supply_chain_package_eval/heuristics.rs",
       "src/supply_chain_package_eval/local_manifests.rs",
       "src/supply_chain_package_eval/local_projects.rs",
+      "src/supply_chain_package_eval/lockfile_direct_copies.rs",
       "src/supply_chain_package_eval/lockfile_evidence.rs",
       "src/supply_chain_package_eval/lockfile_helpers.rs",
       "src/supply_chain_package_eval/lockfile_parse.rs",

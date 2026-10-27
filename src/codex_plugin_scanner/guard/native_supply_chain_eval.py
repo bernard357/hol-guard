@@ -400,12 +400,15 @@ def evaluate_package_request_native(
     now: str | None = None,
     external_archive_network_authorized: bool = False,
     retain_external_archive_blob: bool = False,
+    record_evidence: bool = True,
 ) -> Any:
     """Evaluate one package request in the resident; fail closed when it cannot answer.
 
     With ``retain_external_archive_blob`` the evaluation carries the verified
     external-archive blobs the resident asked the caller to keep; the caller
-    removes them with ``download.cleanup()``.
+    removes them with ``download.cleanup()``. ``record_evidence=False`` is for a
+    background assessment: it reports findings, and an evidence row would show a
+    package nobody tried to install as a blocked request.
     """
 
     guard_home = getattr(store, "guard_home", None)
@@ -453,7 +456,8 @@ def evaluate_package_request_native(
     try:
         if downloads:
             evaluation = replace(evaluation, external_archive_downloads=tuple(downloads))
-        _persist_evidence(store=store, artifact=artifact, evaluation=evaluation, now=_now_text(now))
+        if record_evidence:
+            _persist_evidence(store=store, artifact=artifact, evaluation=evaluation, now=_now_text(now))
     except ValueError:
         # The recorder refuses a reply whose evidence ids do not cover the
         # packages it would record. That disagreement is about this

@@ -364,6 +364,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::CommandCapability(request) => {
                 crate::command_capability_op::evaluate_command_capability_request(&request)
             }
+            ResidentOperationV1::CommandEnvelope(request) => {
+                crate::command_envelope_op::evaluate_command_envelope_request(&request)
+            }
             ResidentOperationV1::ContainedWrapperPlan(request) => {
                 crate::contained_wrapper_plan_op::evaluate_contained_wrapper_plan_request(&request)
             }
@@ -479,6 +482,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             }
             ResidentOperationV1::ArtifactRisk(request) => {
                 crate::artifact_risk_op::evaluate_artifact_risk_request(&request)
+            }
+            ResidentOperationV1::SupplyChainBundleVerify(request) => {
+                crate::supply_chain_bundle_verify_op::evaluate_supply_chain_bundle_verify_request(
+                    &request,
+                )
             }
             ResidentOperationV1::TrustAttestationVerify(request) => {
                 crate::trust_attestation_verify_op::evaluate_trust_attestation_verify_request(
@@ -750,6 +758,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             // Diagnostic correlation only: the lineage never authorizes an action.
             ResidentOperationV1::RetryLineageCapture(request) => {
                 crate::retry_lineage_capture_op::evaluate_retry_lineage_capture(&request)
+            }
+            ResidentOperationV1::AdapterStateIntegrity(request) => {
+                crate::adapter_state_integrity_op::evaluate_adapter_state_integrity_request(
+                    &request,
+                )
             }
             #[cfg(not(unix))]
             ResidentOperationV1::ContainedNodeExecute(_)

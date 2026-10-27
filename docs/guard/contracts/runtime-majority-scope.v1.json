@@ -639,11 +639,9 @@
           "src/codex_plugin_scanner/guard/cli/commands_router.py",
           "src/codex_plugin_scanner/guard/cli/commands_support.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_claude_approval.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_codex_commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_git_config.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_paths.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_prompt_attachments.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_codex_reads.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_connect.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_permission_store.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_prompts.py",
@@ -1324,21 +1322,6 @@
         "evidence": "install, prepare_install and uninstall have no caller in any in-scope module; they are invoked by the excluded install, uninstall and repair dispatchers. The report validates that no retained symbol or in-scope module references the excluded names."
       },
       {
-        "id": "adapter-grok-config-setup",
-        "category": "install_config",
-        "path": "src/codex_plugin_scanner/guard/adapters/grok_config.py",
-        "symbols": [
-          "_toml_inline_command_hook",
-          "foreign_hook_compat_toml",
-          "force_compat_hooks_false",
-          "prepare_managed_config_text",
-          "build_managed_config_block"
-        ],
-        "entry_points": [],
-        "reason": "Managed Grok config block writer used only by the Grok install.",
-        "evidence": "These functions are referenced only by the excluded Grok install path; detect and launch config readers stay in scope. The report validates that no retained symbol or in-scope module references the excluded names."
-      },
-      {
         "id": "runtime-policy-admin-payloads",
         "category": "cli_only",
         "path": "src/codex_plugin_scanner/guard/cli/commands_support_runtime_policy.py",
@@ -1974,14 +1957,13 @@
           "_resolve_runtime_headline_state",
           "_runtime_headline_label",
           "_runtime_headline_detail",
-          "is_bulk_allow_once_eligible",
           "bulk_allow_read_only_once",
           "_optional_string",
           "_non_negative_int"
         ],
         "entry_points": [],
         "reason": "Resolving queued approval requests (approve, deny, bulk allow-once) and building the dashboard runtime snapshot. These run when a person acts in the approval center, the dashboard or the guard approvals command; no hook or MCP proxy call reaches them.",
-        "evidence": "Every caller of apply_approval_resolution, build_runtime_snapshot, bulk_allow_read_only_once and is_bulk_allow_once_eligible is outside runtime scope: the daemon control-plane routes (server_control_routes_post.py, server_control_policy.py), the dashboard read routes (server_dashboard_runtime_read.py) and the guard approvals command (cli/approval_commands.py). The remaining symbols are reached only from apply_approval_resolution, build_runtime_snapshot, bulk_allow_read_only_once and is_bulk_allow_once_eligible. The retained in-scope part of approvals.py (request queueing, build_approval_request_url, primary_approval_request, silent_review_center_url) does not reference them, and the report validates this reference closure on every run."
+        "evidence": "Every caller of apply_approval_resolution, build_runtime_snapshot and bulk_allow_read_only_once is outside runtime scope: the daemon control-plane routes (server_control_routes_post.py, server_control_policy.py), the dashboard read routes (server_dashboard_runtime_read.py) and the guard approvals command (cli/approval_commands.py). The remaining symbols are reached only from apply_approval_resolution, build_runtime_snapshot and bulk_allow_read_only_once. The retained in-scope part of approvals.py (request queueing, build_approval_request_url, primary_approval_request, silent_review_center_url) does not reference them, and the report validates this reference closure on every run."
       },
       {
         "id": "daemon-health-details-probe",

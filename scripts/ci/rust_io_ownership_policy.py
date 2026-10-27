@@ -136,8 +136,6 @@ _TRANSPORT_INTEGRITY_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/native_mcp_proxy_decision.py",
         # Decodes the bounded resident daemon-lifecycle verdict; decisions stay Rust.
         "src/codex_plugin_scanner/guard/native_daemon_lifecycle.py",
-        # Gathers facts for and decodes the resident sensitive-read decisions; verdicts stay Rust.
-        "src/codex_plugin_scanner/guard/native_mcp_sensitive_read.py",
     }
 )
 _TRANSPORT_AUTHORITY_PATHS: Final = frozenset(
@@ -228,8 +226,6 @@ _TRANSPORT_DECODE_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/native_mcp_proxy_decision.py",
         # Decodes the bounded resident daemon-lifecycle verdict; decisions stay Rust.
         "src/codex_plugin_scanner/guard/native_daemon_lifecycle.py",
-        # Gathers facts for and decodes the resident sensitive-read decisions; verdicts stay Rust.
-        "src/codex_plugin_scanner/guard/native_mcp_sensitive_read.py",
         # Decodes the bounded resident MCP runtime-evidence response envelope.
         "src/codex_plugin_scanner/guard/native_mcp_runtime_evidence.py",
         # Decodes the bounded resident runtime-detector-run response envelope.
@@ -314,7 +310,6 @@ _PRESENTATION_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/codex_app_server.py",
         "src/codex_plugin_scanner/guard/continuation_runtime.py",
         "src/codex_plugin_scanner/guard/edge_events.py",
-        "src/codex_plugin_scanner/guard/harness_usage.py",
         "src/codex_plugin_scanner/guard/local_authority_integrity.py",
         "src/codex_plugin_scanner/guard/mcp_tool_calls.py",
         "src/codex_plugin_scanner/guard/temporary_mcp_approvals.py",

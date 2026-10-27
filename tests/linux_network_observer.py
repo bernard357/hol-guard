@@ -8,7 +8,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import NetworkProtocol
+from tests.network_policy_model import (
+    NetworkProtocol,
+)
 
 _PSEUDONYM_DOMAIN = b"HOL-GUARD/evidence-pseudonym/v1\0procfs.remote-address\0"
 

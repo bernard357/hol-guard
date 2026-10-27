@@ -1,4 +1,5 @@
 import { fetchGuardApi } from "./guard-api";
+import type { WorkspaceFinding, WorkspaceFindingValidation } from "./workspace-finding-types";
 
 const ASSESSMENTS_PATH = "/v1/supply-chain/workspace-assessments";
 const FINDINGS_PATH = "/v1/supply-chain/workspace-findings";
@@ -22,65 +23,15 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime" | "skill" | "mcp" | "hook" | "plugin" | "workflow" | "editor_task";
-
-/** The fixed wording of the skill content rule that matched; never text from the skill. */
-export type WorkspaceSkillCheck = { title: string; reason: string; confidence: string; falsePositiveHint: string | null };
-
-/** The MCP launch rule that matched and the server it names; never the server's command or URL. */
-export type WorkspaceMcpCheck = WorkspaceSkillCheck & { server: string };
-
-/** The hook rule that matched and the event the hook runs on; never the hook's command. */
-export type WorkspaceHookCheck = WorkspaceSkillCheck & { event: string };
-
-/** An executable a configured tool would launch that matches a runtime advisory. */
-export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
-
-export type WorkspaceFinding = {
-  findingId: string;
-  kind: WorkspaceFindingKind;
-  severity: string;
-  decision: string;
-  /** Rule or advisory codes that raised the finding. */
-  ruleIds: string[];
-  ecosystem: string;
-  /** Null for a secret finding, which names a file location instead of a package. */
-  packageName: string | null;
-  packageVersion: string | null;
-  fixVersion: string | null;
-  advisoryIds: string[];
-  /**
-   * True when the latest scan could not recheck this finding (its detector did
-   * not finish), so it is still listed from the run that last observed it.
-   */
-  carried: boolean;
-  /**
-   * Root-relative file path of a secret or skill finding, or the executable
-   * path of a runtime finding. Guard never receives the secret itself.
-   */
-  path: string | null;
-  line: number | null;
-  /** Every line the same secret appears on in that file, first to last. */
-  lines: number[];
-  /** Set only for a runtime finding; observation only, so it has no fix. */
-  runtime: WorkspaceRuntime | null;
-  /** Set only for an agent skill finding, a warning with no fix. */
-  skill: WorkspaceSkillCheck | null;
-  /**
-   * Set only for an MCP server configuration finding, a warning with no fix,
-   * or for an agent plugin finding about a server the plugin ships.
-   */
-  mcp: WorkspaceMcpCheck | null;
-  /**
-   * Set only for a project hook configuration finding, a warning with no fix,
-   * or for an agent plugin finding about a hook the plugin ships.
-   */
-  hook: WorkspaceHookCheck | null;
-  /** Set only for a GitHub Actions workflow finding, a warning with no fix. */
-  workflow: WorkspaceSkillCheck | null;
-  /** Set only for an editor task or dev container finding, a warning with no fix. */
-  editorTask: WorkspaceSkillCheck | null;
-};
+export type {
+  WorkspaceFinding,
+  WorkspaceFindingKind,
+  WorkspaceFindingValidation,
+  WorkspaceHookCheck,
+  WorkspaceMcpCheck,
+  WorkspaceRuntime,
+  WorkspaceSkillCheck,
+} from "./workspace-finding-types";
 
 export type WorkspaceAssessment = WorktreeKeys & {
   runId: string;
@@ -168,6 +119,10 @@ function strings(value: unknown): string[] {
   return list(value).filter((entry): entry is string => typeof entry === "string");
 }
 
+function validationState(value: unknown): WorkspaceFindingValidation {
+  return value === "confirmed" || value === "unvalidated" ? value : "unknown";
+}
+
 function normalizeFinding(value: unknown): WorkspaceFinding | null {
   const item = record(value);
   const findingId = text(item.finding_id);
@@ -179,6 +134,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     ruleIds: strings(item.rule_ids),
     advisoryIds: strings(item.advisory_ids),
     carried: text(item.carried_from_run_id) !== null,
+    validation: validationState(item.validation_state),
   };
   if (item.source_kind === "secret") {
     const path = text(item.path);
@@ -441,7 +397,15 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
 }
 
 async function readPayload(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
-  const response = await fetchGuardApi(path, init);
+  let response: Response;
+  try {
+    response = await fetchGuardApi(path, init);
+  } catch (error) {
+    // A request that never reaches the daemon fails with the browser's own
+    // wording, such as "Failed to fetch"; give the same advice as any failure.
+    if (init?.signal?.aborted) throw error;
+    throw new Error(workspaceErrorMessage(null));
+  }
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok && response.status !== 409) {
     throw new Error(workspaceErrorMessage(text(record(body).error)));

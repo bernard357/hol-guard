@@ -172,11 +172,19 @@ fn render(request: &HookRenderRequestV1) -> Result<Value, &'static str> {
         // caller that sends none gets the recovery line for the default
         // home, which is what every caller printed before this key existed.
         let guard_home = params.get("guard_home").and_then(Value::as_str);
+        // The Python bounded bridge prints the harness's own output for
+        // every harness it launches, not only the ones `hol-guard hook`
+        // reshapes. Absent means the `hol-guard hook` reading.
+        let bridge = params
+            .get("bridge")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let document = cli_hook_emit_document(
             harness,
             event_name,
             response_json,
             guard_home.map(Path::new),
+            bridge,
         )
         .ok_or("native_hook_render_unrenderable")?;
         return Ok(cli_payload(CliOutcome::Document(document)));
