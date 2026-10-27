@@ -277,6 +277,9 @@ def build_fixture(root: Path) -> BenignFixture:
     _write(parent / "src" / "report-window.ts", COMMITTED_SOURCE)
     _write(parent / "src" / "password-reset-email.tsx", "export const Email = () => null;\n")
     _write(parent / "app" / "registry" / "[slug]" / "page.tsx", "export default function Page() { return null; }\n")
+    # Larger than the 32 KiB command bound, as many READMEs are. Cursor sends
+    # the whole file body with each read of it.
+    _write(parent / "docs" / "large-guide.md", "# Guide\n" + "Plain guide paragraph text.\n" * 1600)
     _write(parent / ".agents" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\nSynthetic skill body.\n")
     # Git treats a link as a file, so `node_modules/` alone leaves the borrowed
     # `dashboard/node_modules` link below unignored.

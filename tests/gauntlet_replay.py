@@ -159,11 +159,17 @@ def cursor_hook_fields(tool: str, payload: dict[str, object]) -> dict[str, objec
 
     Cursor reports shell calls as beforeShellExecution and reads as beforeReadFile.
     The script forwards both as PreToolUse, keeping the raw command or path beside tool_input.
+    A beforeReadFile event also carries the file's full text as ``content``.
     """
     tool_input = payload["tool_input"]
     assert isinstance(tool_input, dict)
     if tool == "read":
-        return {"file_path": tool_input["file_path"]}
+        file_path = str(tool_input["file_path"])
+        fields: dict[str, object] = {"file_path": file_path}
+        target = Path(str(payload["cwd"]), file_path)
+        if target.is_file():
+            fields["content"] = target.read_text(encoding="utf-8", errors="replace")
+        return fields
     return {
         "command": tool_input["command"],
         "tool_input": {**tool_input, "working_directory": payload["cwd"]},

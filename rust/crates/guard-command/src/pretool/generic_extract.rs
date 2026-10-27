@@ -48,6 +48,18 @@ pub(super) struct GenericSignals {
     pub(super) event_hint: Option<String>,
 }
 
+/// File bodies a host sends beside the path they belong to. Generic
+/// extraction reads none of these keys and the decision uses the path, so the
+/// command-size bound does not apply to them.
+const FILE_BODY_KEYS: [&str; 6] = [
+    "content",
+    "contents",
+    "old_string",
+    "new_string",
+    "oldString",
+    "newString",
+];
+
 fn bounded_payload(
     value: &Value,
     depth: usize,
@@ -62,7 +74,13 @@ fn bounded_payload(
             if *keys > MAX_PRE_TOOL_KEYS {
                 return Err(GenericExtractionError::Bounds);
             }
-            for child in record.values() {
+            let names_file = signals::PATH_KEYS
+                .iter()
+                .any(|key| record.get(*key).is_some_and(Value::is_string));
+            for (key, child) in record {
+                if names_file && child.is_string() && FILE_BODY_KEYS.contains(&key.as_str()) {
+                    continue;
+                }
                 bounded_payload(child, depth.saturating_add(1), keys)?;
             }
         }
