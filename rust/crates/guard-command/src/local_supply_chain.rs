@@ -3489,19 +3489,10 @@ fn workspace_inventory_from_paths(
             DEFAULT_MANIFEST_PARSE_DEADLINE_MS,
         );
         for (package_name, version) in &dependency_map {
-            let mut item = Map::new();
-            item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = dependency_name(ecosystem, package_name);
-            item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
-            item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(true));
             let range = Some(version.trim())
                 .filter(|range| !range.is_empty())
                 .map(str::to_string);
-            direct_dependencies.record(relative_path, ecosystem, package_name, range.clone());
-            item.insert("range".into(), range.map_or(Value::Null, Value::String));
-            item.insert("version".into(), Value::Null);
-            merge_inventory_item(&mut inventory_map, &item);
+            direct_dependencies.record(relative_path, ecosystem, package_name, range);
         }
     }
 
@@ -3543,6 +3534,18 @@ fn workspace_inventory_from_paths(
             );
             merge_inventory_item(&mut inventory_map, &item);
         }
+    }
+
+    for (ecosystem, package_name, range) in direct_dependencies.unresolved() {
+        let mut item = Map::new();
+        item.insert("ecosystem".into(), json!(ecosystem));
+        let (ns, name) = dependency_name(ecosystem, package_name);
+        item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
+        item.insert("name".into(), json!(name));
+        item.insert("direct".into(), json!(true));
+        item.insert("range".into(), range.map_or(Value::Null, Value::String));
+        item.insert("version".into(), Value::Null);
+        merge_inventory_item(&mut inventory_map, &item);
     }
 
     inventory_map.into_values()

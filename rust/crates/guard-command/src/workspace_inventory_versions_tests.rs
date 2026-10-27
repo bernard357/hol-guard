@@ -146,3 +146,28 @@ fn a_lockfile_entry_its_own_manifest_lists_is_direct() {
         None
     );
 }
+
+#[test]
+fn a_requirement_no_lockfile_beside_its_manifest_resolved_stays_unresolved() {
+    let mut direct = DirectDependencies::default();
+    direct.record("package.json", "npm", "lodash", Some("^4".into()));
+    direct.record("package.json", "npm", "a", None);
+    direct.record("apps/web/package.json", "npm", "lodash", Some("^3".into()));
+
+    // A nested copy or another workspace's lockfile resolves none of them.
+    assert_eq!(
+        direct.lockfile_range("package-lock.json", "npm", "a/node_modules/lodash"),
+        None
+    );
+    assert_eq!(
+        direct.lockfile_range("package-lock.json", "npm", "a"),
+        Some(None)
+    );
+    assert_eq!(
+        direct.unresolved().collect::<Vec<_>>(),
+        vec![
+            ("npm", "lodash", Some("^4".to_owned())),
+            ("npm", "lodash", Some("^3".to_owned())),
+        ]
+    );
+}

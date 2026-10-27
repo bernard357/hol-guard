@@ -475,7 +475,8 @@ fn every_resolved_version_in_the_workspace_is_listed() {
 #[test]
 fn each_workspace_keeps_the_direct_requirement_of_its_own_version() {
     // Two workspaces require lodash directly and resolve different versions;
-    // the root lock also nests a copy under `a`, which stays transitive.
+    // the root lock also nests a copy under `a`, which stays transitive even
+    // though npm's sorted keys list it before the root's own copy.
     let scratch = Scratch::new("direct-versions");
     let workspace = scratch.0.join("ws");
     write_files(
@@ -484,9 +485,9 @@ fn each_workspace_keeps_the_direct_requirement_of_its_own_version() {
             "package.json": r#"{"dependencies": {"lodash": "^4", "a": "^1"}}"#,
             "package-lock.json": r#"{"lockfileVersion": 3, "packages": {
                 "": {"dependencies": {"lodash": "^4", "a": "^1"}},
-                "node_modules/lodash": {"version": "4.17.21"},
                 "node_modules/a": {"version": "1.0.0"},
-                "node_modules/a/node_modules/lodash": {"version": "3.10.1"}
+                "node_modules/a/node_modules/lodash": {"version": "3.10.1"},
+                "node_modules/lodash": {"version": "4.17.21"}
             }}"#,
             "packages/app/package.json": r#"{"dependencies": {"lodash": "~4.17.15"}}"#,
             "packages/app/package-lock.json": r#"{"lockfileVersion": 3, "packages": {

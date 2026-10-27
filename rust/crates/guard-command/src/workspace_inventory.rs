@@ -335,9 +335,22 @@ pub fn merge_inventory_item(inventory_map: &mut InventoryMap, item: &Map<String,
 /// Packages each manifest lists itself, by the manifest's directory and
 /// ecosystem. A lockfile beside the manifest resolves them as direct
 /// dependencies, so a second resolved version of a package that another
-/// workspace requires directly keeps its own `direct` flag and range.
+/// workspace requires directly keeps its own `direct` flag and range. A
+/// requirement no lockfile beside its manifest resolved is merged only after
+/// every lockfile, so an unrelated or nested copy never takes its range.
 #[derive(Debug, Default)]
-pub struct DirectDependencies(HashMap<(String, String), HashMap<String, Option<String>>>);
+pub struct DirectDependencies {
+    index: HashMap<(String, String, String), usize>,
+    listed: Vec<DirectDependency>,
+}
+
+#[derive(Debug)]
+struct DirectDependency {
+    ecosystem: String,
+    package_name: String,
+    range: Option<String>,
+    resolved: bool,
+}
 
 fn parent_dir(path: &str) -> &str {
     path.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir)
@@ -353,18 +366,28 @@ impl DirectDependencies {
         package_name: &str,
         range: Option<String>,
     ) {
-        self.0
-            .entry((parent_dir(manifest_path).to_owned(), ecosystem.to_owned()))
-            .or_default()
-            .entry(package_name.to_owned())
-            .or_insert(range);
+        let key = (
+            parent_dir(manifest_path).to_owned(),
+            ecosystem.to_owned(),
+            package_name.to_owned(),
+        );
+        if self.index.contains_key(&key) {
+            return;
+        }
+        self.index.insert(key, self.listed.len());
+        self.listed.push(DirectDependency {
+            ecosystem: ecosystem.to_owned(),
+            package_name: package_name.to_owned(),
+            range,
+            resolved: false,
+        });
     }
 
     /// `Some(range)` when the manifest beside `lockfile_path` lists
-    /// `package_name` itself. A copy npm nests under another package
-    /// (`a/node_modules/b`) is never direct.
+    /// `package_name` itself, which marks that requirement resolved. A copy
+    /// npm nests under another package (`a/node_modules/b`) is never direct.
     pub fn lockfile_range(
-        &self,
+        &mut self,
         lockfile_path: &str,
         ecosystem: &str,
         package_name: &str,
@@ -372,10 +395,29 @@ impl DirectDependencies {
         if package_name.contains("/node_modules/") {
             return None;
         }
-        self.0
-            .get(&(parent_dir(lockfile_path).to_owned(), ecosystem.to_owned()))?
-            .get(package_name)
-            .cloned()
+        let key = (
+            parent_dir(lockfile_path).to_owned(),
+            ecosystem.to_owned(),
+            package_name.to_owned(),
+        );
+        let requirement = &mut self.listed[*self.index.get(&key)?];
+        requirement.resolved = true;
+        Some(requirement.range.clone())
+    }
+
+    /// The requirements no lockfile beside their manifest resolved, in the
+    /// order the manifests list them, as `(ecosystem, package_name, range)`.
+    pub fn unresolved(&self) -> impl Iterator<Item = (&str, &str, Option<String>)> {
+        self.listed
+            .iter()
+            .filter(|requirement| !requirement.resolved)
+            .map(|requirement| {
+                (
+                    requirement.ecosystem.as_str(),
+                    requirement.package_name.as_str(),
+                    requirement.range.clone(),
+                )
+            })
     }
 }
 

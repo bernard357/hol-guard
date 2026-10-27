@@ -102,20 +102,20 @@ fn merge_dependencies(
         return;
     };
     for (package_name, version) in dependencies.iter() {
-        let (namespace, name) = dependency_name(ecosystem, package_name);
         let stripped = stripped_or_none(version);
-        let (direct, range, version) = if manifest {
-            direct_dependencies.record(path, ecosystem, package_name, stripped.clone());
-            (true, stripped, None)
-        } else {
+        if manifest {
+            direct_dependencies.record(path, ecosystem, package_name, stripped);
+            continue;
+        }
+        let (namespace, name) = dependency_name(ecosystem, package_name);
+        let (direct, range) =
             match direct_dependencies.lockfile_range(path, ecosystem, package_name) {
-                Some(range) => (true, range, stripped),
-                None => (false, None, stripped),
-            }
-        };
+                Some(range) => (true, range),
+                None => (false, None),
+            };
         merge_inventory_item(
             inventory,
-            &item(ecosystem, namespace, name, direct, range, version),
+            &item(ecosystem, namespace, name, direct, range, stripped),
         );
     }
 }
@@ -137,6 +137,13 @@ fn inventory_from_paths(
         if let Some(ecosystem) = ECOSYSTEM_BY_LOCKFILE.get(basename(path)) {
             merge_dependencies(&mut inventory, reader, path, ecosystem, false, &mut direct);
         }
+    }
+    for (ecosystem, package_name, range) in direct.unresolved() {
+        let (namespace, name) = dependency_name(ecosystem, package_name);
+        merge_inventory_item(
+            &mut inventory,
+            &item(ecosystem, namespace, name, true, range, None),
+        );
     }
     inventory
 }
