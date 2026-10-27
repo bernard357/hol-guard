@@ -118,8 +118,17 @@ def test_shadow_native_identity_is_reused_without_another_transport(monkeypatch)
     assert projected.to_dict()["security_identity"] == rich.security_identity
     assert _canonical_command_from_native("echo hi", {**payload, "security_identity": "invalid"}) is None
     malformed_segment = {key: value for key, value in payload["segments"][0].items() if key != "span"}
+    first = payload["segments"][0]
+    outside_span = {**first, "span": {**first["span"], "end": len("echo hi") + 1}}
+    mismatched_text = {**first, "text": "echo ho"}
     for damaged in (
         {**payload, "segments": [malformed_segment]},
+        {**payload, "segments": []},
+        {**payload, "segments": [outside_span]},
+        {**payload, "segments": [mismatched_text]},
+        {**payload, "segments": [first, first]},
+        {**payload, "confidence": "uncertain", "uncertainty_reason": "unsupported_syntax"},
+        {**payload, "uncertainty_reason": "unsupported_syntax"},
         {**payload, "segments": "echo hi"},
         {**payload, "dialect": "powershell"},
         {**payload, "confidence": "guess"},
