@@ -118,7 +118,7 @@ fn cached(bundle: Value) -> SupplyChainBundleResponse {
     let raw = json!({
         "bundle": bundle,
         "payloadHash": "0".repeat(64),
-        "signature": "",
+        "signature": "cGxhY2Vob2xkZXItc2lnbmF0dXJl",
         "signatureAlgorithm": "rsa-pss-sha256",
         "verificationKeys": [{
             "fingerprintSha256": "0".repeat(64),
