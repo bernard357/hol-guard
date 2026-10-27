@@ -2288,6 +2288,34 @@ def test_exchange_guard_device_code_keeps_invalid_grant_generic_when_every_poll_
     assert not isinstance(raised.value, connect_flow.GuardDeviceApprovalLostError)
 
 
+def test_exchange_guard_device_code_keeps_invalid_grant_generic_after_pending_answer() -> None:
+    def fake_urlopen(request: urllib.request.Request, timeout: int):
+        del request, timeout
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise TimeoutError("timed out")
+        if len(attempts) == 2:
+            raise _device_token_error("authorization_pending")
+        raise _device_token_error("invalid_grant")
+
+    attempts: list[int] = []
+    with pytest.raises(RuntimeError, match="token exchange failed: invalid_grant") as raised:
+        connect_flow.exchange_guard_device_code(
+            token_endpoint="https://hol.org/api/guard/oauth/token",
+            client_id="guard-local-daemon",
+            device_code="device-code-123",
+            dpop_key_material=generate_dpop_key_pair(),
+            interval_seconds=5,
+            expires_in_seconds=600,
+            urlopen=fake_urlopen,
+            sleep=lambda seconds: None,
+            now=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+
+    assert attempts == [0, 1, 2]
+    assert not isinstance(raised.value, connect_flow.GuardDeviceApprovalLostError)
+
+
 def _lost_then_approved_device_flow():
     device_codes: list[str] = []
     polled_codes: list[str] = []
@@ -2379,6 +2407,70 @@ def test_headless_connect_stops_after_one_lost_approval_restart(tmp_path: Path, 
 
     assert requested == [0, 1]
     assert store.get_oauth_local_credentials() is None
+
+
+def _record_lost_approval_waits(monkeypatch, *, seconds_per_wait: float):
+    clock = [1000.0]
+    waits: list[object] = []
+    requested: list[int] = []
+    monkeypatch.setattr(connect_flow.time, "monotonic", lambda: clock[0])
+
+    def fake_exchange(**kwargs):
+        waits.append(kwargs["wait_timeout_seconds"])
+        clock[0] += seconds_per_wait
+        raise connect_flow._device_approval_lost_error()
+
+    def fake_request(url: str, body: str) -> dict[str, object]:
+        del url, body
+        requested.append(len(requested))
+        return {
+            "device_code": f"device-code-{len(requested)}",
+            "user_code": "ABCD-EFGH",
+            "verification_uri": "https://hol.org/guard/oauth/device",
+            "expires_in": 600,
+            "interval": 5,
+        }
+
+    monkeypatch.setattr(connect_flow, "exchange_guard_device_code", fake_exchange)
+    return waits, requested, fake_request
+
+
+def test_headless_connect_restart_shares_the_wait_budget(tmp_path: Path, monkeypatch) -> None:
+    _install_fake_system_keyring(monkeypatch)
+    store = GuardStore(tmp_path / "guard-home")
+    waits, requested, fake_request = _record_lost_approval_waits(monkeypatch, seconds_per_wait=100)
+
+    with pytest.raises(RuntimeError, match="answer was lost"):
+        connect_flow.run_guard_device_connect_command(
+            store=store,
+            connect_url="https://hol.org/guard/connect",
+            request_device_authorization=fake_request,
+            sleep=lambda seconds: None,
+            wait_timeout_seconds=180,
+            now="2026-06-01T12:00:00+00:00",
+        )
+
+    assert requested == [0, 1]
+    assert waits == [180, 80]
+
+
+def test_headless_connect_does_not_restart_once_the_wait_budget_is_spent(tmp_path: Path, monkeypatch) -> None:
+    _install_fake_system_keyring(monkeypatch)
+    store = GuardStore(tmp_path / "guard-home")
+    waits, requested, fake_request = _record_lost_approval_waits(monkeypatch, seconds_per_wait=200)
+
+    with pytest.raises(RuntimeError, match=r"answer was lost.*hol-guard connect --headless"):
+        connect_flow.run_guard_device_connect_command(
+            store=store,
+            connect_url="https://hol.org/guard/connect",
+            request_device_authorization=fake_request,
+            sleep=lambda seconds: None,
+            wait_timeout_seconds=180,
+            now="2026-06-01T12:00:00+00:00",
+        )
+
+    assert requested == [0]
+    assert waits == [180]
 
 
 def test_revoke_guard_self_oauth_grant_retries_with_dpop_nonce_challenge() -> None:

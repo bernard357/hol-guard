@@ -777,6 +777,8 @@ def exchange_guard_device_code(
                 continue
             oauth_error = str(payload.get("error") or "").strip() if isinstance(payload, dict) else ""
             if oauth_error == "authorization_pending":
+                # An answered pending poll proves the code was not redeemed yet.
+                poll_went_unanswered = False
                 if time.monotonic() >= deadline:
                     raise RuntimeError(
                         "Guard OAuth approval timed out. Retry `hol-guard connect --headless` to request a new code."
@@ -784,6 +786,7 @@ def exchange_guard_device_code(
                 sleep(float(current_interval))
                 continue
             if oauth_error == "slow_down":
+                poll_went_unanswered = False
                 current_interval = max(current_interval + DEVICE_CODE_SLOW_DOWN_SECONDS, 1)
                 if time.monotonic() >= deadline:
                     raise RuntimeError(
@@ -1155,6 +1158,9 @@ def run_guard_device_connect_command(
     )
     restarts_left = DEVICE_CODE_LOST_APPROVAL_RESTARTS
     approval_lost = False
+    # A restart with a new code shares the caller's wait budget instead of
+    # starting a fresh one.
+    command_deadline = time.monotonic() + wait_timeout_seconds if wait_timeout_seconds is not None else None
     while True:
         response = request_device_authorization(
             oauth_client.device_authorization_endpoint,
@@ -1184,13 +1190,16 @@ def run_guard_device_connect_command(
                 dpop_key_material=dpop_key_material,
                 interval_seconds=_int_payload_value(response, "interval", 5),
                 expires_in_seconds=_int_payload_value(response, "expires_in", 0),
-                wait_timeout_seconds=wait_timeout_seconds,
+                wait_timeout_seconds=(
+                    max(command_deadline - time.monotonic(), 0) if command_deadline is not None else None
+                ),
                 urlopen=token_urlopen,
                 sleep=sleep,
                 now=datetime.fromisoformat(now) if now else None,
             )
         except GuardDeviceApprovalLostError as error:
-            if restarts_left <= 0:
+            out_of_time = command_deadline is not None and time.monotonic() >= command_deadline
+            if restarts_left <= 0 or out_of_time:
                 raise RuntimeError(f"{error} Retry `hol-guard connect --headless` to request a new code.") from error
             # The spent code cannot be redeemed again; ask for a new one and
             # show it, so the user approves once more instead of starting over.
