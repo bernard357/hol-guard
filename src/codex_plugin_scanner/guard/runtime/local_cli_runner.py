@@ -34,13 +34,6 @@ def runner_target(runner: str, arguments: list[str] | tuple[str, ...]) -> str | 
     return split[0] if split is not None else None
 
 
-def runner_inner_arguments(runner: str, arguments: list[str] | tuple[str, ...]) -> list[str] | None:
-    """Return the arguments passed through to the runner's target CLI."""
-
-    split = _split_runner_arguments(runner, arguments)
-    return split[1] if split is not None else None
-
-
 def _split_runner_arguments(
     runner: str,
     arguments: list[str] | tuple[str, ...],
@@ -60,7 +53,6 @@ def _split_runner_arguments(
 
 __all__ = [
     "LOCAL_BIN_RUNNERS",
-    "runner_inner_arguments",
     "runner_name",
     "runner_target",
 ]

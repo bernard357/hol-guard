@@ -10,7 +10,6 @@ from codex_plugin_scanner.guard.runtime.network_capability_contract import (
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     BackendCapability,
     EnforcementGrade,
-    FailureMode,
 )
 from tests.network_capability_negotiation import (
     BackendState,
@@ -22,6 +21,7 @@ from tests.network_capability_negotiation import (
     failure_disposition,
     negotiate_capability,
 )
+from tests.network_policy_model import FailureMode
 
 _DIGEST = "b" * 64
 

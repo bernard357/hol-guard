@@ -14,7 +14,6 @@ from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_approvals import (
     approval_index_statements,
     approval_schema_statement,
-    bulk_resolve_approval_requests,
     get_approval_request,
     list_approval_requests,
     resolve_request_with_queue_result,
@@ -24,6 +23,7 @@ from tests.coverage_ci import under_coverage_scale
 from tests.native_approval_writes import (
     _store_for,
     add_approval_request,
+    bulk_resolve_approval_requests,
     native_approval_connection,
     native_store,
     page_cursor,
@@ -376,40 +376,6 @@ class TestCountFilter:
         _insert(conn, _make_request(harness="claude"))
         assert native_store(conn).count_approval_requests(status="pending", harness="codex") == 1
         assert native_store(conn).count_approval_requests(status="pending", harness="claude") == 1
-
-
-class TestBulkResolve:
-    def test_bulk_resolve_marks_multiple_pending_resolved(self) -> None:
-        conn = _make_conn()
-        reqs = [_make_request() for _ in range(4)]
-        for r in reqs:
-            _insert(conn, r)
-        ids = [reqs[0].request_id, reqs[1].request_id]
-        bulk_resolve_approval_requests(
-            conn,
-            ids,
-            resolution_action="allow",
-            resolution_scope="session",
-            reason="bulk",
-            resolved_at="2026-01-10T00:00:00Z",
-        )
-        for rid in ids:
-            row = get_approval_request(conn, rid)
-            assert row is not None
-            assert row["status"] == "resolved"
-        assert get_approval_request(conn, reqs[2].request_id)["status"] == "pending"
-
-    def test_bulk_resolve_empty_list_is_noop(self) -> None:
-        conn = _make_conn()
-        bulk_resolve_approval_requests(
-            conn,
-            [],
-            resolution_action="allow",
-            resolution_scope="session",
-            reason=None,
-            resolved_at="2026-01-01T00:00:00Z",
-        )
-        assert native_store(conn).count_approval_requests() == 0
 
 
 class TestMigrationFromOldSchema:

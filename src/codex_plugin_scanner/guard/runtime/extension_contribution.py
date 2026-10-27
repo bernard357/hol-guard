@@ -39,10 +39,6 @@ _ALLOWED_ICON_NAMES: Final = frozenset(
 )
 
 
-def contributions_dir() -> Path:
-    return Path(__file__).resolve().parents[4] / "contributions" / "extensions"
-
-
 def validate_contribution(payload: Mapping[str, object], *, filename: str = "contribution") -> None:
     if payload.get("schemaVersion") == "guard.extension-contribution.v1":
         raise ValueError(

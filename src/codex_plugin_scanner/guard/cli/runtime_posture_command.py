@@ -68,6 +68,7 @@ def run_runtime_posture_command(
         skipped_harnesses=skipped,
         advisory_bundle=advisory_bundle,
         advisory_bundle_reason=bundle_reason,
+        instance_home=context.guard_home,
     )
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))
@@ -101,12 +102,32 @@ def render_runtime_posture(payload: dict[str, object]) -> str:
         lines.append(f"  {label}: {item['command']} ({item['harness']} / {item['server']})")
     if payload.get("candidate_limit_reached"):
         lines.append("  Candidate limit reached; some launch executables were not inspected.")
+    lines.extend(_render_instances(payload.get("instances")))
     available = isinstance(coverage, dict) and coverage.get("advisories_available") is True
     advisories = f"cached bundle {_bundle_label(payload)}" if available else f"unavailable ({reason})"
     lines.append(f"Coverage: observed_only; scope complete: no; advisories: {advisories}.")
     lines.extend(_render_advisories(payload.get("advisories")))
     lines.append("Unknown versions stay unknown. No runtime is reported safe.")
     return "\n".join(lines) + "\n"
+
+
+def _render_instances(summary: object) -> list[str]:
+    if not isinstance(summary, dict) or summary.get("enumerated") is not True:
+        return []
+    line = f"  Running processes seen: {summary['running']}"
+    if summary.get("unidentified"):
+        line += f", {summary['unidentified']} started from a file replaced since (version unknown)"
+    if summary.get("exited"):
+        line += f"; {summary['exited']} seen earlier have exited"
+    lines = [line + "."]
+    if summary.get("unbound_processes"):
+        lines.append(f"  {summary['unbound_processes']} processes could not be identified by start time.")
+    if summary.get("limit_reached"):
+        lines.append("  Instance limit reached; some processes were not listed.")
+    if summary.get("assessed") is not True:
+        reason = summary.get("assessment_error") or "not assessed"
+        lines.append(f"  Processes could not be assessed against advisories ({reason}); files were assessed alone.")
+    return lines
 
 
 def _render_row(row: object) -> list[str]:

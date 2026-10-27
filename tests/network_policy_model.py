@@ -20,7 +20,6 @@ import idna
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     EnforcementGrade,
-    FailureMode,
     NetworkAction,
     require_digest,
     require_id,
@@ -36,6 +35,12 @@ NETWORK_EVIDENCE_SCHEMA_VERSION: Final = "guard.network-evidence.v1"
 
 
 _LABEL: Final = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+class FailureMode(str, Enum):
+    DENY = "deny"
+    OFFLINE = "offline"
+    REQUIRE_APPROVAL = "require-approval"
 
 
 class NetworkProtocol(str, Enum):

@@ -14,7 +14,6 @@ from typing import cast
 
 from codex_plugin_scanner.guard.runtime.extension_contribution import (
     _frozen_runtime,
-    contributions_dir,
     frozen_package_data,
     validate_contribution,
 )
@@ -23,7 +22,7 @@ from codex_plugin_scanner.guard.runtime.extension_contribution import (
 def load_contribution_payloads(root: Path | None = None) -> tuple[dict[str, object], ...]:
     if root is not None:
         return _load_from_directory(root)
-    from codex_plugin_scanner.guard.catalog_delivery.installed_bundle import compatibility_payloads
+    from tests.installed_compatibility_support import compatibility_payloads
 
     bundled = compatibility_payloads("commands")
     if bundled is not None:
@@ -31,7 +30,7 @@ def load_contribution_payloads(root: Path | None = None) -> tuple[dict[str, obje
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
-    return _load_from_directory(contributions_dir())
+    return _load_from_directory(Path(__file__).resolve().parents[1] / "contributions" / "extensions")
 
 
 def validate_contribution_file(path: Path) -> dict[str, object]:
@@ -83,3 +82,7 @@ def _load_packaged_payloads() -> tuple[dict[str, object], ...]:
     for item in sorted(names, key=lambda entry: entry.name):
         payloads.append(_validated_payload(json.loads(item.read_text(encoding="utf-8")), item.name))
     return tuple(payloads)
+
+
+def contributions_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "contributions" / "extensions"

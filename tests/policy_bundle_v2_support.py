@@ -9,11 +9,11 @@ from codex_plugin_scanner.guard.native_policy_bundle import (
     PolicyBundleNativeError,
     native_rejection_code,
     policy_bundle_chunks,
-    policy_bundle_paged_text,
     policy_bundle_verdict,
 )
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import PolicyBundleVerificationKey
 from codex_plugin_scanner.guard.policy_bundle_v2 import policy_bundle_v2_now_micros
+from tests.policy_bundle_parser_support import policy_bundle_paged_text
 
 
 def _document(policy_bundle: dict[str, object]) -> dict[str, object]:

@@ -11,11 +11,10 @@ import json
 from importlib import resources
 from pathlib import Path
 
-from codex_plugin_scanner.guard.runtime import mcp_server_contribution
 from codex_plugin_scanner.guard.runtime.extension_contribution import frozen_package_data
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
+    _bound_grammar,
     _frozen_runtime,
-    contributions_dir,
     direct_mcp_command_name,
     normalized_remote_mcp_url,
     normalized_remote_server_name,
@@ -26,7 +25,7 @@ from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
 def load_mcp_contribution_payloads(root: Path | None = None) -> tuple[dict[str, object], ...]:
     if root is not None:
         return _load_from_directory(root)
-    from codex_plugin_scanner.guard.catalog_delivery.installed_bundle import compatibility_payloads
+    from tests.installed_compatibility_support import compatibility_payloads
 
     bundled = compatibility_payloads("mcp")
     if bundled is not None:
@@ -34,7 +33,7 @@ def load_mcp_contribution_payloads(root: Path | None = None) -> tuple[dict[str, 
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
-    return _load_from_directory(contributions_dir())
+    return _load_from_directory(Path(__file__).resolve().parents[1] / "contributions" / "mcp-servers")
 
 
 def validate_mcp_contribution_file(path: Path) -> dict[str, object]:
@@ -138,10 +137,18 @@ def _finalize_payloads(payloads: tuple[dict[str, object], ...]) -> tuple[dict[st
     return payloads
 
 
+def contributions_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "contributions" / "mcp-servers"
+
+
+def catalog_id_for_mcp_id(mcp_id: str) -> str:
+    return f"command.mcp-{mcp_id.removeprefix('mcp.')}"
+
+
 def remote_mcp_endpoint_identity(value: object) -> str | None:
     """Identify the launch endpoint a configured remote MCP URL points at.
 
     Only tests ask the resident's grammar for this on its own; the runtime
     reads it inside the native MCP decision.
     """
-    return mcp_server_contribution._bound_grammar("remote_endpoint_identity", value)
+    return _bound_grammar("remote_endpoint_identity", value)

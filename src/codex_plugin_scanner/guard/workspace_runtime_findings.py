@@ -4,8 +4,11 @@ Reuses the runtime posture: the native probe describes each executable the
 configured MCP servers would launch, without running it, and the native
 assessment matches it against the runtime advisories carried in the cached
 supply-chain bundle. Nothing here reaches Cloud or feeds hooks or approvals.
-Running processes are not enumerated, so a finding says an executable on disk
-matches an advisory; it never claims a live process is affected or fixed.
+Where the native runtime enumerates running processes, a process that kept
+running after its runtime was replaced on disk keeps its finding, as
+``restart_required``, until it exits: a new build on disk alone is never the
+fix. Only processes this user can see are enumerated, so a finding that goes
+away never claims the runtime was verified fixed.
 
 Runtime findings belong to the agent inventory domain, so they are recorded
 with that source kind rather than dressed up as packages.
@@ -59,6 +62,7 @@ def observe_workspace_runtimes(store: Any, root: Path, *, home_dir: Path | None 
         skipped_harnesses=skipped,
         advisory_bundle=bundle,
         advisory_bundle_reason=reason,
+        instance_home=Path(store.guard_home),
     )
 
 
@@ -92,6 +96,11 @@ def runtime_identity_digest(posture: Mapping[str, object]) -> str | None:
         ),
         "skipped": sorted(str(item) for item in _list(posture.get("skipped_harnesses"))),
     }
+    # A process left running on a replaced build, and its exit, change what a
+    # run reports; processes running the build on disk do not.
+    stale = _stale_instances(posture)
+    if stale:
+        identity["stale_instances"] = stale
     encoded = json.dumps(identity, separators=(",", ":"))
     return hashlib.sha256(("guard.workspace-runtimes.v1\0" + encoded).encode("utf-8")).hexdigest()
 
@@ -172,9 +181,10 @@ def assessment_context_digest(feed_digest: str, runtime_digest: str | None) -> s
     v8: runs check agent plugin hooks and MCP servers.
     v9: runs check GitHub Actions workflows.
     v10: runs check editor tasks and dev container commands.
+    v11: runs report processes still running a replaced, affected runtime.
     """
 
-    encoded = f"guard.workspace-context.v10\0{feed_digest}\0{runtime_digest or 'unknown'}"
+    encoded = f"guard.workspace-context.v11\0{feed_digest}\0{runtime_digest or 'unknown'}"
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -191,20 +201,35 @@ def project_runtime_findings(worktree_key: str, posture: Mapping[str, object]) -
         artifact_id = row.get("artifact_id")
         if isinstance(artifact_id, str):
             rows.setdefault(artifact_id, []).append(row)
+    locations = _by_location(posture)
+    instances = {row.get("instance_id"): row for row in _instance_rows(posture)}
     findings: dict[str, dict[str, object]] = {}
     for advisory in _rows(posture.get("advisories")):
         advisory_id, verdict = _text(advisory.get("advisory_id")), advisory.get("verdict")
         if advisory_id is None or not isinstance(verdict, str) or verdict not in _FINDING_VERDICTS:
             continue
         severity = str(advisory.get("severity") or "").lower()
-        for artifact_id in _list(advisory.get("affected_artifact_ids")):
-            for row in rows.get(str(artifact_id), []):
-                path = str(row.get("path"))
-                finding_id = hashlib.sha256(
-                    "\0".join(("guard.workspace-finding.v1", worktree_key, "runtime", advisory_id, path)).encode(
-                        "utf-8"
-                    )
-                ).hexdigest()[:32]
+        targets = [
+            (row, row.get("version"))
+            for artifact_id in _list(advisory.get("affected_artifact_ids"))
+            for row in rows.get(str(artifact_id), [])
+        ]
+        # A process still running an affected build is reported at the path it
+        # was launched from, even once a fixed build sits there.
+        for instance_id in _list(advisory.get("affected_instance_ids")):
+            instance = instances.get(instance_id)
+            if instance is None:
+                continue
+            location_id = _text(instance.get("location_id"))
+            location = locations.get(location_id) if location_id is not None else None
+            if location is not None:
+                targets.append((location, instance.get("version")))
+        for row, version in targets:
+            path = str(row.get("path"))
+            finding_id = hashlib.sha256(
+                "\0".join(("guard.workspace-finding.v1", worktree_key, "runtime", advisory_id, path)).encode("utf-8")
+            ).hexdigest()[:32]
+            if finding_id not in findings:
                 findings[finding_id] = {
                     "finding_id": finding_id,
                     "source_kind": RUNTIME_SOURCE_KIND,
@@ -215,7 +240,7 @@ def project_runtime_findings(worktree_key: str, posture: Mapping[str, object]) -
                     "ecosystem": None,
                     "package_name": None,
                     "runtime_family": _text(row.get("family")),
-                    "runtime_version": _text(row.get("version")),
+                    "runtime_version": _text(version),
                     "path": path,
                     "rule_ids": [str(verdict)],
                     "advisory_ids": [advisory_id],
@@ -260,6 +285,19 @@ def with_runtime_coverage(coverage: dict[str, object], posture: Mapping[str, obj
             or any(row.get("verdict") == "unknown" for row in _rows(posture.get("advisories")))
         ):
             gaps.append("runtimes_incomplete")
+        # A process Guard could not name, one past the limit, or processes the
+        # assessment left out may still run an affected build.
+        instances = posture.get("instances")
+        if (
+            isinstance(instances, Mapping)
+            and instances.get("enumerated") is True
+            and (
+                instances.get("limit_reached") is True
+                or instances.get("unbound_processes")
+                or instances.get("assessed") is False
+            )
+        ):
+            gaps.append("runtime_instances_incomplete")
         posture_coverage = posture.get("coverage")
         available = isinstance(posture_coverage, Mapping) and posture_coverage.get("advisories_available") is True
         if runtimes and not available:
@@ -278,6 +316,30 @@ def with_runtime_coverage(coverage: dict[str, object], posture: Mapping[str, obj
         "detectors": {**(detectors if isinstance(detectors, Mapping) else {}), RUNTIME_DETECTOR: status},
         "runtimes": summary,
     }
+
+
+def _by_location(posture: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    return {
+        location_id: row
+        for row in _rows(posture.get("runtimes"))
+        if isinstance(location_id := row.get("location_id"), str)
+    }
+
+
+def _instance_rows(posture: Mapping[str, object]) -> list[Mapping[str, object]]:
+    instances = posture.get("instances")
+    return _rows(instances.get("rows")) if isinstance(instances, Mapping) else []
+
+
+def _stale_instances(posture: Mapping[str, object]) -> list[list[str]]:
+    locations = _by_location(posture)
+    stale: list[list[str]] = []
+    for row in _instance_rows(posture):
+        location = locations.get(str(row.get("location_id")))
+        running = row.get("state") == "running"
+        if location is not None and running and row.get("artifact_id") != location.get("artifact_id"):
+            stale.append([str(location.get("path")), str(row.get("artifact_id"))])
+    return sorted(stale)
 
 
 def _rows(value: object) -> list[Mapping[str, object]]:
