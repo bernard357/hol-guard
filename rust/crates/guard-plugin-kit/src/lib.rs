@@ -94,6 +94,10 @@ enum Request {
         /// Set only when the user overrode the install-spec endpoint.
         #[serde(default)]
         listing_origin: Option<String>,
+        /// Days since 1970-01-01, to age HOL's scan. Tests pin it; Guard
+        /// leaves it out and the Kit reads the clock.
+        #[serde(default)]
+        today: Option<i64>,
     },
     /// Plans from what Guard recorded installing; see `ledger.rs`.
     Uninstall {
@@ -115,14 +119,18 @@ enum Request {
         spec: Option<Value>,
         #[serde(default)]
         listing_origin: Option<String>,
+        /// Guard registered the marketplace for this install.
+        #[serde(default)]
+        marketplace_added: bool,
     },
     Installs {
         guard_home: String,
+        /// Move a record that no longer parses aside instead of failing.
+        #[serde(default)]
+        recover: bool,
     },
     /// Checks an install-spec endpoint override; see `install::endpoint_origin`.
-    Endpoint {
-        value: String,
-    },
+    Endpoint { value: String },
 }
 
 /// Runs one request and wraps the outcome in the native response envelope.
@@ -175,6 +183,7 @@ fn handle(request: Request) -> Result<Value, String> {
             slug,
             version,
             listing_origin,
+            today,
         } => {
             let origin = origin(listing_origin.as_deref())?;
             let plan = install::plan(
@@ -183,6 +192,7 @@ fn handle(request: Request) -> Result<Value, String> {
                 &available,
                 &runtimes,
                 origin,
+                today.unwrap_or_else(install::today),
             )?;
             if slug.is_some_and(|slug| slug != plan.slug) {
                 return Err("plugin_kit_install_spec_mismatch".to_owned());
@@ -207,18 +217,21 @@ fn handle(request: Request) -> Result<Value, String> {
             if listing.is_some_and(|url| !url.starts_with(origin)) {
                 return Err("plugin_kit_install_recorded_elsewhere".to_owned());
             }
-            let plan = install::plan(
+            let owned = ledger::marketplaces_added(&guard_home, &slug)?;
+            let mut plan = install::plan(
                 spec,
                 install::Action::Uninstall,
                 &available,
                 &runtimes,
                 origin,
+                install::today(),
             )
             .map_err(|error| match error.as_str() {
                 "plugin_kit_install_runtime_not_offered" => ledger::NOT_RECORDED.to_owned(),
                 "plugin_kit_install_runtime_unknown" => error,
                 _ => ledger::INVALID.to_owned(),
             })?;
+            install::offer_marketplace_removal(&mut plan, &owned);
             encode(&plan)
         }
         Request::Record {
@@ -228,11 +241,23 @@ fn handle(request: Request) -> Result<Value, String> {
             installed,
             spec,
             listing_origin,
+            marketplace_added,
         } => {
             let origin = origin(listing_origin.as_deref())?;
-            ledger::record(&guard_home, &slug, &runtime, installed, spec, origin)
+            ledger::record(
+                &guard_home,
+                &slug,
+                &runtime,
+                installed,
+                spec,
+                origin,
+                marketplace_added,
+            )
         }
-        Request::Installs { guard_home } => ledger::installs(&guard_home),
+        Request::Installs {
+            guard_home,
+            recover,
+        } => ledger::installs(&guard_home, recover),
         Request::Endpoint { value } => install::endpoint_origin(&value)
             .map(|origin| json!({ "origin": origin }))
             .ok_or_else(|| "plugin_kit_install_endpoint_invalid".to_owned()),
@@ -404,10 +429,11 @@ fn package(
         }
     };
     let detection = detect::detect(root)?;
+    output::reject_unsafe_out(root, &out)?;
     output::reject_source_overlap(root, &out, &detection.plugin)?;
     let outputs = package_plan(root, requested)?;
     let mode = if force {
-        output::clear_previous(&out)?;
+        output::clear_previous(&out, &outputs)?;
         output::Mode::Replace
     } else {
         output::require_empty(&out)?;

@@ -12,7 +12,6 @@ from ..native_context import bound_context_digest_home
 from ..native_path_anchor import anchor_to_process_directory
 from ..native_prompt import merge_prompt_artifacts
 from ..native_rich_command_model import NativeCommandModelError
-from ..native_runtime_artifact_identity import NativeRuntimeArtifactIdentityError
 from ..native_sensitive_request import (
     NativeSensitiveRequestError,
     native_compound_artifact,
@@ -168,7 +167,6 @@ def _hook_runtime_artifact(**kwargs: Any) -> GuardArtifact | None:
             return _hook_runtime_artifact_with_native(**kwargs)
     except (
         NativeCommandModelError,
-        NativeRuntimeArtifactIdentityError,
         NativeSensitiveRequestError,
         NativeToolActionIdentityError,
     ):

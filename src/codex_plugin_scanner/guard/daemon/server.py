@@ -2192,18 +2192,6 @@ class _GuardDaemonHandler(
             )
             return
         with byte_reservation:
-            # A referenced payload reserves its bounded maximum, but remains
-            # an opaque envelope until the native edge owns its file I/O.
-            # Do not hydrate or re-encode it here: duplicate keys in the
-            # referenced bytes must not be collapsed by Python before Rust.
-            normalized_payload = None
-            if referenced_payload_bytes is None:
-                normalized_payload = json.dumps(
-                    payload,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ).encode("utf-8")
             admission = daemon_server.runtime_hook_scheduler.acquire(
                 harness=capacity_harness,
                 client_key=self._runtime_hook_client_key(payload, workspace),
@@ -2211,7 +2199,6 @@ class _GuardDaemonHandler(
                 payload_bytes=payload_bytes,
                 deadline=hook_deadline,
                 byte_reservation=byte_reservation,
-                normalized_payload=normalized_payload,
             )
             if admission.permit is None:
                 self._record_hook_capacity_rejection(daemon_server, capacity_harness)
