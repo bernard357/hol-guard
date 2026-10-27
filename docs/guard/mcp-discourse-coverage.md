@@ -37,8 +37,9 @@ authorization. Discourse MCP registers **built-in** write tools when
 these registered tools additionally requires matching credentials for the
 selected Discourse site; without them, the server returns an error.
 
-Separately, with `--site` set and the default `--tools_mode auto`, Discourse MCP
-may discover remote Tool Execution API tools (`remote_*`). Remote tool calls do
+Separately, whether the operator passes `--site` at startup or selects a site
+later with `discourse_select_site`, the default `--tools_mode auto` may discover
+remote Tool Execution API tools (`remote_*`). Remote tool calls do
 **not** check `allow_writes` in the MCP server and can have side effects. To
 disable remote discovery, select `--tools_mode discourse_api_only` (or set
 `"tools_mode": "discourse_api_only"` in the profile). This Guard contribution
