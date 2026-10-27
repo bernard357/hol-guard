@@ -104,14 +104,29 @@ def _envelope(
     """
 
     home = _resident_home(store)
-    key_b64, key_id = _signing_material_for_resident(store, create=create_key)
-    answer = native_command_envelope(
-        action=action,
-        payload=payload,
-        integrity_key_b64=key_b64,
-        integrity_key_id=key_id,
-        guard_home=home,
-    )
+    if action == "digest":
+        # The runtime digests the payload alone and never reads the key for
+        # this action, so reading the policy integrity secret out of the store
+        # and putting it on the socket for every replay row and approval match
+        # would spend the secret for nothing.
+        key_b64, key_id = None, None
+    else:
+        key_b64, key_id = _signing_material_for_resident(store, create=create_key)
+    try:
+        answer = native_command_envelope(
+            action=action,
+            payload=payload,
+            integrity_key_b64=key_b64,
+            integrity_key_id=key_id,
+            guard_home=home,
+        )
+    except CommandEnvelopeUnavailableError as error:
+        # Every caller of this module already reads a `CommandCapabilityError`
+        # as a fail-closed refusal: the queue poll records it on the job result
+        # and the CLI prints it as `{"status": "error"}` with exit code 2. A
+        # resident that gives no answer is the same refusal, so it reaches them
+        # as one and keeps its own code.
+        raise CommandCapabilityError(CommandEnvelopeUnavailableError.reason) from error
     if not answer.get("accepted"):
         raise CommandCapabilityError(str(answer.get("reason") or "signed_payload_missing"))
     return answer.get("result")
@@ -120,14 +135,14 @@ def _envelope(
 def _signed_payload(store: GuardStore, payload: dict[str, object], *, create_key: bool) -> dict[str, object]:
     signed = _envelope(store, "sign", payload, create_key=create_key)
     if not isinstance(signed, dict):
-        raise CommandEnvelopeUnavailableError
+        raise CommandCapabilityError(CommandEnvelopeUnavailableError.reason)
     return {str(key): value for key, value in signed.items()}
 
 
 def _verify_signed_payload(store: GuardStore, payload: object) -> dict[str, object]:
     unsigned = _envelope(store, "verify", payload)
     if not isinstance(unsigned, dict):
-        raise CommandEnvelopeUnavailableError
+        raise CommandCapabilityError(CommandEnvelopeUnavailableError.reason)
     return {str(key): value for key, value in unsigned.items()}
 
 
@@ -406,7 +421,7 @@ def _identity_digest(store: GuardStore, identity: Mapping[str, object]) -> str:
 
     digest = _envelope(store, "digest", dict(identity))
     if not isinstance(digest, str) or not digest:
-        raise CommandEnvelopeUnavailableError
+        raise CommandCapabilityError(CommandEnvelopeUnavailableError.reason)
     return digest
 
 
@@ -518,7 +533,12 @@ def consume_local_command_approval(
             continue
         try:
             verified = _verify_signed_payload(store, item)
-        except CommandCapabilityError:
+        except CommandCapabilityError as error:
+            if error.code == CommandEnvelopeUnavailableError.reason:
+                # A resident that cannot answer is not a grant that fails to
+                # match. Walking on would drop a real approval and ask the user
+                # to approve this job a second time.
+                raise
             continue
         if verified.get("identity") == authorized.identity:
             matched_index = index
