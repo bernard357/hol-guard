@@ -27,9 +27,13 @@ def route_zcode_containment(
     guard_home: Path,
     home_dir: Path,
     workspace: Path | None,
+    bridge: bool = False,
     deadline: float | None = None,
 ) -> dict[str, object]:
     """Rewrite at the authority edge so frozen/stdlib hook clients also work.
+
+    ``bridge`` is set by a harness whose own hook applies the rewrite (Cursor's
+    ``preToolUse`` probe); the resident routes those harnesses only then.
 
     Without a workspace there is no snapshot to write, so the receipt stands.
     No resident answer raises ``NativeHookDecisionError`` for the caller's
@@ -40,7 +44,7 @@ def route_zcode_containment(
     rewrite = native_containment_rewrite(
         response,
         harness=harness,
-        bridge=False,
+        bridge=bridge,
         payload=payload,
         workspace=workspace,
         guard_home=guard_home,

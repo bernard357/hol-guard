@@ -217,6 +217,7 @@ pub(crate) enum ResidentOperationV1 {
     NativeBashAck(guard_contracts::NativeBashAckRequestV1),
     NativeBashReviewCheck(guard_contracts::NativeBashReviewCheckRequestV1),
     ComposioRole(guard_contracts::ComposioRoleRequestV1),
+    ProjectIdentity(guard_contracts::ProjectIdentityRequestV1),
     ExtensionControl(guard_contracts::ExtensionControlRequestV1),
     ExtensionAllowHint(guard_contracts::ExtensionAllowHintRequestV1),
     ExtensionReviewHint(

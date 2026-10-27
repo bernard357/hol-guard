@@ -310,6 +310,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::ComposioRole(request) => {
                 crate::composio_role_op::evaluate_composio_role_request(&request)
             }
+            ResidentOperationV1::ProjectIdentity(request) => {
+                crate::project_identity_op::evaluate_project_identity_request(&request)
+            }
             ResidentOperationV1::SkillWorkflowPreflight(request) => {
                 crate::skill_workflow_preflight_op::evaluate_skill_workflow_preflight_request(
                     &request,

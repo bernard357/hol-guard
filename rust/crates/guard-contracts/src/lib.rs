@@ -33,6 +33,8 @@ mod github_workflow_prepare;
 pub use github_workflow_prepare::*;
 mod protect_request;
 pub use protect_request::*;
+mod portable_project_identity;
+pub use portable_project_identity::*;
 mod git_execution_safety;
 pub use git_execution_safety::*;
 mod compound_git_inspection;
