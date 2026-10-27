@@ -26,10 +26,6 @@ def _valid_identity(identity: object) -> bool:
     return len(digest) == 64 and set(digest) <= _HEX_DIGITS
 
 
-def _int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 def _segments_fit(payload: dict[str, Any]) -> bool:
     """Check the model's shape only: segment count and spans that tile the normalized text in order."""
     text = payload.get("normalized_text")
@@ -46,7 +42,9 @@ def _segments_fit(payload: dict[str, Any]) -> bool:
         if not isinstance(span, dict) or span.get("source") != "normalized":
             return False
         start, end = span.get("start"), span.get("end")
-        if not _int(start) or not _int(end) or not previous_end <= start < end <= len(text):
+        if not isinstance(start, int) or not isinstance(end, int) or isinstance(start, bool) or isinstance(end, bool):
+            return False
+        if not previous_end <= start < end <= len(text):
             return False
         if text[start:end] != segment.get("text"):
             return False
