@@ -41,8 +41,9 @@ matched; an artifact for another architecture is not a native installation.
 
 `cryptography` 49 and later publish no Intel macOS wheels, so `pipx install
 hol-guard` builds it from source. That build needs a Rust toolchain and OpenSSL
-headers, and fails with `failed to run custom build command for openssl-sys` when
-either is missing. Install both (for example `brew install rust openssl@3`) before
+headers. Without Rust the build stops with an error that it cannot find a Rust
+compiler; without the OpenSSL headers it fails with `failed to run custom build
+command for openssl-sys`. Install both (for example `brew install rust openssl@3`) before
 installing Guard.
 
 Once the install succeeds, run `hol-guard update`. On a platform whose native wheel
@@ -54,7 +55,7 @@ the native wheel for the **same installed version** by hand before checking runt
 readiness. On Intel macOS 13 or later:
 
 ```bash
-V=$(hol-guard --version | awk '{print $NF}')
+V=$(pipx runpip hol-guard show hol-guard | awk '/^Version:/{print $2}')
 pipx runpip hol-guard install --force-reinstall --no-deps "https://github.com/hashgraph-online/hol-guard/releases/download/v$V/hol_guard-$V-py3-none-macosx_13_0_x86_64.whl"
 ```
 
@@ -70,7 +71,7 @@ and verify the native wheel from the GitHub release. To do it by hand, use the s
 installed version:
 
 ```bash
-V=$(hol-guard --version | awk '{print $NF}')
+V=$(pipx runpip hol-guard show hol-guard | awk '/^Version:/{print $2}')
 pipx runpip hol-guard install --force-reinstall --no-deps "https://github.com/hashgraph-online/hol-guard/releases/download/v$V/hol_guard-$V-py3-none-manylinux_2_17_aarch64.whl"
 ```
 
