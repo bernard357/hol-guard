@@ -1,7 +1,9 @@
-"""Resident bridge for the ``github_cli_classify`` op (RTM-032).
+"""Test-only client for the resident's ``github_cli_classify`` op.
 
-The Rust command model owns GitHub CLI capability classification. This module
-only frames one request, binds the response by ``request_id`` plus
+The Rust command model owns GitHub CLI capability classification, and no
+production code asks the resident for it over this op. The capability suites
+use this client to check the resident's answers against an independent
+oracle. It only frames one request, binds the response by ``request_id`` plus
 ``request_sha256``, and decodes the assessment. Any transport failure
 (resident unavailable, capability absent, timeout, overload, malformed or
 mismatched result) yields ``None``; callers must treat ``None`` as an
@@ -15,10 +17,14 @@ import json
 import time
 from dataclasses import dataclass
 
-from .native_context import _canonical_request_sha256, _resolve_digest_home, ensure_resident_prerequisite
-from .native_resident_client import native_resident_client_request
-from .native_runtime import _isolated_environment, _native_error, native_runtime_status
-from .native_runtime_resilience import (
+from codex_plugin_scanner.guard.native_context import (
+    _canonical_request_sha256,
+    _resolve_digest_home,
+    ensure_resident_prerequisite,
+)
+from codex_plugin_scanner.guard.native_resident_client import native_resident_client_request
+from codex_plugin_scanner.guard.native_runtime import _isolated_environment, _native_error, native_runtime_status
+from codex_plugin_scanner.guard.native_runtime_resilience import (
     native_record_overload,
     native_record_resident_failure,
     native_record_resident_success,

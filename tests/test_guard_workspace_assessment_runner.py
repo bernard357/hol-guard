@@ -87,6 +87,15 @@ WORKFLOWS_COMPLETE = {
     "truncation_reasons": [],
     "findings": [],
 }
+EDITOR_TASKS_COMPLETE = {
+    "schema": "guard.workspace-editor-tasks.v1",
+    "detector_version": "editor-task-v1",
+    "status": "complete",
+    "files_scanned": 0,
+    "skipped": {"oversize": 0, "not_text": 0, "unparsed": 0, "unread": 0, "linked": 0},
+    "truncation_reasons": [],
+    "findings": [],
+}
 SCANNED = replace(
     SNAPSHOT,
     secrets=SECRETS_COMPLETE,
@@ -94,6 +103,7 @@ SCANNED = replace(
     hooks=HOOKS_COMPLETE,
     plugins=PLUGINS_COMPLETE,
     workflows=WORKFLOWS_COMPLETE,
+    editor_tasks=EDITOR_TASKS_COMPLETE,
 )
 KEYS = assessments.WorktreeKeys(SNAPSHOT.codebase_key, SNAPSHOT.worktree_key)
 
@@ -152,6 +162,7 @@ def snapshots(monkeypatch: pytest.MonkeyPatch, module, *values: native.Workspace
         hooks: bool = False,
         plugins: bool = False,
         workflows: bool = False,
+        editor_tasks: bool = False,
     ) -> native.WorkspaceSnapshot:
         modes.append(mode)
         return remaining.pop(0) if len(remaining) > 1 else remaining[0]
@@ -180,6 +191,7 @@ def test_unchanged_snapshot_reports_projected_findings(tmp_path: Path, monkeypat
         "hook_config_v1": "no_inputs",
         "plugin_manifest_v1": "no_inputs",
         "ci_workflow_v1": "no_inputs",
+        "editor_task_v1": "no_inputs",
     }
     [finding] = outcome.findings
     assert finding["severity"] == "critical"
@@ -289,6 +301,7 @@ def test_snapshot_failure_fails_the_run(tmp_path: Path, monkeypatch) -> None:
         hooks: bool = False,
         plugins: bool = False,
         workflows: bool = False,
+        editor_tasks: bool = False,
     ):
         raise native.WorkspaceSnapshotError("workspace_snapshot_native_unavailable")
 

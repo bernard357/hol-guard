@@ -18,12 +18,12 @@ from pathlib import PurePosixPath
 from typing import cast, final
 
 from codex_plugin_scanner.guard.runtime.execution_assurance_contract import framed_digest
-from codex_plugin_scanner.guard.runtime.linux_artifact_ownership import (
+from tests.linux_artifact_ownership import (
     LinuxArtifactMetadata,
     LinuxArtifactOwnershipReceipt,
     verify_linux_artifact_ownership,
 )
-from codex_plugin_scanner.guard.runtime.linux_artifact_supply_chain import (
+from tests.linux_artifact_supply_chain import (
     LinuxArtifactSupplyChainError,
     LinuxArtifactSupplyChainReceipt,
     revalidate_linux_artifact_supply_chain_receipt,

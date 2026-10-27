@@ -32,6 +32,11 @@ from .workspace_ci_workflow_findings import (
     project_ci_workflow_findings,
     with_ci_workflow_coverage,
 )
+from .workspace_editor_task_findings import (
+    EDITOR_TASK_DETECTOR,
+    project_editor_task_findings,
+    with_editor_task_coverage,
+)
 from .workspace_hook_config_findings import (
     HOOK_CONFIG_DETECTOR,
     project_hook_config_findings,
@@ -69,9 +74,10 @@ DETECTOR_SET: Final = (
     HOOK_CONFIG_DETECTOR,
     PLUGIN_MANIFEST_DETECTOR,
     CI_WORKFLOW_DETECTOR,
+    EDITOR_TASK_DETECTOR,
 )
 # The content scans in the order they reached the native runtime.
-_CONTENT_SCANS: Final = ("secrets", "skills", "hooks", "plugins", "workflows")
+_CONTENT_SCANS: Final = ("secrets", "skills", "hooks", "plugins", "workflows", "editor_tasks")
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
@@ -190,6 +196,7 @@ def execute(
         project_hook_config_findings(before.hooks),
         project_plugin_manifest_findings(before.plugins),
         project_ci_workflow_findings(before.workflows),
+        project_editor_task_findings(before.editor_tasks),
     )
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
@@ -202,6 +209,7 @@ def execute(
         (with_hook_config_coverage, before.hooks),
         (with_plugin_manifest_coverage, before.plugins),
         (with_ci_workflow_coverage, before.workflows),
+        (with_editor_task_coverage, before.editor_tasks),
     ):
         coverage = add_coverage(coverage, result)
     return assessments.RunOutcome(
@@ -335,8 +343,7 @@ def coverage_summary(
 
 
 def project_supply_chain_findings(
-    worktree_key: str,
-    payload: Mapping[str, object],
+    worktree_key: str, payload: Mapping[str, object]
 ) -> tuple[list[dict[str, object]], bool]:
     """Project audit packages into bounded workspace findings.
 
@@ -387,20 +394,10 @@ def project_supply_chain_findings(
         findings.values(),
         key=lambda item: (_SEVERITY_ORDER.index(str(item["severity"])), str(item["package_name"])),
     )
-    kept: list[dict[str, object]] = []
-    used = 0
-    for finding in ordered[:MAX_FINDINGS]:
-        size = len(json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
-        if used + size > _FINDINGS_BYTE_BUDGET:
-            break
-        kept.append(finding)
-        used += size
-    return kept, len(kept) < len(ordered)
+    return _within_budget(ordered)
 
 
-def merge_findings(
-    *groups: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], bool]:
+def merge_findings(*groups: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:
     """Order findings from every detector and keep them within the bounds.
 
     Each group is already bounded on its own; the merge keeps the most severe
@@ -416,14 +413,17 @@ def merge_findings(
             str(item["finding_id"]),
         ),
     )
+    return _within_budget(ordered)
+
+
+def _within_budget(ordered: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:
     kept: list[dict[str, object]] = []
     used = 0
     for finding in ordered[:MAX_FINDINGS]:
-        size = len(json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
-        if used + size > _FINDINGS_BYTE_BUDGET:
+        used += len(json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
+        if used > _FINDINGS_BYTE_BUDGET:
             break
         kept.append(finding)
-        used += size
     return kept, len(kept) < len(ordered)
 
 

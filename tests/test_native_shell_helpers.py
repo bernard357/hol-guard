@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.guard import native_execution, native_shell_helpers
+from codex_plugin_scanner.guard import native_execution
 from codex_plugin_scanner.guard.native_context import _canonical_request_sha256
+from tests import native_shell_helpers_client as native_shell_helpers
 from tests.shell_data_flow_test_support import (
     native_command_segments,
     native_input_redirects,
@@ -190,7 +191,7 @@ def test_fresh_process_provisions_resident_before_public_helper(native_hook_forc
 import os
 from pathlib import Path
 from codex_plugin_scanner.guard.native_context import bind_context_digest_home
-from codex_plugin_scanner.guard.native_shell_helpers import call
+from tests.native_shell_helpers_client import call
 bind_context_digest_home(Path(os.environ["SHELL_HELPER_TEST_HOME"]))
 result = call("normalization", "bash --init-file /dev/null -c 'echo value'", cwd=None, home_dir=None)
 assert result["normalized_command"] == "echo value"
