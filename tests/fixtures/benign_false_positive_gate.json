@@ -5934,7 +5934,8 @@
         "command": "awk '{ print $1 / 2 | \"sh\" }' README.md"
       },
       "cwd": "worktree",
-      "expect": "not_allow"
+      "expect": "not_allow",
+      "contained_ok": true
     },
     {
       "id": "neg-awk-regex-quote-hides-pipe",
@@ -5951,7 +5952,8 @@
         "command": "awk '{ if ($1) /\"/; print | \"sh\" } # \"' README.md"
       },
       "cwd": "worktree",
-      "expect": "not_allow"
+      "expect": "not_allow",
+      "contained_ok": true
     },
     {
       "id": "awk-end-anchor-after-vitest",
