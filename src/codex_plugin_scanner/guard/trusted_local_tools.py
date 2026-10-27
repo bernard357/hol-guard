@@ -150,8 +150,16 @@ def local_tool_approval_payload(request: Mapping[str, object]) -> dict[str, obje
 
     A resident that cannot answer offers nothing: the request keeps its
     once-only choices rather than a grant Python shaped on its own.
+
+    Every row of an approval queue passes through here, and almost none of them
+    were filed by the local-tool scanner. A request whose evidence never names
+    that source can carry no grant whatever the resident says, so it is answered
+    without a round-trip. That is a narrower answer, never a wider one: which of
+    the entries that do name it is eligible stays the resident's to decide.
     """
 
+    if not _names_a_local_tool(request):
+        return None
     payload = _grant_payload(request, None)
     approval = None if payload is None else payload.get("approval")
     return cast(dict[str, object], approval) if isinstance(approval, dict) else None
@@ -198,7 +206,7 @@ def parse_local_tool_grant_selection(
     decision = chosen.get("decision")
     if not isinstance(decision, dict) or not (expires_at is None or isinstance(expires_at, str)):
         raise LocalToolGrantUnavailableError("native_local_tool_grant_unavailable")
-    return LocalToolGrantSelection(
+    selected = LocalToolGrantSelection(
         target=cast(LocalToolGrantTarget, _required_text(chosen.get("target"))),
         duration=cast(LocalToolGrantDuration, _required_text(chosen.get("duration"))),
         expires_at=expires_at,
@@ -206,6 +214,11 @@ def parse_local_tool_grant_selection(
         capability=_required_text(offered.get("capability")),
         decision=cast(dict[str, object], decision),
     )
+    # Read the filed row here, where nothing has been written yet. Left until
+    # the resolution files it, a malformed reply would fail after the approval
+    # gate had already been required and a policy row may already exist.
+    local_tool_grant_decision(selected)
+    return selected
 
 
 def local_tool_grant_decision(selection: LocalToolGrantSelection) -> PolicyDecision:
@@ -289,6 +302,16 @@ def _filed_evidence(request: Mapping[str, object]) -> list[dict[str, object]]:
         return []
     items = cast(Sequence[object], evidence)
     return [dict(cast(Mapping[str, object], item)) for item in items if isinstance(item, Mapping)]
+
+
+def _names_a_local_tool(request: Mapping[str, object]) -> bool:
+    """Whether any filed entry claims the local-tool scanner as its source.
+
+    The claim is untrusted and proves nothing on its own. Its absence is what
+    matters: without it there is no entry a grant could ever rest on.
+    """
+
+    return any(entry.get("source") == "trusted_local_tool" for entry in _filed_evidence(request))
 
 
 def _required_text(value: object) -> str:
