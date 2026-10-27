@@ -31,7 +31,14 @@ def _package_shim_handoff_active(shim_directory: Path) -> bool:
 
 
 def _names_vitest(token: str) -> bool:
-    """``vitest`` or a versioned ``vitest@<spec>`` package token."""
+    """``vitest`` or a versioned ``vitest@<spec>`` package token.
+
+    The resident owns the exact rule, over the package name it parsed out of
+    the launch (``vitest_refusal`` in ``guard-command``). This reading is
+    deliberately broader: it runs only where no verdict came back, so no
+    parse exists to read, and a launch that merely mentions Vitest is stopped
+    rather than handed to review uncontained.
+    """
 
     return token == "vitest" or token.startswith("vitest@")
 
