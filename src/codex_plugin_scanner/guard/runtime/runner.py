@@ -99,6 +99,7 @@ from . import runner_native_authority as _authority
 from . import runner_native_sync as _sync
 from .cloud_request_native import cloud_sync_receipt_payloads
 from .extension_catalog_handshake import (
+    catalog_runtime_unavailable_summary,
     prepare_extension_catalog_handshake,
     runtime_session_success_summary,
     runtime_summary_device_id,
@@ -4263,7 +4264,7 @@ def _sync_extension_catalog_from_runtime_handshake(
     """Upload the canonical catalog only after a digest-bound Cloud request."""
 
     from .extension_catalog_pages import observed_view
-    from .extension_catalog_sync import build_v1_catalog_from_view
+    from .extension_catalog_sync import ExtensionCatalogUnavailableError, build_v1_catalog_from_view
     from .extension_catalog_transfer import catalog_sync_plan, sync_catalog_view
 
     signal = runtime_response.get("extensionCatalogSync")
@@ -4289,14 +4290,19 @@ def _sync_extension_catalog_from_runtime_handshake(
             except OSError as error:
                 raise RuntimeError(_sync_url_error_message(error)) from error
 
-        view = observed_view(session_payload, guard_home)
-        result = sync_catalog_view(
-            runtime_sync_url=runtime_sync_url,
-            runtime_response=runtime_response,
-            session_payload=session_payload,
-            view=view,
-            send=send_page,
-        )
+        try:
+            view = observed_view(session_payload, guard_home)
+            result = sync_catalog_view(
+                runtime_sync_url=runtime_sync_url,
+                runtime_response=runtime_response,
+                session_payload=session_payload,
+                view=view,
+                send=send_page,
+            )
+        except ExtensionCatalogUnavailableError:
+            # The shared cache dropped the view this session named, for example
+            # after a concurrent publish; the next sync names a current one.
+            return catalog_runtime_unavailable_summary()
         if store is None:
             raise RuntimeError("Authenticated catalog completion requires the current store")
         from .extension_catalog_completion import complete_authenticated_view
