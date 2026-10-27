@@ -95,7 +95,9 @@ fn self_bound_jq_filter(original: &[String], index: usize, text: &str) -> bool {
             (index > 0 && matches!(original[index - 1].as_str(), "--jq" | "-q")).then_some(value)
         });
     filter.is_some_and(|filter| {
-        literal_everywhere(text, '$') && crate::pretool::safe_reads::jq_variables_bound(filter)
+        !filter.contains(['\n', '\r'])
+            && literal_everywhere(text, '$')
+            && crate::pretool::safe_reads::jq_variables_bound(filter)
     })
 }
 

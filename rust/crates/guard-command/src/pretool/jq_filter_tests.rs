@@ -377,6 +377,7 @@ fn a_binding_is_read_only_inside_its_scope() {
         ".a as $x | {b: [$x]}",
         "\"\\(.a)\" as $x | $x",
         "\"$x is text\"",
+        "\"#\" as $x | $x",
     ] {
         assert!(variables_bound(filter), "expected bound: {filter}");
     }
@@ -389,6 +390,8 @@ fn a_binding_is_read_only_inside_its_scope() {
         "(. as $x | $x",
         ". as $x | $x)",
         "\"open",
+        ". # \"\n| $ENV # \"",
+        ". as $x | $x # \"\n| $y # \"",
     ] {
         assert!(!variables_bound(filter), "expected unbound: {filter}");
     }

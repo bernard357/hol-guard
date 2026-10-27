@@ -500,6 +500,7 @@ mod encoded_endpoint_tests {
             vec!["-q", "@text \"\\($ENV)\""],
             vec!["-q", "@sh \"`id`\""],
             vec!["-q", ".a\n| env"],
+            vec!["-q", ". as $c | $c # \"\n| $ENV"],
             vec!["-q", ".[] | @sh"],
             vec!["-q", "@text \"id\""],
             vec!["--jq", "@json2"],

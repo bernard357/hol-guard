@@ -186,6 +186,9 @@ pub(crate) fn variables_bound(filter: &str) -> bool {
             continue;
         }
         match byte {
+            // A `#` opens a jq comment that ends at the newline, so a quote
+            // after it starts no string and the rest of the scan is unsound.
+            b'#' => return false,
             b'"' => in_string = true,
             b'(' | b'[' | b'{' => groups.push((byte, bound.len())),
             b')' | b']' | b'}' => {
