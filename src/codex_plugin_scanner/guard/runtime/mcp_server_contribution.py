@@ -47,10 +47,6 @@ def _bound_grammar(operation: str, value: object) -> str | None:
     return result
 
 
-def contributions_dir() -> Path:
-    return Path(__file__).resolve().parents[4] / "contributions" / "mcp-servers"
-
-
 def catalog_id_for_mcp_id(mcp_id: str) -> str:
     return f"command.mcp-{mcp_id.removeprefix('mcp.')}"
 

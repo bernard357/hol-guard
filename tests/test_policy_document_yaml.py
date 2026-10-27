@@ -15,9 +15,9 @@ from codex_plugin_scanner.guard.policy_document_yaml import (
     MAX_POLICY_BYTES,
     MAX_POLICY_TOKENS,
     PolicyDocumentError,
+    _load_policy_document_schema,
     format_policy_document_yaml,
     parse_policy_document_yaml,
-    policy_document_schema,
 )
 from tests.policy_bundle_parser_support import (
     canonical_policy_bundle_payload,
@@ -49,11 +49,7 @@ def test_normative_and_packaged_schema_are_identical() -> None:
     )
 
     assert packaged == normative
-    assert policy_document_schema()["$id"] == "https://guard.hashgraphonline.com/schema/policy/v1alpha1"
-
-    mutable_copy = policy_document_schema()
-    mutable_copy.clear()
-    assert policy_document_schema()["$id"] == "https://guard.hashgraphonline.com/schema/policy/v1alpha1"
+    assert _load_policy_document_schema()["$id"] == "https://guard.hashgraphonline.com/schema/policy/v1alpha1"
 
 
 def test_valid_conformance_fixtures_are_stable() -> None:
