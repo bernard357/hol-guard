@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   coverageScopeLine,
+  coverageSegmentsBeyond,
   coverageStepLabel,
   normalizeApprovalExtensionCoverage,
 } from "./approval-extension-coverage";
@@ -87,6 +88,15 @@ async function run(): Promise<void> {
     "a compound command says the other steps still need review",
   );
   assert(coverageScopeLine(coverage!) === null, "a single-step command needs no scope line");
+  assert(
+    coverageSegmentsBeyond(coverage!, ["command.container-runtime"]).length === 0,
+    "a step the recommendation already links is not listed again",
+  );
+  assert(
+    coverageSegmentsBeyond(compound!, ["command.git"]).map((segment) => segment.index).join(",") === "2",
+    "only steps with an extension the recommendation does not link stay",
+  );
+  assert(coverageSegmentsBeyond(compound!, []).length === 2, "with no recommendation every step stays");
   assert(coverageStepLabel(compound!.segments[0]) === "Step 1 · git", "a step is labelled by position and executable");
   assert(
     coverageStepLabel({ ...compound!.segments[0], executable: null }) === "Step 1",
@@ -176,7 +186,7 @@ async function run(): Promise<void> {
     "utf8",
   );
   assert(
-    recommendationCardSource.includes("configurable.map("),
+    recommendationCardSource.includes("configurable.map(") && recommendationCardSource.includes("{reviewLinks}"),
     "the recommendation card links every extension it would configure, not just the first",
   );
 

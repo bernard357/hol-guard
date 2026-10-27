@@ -111,3 +111,17 @@ export function coverageStepLabel(segment: GuardCoveredSegment): string {
   const step = `Step ${segment.index + 1}`;
   return segment.executable === null ? step : `${step} · ${segment.executable}`;
 }
+
+/**
+ * The steps still worth listing once the recommendation card names some extensions.
+ * A step whose every extension is already linked above would only repeat that link.
+ */
+export function coverageSegmentsBeyond(
+  coverage: GuardApprovalExtensionCoverage,
+  linkedExtensionIds: readonly string[],
+): GuardCoveredSegment[] {
+  const linked = new Set(linkedExtensionIds);
+  return coverage.segments.filter((segment) =>
+    segment.extensions.some((extension) => !linked.has(extension.extension_id)),
+  );
+}

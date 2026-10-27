@@ -362,7 +362,9 @@ export function ReviewDecisionCard(props: {
         {resolutionBlockReason === null && resolved === null && !watchOnlyObservation && (
           <ApprovalExtensionCoverageCard
             coverage={item.extension_coverage}
-            hasRecommendation={item.extension_recommendation !== undefined}
+            linkedExtensionIds={
+              item.extension_recommendation?.permissions.map((permission) => permission.extension_id) ?? []
+            }
           />
         )}
 
