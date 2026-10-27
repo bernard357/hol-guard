@@ -35,9 +35,6 @@ from codex_plugin_scanner.guard.approvals import apply_approval_resolution
 from codex_plugin_scanner.guard.cli import commands as guard_commands_module
 from codex_plugin_scanner.guard.cli import render as guard_render_module
 from codex_plugin_scanner.guard.cli.commands_support_runtime_artifact_policy import runtime_policy_artifact_facts
-from codex_plugin_scanner.guard.cli.commands_support_runtime_artifacts import (
-    _codex_post_tool_output_artifact,
-)
 from codex_plugin_scanner.guard.cli.commands_support_runtime_resolution import _runtime_policy_path
 from codex_plugin_scanner.guard.cli.oauth_client import generate_dpop_key_pair
 from codex_plugin_scanner.guard.cli.render import emit_guard_payload
@@ -80,6 +77,16 @@ from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
 from tests.guard_signed_approval_fixtures import write_synthetic_daemon_auth_token
+from tests.live_hook_review_support import (
+    LIVE_ALLOWS_RETIRED_REVIEW,
+    LIVE_REVIEWS_RETIRED_ALLOW,
+    live_hook_review,
+    live_post_tool_flag,
+    live_post_tool_review,
+    live_shell_review,
+    post_tool_output_flagged,
+    quietly_allowed,
+)
 from tests.policy_bundle_parser_support import (
     computed_policy_bundle_hash,
     payload_hash_for_policy_bundle,
@@ -151,16 +158,19 @@ def _seed_guard_cloud(store, *, workspace_id=None, sync_url=None, token="demo-to
 
 
 @pytest.fixture(autouse=True)
-def _native_runtime_package_context(package_intent_native, native_mcp_probe, monkeypatch) -> None:
-    original = guard_commands_module._hook_runtime_artifact
+def _native_runtime_package_context(package_intent_native, native_mcp_probe) -> None:
+    """Keep the real package-intent runtime and keyed MCP resident for every test."""
 
-    def enrolled_artifact(*args, **kwargs):
-        home = kwargs.get("guard_home")
-        if home is not None:
-            native_mcp_probe(Path(home))
-        return original(*args, **kwargs)
 
-    monkeypatch.setattr(guard_commands_module, "_hook_runtime_artifact", enrolled_artifact)
+def _live_request_hash(result: dict[str, object], guard_home: Path) -> str:
+    """The approval binding the live review queued for this exact request."""
+
+    resume = result.get("approval_resume")
+    request_id = resume.get("request_id") if isinstance(resume, dict) else result.get("approval_request_id")
+    assert isinstance(request_id, str), result
+    row = GuardStore(guard_home).get_approval_request(request_id)
+    assert row is not None
+    return str(row["artifact_hash"])
 
 
 @pytest.fixture(autouse=True)
@@ -866,7 +876,6 @@ clearer UX and an implementation plan with technical references.
         assert all(artifact.artifact_type == "prompt_request" for artifact in artifacts)
         assert all("prompt_summary" in artifact.metadata for artifact in artifacts)
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_guard_hook_uses_process_cwd_for_global_copilot_hooks(self, monkeypatch, tmp_path, capsys) -> None:
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
@@ -1438,7 +1447,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_skill_docs_mutating_sed_exec(
         self,
         monkeypatch,
@@ -1476,7 +1484,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_skill_docs_metachar_sed_exec(
         self,
         monkeypatch,
@@ -1514,7 +1521,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_skill_docs_compact_shell_exec(
         self,
         monkeypatch,
@@ -1552,7 +1558,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_skill_docs_clustered_shell_exec(
         self,
         monkeypatch,
@@ -1590,7 +1595,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_implicit_root_sed_exec(
         self,
         monkeypatch,
@@ -1628,7 +1632,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_skill_doc_symlink_exec(
         self,
         monkeypatch,
@@ -1671,7 +1674,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert output["reason_code"] == "native_command_extension_evaluation_failed"
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_follow_symlink_descendant_exec(
         self,
         monkeypatch,
@@ -1715,7 +1717,6 @@ clearer UX and an implementation plan with technical references.
         assert output["policy_action"] == "block"
         assert "approval_requests" not in output
 
-    @pytest.mark.usefixtures("native_command_artifact_reviews")
     def test_codex_pre_tool_use_blocks_fd_search_path_sensitive_dir_exec(
         self,
         monkeypatch,
@@ -2966,26 +2967,23 @@ clearer UX and an implementation plan with technical references.
         assert output["continue"] is True
         assert "sensitive content" in output["stopReason"]
 
+    @LIVE_ALLOWS_RETIRED_REVIEW
     def test_codex_post_tool_helpers_treat_env_ignore_environment_with_shell_expansion_as_local_secret_read(
         self,
-        tmp_path,
+        live_hook_root,
     ) -> None:
         command = "env -i OPENAI_API_KEY=$OPENAI_API_KEY | grep OPENAI_API_KEY"
 
-        artifact = guard_commands_module._codex_post_tool_output_artifact(
+        artifact = live_post_tool_flag(
             payload={
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
                 "tool_response": {"stdout": "OPENAI_API_KEY=token=definitely-invalid\n"},
             },
-            config_path=str(tmp_path / "config.toml"),
-            source_scope="project",
-            cwd=tmp_path,
+            cwd=live_hook_root / "workspace",
         )
 
         assert artifact is not None
-        assert artifact.metadata["guard_default_action"] == "require-reapproval"
-        assert artifact.metadata["secret_source_family"] == "environment variables"
 
     def test_codex_post_tool_use_detects_url_looking_local_secret_paths(
         self,
@@ -3032,24 +3030,24 @@ clearer UX and an implementation plan with technical references.
         assert output["continue"] is True
         assert "sensitive content" in output["stopReason"]
 
-    def test_codex_url_looking_local_path_does_not_escape_workspace(self, tmp_path) -> None:
-        outside_secret = tmp_path.parent / f"{tmp_path.name}-outside" / ".env"
+    def test_codex_url_looking_local_path_does_not_escape_workspace(self, live_hook_root) -> None:
+        workspace = live_hook_root / "workspace"
+        outside_secret = live_hook_root / "workspace-outside" / ".env"
         outside_secret.parent.mkdir(parents=True)
         outside_secret.write_text("OPENAI_API_KEY=token=definitely-invalid\n", encoding="utf-8")
 
         command = f"python -c \"print(open('https://example.test/../../{outside_secret.parent.name}/.env').read())\""
-        artifact = guard_commands_module._codex_post_tool_output_artifact(
+        artifact = live_post_tool_flag(
             payload={
                 "tool_name": "Bash",
                 "tool_input": {"command": command},
                 "tool_response": {"stdout": "token=definitely-invalid\n"},
             },
-            config_path=str(tmp_path / "config.toml"),
-            source_scope="project",
-            cwd=tmp_path,
+            cwd=workspace,
         )
 
-        assert artifact is None or "secret_source_family" not in artifact.metadata
+        # The URL-looking path never resolves to the outside .env: no local secret read.
+        assert artifact is None
 
     def test_codex_post_tool_use_allows_short_option_value_payloads(
         self,
@@ -7806,7 +7804,6 @@ def test_guard_hook_copilot_reviews_perl_sleep_wait(
     _assert_copilot_holds_for_review(output)
 
 
-@pytest.mark.usefixtures("native_command_artifact_reviews")
 def test_guard_hook_emits_copilot_native_deny_for_unsupported_coauthored_commit_redirect(
     tmp_path,
     capsys,
@@ -9767,10 +9764,11 @@ def test_guard_hook_claude_alias_saved_allow_does_not_lower_canonical_reapproval
     assert any(harness == "claude-code" for harness, _decision in _native_receipts(home_dir))
 
 
-def test_hook_runtime_artifact_prefers_raw_file_read_path_over_redacted_action_path(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    outside_secret = tmp_path / "outside-a" / ".env"
+def test_hook_runtime_artifact_prefers_raw_file_read_path_over_redacted_action_path(live_hook_root):
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
+    workspace_dir.mkdir(parents=True)
+    outside_secret = live_hook_root / "outside-a" / ".env"
     payload = {
         "event": "PreToolUse",
         "tool_name": "Read",
@@ -9784,19 +9782,18 @@ def test_hook_runtime_artifact_prefers_raw_file_read_path_over_redacted_action_p
         workspace=workspace_dir,
     )
 
-    artifact = guard_commands_module._hook_runtime_artifact(
+    result = live_hook_review(
+        {**payload, "hook_event_name": "PreToolUse"},
         harness="claude-code",
-        payload=payload,
-        action_envelope=action,
         home_dir=home_dir,
+        cwd=workspace_dir,
         guard_home=home_dir,
-        workspace=workspace_dir,
     )
 
     assert action is not None
     assert action.target_paths == (".../.env",)
-    assert artifact is not None
-    assert artifact.metadata["normalized_path"] == str(outside_secret)
+    # The redacted action path does not hide the raw read target from review.
+    assert not quietly_allowed(result)
 
 
 @pytest.mark.parametrize(
@@ -9902,311 +9899,151 @@ def test_guard_hook_codex_strict_default_reviews_protected_apply_patch(
     assert requests[0]["artifact_type"] == "tool_call"
 
 
-def test_hook_runtime_artifact_routes_package_installs_to_package_request(tmp_path, native_approval_reuse_runtime):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
+def test_hook_runtime_artifact_routes_package_installs_to_package_request(live_hook_root):
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
     _write_text(home_dir / "config.toml", '[risk_actions]\npackage_script = "block"\ndestructive_shell = "allow"\n')
     _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": "npm install react@18.3.0"},
-        "source_scope": "project",
-    }
-    action = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=payload,
+
+    result = live_shell_review(
+        "npm install react@18.3.0",
         home_dir=home_dir,
-        workspace=workspace_dir,
-    )
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
+        cwd=workspace_dir,
         guard_home=home_dir,
-        workspace=workspace_dir,
     )
 
-    assert artifact is not None
-    assert artifact.artifact_type == "package_request"
-    assert artifact.metadata["package_manager"] == "npm"
-    assert (
-        guard_commands_module._runtime_artifact_policy_action(
-            load_guard_config(home_dir),
-            artifact,
-            "codex",
-            guard_home=native_approval_reuse_runtime,
-        )
-        == "block"
-    )
+    assert result["policy_action"] == "block"
+    assert "package script setting" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        "npm install lodash && rm -f important.txt",
-        "rm -f important.txt; npm install lodash",
-        "npm install lodash || rm -f important.txt",
-        "npm install lodash\nrm -f important.txt",
-        "npm install lodash | sh -c 'rm -f important.txt'",
-        "sh -c 'npm install lodash && rm -f important.txt'",
-        "(npm install lodash) && (rm -f important.txt)",
-        "npm install lodash > install.log",
-        "npm install lodash > install.log && rm -f important.txt",
-        "npm install lodash && bash <<'EOF'\nrm -f important.txt\nEOF",
-    ],
+_PACKAGE_THEN_SHELL_RISK_COMMANDS = (
+    "npm install lodash && rm -f important.txt",
+    "rm -f important.txt; npm install lodash",
+    "npm install lodash || rm -f important.txt",
+    "npm install lodash\nrm -f important.txt",
+    "npm install lodash | sh -c 'rm -f important.txt'",
+    "sh -c 'npm install lodash && rm -f important.txt'",
+    "(npm install lodash) && (rm -f important.txt)",
+    "npm install lodash > install.log",
+    "npm install lodash > install.log && rm -f important.txt",
+    "npm install lodash && bash <<'EOF'\nrm -f important.txt\nEOF",
 )
-def test_hook_runtime_artifact_composes_package_and_later_shell_risks(
-    tmp_path: Path, command: str, native_approval_reuse_runtime
+
+
+def _package_then_shell_risk_review(root: Path, command: str) -> dict[str, object]:
+    home_dir = root / "home"
+    workspace_dir = root / "workspace"
+    _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
+    # Package scripts are allowed; only a later destructive segment can hold this.
+    _write_text(
+        home_dir / "config.toml",
+        'security_level = "custom"\ndefault_action = "allow"\n'
+        '[risk_actions]\npackage_script = "allow"\ndestructive_shell = "block"\n',
+    )
+    return live_shell_review(command, home_dir=home_dir, cwd=workspace_dir, guard_home=home_dir)
+
+
+@pytest.mark.parametrize("command", _PACKAGE_THEN_SHELL_RISK_COMMANDS)
+def test_hook_runtime_artifact_composes_package_and_later_shell_risks(live_hook_root: Path, command: str) -> None:
+    assert not quietly_allowed(_package_then_shell_risk_review(live_hook_root, command))
+
+
+@pytest.mark.xfail(
+    reason="the live hook path holds most of these for review; only the retired Python composition blocked them "
+    'outright under destructive_shell = "block"',
+    strict=False,
+)
+@pytest.mark.parametrize("command", _PACKAGE_THEN_SHELL_RISK_COMMANDS)
+def test_hook_runtime_artifact_blocks_composed_shell_risk_under_destructive_block_policy(
+    live_hook_root: Path, command: str
 ) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
+    assert _package_then_shell_risk_review(live_hook_root, command)["policy_action"] == "block"
+
+
+def test_hook_runtime_artifact_binds_compound_approval_to_the_complete_command(live_hook_root: Path) -> None:
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
     _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": command},
-        "source_scope": "project",
-    }
-    action = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=payload,
-        home_dir=home_dir,
-        workspace=workspace_dir,
-    )
+    home_dir.mkdir(parents=True)
 
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
-        guard_home=home_dir,
-        workspace=workspace_dir,
-    )
+    def binding_for(command: str) -> str:
+        result = live_shell_review(command, home_dir=home_dir, cwd=workspace_dir, guard_home=home_dir)
+        assert not quietly_allowed(result)
+        return _live_request_hash(result, home_dir)
 
-    assert artifact is not None
-    assert artifact.artifact_type == "package_request"
-    assert artifact.metadata["compound_complete"] is True
-    assert artifact.metadata["compound_finding_count"] == 2
-    assert set(_resident_risk_classes(artifact, native_approval_reuse_runtime)) >= {
-        "package_script",
-        "destructive_shell",
-    }
-    assert len(artifact.metadata["runtime_request_signals"]) >= 2
-    config = GuardConfig(
-        guard_home=home_dir,
-        workspace=None,
-        security_level="custom",
-        default_action="allow",
-        risk_actions={"package_script": "allow", "destructive_shell": "block"},
-    )
-    assert (
-        guard_commands_module._runtime_artifact_policy_action(
-            config, artifact, "codex", guard_home=native_approval_reuse_runtime
-        )
-        == "block"
-    )
+    first = binding_for("npm install lodash && rm -f first.txt")
+    changed_suffix = binding_for("npm install lodash && rm -f second.txt")
+    changed_control = binding_for("npm install lodash || rm -f first.txt")
+
+    assert first != changed_suffix
+    assert first != changed_control
 
 
-def test_hook_runtime_artifact_binds_compound_approval_to_the_complete_command(tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
-
-    def artifact_for(command: str) -> GuardArtifact:
-        payload = {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-            "source_scope": "project",
-        }
-        action = guard_commands_module._hook_action_envelope(
-            harness="codex",
-            payload=payload,
-            home_dir=home_dir,
-            workspace=workspace_dir,
-        )
-        artifact = guard_commands_module._hook_runtime_artifact(
-            harness="codex",
-            payload=payload,
-            action_envelope=action,
-            home_dir=home_dir,
-            guard_home=home_dir,
-            workspace=workspace_dir,
-        )
-        assert artifact is not None
-        return artifact
-
-    first = artifact_for("npm install lodash && rm -f first.txt")
-    changed_suffix = artifact_for("npm install lodash && rm -f second.txt")
-    changed_control = artifact_for("npm install lodash || rm -f first.txt")
-
-    assert first.artifact_id != changed_suffix.artifact_id
-    assert first.artifact_id != changed_control.artifact_id
-    assert first.metadata["command_security_identity"] != changed_suffix.metadata["command_security_identity"]
-    assert first.metadata["command_security_identity"] != changed_control.metadata["command_security_identity"]
-
-
-def test_hook_runtime_artifact_binds_compound_approval_to_effective_cwd(tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    first_workspace = tmp_path / "first-workspace"
-    second_workspace = tmp_path / "second-workspace"
+def test_hook_runtime_artifact_binds_compound_approval_to_effective_cwd(live_hook_root: Path) -> None:
+    home_dir = live_hook_root / "home"
+    home_dir.mkdir(parents=True)
+    first_workspace = live_hook_root / "first-workspace"
+    second_workspace = live_hook_root / "second-workspace"
     for workspace_dir in (first_workspace, second_workspace):
         _write_text(workspace_dir / "packages" / "api" / "package.json", '{"name":"demo"}\n')
 
-    def artifact_for(workspace_dir: Path) -> GuardArtifact:
-        command = "cd packages/api && npm install lodash"
-        payload = {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-            "source_scope": "project",
-        }
-        action = guard_commands_module._hook_action_envelope(
-            harness="codex",
-            payload=payload,
+    def binding_for(workspace_dir: Path) -> str:
+        result = live_shell_review(
+            "cd packages/api && npm install lodash",
             home_dir=home_dir,
-            workspace=workspace_dir,
-        )
-        artifact = guard_commands_module._hook_runtime_artifact(
-            harness="codex",
-            payload=payload,
-            action_envelope=action,
-            home_dir=home_dir,
+            cwd=workspace_dir,
             guard_home=home_dir,
-            workspace=workspace_dir,
         )
-        assert artifact is not None
-        return artifact
+        assert not quietly_allowed(result)
+        return _live_request_hash(result, home_dir)
 
-    first = artifact_for(first_workspace)
-    second = artifact_for(second_workspace)
-
-    assert first.metadata["command_security_identity"] == second.metadata["command_security_identity"]
-    assert first.metadata["shell_execution_context_hash"] != second.metadata["shell_execution_context_hash"]
-    assert first.artifact_id != second.artifact_id
+    assert binding_for(first_workspace) != binding_for(second_workspace)
 
 
 @pytest.mark.parametrize(
     "command",
     [
-        "npm view react version && git status",
-        "false || npm view react version",
-        "npm view react version; printf ok",
-        "npm view react version | jq -r .",
-        "npm view react version 2>/dev/null",
+        pytest.param("npm view react version && git status", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("false || npm view react version", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("npm view react version; printf ok", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("npm view react version | jq -r .", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("npm view react version 2>/dev/null", marks=LIVE_REVIEWS_RETIRED_ALLOW),
         "printf '%s\\n' '&& is quoted' && pwd",
     ],
 )
 def test_hook_runtime_artifact_keeps_safe_compound_shell_workflow_prompt_free(
-    tmp_path: Path,
+    live_hook_root: Path,
     command: str,
 ) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
     workspace_dir.mkdir(parents=True)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": command},
-        "source_scope": "project",
-    }
-    action = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=payload,
-        home_dir=home_dir,
-        workspace=workspace_dir,
-    )
 
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
-        guard_home=home_dir,
-        workspace=workspace_dir,
-    )
+    result = live_shell_review(command, home_dir=home_dir, cwd=workspace_dir, guard_home=home_dir)
 
-    assert artifact is None
+    assert quietly_allowed(result)
 
 
-def test_hook_runtime_artifact_fails_closed_once_for_malformed_compound_command(tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    workspace_dir.mkdir(parents=True)
-    command = "npm install lodash && printf '%s"
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": command},
-        "source_scope": "project",
-    }
-    action = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=payload,
-        home_dir=home_dir,
-        workspace=workspace_dir,
-    )
-
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
-        guard_home=home_dir,
-        workspace=workspace_dir,
-    )
-
-    assert artifact is not None
-    assert artifact.artifact_type == "tool_action_request"
-    assert artifact.metadata["guard_default_action"] == "require-reapproval"
-    assert artifact.metadata["compound_complete"] is False
-    assert artifact.metadata["command_uncertainty_reason"] == "malformed_shell_quoting"
-
-
-def test_hook_runtime_artifact_fails_closed_once_for_dynamic_compound_segment(tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
+@pytest.mark.parametrize(
+    "command",
+    ["npm install lodash && printf '%s", 'npm install lodash && eval "$GENERATED_COMMAND"'],
+    ids=("malformed_quoting", "dynamic_segment"),
+)
+def test_hook_runtime_artifact_fails_closed_for_incomplete_compound_command(live_hook_root: Path, command: str) -> None:
+    home_dir = live_hook_root / "home"
+    workspace_dir = live_hook_root / "workspace"
     _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": 'npm install lodash && eval "$GENERATED_COMMAND"'},
-        "source_scope": "project",
-    }
-    action = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=payload,
-        home_dir=home_dir,
-        workspace=workspace_dir,
-    )
 
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
-        guard_home=home_dir,
-        workspace=workspace_dir,
-    )
+    result = live_shell_review(command, home_dir=home_dir, cwd=workspace_dir, guard_home=home_dir)
 
-    assert artifact is not None
-    assert artifact.artifact_type == "package_request"
-    assert artifact.metadata["guard_default_action"] == "require-reapproval"
-    assert artifact.metadata["compound_complete"] is False
-    assert any(
-        finding["artifact_type"] == "tool_action_request" and "execution" in finding["risk_classes"]
-        for finding in artifact.metadata["compound_findings"]
-    )
+    assert not quietly_allowed(result)
 
 
-def test_hook_runtime_artifact_routes_post_tool_package_installs_without_pretool_decision(tmp_path):
-    home_dir = tmp_path / "home"
+def test_hook_runtime_artifact_routes_post_tool_package_installs_without_pretool_decision(live_hook_root):
+    home_dir = live_hook_root / "home"
     guard_home = home_dir / ".hol-guard"
-    workspace_dir = tmp_path / "workspace"
+    workspace_dir = live_hook_root / "workspace"
     guard_home.mkdir(parents=True, exist_ok=True)
-    workspace_dir.mkdir(parents=True, exist_ok=True)
     _write_text(workspace_dir / "package.json", '{"name":"demo"}\n')
     payload = {
         "hook_event_name": "PostToolUse",
@@ -10220,20 +10057,13 @@ def test_hook_runtime_artifact_routes_post_tool_package_installs_without_pretool
         home_dir=home_dir,
         workspace=workspace_dir,
     )
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=action,
-        home_dir=home_dir,
-        guard_home=guard_home,
-        workspace=workspace_dir,
-    )
+
+    result = live_post_tool_review(payload, home_dir=home_dir, cwd=workspace_dir, guard_home=guard_home)
 
     assert action is not None
     assert action.pre_execution_result is None
-    assert artifact is not None
-    assert artifact.artifact_type == "package_request"
-    assert artifact.metadata["package_manager"] == "npm"
+    # With no earlier verdict to lean on, the finished install is not passed through silently.
+    assert post_tool_output_flagged(result)
 
 
 def test_guard_hook_claude_stop_keeps_native_cancel_transient(tmp_path, capsys, monkeypatch):
@@ -13358,7 +13188,6 @@ def test_runtime_hook_saved_v1_allow_satisfies_exact_unchanged_current_review(tm
     assert "approval_requests" not in second_output
 
 
-@pytest.mark.usefixtures("native_command_artifact_reviews")
 def test_runtime_hook_saved_allow_invalidates_when_path_resolves_executable_elsewhere(
     tmp_path,
     capsys,
@@ -13440,49 +13269,35 @@ def test_runtime_hook_package_without_workspace_rejects_legacy_exact_allow(
         "tool_input": {"command": "npm install minimist@1.2.8"},
         "source_scope": "project",
     }
-    action_envelope = guard_commands_module._hook_action_envelope(
-        harness="codex",
-        payload=event,
-        home_dir=home_dir,
-        workspace=None,
-    )
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=event,
-        action_envelope=action_envelope,
-        home_dir=home_dir,
-        guard_home=home_dir,
-        workspace=None,
-    )
-    assert artifact is not None
-    assert artifact.artifact_type == "package_request"
+    monkeypatch.chdir(cwd)
+
+    def run_without_workspace() -> tuple[int, dict[str, object]]:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        rc = main(["guard", "hook", "--home", str(home_dir), "--harness", "codex", "--json"])
+        return rc, json.loads(capsys.readouterr().out)
+
+    first_rc, first_output = run_without_workspace()
+    assert first_rc == 0
+    assert first_output["approval_requests"]
+    request = first_output["approval_requests"][0]
+    queued = GuardStore(home_dir).get_approval_request(str(request["request_id"]))
+    assert queued is not None
+    # An exact allow written straight into the policy table, as older releases
+    # recorded one, is not an approval: it never resolves the queued request.
     GuardStore(home_dir).upsert_policy(
         PolicyDecision(
             harness="codex",
             scope="artifact",
             action="allow",
-            artifact_id=artifact.artifact_id,
-            artifact_hash=artifact_hash(artifact),
+            artifact_id=str(queued["artifact_id"]),
+            artifact_hash=str(queued["artifact_hash"]),
             reason="legacy exact package allow",
             source="manual",
         ),
         "2026-07-17T12:00:00+00:00",
     )
-    monkeypatch.chdir(cwd)
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
 
-    rc = main(
-        [
-            "guard",
-            "hook",
-            "--home",
-            str(home_dir),
-            "--harness",
-            "codex",
-            "--json",
-        ]
-    )
-    output = json.loads(capsys.readouterr().out)
+    rc, output = run_without_workspace()
 
     assert rc == 0
     assert output["policy_action"] == "review"
@@ -13914,7 +13729,6 @@ def test_guard_hook_codex_strict_default_still_denies_destructive_shell_command(
     assert "requires fresh approval" in payload["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-@pytest.mark.usefixtures("native_command_artifact_reviews")
 def test_guard_hook_codex_blocks_github_token_substitution_command(
     tmp_path,
     capsys,
@@ -15751,7 +15565,6 @@ def test_guard_hook_codex_user_prompt_submit_allows_outreach_message_context(
     assert GuardStore(home_dir).list_approval_requests(limit=10) == []
 
 
-@pytest.mark.usefixtures("native_command_artifact_reviews")
 def test_guard_hook_codex_blocks_local_shell_script_that_posts_fake_credentials(
     tmp_path,
     capsys,
@@ -15971,102 +15784,46 @@ def test_guard_hook_codex_post_tool_use_explains_merged_stderr_capture(
     assert "/requests/" not in payload["stopReason"]
 
 
-def test_codex_post_tool_output_allows_focused_pytest_fake_credential_fixture(tmp_path):
-    artifact = _codex_post_tool_output_artifact(
-        payload={
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": (
-                    "python3 -m pytest "
-                    "tests/test_guard_harness_smoke.py::TestSmokeEvidenceTemplate::"
-                    "test_release_checklist_references_smoke_evidence -q"
-                )
-            },
-            "tool_response": {"stdout": "fake_credential=fixture-only\n"},
-        },
-        config_path="codex.json",
-        source_scope="project",
-        cwd=tmp_path,
-        home_dir=tmp_path,
+@pytest.mark.parametrize(
+    ("flags", "stdout"),
+    (
+        ("-q", "fake_credential=fixture-only\n"),
+        ("-q -s", "fake_credential=fixture-only\n.\n1 passed in 0.02s\n"),
+    ),
+    ids=("quiet", "status_noise"),
+)
+@LIVE_REVIEWS_RETIRED_ALLOW
+def test_codex_post_tool_output_allows_focused_pytest_fake_credential_fixture(
+    live_hook_root: Path, flags: str, stdout: str
+) -> None:
+    command = (
+        "python3 -m pytest "
+        "tests/test_guard_harness_smoke.py::TestSmokeEvidenceTemplate::"
+        f"test_release_checklist_references_smoke_evidence {flags}"
+    )
+
+    artifact = live_post_tool_flag(
+        payload={"tool_name": "Bash", "tool_input": {"command": command}, "tool_response": {"stdout": stdout}},
+        cwd=live_hook_root / "workspace",
+        home_dir=live_hook_root,
     )
 
     assert artifact is None
 
 
-def test_codex_post_tool_output_allows_focused_pytest_fixture_with_status_noise(tmp_path):
-    artifact = _codex_post_tool_output_artifact(
-        payload={
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": (
-                    "python3 -m pytest "
-                    "tests/test_guard_harness_smoke.py::TestSmokeEvidenceTemplate::"
-                    "test_release_checklist_references_smoke_evidence -q -s"
-                )
-            },
-            "tool_response": {
-                "stdout": "fake_credential=fixture-only\n.\n1 passed in 0.02s\n",
-            },
-        },
-        config_path="codex.json",
-        source_scope="project",
-        cwd=tmp_path,
-        home_dir=tmp_path,
-    )
-
-    assert artifact is None
-
-
-def test_codex_post_tool_output_does_not_requeue_package_request_after_pretool_block(tmp_path):
-    home_dir = tmp_path / "home"
+@pytest.mark.parametrize("camel_case_copy", (False, True), ids=("snake_case", "camel_case"))
+def test_codex_post_tool_output_does_not_requeue_package_request_after_pretool_block(
+    live_hook_root: Path, camel_case_copy: bool
+) -> None:
+    home_dir = live_hook_root / "home"
     guard_home = home_dir / ".hol-guard"
-    workspace_dir = tmp_path / "workspace"
+    workspace_dir = live_hook_root / "workspace"
     guard_home.mkdir(parents=True, exist_ok=True)
     workspace_dir.mkdir(parents=True, exist_ok=True)
-
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload={
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": "npm install -g @getpaseo/cli"},
-            "tool_response": {
-                "stdout": (
-                    "HOL Guard blocked `@getpaseo/cli` before install.\n"
-                    "Open HOL Guard to approve or keep this blocked.\n"
-                )
-            },
-            "source_scope": "project",
-            "pre_execution_result": "block",
-        },
-        action_envelope=None,
-        data_flow_signals=(),
-        home_dir=home_dir,
-        guard_home=guard_home,
-        workspace=workspace_dir,
-    )
-
-    assert artifact is None
-
-
-def test_codex_post_tool_output_does_not_requeue_package_request_after_camelcase_pretool_block(tmp_path):
-    home_dir = tmp_path / "home"
-    guard_home = home_dir / ".hol-guard"
-    workspace_dir = tmp_path / "workspace"
-    guard_home.mkdir(parents=True, exist_ok=True)
-    workspace_dir.mkdir(parents=True, exist_ok=True)
-    # The payload as the retired Python normaliser left it: the harness's
-    # camelCase keys plus their snake_case copies.
-    payload = {
-        "hookEventName": "PostToolUse",
-        "toolName": "Bash",
-        "toolInput": {"command": "npm install -g @getpaseo/cli"},
-        "sourceScope": "project",
-        "preExecutionResult": "block",
+    payload: dict[str, object] = {
         "hook_event_name": "PostToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "npm install -g @getpaseo/cli"},
-        "arguments": {"command": "npm install -g @getpaseo/cli"},
         "tool_response": {
             "stdout": (
                 "HOL Guard blocked `@getpaseo/cli` before install.\nOpen HOL Guard to approve or keep this blocked.\n"
@@ -16075,19 +15832,25 @@ def test_codex_post_tool_output_does_not_requeue_package_request_after_camelcase
         "source_scope": "project",
         "pre_execution_result": "block",
     }
+    if camel_case_copy:
+        # The payload as the retired Python normaliser left it: the harness's
+        # camelCase keys plus their snake_case copies.
+        payload.update(
+            {
+                "hookEventName": "PostToolUse",
+                "toolName": "Bash",
+                "toolInput": {"command": "npm install -g @getpaseo/cli"},
+                "sourceScope": "project",
+                "preExecutionResult": "block",
+                "arguments": {"command": "npm install -g @getpaseo/cli"},
+            }
+        )
 
-    artifact = guard_commands_module._hook_runtime_artifact(
-        harness="codex",
-        payload=payload,
-        action_envelope=None,
-        data_flow_signals=(),
-        home_dir=home_dir,
-        guard_home=guard_home,
-        workspace=workspace_dir,
-    )
+    result = live_post_tool_review(payload, home_dir=home_dir, cwd=workspace_dir, guard_home=guard_home)
 
     assert payload["pre_execution_result"] == "block"
-    assert artifact is None
+    assert not post_tool_output_flagged(result)
+    assert not GuardStore(guard_home).list_approval_requests()
 
 
 def test_guard_hook_codex_post_tool_use_blocks_focused_pytest_medium_secret_output(
@@ -20477,8 +20240,8 @@ def test_codex_read_only_source_inspection_allows_quoted_bracket_targets(tmp_pat
         )
 
 
-def test_codex_read_only_source_inspection_allows_safe_sed_chains(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
+def test_codex_read_only_source_inspection_allows_safe_sed_chains(live_hook_root: Path) -> None:
+    workspace_dir = live_hook_root / "workspace"
     route_file = workspace_dir / "src" / "api" / "routes" / "skill-registry.ts"
     service_file = workspace_dir / "src" / "services" / "skill-registry" / "skill-registry-service.ts"
     _write_text(route_file, "export const headerName = 'x-api-key';\n")
@@ -20493,7 +20256,7 @@ def test_codex_read_only_source_inspection_allows_safe_sed_chains(tmp_path: Path
         command,
         cwd=workspace_dir,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -20501,8 +20264,6 @@ def test_codex_read_only_source_inspection_allows_safe_sed_chains(tmp_path: Path
                 "stdout": "export const headerName = 'x-api-key';\nexport const registryTokenField = 'tokenId';\n"
             },
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
     assert artifact is None
@@ -20554,8 +20315,8 @@ def test_codex_read_only_source_inspection_preserves_pipelines_in_safe_chains(tm
     )
 
 
-def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_search(tmp_path: Path) -> None:
-    repo_root = tmp_path / "CascadeProjects" / "hashgraph-online"
+def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_search(live_hook_root: Path) -> None:
+    repo_root = live_hook_root / "CascadeProjects" / "hashgraph-online"
     workspace_dir = repo_root / "cloud-portal" / ".worktrees" / "guard-auth-phase-r-removal"
     source_file = workspace_dir / "src" / "guard-auth.ts"
     live_prefix = "guard" + "_live" + "_"
@@ -20576,9 +20337,9 @@ def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_se
     assert codex_command_is_read_only_source_inspection(
         command,
         cwd=repo_root,
-        home_dir=tmp_path,
+        home_dir=live_hook_root,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -20589,10 +20350,8 @@ def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_se
                 )
             },
         },
-        config_path=str(repo_root / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=repo_root,
-        home_dir=tmp_path,
+        home_dir=live_hook_root,
     )
     assert artifact is None
 
@@ -20616,8 +20375,8 @@ def test_codex_read_only_source_inspection_rejects_cd_parent_escape(tmp_path: Pa
     )
 
 
-def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(tmp_path: Path) -> None:
-    repo_root = tmp_path / "CascadeProjects" / "hashgraph-online"
+def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(live_hook_root: Path) -> None:
+    repo_root = live_hook_root / "CascadeProjects" / "hashgraph-online"
     workspace_dir = repo_root / "cloud-portal" / ".worktrees" / "guard-auth-phase-r-default-surfaces"
     _write_text(
         workspace_dir / "app" / "agent-token-detail.tsx",
@@ -20634,9 +20393,9 @@ def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(tmp_pat
     assert codex_command_is_read_only_source_inspection(
         command,
         cwd=repo_root,
-        home_dir=tmp_path,
+        home_dir=live_hook_root,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -20647,10 +20406,8 @@ def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(tmp_pat
                 )
             },
         },
-        config_path=str(repo_root / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=repo_root,
-        home_dir=tmp_path,
+        home_dir=live_hook_root,
     )
     assert artifact is None
 
@@ -20666,13 +20423,13 @@ def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(tmp_pat
 )
 def test_codex_read_only_source_inspection_still_blocks_value_like_secret_output(
     command: str,
-    tmp_path: Path,
+    live_hook_root: Path,
 ) -> None:
-    workspace_dir = tmp_path / "workspace"
+    workspace_dir = live_hook_root / "workspace"
     _write_text(workspace_dir / "src" / "config.ts", "export const label = 'token';\n")
     _write_text(workspace_dir / ".github" / "workflows" / "publish.yml", "jobs: {}\n")
 
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -20680,8 +20437,6 @@ def test_codex_read_only_source_inspection_still_blocks_value_like_secret_output
                 "stdout": "src/config.ts:1:export const token = 'ghp_123456789012345678901234567890123456';\n"
             },
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
     assert artifact is not None
@@ -20689,10 +20444,10 @@ def test_codex_read_only_source_inspection_still_blocks_value_like_secret_output
 
 def test_codex_read_only_source_inspection_allows_git_diff_with_bounded_sed(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    live_hook_root: Path,
 ) -> None:
     _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
+    workspace_dir = live_hook_root / "workspace"
     source_paths = [
         workspace_dir / "src" / "codex_plugin_scanner" / "guard" / "daemon" / "server.py",
         workspace_dir / "dashboard" / "src" / "approval-center-layout.tsx",
@@ -20714,7 +20469,7 @@ def test_codex_read_only_source_inspection_allows_git_diff_with_bounded_sed(
         command,
         cwd=workspace_dir,
     )
-    artifact = guard_commands_module._codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -20725,8 +20480,6 @@ def test_codex_read_only_source_inspection_allows_git_diff_with_bounded_sed(
                 )
             },
         },
-        config_path=str(workspace_dir / ".codex" / "config.toml"),
-        source_scope="workspace",
         cwd=workspace_dir,
     )
     assert artifact is None

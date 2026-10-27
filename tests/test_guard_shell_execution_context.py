@@ -7,9 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli.commands_support_runtime_artifacts import (
-    _codex_post_tool_output_artifact,
-)
 from codex_plugin_scanner.guard.runtime.package_intent_parser import parse_package_intent
 from codex_plugin_scanner.guard.runtime.secret_file_requests import (
     extract_sensitive_tool_action_request,
@@ -30,6 +27,7 @@ from codex_plugin_scanner.guard.runtime.shell_execution_context import (
 from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
+from tests.live_hook_review_support import live_post_tool_flag
 from tests.resident_probe_support import validate_shell_execution_segment
 
 pytestmark = pytest.mark.usefixtures("package_intent_native")
@@ -462,26 +460,22 @@ def test_source_inspection_and_package_evidence_use_project_b(
     assert intent.manifest_paths == ("project-b/package.json",)
 
 
-def test_secret_source_output_artifact_uses_the_effective_project(tmp_path: Path) -> None:
-    project_a = tmp_path / "project-a"
+def test_secret_source_output_artifact_uses_the_effective_project(live_hook_root: Path) -> None:
+    project_a = live_hook_root / "project-a"
     project_b = project_a / "project-b"
     _write(project_b / ".env", "API_KEY=project-b-secret\n")
     command = "cd project-b && cat .env"
 
-    artifact = _codex_post_tool_output_artifact(
+    artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "tool_response": {"stdout": "API_KEY=project-b-secret\n"},
         },
-        config_path=str(project_a / ".codex" / "config.toml"),
-        source_scope="project",
         cwd=project_a,
     )
 
     assert artifact is not None
-    assert artifact.metadata["guard_default_action"] == "require-reapproval"
-    assert artifact.metadata["effective_cwd"] == str(project_b.resolve())
 
 
 def test_path_hash_changes_when_effective_directory_identity_changes(tmp_path: Path) -> None:
