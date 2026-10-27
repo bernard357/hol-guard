@@ -4292,17 +4292,19 @@ def _sync_extension_catalog_from_runtime_handshake(
 
         try:
             view = observed_view(session_payload, guard_home)
-            result = sync_catalog_view(
-                runtime_sync_url=runtime_sync_url,
-                runtime_response=runtime_response,
-                session_payload=session_payload,
-                view=view,
-                send=send_page,
-            )
         except ExtensionCatalogUnavailableError:
             # The shared cache dropped the view this session named, for example
             # after a concurrent publish; the next sync names a current one.
+            # Only this lookup downgrades: once a transfer may have reached
+            # Cloud, a later failure must not hide it as an absent catalog.
             return catalog_runtime_unavailable_summary()
+        result = sync_catalog_view(
+            runtime_sync_url=runtime_sync_url,
+            runtime_response=runtime_response,
+            session_payload=session_payload,
+            view=view,
+            send=send_page,
+        )
         if store is None:
             raise RuntimeError("Authenticated catalog completion requires the current store")
         from .extension_catalog_completion import complete_authenticated_view

@@ -60,3 +60,22 @@ def test_evicted_view_downgrades_the_v2_transfer(monkeypatch, tmp_path: Path) ->
     )
     assert result["extension_catalog_sync_status"] == "downgraded"
     assert result["extension_catalog_sync_reason"] == "catalog_runtime_unavailable"
+
+
+def test_unavailable_after_the_transfer_is_not_a_downgrade(monkeypatch, tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.runtime import extension_catalog_pages, extension_catalog_transfer, runner
+
+    monkeypatch.setattr(extension_catalog_pages, "observed_view", lambda *_: object())
+
+    def lost_lease(**_):
+        raise ExtensionCatalogUnavailableError("lease released by a restarted resident")
+
+    monkeypatch.setattr(extension_catalog_transfer, "sync_catalog_view", lost_lease)
+    with pytest.raises(ExtensionCatalogUnavailableError):
+        runner._sync_extension_catalog_from_runtime_handshake(
+            guard_home=tmp_path,
+            auth_context={},
+            runtime_sync_url="https://example.test/api/guard/runtime/sessions/sync",
+            runtime_response={"extensionCatalogSync": {"protocolVersion": 2}},
+            session_payload=SESSION,
+        )
