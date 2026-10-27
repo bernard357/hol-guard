@@ -11,6 +11,7 @@ from codex_plugin_scanner.guard import native_sensitive_request as client
 from codex_plugin_scanner.guard.models import GuardArtifact
 from codex_plugin_scanner.guard.native_request_context import NativeRequestContextFailure
 from codex_plugin_scanner.guard.runtime import secret_file_requests
+from tests import resident_probe_support as probes
 
 
 def _reply(query: str, result: object) -> dict[str, object]:
@@ -91,7 +92,7 @@ def test_unknown_sensitivity_is_not_presented(monkeypatch: pytest.MonkeyPatch, t
 def test_boolean_answers_must_be_booleans(monkeypatch: pytest.MonkeyPatch) -> None:
     _answer(monkeypatch, _reply("read_only_lookup_target_is_safe", 1))
     with pytest.raises(client.NativeSensitiveRequestError):
-        secret_file_requests._read_only_lookup_target_is_safe("README.md", allow_dirs=False)
+        probes._read_only_lookup_target_is_safe("README.md", allow_dirs=False)
 
 
 def test_tool_action_reply_rejects_a_non_string_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

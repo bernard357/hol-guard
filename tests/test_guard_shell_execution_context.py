@@ -29,8 +29,8 @@ from codex_plugin_scanner.guard.runtime.shell_execution_context import (
     SHELL_CWD_UNRESOLVED_PARENT_SHELL,
     SHELL_CWD_WORKSPACE_ESCAPE,
     model_shell_execution_context,
-    validate_shell_execution_segment,
 )
+from tests.resident_probe_support import validate_shell_execution_segment
 
 pytestmark = pytest.mark.usefixtures("package_intent_native")
 

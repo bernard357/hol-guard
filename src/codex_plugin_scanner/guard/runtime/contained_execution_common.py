@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import errno
 import hashlib
-import json
 import os
 import stat
 from pathlib import Path
@@ -81,16 +80,8 @@ def clean_containment_environment(environment: dict[str, str]) -> tuple[tuple[st
     return tuple(sorted((key, value) for key in _ALLOWED_ENVIRONMENT_KEYS if (value := environment.get(key))))
 
 
-def containment_binding_digest(payload: dict[str, object]) -> str:
-    """Hash one canonical payload with an explicit length prefix."""
-
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    return hashlib.sha256(len(encoded).to_bytes(8, "big") + encoded).hexdigest()
-
-
 __all__ = [
     "canonical_existing_directory",
     "clean_containment_environment",
-    "containment_binding_digest",
     "file_sha256",
 ]

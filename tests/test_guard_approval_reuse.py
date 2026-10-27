@@ -9,7 +9,6 @@ from typing import cast
 import pytest
 
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution
-from codex_plugin_scanner.guard.cli.commands_support_runtime_policy import _runtime_saved_allow_validation_reason
 from codex_plugin_scanner.guard.models import (
     GUARD_ACTION_VALUES,
     DecisionScope,
@@ -31,6 +30,7 @@ from codex_plugin_scanner.guard.runtime.approval_reuse import (
 )
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
+from tests.resident_probe_support import _runtime_saved_allow_validation_reason
 
 
 def _exact_command_id(command: str) -> str:
