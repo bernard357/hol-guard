@@ -332,7 +332,7 @@ def test_pi_pre_tool_use_blocks_argv_wrapped_kubectl_secret_dump(tmp_path: Path,
     assert output["decision"] == "deny"
 
 
-def test_pi_post_tool_output_labels_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_kubernetes_read(live_hook_root: Path) -> None:
     command = (
         "kubectl exec -n registry-broker registry-frontend-7fb9bf6b46-2fcj8 -- printenv GUARD_GITHUB_APP_PRIVATE_KEY"
     )
@@ -350,7 +350,7 @@ def test_pi_post_tool_output_labels_kubernetes_secret_source(live_hook_root: Pat
     assert_secret_output_held(artifact)
 
 
-def test_pi_post_tool_output_labels_argv_wrapped_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_argv_wrapped_kubernetes_read(live_hook_root: Path) -> None:
     artifact = live_post_tool_flag(
         harness="pi",
         payload={
@@ -365,7 +365,7 @@ def test_pi_post_tool_output_labels_argv_wrapped_kubernetes_secret_source(live_h
     assert_secret_output_held(artifact)
 
 
-def test_pi_post_tool_output_labels_single_item_command_args_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_single_item_command_args_kubernetes_read(live_hook_root: Path) -> None:
     artifact = live_post_tool_flag(
         harness="pi",
         payload={
@@ -380,7 +380,7 @@ def test_pi_post_tool_output_labels_single_item_command_args_kubernetes_secret_s
     assert_secret_output_held(artifact)
 
 
-def test_pi_post_tool_output_labels_commands_payload_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_commands_payload_kubernetes_read(live_hook_root: Path) -> None:
     artifact = live_post_tool_flag(
         harness="pi",
         payload={
@@ -395,7 +395,7 @@ def test_pi_post_tool_output_labels_commands_payload_kubernetes_secret_source(li
     assert_secret_output_held(artifact)
 
 
-def test_pi_post_tool_output_labels_later_commands_payload_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_later_commands_payload_kubernetes_read(live_hook_root: Path) -> None:
     artifact = live_post_tool_flag(
         harness="pi",
         payload={
@@ -461,7 +461,7 @@ def test_read_only_command_batches_stay_read_only_for_post_tool_skip(tmp_path: P
     )
 
 
-def test_pi_post_tool_output_labels_wrapped_kubernetes_secret_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_wrapped_kubernetes_read(live_hook_root: Path) -> None:
     command = (
         'bash -lc "kubectl exec -n registry-broker registry-frontend-7fb9bf6b46-2fcj8 '
         '-- printenv GUARD_GITHUB_APP_PRIVATE_KEY"'
@@ -480,7 +480,7 @@ def test_pi_post_tool_output_labels_wrapped_kubernetes_secret_source(live_hook_r
     assert_secret_output_held(artifact)
 
 
-def test_pi_post_tool_output_preserves_kubernetes_secret_volume_source(live_hook_root: Path) -> None:
+def test_pi_post_tool_output_holds_secret_from_kubernetes_secret_volume_read(live_hook_root: Path) -> None:
     command = 'kubectl exec registry-frontend -- sh -c "cat /etc/secrets/token"'
     artifact = live_post_tool_flag(
         harness="pi",

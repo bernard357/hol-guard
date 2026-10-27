@@ -7732,6 +7732,41 @@
    "old_node": "tests/test_npm_source_spec.py::test_git_approval_fingerprint_uses_canonical_repository_and_exact_commit",
    "new_node": "tests/test_guard_package_intent.py::test_git_approval_fingerprint_uses_canonical_repository_and_exact_commit",
    "reason": "Approval-fingerprint equivalence exercises the native package-intent artifact path, not the retired Python source parser, so it moves to the package-intent suite unchanged."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_argv_wrapped_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_argv_wrapped_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_single_item_command_args_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_single_item_command_args_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_commands_payload_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_commands_payload_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_later_commands_payload_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_later_commands_payload_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_labels_wrapped_kubernetes_secret_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_wrapped_kubernetes_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
+  },
+  {
+   "old_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_preserves_kubernetes_secret_volume_source",
+   "new_node": "tests/test_guard_kubernetes_runtime.py::test_pi_post_tool_output_holds_secret_from_kubernetes_secret_volume_read",
+   "reason": "The live hook answer for this payload shape still withholds the credential output; the Kubernetes source label it carries is checked by the native post-tool review's payload-shape test."
   }
  ],
  "unchanged_regression_suites": [
