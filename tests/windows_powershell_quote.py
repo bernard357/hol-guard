@@ -19,6 +19,11 @@ single-quoted arguments holding no quote character. Neither shell expands
 anything inside such a literal. The bootstrap's package root moves out of its
 Python string literal into the argument after it, so the code holds no quote.
 Only an argv that subset cannot carry falls back to ``powershell_join``.
+
+Guard writes this command line in the native runtime
+(``rust/crates/guard-runtime/src/codex_hook_bridge_contain_windows.rs``). This
+Python copy is the reference its quoting rules are checked against in
+``tests/test_windows_powershell_quote.py``; nothing in Guard imports it.
 """
 
 from __future__ import annotations

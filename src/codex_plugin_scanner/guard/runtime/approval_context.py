@@ -213,35 +213,6 @@ def approval_context_tokens_validation_reason(
     return cast(ApprovalContextValidationFailure | None, result.get("validation_reason"))
 
 
-def build_runtime_executable_identity(
-    command: object,
-    *,
-    search_path: str | None = None,
-    cwd: Path | None = None,
-    home_dir: Path | None = None,
-    require_executable: bool = True,
-) -> dict[str, object]:
-    """Resolve and content-bind an executable without launching it.
-
-    Resolution, hashing, symlink-chain snapshotting, and per-evaluation
-    nonce semantics live in the native ``runtime_executable_identity``
-    context-digest kind; this wrapper only transports the call. Files that
-    cannot be safely and completely hashed receive a per-evaluation nonce —
-    that deliberately disables approval reuse instead of treating an
-    incomplete executable identity as stable.
-    """
-
-    from ..native_context import context_runtime_executable_identity
-
-    return context_runtime_executable_identity(
-        command,
-        search_path=search_path,
-        cwd=cwd,
-        home_dir=home_dir,
-        require_executable=require_executable,
-    )
-
-
 def build_runtime_launch_identity(
     command: object,
     *,

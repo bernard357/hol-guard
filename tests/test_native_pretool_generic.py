@@ -58,7 +58,7 @@ def test_generic_review_result_renders_grok_deny_decision() -> None:
     assert hook_specific["permissionDecision"] == "deny"
 
 
-def test_generic_review_result_renders_grok_review_decision_with_approval() -> None:
+def test_generic_review_result_renders_grok_review_decision_with_approval(native_approval_reuse_runtime: Path) -> None:
     edge = _edge("grok", "PreToolUse")
     result = edge["result"]
     assert isinstance(result, dict)
@@ -66,6 +66,7 @@ def test_generic_review_result_renders_grok_review_decision_with_approval() -> N
         "grok",
         result,
         approval={"request_id": "req-1", "approval_url": "http://127.0.0.1/pending/req-1"},
+        guard_home=native_approval_reuse_runtime,
     )
     assert rendered["decision"] == "deny"
     assert rendered["policy_action"] == "review"

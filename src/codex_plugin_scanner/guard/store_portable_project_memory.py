@@ -16,18 +16,12 @@ from .project_identity import (
 )
 from .store_base import PolicyDecisionLookupResult
 from .store_policy import _DEGRADED_AUTHORITY_REVISION
-from .store_policy import POLICY_DECISION_LOOKUP_FEATURE as _LOOKUP
 from .store_policy import POLICY_LOOKUP_MEMORY_FEATURE as _MEMORY
 from .store_policy import PORTABLE_COMPOSITION_LOOKUP_FEATURE as _PORTABLE_COMPOSITION
-from .store_policy import RUNTIME_SAVED_REUSE_FEATURE as _SAVED_REUSE
 
 # A decision at or above this rank can only hold a caller back, so a lookup
 # that lost its portable half may still return it.
 _REVIEW_FLOOR = guard_action_severity("review")
-
-
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) else None
 
 
 def _restrictive_only(decision: object) -> dict[str, object] | None:
@@ -71,41 +65,6 @@ class StorePortableProjectMemoryMixin:
             **operation,
             "metadata": enrich_project_identity_metadata(metadata, guard_home=self.guard_home),
         }
-
-    def peek_saved_decision_groups(
-        self,
-        harness: str,
-        probes: Sequence[tuple[str, str | None]],
-        *,
-        workspace: str | None,
-        publisher: str | None,
-        runtime_exact_match_context: str | None,
-        memory_command: str | None,
-        memory_artifact_type: str | None,
-        memory_artifact_name: str | None,
-        current_action: str,
-        approval_context_inputs: Mapping[str, object],
-    ) -> dict[str, Any] | None:
-        """Peek saved decisions for several ``(artifact_id, artifact_hash)`` probes in one resident call.
-
-        The resident expands each probe's direct id with its exact-command and
-        memory ids and composes them most restrictive (with the portable Git
-        workspace); across probes a strictly more severe decision wins. Nothing is consumed. The first probe names
-        the current action: the resident also checks a saved allow's context
-        token against its hash, explains a miss, and composes the reuse verdict
-        for ``current_action``. Returns ``decision``, ``ignored_local_integrity``,
-        ``reuse`` (the verdict payload), ``saved_present`` and
-        ``saved_artifact_hash``. ``None`` means the home serves no saved
-        authority, so there is no saved decision to compose.
-        """
-        evidence = self.policy_lookup_evidence()
-        if evidence.degraded_trust_status is not None:
-            return None
-        reuse = {"current_action": current_action, "approval_context_inputs": dict(approval_context_inputs)}
-        memory = (memory_command, memory_artifact_type, memory_artifact_name)
-        return self._send_memory_probe_groups(
-            evidence, harness, probes, workspace, publisher, runtime_exact_match_context, memory, reuse
-        )
 
     def resolve_policy_decision_lookup_with_memory_pattern(
         self,
@@ -163,13 +122,8 @@ class StorePortableProjectMemoryMixin:
         publisher: str | None,
         runtime_exact_match_context: str | None,
         memory: tuple[str | None, str | None, str | None],
-        reuse: Mapping[str, object] | None = None,
     ) -> Any:
-        """Send direct-id probe groups for the resident to expand and compose.
-
-        Without ``reuse`` the request names one probe and answers its full
-        ``lookup_result``.
-        """
+        """Send direct-id probe groups for the resident to expand and compose."""
         request = self.policy_decision_lookup_request(
             evidence,
             harness=harness,
@@ -185,7 +139,6 @@ class StorePortableProjectMemoryMixin:
         request["probe_groups"] = {
             "portable_workspace": portable,
             "groups": [{"artifact_hash": h, "candidate_artifact_ids": [i]} for i, h in probes],
-            **({"reuse": reuse} if reuse is not None else {}),
             "memory": {
                 "command": command,
                 "artifact_type": artifact_type,
@@ -200,77 +153,6 @@ class StorePortableProjectMemoryMixin:
         # named missing capability says that; a serde error would not.
         lookup = self.send_policy_decision_lookup(request, required_feature=_MEMORY)
         return _restrictive_only_lookup(lookup) if unread else lookup
-
-    def resolve_runtime_saved_decision(
-        self,
-        current: Mapping[str, object],
-        legacy: Mapping[str, object],
-        alias: Mapping[str, object] | None,
-        reuse: Mapping[str, object] | None = None,
-    ) -> tuple[PolicyDecisionLookupResult, dict[str, Any] | None, dict[str, Any] | None]:
-        """Resolve a runtime hook evaluation's saved decision in one resident call.
-
-        ``current`` and ``legacy`` probe the request hash and the legacy content
-        hash with their exact-command and memory candidates; ``alias`` probes
-        the Claude alias of a legacy ``claude-code:`` artifact when neither
-        matched. Nothing is consumed. Returns the trust and integrity evidence,
-        the decision this artifact may use and, with ``reuse``, the resident's
-        ``saved_reuse`` (a degraded store builds only its query).
-        """
-        evidence = self.policy_lookup_evidence()
-        if evidence.degraded_trust_status is not None:
-            degraded: PolicyDecisionLookupResult = {
-                "decision": None,
-                "ignored_local_integrity": None,
-                "trust_status": evidence.degraded_trust_status,
-                "authority_revision": _DEGRADED_AUTHORITY_REVISION,
-            }
-            query = None if reuse is None else {"query": self._degraded_saved_reuse_query(current, reuse)}
-            return degraded, None, query
-        probes = {"current": current, "legacy": legacy, **({"alias": alias} if alias is not None else {})}
-        resolved = {
-            name: self._portable_probe_workspace(_text(probe.get("workspace"))) for name, probe in probes.items()
-        }
-        unread = any(probe_unread for _, probe_unread in resolved.values())
-        runtime = {name: {**probe, "portable_workspace": resolved[name][0]} for name, probe in probes.items()}
-        request = self.policy_decision_lookup_request(
-            evidence,
-            harness=str(current["harness"]),
-            artifact_id=_text(current.get("artifact_id")),
-            artifact_hash=_text(current.get("artifact_hash")),
-            workspace=_text(current.get("workspace")),
-            publisher=_text(current.get("publisher")),
-            runtime_exact_match_context=_text(current.get("exact_match_context")),
-            consume_one_shot=False,
-        )
-        request["probe_groups"] = {"groups": [], "runtime": {**runtime, **({"reuse": reuse} if reuse else {})}}
-        payload = self.send_policy_decision_lookup(request, required_feature=_SAVED_REUSE if reuse else _LOOKUP)
-        saved_reuse = None if reuse is None else payload.get("saved_reuse")
-        if unread:
-            # A probe sent without its identity read only local authority, so
-            # neither its decision nor a reuse built on it may grant anything.
-            return _restrictive_only_lookup(payload["lookup"]), _restrictive_only(payload["decision"]), None
-        return payload["lookup"], payload["decision"], saved_reuse
-
-    def _degraded_saved_reuse_query(self, current: Mapping[str, object], reuse: Mapping[str, object]) -> dict[str, Any]:
-        """The ``saved_reuse`` query of a store that serves no saved decision."""
-        from .runtime.approval_context import approval_context_tokens_validation_reason as validate
-
-        token, keys = reuse.get("cursor_native_token"), ("artifact_id", "artifact_hash", "workspace", "publisher")
-        reason, stored_hash = (
-            self.approval_reuse_diagnostic(str(current["harness"]), *(_text(current.get(key)) for key in keys))
-            if token is None
-            else (None, None)
-        )
-        return {
-            "current_action": reuse["current_action"],
-            **dict.fromkeys(("stored_action", "stored_artifact_hash", "stored_validation_reason"), None),
-            **dict.fromkeys(("stored_present", "integrity_failure"), False),
-            "cursor_native_present": token is not None,
-            "cursor_validation_reason": None if token is None else validate(token, current["artifact_hash"]),
-            "diagnostic_reason": reason,
-            "diagnostic_stored_hash": stored_hash,
-        }
 
     def mcp_policy_lookup_input(self, *, workspace: str | None) -> dict[str, object]:
         """Ship the keyring-facing evidence once so the resident can read saved policy itself.
