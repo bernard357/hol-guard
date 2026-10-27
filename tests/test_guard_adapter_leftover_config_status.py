@@ -135,3 +135,47 @@ def test_a_harness_running_without_its_command_stays_broken(tmp_path: Path) -> N
     diagnostics = _diagnostics(_EditorStubAdapter(command_available=False), tmp_path)
 
     assert diagnostics["setup_status"] == "broken"
+
+
+def test_a_harness_running_without_its_command_is_not_told_to_uninstall(tmp_path: Path) -> None:
+    # Its configuration is in use, so recommending `hol-guard uninstall` would drop live protection.
+    diagnostics = _diagnostics(_EditorStubAdapter(command_available=False), tmp_path)
+
+    warnings = [str(warning) for warning in diagnostics["warnings"]]  # type: ignore[union-attr]
+    assert warnings
+    assert not any("uninstall" in warning for warning in warnings)
+    assert not any("leftover" in warning.lower() for warning in warnings)
+    assert any("runs Guard's hooks without it" in warning for warning in warnings)
+
+
+class _LauncherOnlyStubAdapter(_StubAdapter):
+    """A Guard launcher beside a tool config Guard never touched."""
+
+    def detect(self, context: HarnessContext) -> HarnessDetection:
+        detection = super().detect(context)
+        return HarnessDetection(
+            harness=detection.harness,
+            installed=detection.installed,
+            command_available=detection.command_available,
+            config_paths=detection.config_paths,
+            artifacts=(
+                GuardArtifact(
+                    artifact_id="stubtool:launcher",
+                    name="guard launcher",
+                    harness=detection.harness,
+                    artifact_type="guard_launcher_shim",
+                    source_scope="global",
+                    config_path=str(context.home_dir / ".local" / "bin" / "guard-stubtool"),
+                ),
+            ),
+            warnings=detection.warnings,
+        )
+
+
+def test_a_launcher_beside_an_unmanaged_config_stays_broken(tmp_path: Path) -> None:
+    # The launcher is the only thing Guard manages here, so an unmanaged tool
+    # config sitting beside it must not make the launcher vanish from doctor.
+    diagnostics = _diagnostics(_LauncherOnlyStubAdapter(command_available=False), tmp_path)
+
+    assert diagnostics["setup_status"] == "broken"
+    assert _protection_state(diagnostics) == "broken"

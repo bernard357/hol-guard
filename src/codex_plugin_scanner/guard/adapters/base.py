@@ -578,11 +578,19 @@ class HarnessAdapter:
                 f"{self.harness} config was found, but Guard is not installed for this harness. "
                 f"Run `hol-guard install {self.harness}` to enable protection."
             )
-        if guard_managed and not detection.command_available:
+        if guard_managed and not detection.command_available and self.command_absence_proves_uninstalled:
             warnings.append(
                 f"Guard is configured for {self.harness}, but the {self.executable} command is not available on "
                 f"this machine. Install {self.executable}, or run `hol-guard uninstall {self.harness}` to remove "
                 "the leftover Guard configuration."
+            )
+        elif guard_managed and not detection.command_available:
+            # The tool runs Guard's hooks without its CLI, so the configuration is in use,
+            # not left behind: naming it leftover would invite an uninstall that drops live protection.
+            warnings.append(
+                f"Guard is configured for {self.harness}, but the {self.executable} command is not available on "
+                f"this machine. Install {self.executable} to protect {self.harness} command-line sessions. "
+                f"The configuration is still in use, because {self.harness} runs Guard's hooks without it."
             )
         elif detection.config_paths and not detection.command_available:
             warnings.append(
@@ -735,9 +743,26 @@ def setup_failures_besides_missing_command(warnings: Sequence[str]) -> bool:
     return any(_MISSING_COMMAND_MARKER not in warning.lower() for warning in warnings)
 
 
+def _guard_management_is_launcher_only(detection: HarnessDetection) -> bool:
+    """Whether a Guard launcher is the only thing Guard manages for this tool.
+
+    A launcher beside an ordinary, unmanaged tool config leaves `config_paths`
+    nonempty, so the config alone cannot tell leftover Guard configuration from a
+    tool config Guard never touched.
+    """
+
+    if any(_guard_managed_path(path) for path in detection.config_paths):
+        return False
+    managed = [artifact for artifact in detection.artifacts if _artifact_uses_guard(artifact)]
+    return bool(managed) and all(artifact.artifact_type == "guard_launcher_shim" for artifact in managed)
+
+
 def _only_tool_command_missing(detection: HarnessDetection, warnings: list[str]) -> bool:
-    # A Guard launcher with no tool config is kept broken so it stays visible rather than vanishing.
+    # A Guard launcher is kept broken so it stays visible rather than vanishing, whether or not
+    # an unmanaged tool config sits beside it.
     if detection.command_available or not detection.config_paths:
+        return False
+    if _guard_management_is_launcher_only(detection):
         return False
     return not setup_failures_besides_missing_command(warnings)
 
