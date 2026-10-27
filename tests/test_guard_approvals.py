@@ -3855,13 +3855,17 @@ class TestGuardApprovals:
             is None
         )
 
-    def test_a_package_scope_outage_surfaces_as_an_unavailable_scope(self, tmp_path, monkeypatch):
+    def test_a_package_scope_outage_surfaces_as_an_unavailable_scope(
+        self, tmp_path, monkeypatch, package_workspace_scope_native
+    ):
         """The resident's own failure type never reaches the CLI unconverted.
 
         Every other resident scope failure in this function is an
         ``ApprovalScopeUnavailableError``, and the callers catch it as one.  The
         package workspace bridge raises a ``RuntimeError`` instead, which would
-        walk straight past those handlers.
+        walk straight past those handlers.  The request carries the same
+        portable execution context as the resolution test above, because only a
+        request the resident keeps at workspace scope reaches the bridge at all.
         """
 
         from codex_plugin_scanner.guard import approvals as approvals_module
@@ -3871,6 +3875,33 @@ class TestGuardApprovals:
         store = GuardStore(tmp_path / "guard-home")
         workspace_dir = tmp_path / "workspace"
         workspace_dir.mkdir()
+        (workspace_dir / ".git").mkdir()
+        _write_text(workspace_dir / ".git" / "config", '[remote "origin"]\nurl = https://example.test/app.git\n')
+        _write_text(workspace_dir / "package.json", '{"name":"approval-test"}\n')
+        executable = tmp_path / "bin" / "npm"
+        _write_text(executable, "#!/bin/sh\n")
+        executable.chmod(0o755)
+        (tmp_path / "home").mkdir()
+        package_artifact = GuardArtifact(
+            artifact_id="guard-cli:project:package-request:outage",
+            name="npm install left-pad",
+            harness="guard-cli",
+            artifact_type="package_request",
+            source_scope="project",
+            config_path=str(workspace_dir / "hol-guard.toml"),
+            metadata={
+                "package_manager": "npm",
+                "package_executable": "npm",
+                "manifest_paths": ["package.json"],
+                "lockfile_paths": [],
+            },
+        )
+        package_context = build_package_execution_context(
+            workspace_dir=workspace_dir,
+            artifact=package_artifact,
+            environment={"HOME": str(tmp_path / "home"), "PATH": str(executable.parent)},
+        )
+        assert package_context.portable is True
         store.add_approval_request(
             GuardApprovalRequest(
                 request_id="req-scope-outage",
@@ -3887,6 +3918,7 @@ class TestGuardApprovals:
                 approval_url="http://127.0.0.1/pending",
                 workspace=str(workspace_dir),
                 artifact_type="package_request",
+                scanner_evidence=(package_context.to_evidence(),),
             ),
             "2026-04-11T00:00:00+00:00",
         )
