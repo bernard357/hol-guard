@@ -89,6 +89,7 @@ from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_verification_key,
     sign_policy_bundle,
 )
+from tests.policy_store_support import replace_remote_policies, resolve_policy
 from tests.support.network import stub_authenticated_urlopen
 
 # A credential-shaped literal in source output, assembled so that repository
@@ -17810,9 +17811,9 @@ def test_valid_signed_empty_bundle_excludes_co_delivered_unsigned_policy_sibling
     assert store.get_sync_payload("team_policy_pack") == {}
     assert store.list_policy_decisions() == []
     assert store.list_cloud_exceptions() == []
-    assert store.resolve_policy("codex", "unsigned-exception-artifact", "hash") is None
-    assert store.resolve_policy("codex", "unsigned-team-block", "hash") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="unsigned.publisher.example") is None
+    assert resolve_policy(store, "codex", "unsigned-exception-artifact", "hash") is None
+    assert resolve_policy(store, "codex", "unsigned-team-block", "hash") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="unsigned.publisher.example") is None
     assert summary["exceptions_stored"] == 0
     assert summary["cloud_exceptions_stored"] == 0
     assert summary["remote_policies_stored"] == 0
@@ -17904,7 +17905,8 @@ def test_fresh_mdm_activation_bootstraps_first_signed_policy_sync(
     assert store.get_sync_payload("managed_policy_bundle_keyring_mirror") == keyring
     assert summary["remote_policies_stored"] == 1
     assert (
-        store.resolve_policy(
+        resolve_policy(
+            store,
             "codex",
             "codex:project:package-request:fresh-managed-device",
             "hash",
@@ -18017,7 +18019,8 @@ def test_omitted_bundle_with_invalid_cached_authority_clears_unsigned_legacy_pol
         {"name": "Stale unsigned policy", "allowedPublishers": ["stale.publisher.example"]},
         "2026-07-16T00:00:00Z",
     )
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         [
             PolicyDecision(
                 harness="*",
@@ -18119,11 +18122,11 @@ def test_omitted_bundle_with_invalid_cached_authority_clears_unsigned_legacy_pol
     assert store.list_policy_decisions() == []
     assert store.list_cloud_exceptions() == []
     assert synced_policy_payload(store) is None
-    assert store.resolve_policy("codex", "stale-cloud-allow", "hash") is None
-    assert store.resolve_policy("codex", "stale-bundle-allow", "hash") is None
-    assert store.resolve_policy("codex", "new-unsigned-allow", "hash") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="stale.publisher.example") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="new.publisher.example") is None
+    assert resolve_policy(store, "codex", "stale-cloud-allow", "hash") is None
+    assert resolve_policy(store, "codex", "stale-bundle-allow", "hash") is None
+    assert resolve_policy(store, "codex", "new-unsigned-allow", "hash") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="stale.publisher.example") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="new.publisher.example") is None
     assert summary["exceptions_stored"] == 0
     assert summary["cloud_exceptions_stored"] == 0
     assert summary["remote_policies_stored"] == 0
@@ -18221,13 +18224,13 @@ def test_malformed_policy_bundle_field_rejects_unsigned_siblings_and_preserves_s
         for item in store.list_policy_decisions()
     ] == expected_signed_rows
     assert store.list_cloud_exceptions() == []
-    assert store.resolve_policy("codex", "malformed-unsigned-allow", "hash") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="malformed.publisher.example") is None
+    assert resolve_policy(store, "codex", "malformed-unsigned-allow", "hash") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="malformed.publisher.example") is None
     assert summary["exceptions_stored"] == 0
     assert summary["cloud_exceptions_stored"] == 0
     assert summary["remote_policies_stored"] == len(expected_signed_rows)
     if cached_authority is not None:
-        assert store.resolve_policy("codex", "codex:project:package-request:cached", "hash") == "block"
+        assert resolve_policy(store, "codex", "codex:project:package-request:cached", "hash") == "block"
 
 
 def test_omitted_bundle_rematerializes_only_valid_cached_signed_policy(
@@ -18256,7 +18259,8 @@ def test_omitted_bundle_rematerializes_only_valid_cached_signed_policy(
         {"name": "Stale unsigned policy", "allowedPublishers": ["stale.publisher.example"]},
         "2026-07-17T00:00:00Z",
     )
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         [
             PolicyDecision(
                 harness="*",
@@ -18357,12 +18361,12 @@ def test_omitted_bundle_rematerializes_only_valid_cached_signed_policy(
         for item in store.list_policy_decisions()
     ] == [("codex", "harness", "family:package-request", "block", "signed-package-block", "policy-bundle")]
     assert store.list_cloud_exceptions() == []
-    assert store.resolve_policy("codex", "codex:project:package-request:cached-current", "hash") == "block"
-    assert store.resolve_policy("codex", "stale-cloud-allow", "hash") is None
-    assert store.resolve_policy("codex", "stale-bundle-allow", "hash") is None
-    assert store.resolve_policy("codex", "new-unsigned-allow", "hash") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="stale.publisher.example") is None
-    assert store.resolve_policy("codex", "other", "hash", publisher="new.publisher.example") is None
+    assert resolve_policy(store, "codex", "codex:project:package-request:cached-current", "hash") == "block"
+    assert resolve_policy(store, "codex", "stale-cloud-allow", "hash") is None
+    assert resolve_policy(store, "codex", "stale-bundle-allow", "hash") is None
+    assert resolve_policy(store, "codex", "new-unsigned-allow", "hash") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="stale.publisher.example") is None
+    assert resolve_policy(store, "codex", "other", "hash", publisher="new.publisher.example") is None
     assert summary["exceptions_stored"] == 0
     assert summary["cloud_exceptions_stored"] == 0
     assert summary["remote_policies_stored"] == 1
@@ -18439,13 +18443,13 @@ def test_policy_bundle_decisions_map_to_runtime_families(tmp_path):
         device_id=guard_runner_module._guard_device_metadata(store)[0],
         device_name="MacBook Pro",
     )
-    store.replace_remote_policies(decisions, "2026-04-19T00:00:11+00:00", remote_write_authorized=True)
+    replace_remote_policies(store, decisions, "2026-04-19T00:00:11+00:00", remote_write_authorized=True)
     _cache_signed_test_policy_bundle(store, bundle["rules"])
 
-    assert store.resolve_policy("codex", "codex:project:package-request:abc", "hash") == "block"
-    assert store.resolve_policy("codex", "codex:project:mcp:shell", "hash") == "review"
-    assert store.resolve_policy("codex", "codex:project:file-read:abc", "hash") == "allow"
-    assert store.resolve_policy("codex", "codex:project:tool-action:abc", "hash") == "block"
+    assert resolve_policy(store, "codex", "codex:project:package-request:abc", "hash") == "block"
+    assert resolve_policy(store, "codex", "codex:project:mcp:shell", "hash") == "review"
+    assert resolve_policy(store, "codex", "codex:project:file-read:abc", "hash") == "allow"
+    assert resolve_policy(store, "codex", "codex:project:tool-action:abc", "hash") == "block"
 
 
 def test_policy_bundle_exact_artifact_rules_apply_with_workspace_scope(tmp_path):
@@ -18498,7 +18502,7 @@ def test_policy_bundle_exact_artifact_rules_apply_with_workspace_scope(tmp_path)
         device_id=guard_runner_module._guard_device_metadata(store)[0],
         device_name="MacBook Pro",
     )
-    store.replace_remote_policies(decisions, "2026-06-05T13:31:00+00:00", remote_write_authorized=True)
+    replace_remote_policies(store, decisions, "2026-06-05T13:31:00+00:00", remote_write_authorized=True)
     _cache_signed_test_policy_bundle(
         store,
         bundle["rules"],
@@ -18506,18 +18510,19 @@ def test_policy_bundle_exact_artifact_rules_apply_with_workspace_scope(tmp_path)
         expires_at=str(bundle["expiresAt"]),
     )
 
-    assert store.resolve_policy("codex", allow_artifact, "hash", workspace=workspace_a, now=now) == "allow"
-    assert store.resolve_policy("codex", block_artifact, "hash", workspace=workspace_a, now=now) == "block"
+    assert resolve_policy(store, "codex", allow_artifact, "hash", workspace=workspace_a, now=now) == "allow"
+    assert resolve_policy(store, "codex", block_artifact, "hash", workspace=workspace_a, now=now) == "block"
     assert (
-        store.resolve_policy("codex", "codex:project:tool-action:other", "hash", workspace=workspace_a, now=now) is None
+        resolve_policy(store, "codex", "codex:project:tool-action:other", "hash", workspace=workspace_a, now=now)
+        is None
     )
-    assert store.resolve_policy("codex", allow_artifact, "hash", workspace=workspace_b, now=now) is None
+    assert resolve_policy(store, "codex", allow_artifact, "hash", workspace=workspace_b, now=now) is None
     expiry = "2099-12-01T00:00:00+00:00"
-    assert store.resolve_policy("codex", allow_artifact, "hash", workspace=workspace_a, now=expiry) is None
-    assert store.resolve_policy("codex", block_artifact, "hash", workspace=workspace_a, now=expiry) == "block"
+    assert resolve_policy(store, "codex", allow_artifact, "hash", workspace=workspace_a, now=expiry) is None
+    assert resolve_policy(store, "codex", block_artifact, "hash", workspace=workspace_a, now=expiry) == "block"
     expiry = "2100-10-01T00:00:00+00:00"
-    assert store.resolve_policy("codex", block_artifact, "hash", workspace=workspace_a, now=expiry) is None
-    assert store.resolve_policy("codex", allow_artifact, "hash", workspace=workspace_a, now=expiry) is None
+    assert resolve_policy(store, "codex", block_artifact, "hash", workspace=workspace_a, now=expiry) is None
+    assert resolve_policy(store, "codex", allow_artifact, "hash", workspace=workspace_a, now=expiry) is None
     exact_decisions = [item for item in store.list_policy_decisions() if item["source"] == "policy-bundle"]
     assert {item["scope"] for item in exact_decisions} == {"workspace"}
     stored_workspaces = {item["workspace"] for item in exact_decisions}
@@ -18590,7 +18595,8 @@ def test_materialized_policy_bundle_decision_requires_current_cached_signature(t
     store = GuardStore(tmp_path / "guard-home")
     _seed_guard_cloud(store, workspace_id="workspace-1")
     store.set_sync_payload("policy_bundle_keyring", policy_bundle_test_keyring(), "2026-04-19T00:00:00Z")
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         [
             PolicyDecision(
                 harness="codex",
@@ -18647,11 +18653,11 @@ def test_materialized_policy_bundle_decision_requires_current_cached_signature(t
     digest_bundle["verifier"]["signature"] = digest_bundle["payloadHash"]
     store.set_sync_payload("policy_bundle", digest_bundle, "2026-04-19T00:00:00Z")
 
-    assert store.resolve_policy("codex", "codex:project:package-request:test", "sha256:test") is None
+    assert resolve_policy(store, "codex", "codex:project:package-request:test", "sha256:test") is None
 
     store.set_sync_payload("policy_bundle", policy_bundle, "2026-04-19T00:00:01Z")
 
-    assert store.resolve_policy("codex", "codex:project:package-request:test", "sha256:test") == "allow"
+    assert resolve_policy(store, "codex", "codex:project:package-request:test", "sha256:test") == "allow"
 
 
 def test_cached_and_last_good_policy_bundle_preserve_signed_empty_optional_fields(tmp_path):
@@ -18683,7 +18689,8 @@ def test_cached_and_last_good_policy_bundle_preserve_signed_empty_optional_field
 def test_materialized_policy_bundle_decision_must_exist_in_current_signed_bundle(tmp_path):
     store = GuardStore(tmp_path / "guard-home")
     _cache_signed_test_policy_bundle(store, [])
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         [
             PolicyDecision(
                 harness="codex",
@@ -18699,7 +18706,7 @@ def test_materialized_policy_bundle_decision_must_exist_in_current_signed_bundle
         remote_write_authorized=True,
     )
 
-    assert store.resolve_policy("codex", "codex:project:package-request:test", "sha256:test") is None
+    assert resolve_policy(store, "codex", "codex:project:package-request:test", "sha256:test") is None
 
 
 def test_policy_bundle_replacement_invalidates_prevalidated_allow_claim(tmp_path):
@@ -18727,7 +18734,8 @@ def test_policy_bundle_replacement_invalidates_prevalidated_allow_claim(tmp_path
     }
     authorized_bundle = _signed_test_policy_bundle([allow_rule])
     store.set_sync_payload("policy_bundle", authorized_bundle, "2026-01-01T00:00:00Z")
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         guard_runner_module._build_policy_bundle_decisions(
             authorized_bundle,
             device_id=guard_runner_module._guard_device_metadata(store)[0],
@@ -18784,13 +18792,14 @@ def test_interrupted_policy_bundle_replacement_cannot_reuse_prior_materialized_a
         device_id=device_metadata["installation_id"],
         device_name=device_metadata["device_label"],
     )
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         old_decisions,
         "2026-01-01T00:00:00Z",
         remote_write_authorized=True,
     )
     artifact_id = "codex:project:package-request:test"
-    assert store.resolve_policy("codex", artifact_id, "sha256:test") == "allow"
+    assert resolve_policy(store, "codex", artifact_id, "sha256:test") == "allow"
 
     # Both sync paths persist the newly verified bundle before replacing its
     # materialized rows. Simulate a process interruption at exactly that point.
@@ -18802,7 +18811,7 @@ def test_interrupted_policy_bundle_replacement_cannot_reuse_prior_materialized_a
     store.set_sync_payload("policy_bundle", replacement_bundle, "2026-01-02T00:00:00Z")
     store.set_sync_payload("policy_bundle_last_good", replacement_bundle, "2026-01-02T00:00:00Z")
 
-    assert store.resolve_policy("codex", artifact_id, "sha256:test") is None
+    assert resolve_policy(store, "codex", artifact_id, "sha256:test") is None
 
 
 def test_policy_bundle_downgrade_check_normalizes_mixed_timezone_formats():
@@ -19491,7 +19500,8 @@ def test_policy_bundle_decision_resolves_before_receipt_persistence(tmp_path, mo
             }
         ],
     }
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         guard_runner_module._build_policy_bundle_decisions(
             bundle,
             device_id=guard_runner_module._guard_device_metadata(store)[0],
