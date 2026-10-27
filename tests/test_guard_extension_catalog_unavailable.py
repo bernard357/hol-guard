@@ -62,15 +62,48 @@ def test_evicted_view_downgrades_the_v2_transfer(monkeypatch, tmp_path: Path) ->
     assert result["extension_catalog_sync_reason"] == "catalog_runtime_unavailable"
 
 
-def test_unavailable_after_the_transfer_is_not_a_downgrade(monkeypatch, tmp_path: Path) -> None:
+def _patch_send(monkeypatch, runner) -> None:
+    monkeypatch.setattr(runner, "_guard_sync_request", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(runner, "_urlopen_json_with_timeout_retry", lambda **_kwargs: {})
+
+
+def test_eviction_before_the_first_page_downgrades(monkeypatch, tmp_path: Path) -> None:
+    # The transfer pins the view and builds its plan before it sends anything,
+    # and both of those read the same shared cache the lookup did. Losing the
+    # view there has told Cloud nothing, so pairing carries on.
     from codex_plugin_scanner.guard.runtime import extension_catalog_pages, extension_catalog_transfer, runner
 
     monkeypatch.setattr(extension_catalog_pages, "observed_view", lambda *_: object())
 
-    def lost_lease(**_):
+    def lost_at_pin(**_):
+        raise ExtensionCatalogUnavailableError("view evicted while taking its lease")
+
+    monkeypatch.setattr(extension_catalog_transfer, "sync_catalog_view", lost_at_pin)
+    _patch_send(monkeypatch, runner)
+    result = runner._sync_extension_catalog_from_runtime_handshake(
+        guard_home=tmp_path,
+        auth_context={},
+        runtime_sync_url="https://example.test/api/guard/runtime/sessions/sync",
+        runtime_response={"extensionCatalogSync": {"protocolVersion": 2}},
+        session_payload=SESSION,
+    )
+    assert result["extension_catalog_sync_status"] == "downgraded"
+    assert result["extension_catalog_sync_reason"] == "catalog_runtime_unavailable"
+
+
+def test_unavailable_after_the_transfer_is_not_a_downgrade(monkeypatch, tmp_path: Path) -> None:
+    # A page reached Cloud. Whatever the cache does after that, reporting an
+    # absent catalog would hide a transfer that may have landed.
+    from codex_plugin_scanner.guard.runtime import extension_catalog_pages, extension_catalog_transfer, runner
+
+    monkeypatch.setattr(extension_catalog_pages, "observed_view", lambda *_: object())
+
+    def lost_after_a_page(*, send, **_):
+        send("https://example.test/api/guard/catalog/upload", b"{}")
         raise ExtensionCatalogUnavailableError("lease released by a restarted resident")
 
-    monkeypatch.setattr(extension_catalog_transfer, "sync_catalog_view", lost_lease)
+    monkeypatch.setattr(extension_catalog_transfer, "sync_catalog_view", lost_after_a_page)
+    _patch_send(monkeypatch, runner)
     with pytest.raises(ExtensionCatalogUnavailableError):
         runner._sync_extension_catalog_from_runtime_handshake(
             guard_home=tmp_path,

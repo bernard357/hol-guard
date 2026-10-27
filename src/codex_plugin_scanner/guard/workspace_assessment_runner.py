@@ -13,6 +13,7 @@ coordinates the way an interactive audit does.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -24,10 +25,14 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import workspace_assessment_store as assessments
+from .native_package_audit_projection import (
+    NativePackageAuditProjectionError,
+    SupplyChainProjection,
+    native_workspace_package_findings,
+)
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
-from .workspace_assessment_carry import listed_packages
 from .workspace_ci_workflow_findings import (
     CI_WORKFLOW_DETECTOR,
     project_ci_workflow_findings,
@@ -65,12 +70,7 @@ from .workspace_runtime_findings import (
 )
 from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 from .workspace_skill_findings import SKILL_DETECTOR, project_skill_findings, with_skill_coverage
-from .workspace_supply_chain_findings import (
-    SUPPLY_CHAIN_DETECTOR,
-    supply_chain_findings,
-    unchecked_packages,
-    unresolved_packages,
-)
+from .workspace_supply_chain_findings import SUPPLY_CHAIN_DETECTOR
 
 DETECTOR_SET: Final = (
     SUPPLY_CHAIN_DETECTOR,
@@ -118,6 +118,11 @@ def run_next(
         # leaving the lease to expire and the same run to repeat.
         failed = assessments.RunOutcome(state="failed", error_code="assessment_result_too_large")
         assessments.finish(store, claimed, failed, now_ms=clock())
+    except NativePackageAuditProjectionError:
+        # Package ids could not be carried, so the run fails now instead of
+        # holding its lease until it expires and the run repeats.
+        failed = assessments.RunOutcome(state="failed", error_code="supply_chain_detector_failed")
+        assessments.finish(store, claimed, failed, now_ms=clock())
     return True
 
 
@@ -149,6 +154,7 @@ def execute(
     try:
         with offline_egress() if automatic else nullcontext(None) as offline:
             payload = _local_audit(store, config, root)
+        supply, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload, store=store)
     except Exception:
         return assessments.RunOutcome(
             state="failed",
@@ -176,12 +182,11 @@ def execute(
             input_manifest_digest=before.input_manifest_digest,
             feed_context_digest=context_digest,
         )
-    supply_findings, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
     runtime_findings, runtime_truncated = (
         project_runtime_findings(run.keys.worktree_key, posture) if posture is not None else ([], False)
     )
     findings, merge_truncated = merge_findings(
-        supply_findings,
+        supply.findings,
         project_secret_findings(before.secrets),
         runtime_findings,
         project_skill_findings(before.skills),
@@ -194,7 +199,7 @@ def execute(
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
     coverage = with_runtime_coverage(
-        coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+        coverage_summary(before, payload, supply, findings_truncated=truncated, egress_refused=refused), posture
     )
     for add_coverage, result in (
         (with_skill_coverage, before.skills),
@@ -212,7 +217,7 @@ def execute(
         feed_context_digest=context_digest,
         coverage=coverage,
         findings=findings,
-        listed_packages=listed_packages(payload),
+        listed_packages=supply.listed,
     )
 
 
@@ -286,6 +291,7 @@ def feed_context_digest(store: Any) -> str:
 def coverage_summary(
     snapshot: WorkspaceSnapshot,
     payload: Mapping[str, object],
+    supply: SupplyChainProjection,
     *,
     findings_truncated: bool,
     egress_refused: int = 0,
@@ -299,8 +305,8 @@ def coverage_summary(
         supply_chain = "incomplete" if has_inputs else "no_inputs"
     # The audit stopped, or a package needed registry or Cloud data the offline
     # run could not get.
-    missing_lookup = supply_chain == "incomplete" or bool(egress_refused or unresolved_packages(payload))
-    unchecked = unchecked_packages(payload) > 0
+    missing_lookup = supply_chain == "incomplete" or bool(egress_refused or supply.unresolved)
+    unchecked = supply.unchecked > 0
     if supply_chain == "complete" and (missing_lookup or unchecked):
         supply_chain = "incomplete"
     if missing_lookup:
@@ -338,11 +344,13 @@ def coverage_summary(
 
 
 def project_supply_chain_findings(
-    worktree_key: str, payload: Mapping[str, object]
-) -> tuple[list[dict[str, object]], bool]:
+    worktree_key: str, payload: Mapping[str, object], *, store: Any | None = None
+) -> tuple[SupplyChainProjection, bool]:
     """Project audit packages into workspace findings within the run's bounds."""
 
-    return _within_budget(supply_chain_findings(worktree_key, payload))
+    supply = native_workspace_package_findings(worktree_key, payload, store=store)
+    kept, truncated = _within_budget(supply.findings)
+    return dataclasses.replace(supply, findings=kept), truncated
 
 
 def merge_findings(*groups: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:

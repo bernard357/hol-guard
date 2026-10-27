@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
-from codex_plugin_scanner.guard.workspace_assessment_carry import listed_packages
 from tests.test_guard_workspace_assessment_carry import T0, admitted, assess, outcome, package_finding
 from tests.test_guard_workspace_assessment_runner import AUDIT, BLOCKED_PACKAGE, KEYS
 
@@ -19,8 +18,8 @@ INSTALL_SCRIPT = {"code": "install_script", "message": "m", "severity": "medium"
 
 
 def _project(*packages: dict[str, object]) -> list[dict[str, object]]:
-    findings, _ = runner.project_supply_chain_findings(KEYS.worktree_key, {"evaluation": {"packages": list(packages)}})
-    return findings
+    supply, _ = runner.project_supply_chain_findings(KEYS.worktree_key, {"evaluation": {"packages": list(packages)}})
+    return supply.findings
 
 
 def test_new_rule_data_keeps_the_package_finding_id() -> None:
@@ -44,8 +43,10 @@ def test_a_scoped_package_is_not_the_unscoped_package_of_the_same_name() -> None
 
     assert len({item["finding_id"] for item in findings}) == 2
     assert sorted(item["package_name"] for item in findings) == ["@acme/minimist", "minimist"]
-    listed = listed_packages({"audit_status": "complete", "evaluation": {"packages": [scoped]}})
-    assert listed == {("npm", "@acme/minimist", "1.2.8")}
+    supply, _ = runner.project_supply_chain_findings(
+        KEYS.worktree_key, {"audit_status": "complete", "evaluation": {"packages": [scoped]}}
+    )
+    assert supply.listed == {("npm", "@acme/minimist", "1.2.8")}
 
 
 def test_a_package_listed_twice_is_one_finding_with_the_evidence_of_both() -> None:
@@ -75,9 +76,9 @@ def test_a_package_listed_twice_is_one_finding_with_the_evidence_of_both() -> No
 
 
 def test_the_projected_audit_still_names_one_finding_per_package() -> None:
-    findings, _ = runner.project_supply_chain_findings(KEYS.worktree_key, AUDIT)
+    supply, _ = runner.project_supply_chain_findings(KEYS.worktree_key, AUDIT)
 
-    assert [(item["package_name"], item["package_version"]) for item in findings] == [("minimist", "1.2.8")]
+    assert [(item["package_name"], item["package_version"]) for item in supply.findings] == [("minimist", "1.2.8")]
 
 
 def test_a_partial_run_keeps_the_earlier_identity_of_a_package_it_reports(tmp_path: Path) -> None:
