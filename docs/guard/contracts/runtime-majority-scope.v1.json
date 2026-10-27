@@ -390,8 +390,6 @@
         "category": "async_control_plane",
         "reason": "Managed-device health-lease reporting, lifecycle and removal authorization; cadence-driven machine reporting independent of harness activity. Managed-policy loading (mdm.policy, contracts, network, file locks, device-key and integrity helpers) stays in scope because config loading and the daemon invoke it synchronously during hook handling.",
         "path": [
-          "src/codex_plugin_scanner/guard/mdm/adapter_conformance.py",
-          "src/codex_plugin_scanner/guard/mdm/cloud_control.py",
           "src/codex_plugin_scanner/guard/mdm/health_key_registration.py",
           "src/codex_plugin_scanner/guard/mdm/health_lease.py",
           "src/codex_plugin_scanner/guard/mdm/health_lease_ack.py",
