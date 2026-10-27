@@ -30,6 +30,7 @@ from tests.test_guard_headless_daemon_api import _dashboard_token_for, _read_jso
 from tests.test_guard_workspace_assessment_runner import (
     AUDIT,
     KEYS,
+    NO_SUPPLY_GAPS,
     SCANNED,
     SECRETS_COMPLETE,
     SNAPSHOT,
@@ -194,7 +195,7 @@ def test_a_stored_value_that_is_not_a_key_is_replaced(tmp_path: Path) -> None:
 
 
 def test_complete_scan_makes_a_complete_run() -> None:
-    coverage = runner.coverage_summary(SCANNED, AUDIT, findings_truncated=False)
+    coverage = runner.coverage_summary(SCANNED, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
     assert coverage["status"] == "complete"
     assert coverage["detectors"]["secrets"] == "complete"
     assert coverage["secrets"]["skipped"] == {"credential_store": 0, "not_text": 0, "oversize": 0}
@@ -207,7 +208,7 @@ def test_complete_scan_makes_a_complete_run() -> None:
 )
 def test_truncated_scan_keeps_the_run_partial(reason: str, expected: list[str]) -> None:
     truncated = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=[reason]))
-    coverage = runner.coverage_summary(truncated, AUDIT, findings_truncated=False)
+    coverage = runner.coverage_summary(truncated, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
     assert coverage["status"] == "partial"
     assert coverage["reasons"] == expected
     assert coverage["detectors"]["secrets"] == "incomplete"
@@ -216,16 +217,18 @@ def test_truncated_scan_keeps_the_run_partial(reason: str, expected: list[str]) 
 
 def test_a_scan_that_hit_its_own_cap_marks_the_findings_list_truncated() -> None:
     capped = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=["max_findings"]))
-    coverage = runner.coverage_summary(capped, AUDIT, findings_truncated=False)
+    coverage = runner.coverage_summary(capped, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
     assert coverage["reasons"] == ["secrets_incomplete", "finding_cap"]
     # Other secret limits leave the run partial without claiming a cut list.
     walked = replace(SNAPSHOT, secrets=secrets_result(status="incomplete", truncation_reasons=["entry_cap"]))
-    assert "finding_cap" not in runner.coverage_summary(walked, AUDIT, findings_truncated=False)["reasons"]
+    coverage = runner.coverage_summary(walked, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
+    assert "finding_cap" not in coverage["reasons"]
 
 
 @pytest.mark.parametrize("payload", [{"schema": "other"}, {**SECRETS_COMPLETE, "status": "weird"}, {}])
 def test_unreadable_secret_result_is_an_error(payload: dict[str, object]) -> None:
-    coverage = runner.coverage_summary(replace(SNAPSHOT, secrets=payload), AUDIT, findings_truncated=False)
+    snapshot = replace(SNAPSHOT, secrets=payload)
+    coverage = runner.coverage_summary(snapshot, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
     assert coverage["status"] == "partial"
     assert coverage["reasons"] == ["secrets_incomplete"]
     assert coverage["detectors"]["secrets"] == "error"
@@ -323,8 +326,8 @@ def test_merged_findings_stay_bounded_and_most_severe_first() -> None:
         )[0]
         for index in range(runner.MAX_FINDINGS + 20)
     ]
-    packages, _ = runner.project_supply_chain_findings(KEYS.worktree_key, AUDIT)
-    merged, truncated = runner.merge_findings(packages, many)
+    supply, _ = runner.project_supply_chain_findings(KEYS.worktree_key, AUDIT)
+    merged, truncated = runner.merge_findings(supply.findings, many)
     assert truncated is True
     assert len(merged) == runner.MAX_FINDINGS
     assert [item["severity"] for item in merged[:2]] == ["critical", "critical"]

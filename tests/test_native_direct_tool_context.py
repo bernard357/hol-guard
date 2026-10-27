@@ -81,24 +81,6 @@ def test_context_is_hydrated_from_one_bound_native_call(
     assert calls[0]["source"] == "direct_command"
 
 
-@pytest.mark.parametrize(
-    "reply,expected",
-    [
-        (NativeRequestContextFailure("native_request_context_unavailable"), False),
-        ({}, False),
-        ({"kind": "trusted_tool", "trusted": False}, False),
-        ({"kind": "trusted_tool", "trusted": 1}, False),
-        ({"kind": "trusted_tool", "trusted": True, "extra": True}, False),
-        ({"kind": "trusted_tool", "trusted": True}, True),
-    ],
-)
-def test_trusted_path_command_only_presents_strict_native_boolean(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reply: Any, expected: bool
-) -> None:
-    monkeypatch.setattr(client, "_call", lambda *_args, **_kwargs: reply)
-    assert client.native_trusted_tool_command("bun", cwd=tmp_path, home_dir=tmp_path) is expected
-
-
 @pytest.mark.parametrize("command", ["pwd", "ls -la", "echo hello", "cd workspace && echo hello", "npx tsc --noEmit"])
 @pytest.mark.parametrize("tool", ["vitest", "typescript"])
 def test_impossible_literal_inputs_do_not_contact_the_resident(

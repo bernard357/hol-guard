@@ -192,12 +192,12 @@ def test_a_secret_scan_that_hit_its_cap_is_synced_as_truncated(tmp_path: Path) -
     from dataclasses import replace
 
     from codex_plugin_scanner.guard import workspace_assessment_runner as runner
-    from tests.test_guard_workspace_assessment_runner import AUDIT, SECRETS_COMPLETE, SNAPSHOT
+    from tests.test_guard_workspace_assessment_runner import AUDIT, NO_SUPPLY_GAPS, SECRETS_COMPLETE, SNAPSHOT
 
     capped = replace(
         SNAPSHOT, secrets={**SECRETS_COMPLETE, "status": "incomplete", "truncation_reasons": ["max_findings"]}
     )
-    coverage = runner.coverage_summary(capped, AUDIT, findings_truncated=False)
+    coverage = runner.coverage_summary(capped, AUDIT, NO_SUPPLY_GAPS, findings_truncated=False)
     guard_store = GuardStore(tmp_path / "home")
     assessed(guard_store, state="partial", findings=[finding(1)], reasons=list(coverage["reasons"]))
 
