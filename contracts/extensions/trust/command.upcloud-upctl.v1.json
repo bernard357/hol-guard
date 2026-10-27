@@ -1,0 +1,5 @@
+{
+  "extension": "command.upcloud-upctl",
+  "schemaVersion": "guard.extension-trust-binding.v1",
+  "trustClass": "external"
+}
