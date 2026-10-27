@@ -412,16 +412,21 @@ fn evaluate_envelope(
         && event == "PreToolUse"
         && omp::strict_tool_input(payload)
             .is_some_and(|input| github::read_only_call(input, signals.tool_name.as_deref()));
-    // A search pattern is data, not a command: a proven Claude `Grep` scope
-    // skips the command authority but still passes the command controls below.
+    // A search pattern is data, not a command: a proven Claude or Grok `Grep`
+    // scope skips the command authority but still passes the command controls
+    // below.
     let search_scope_proven = event == "PreToolUse"
-        && harness == "claude-code"
         && signals.url_values.is_empty()
-        && match signals.tool_name.as_deref() {
-            Some("Grep") => {
+        && match (harness, signals.tool_name.as_deref()) {
+            ("claude-code", Some("Grep")) => {
                 super::search_scope::claude_grep_directory_scope_proven(payload, home_dir, cwd)
             }
-            Some("Glob") => super::search_scope::claude_glob_scope_proven(payload, home_dir, cwd),
+            ("claude-code", Some("Glob")) => {
+                super::search_scope::claude_glob_scope_proven(payload, home_dir, cwd)
+            }
+            ("grok", Some("Grep")) => {
+                super::search_scope::grok_grep_directory_scope_proven(payload, home_dir, cwd)
+            }
             _ => false,
         };
     // Codex sends an edit as `apply_patch` with the patch body in `command`.

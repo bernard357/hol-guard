@@ -62,6 +62,37 @@ pub(super) fn claude_grep_directory_scope_proven(
         && walk_scope(&root, &filter, Ignores::Ripgrep, false, home_dir, &mut None).is_ok()
 }
 
+/// True when a Grok `Grep` directory search cannot reach a sensitive file.
+/// Grok's search includes hidden files and searches a gitignored file its
+/// `glob` matches, so neither the glob nor any ignore file narrows the walk:
+/// any sensitive file below the directory fails the proof. A single-file
+/// target returns false so the file-read proof decides.
+pub(super) fn grok_grep_directory_scope_proven(
+    payload: &Value,
+    home_dir: Option<&str>,
+    cwd: Option<&str>,
+) -> bool {
+    let Some(input) = grep_input(payload, true) else {
+        return false;
+    };
+    let target = match input.get("path") {
+        None => ".",
+        Some(Value::String(path)) if !path.is_empty() => path.as_str(),
+        Some(_) => return false,
+    };
+    // A glob is matched below the searched folder; one spelled as an
+    // absolute path or climbing out of it is not modeled.
+    let contained = |glob: &str| {
+        !glob.starts_with(['/', '~', '\\'])
+            && glob.as_bytes().get(1) != Some(&b':')
+            && !glob.split(['/', '\\']).any(|part| part == "..")
+    };
+    input
+        .get("glob")
+        .is_none_or(|glob| glob.as_str().is_some_and(contained))
+        && content_search_scope_proven(target, home_dir, cwd)
+}
+
 /// Shell `rg` with `-g` inclusions the name screen cannot clear, such as
 /// `*.md` or `README*`: true when below each directory root no sensitive
 /// file matches one of them. ripgrep searches such a file even when it is
@@ -356,18 +387,43 @@ fn unfiltered_directory_root(
 }
 
 fn claude_grep_input(payload: &Value) -> Option<&Map<String, Value>> {
+    grep_input(payload, false)
+}
+
+/// The `Grep` input, with Claude's keys. Grok also sends camel-case copies of
+/// the tool name and input; `mirrored` accepts those only when they repeat
+/// the snake-case values and the input was not truncated.
+fn grep_input(payload: &Value, mirrored: bool) -> Option<&Map<String, Value>> {
     let root = payload.as_object()?;
     if root.get("tool_name").and_then(Value::as_str) != Some("Grep") {
         return None;
     }
+    let input = root.get("tool_input")?.as_object()?;
+    // A copy that differs from the value the proof reads could be the one
+    // the host acts on.
+    let differs = |copy: &str, original: &str| {
+        root.get(copy)
+            .is_some_and(|value| Some(value) != root.get(original))
+    };
+    let unmatched_copy = if mirrored {
+        differs("toolInput", "tool_input")
+            || differs("toolName", "tool_name")
+            || root
+                .get("toolInputTruncated")
+                .is_some_and(|truncated| truncated != &Value::Bool(false))
+    } else {
+        root.contains_key("toolInput")
+    };
+    if unmatched_copy {
+        return None;
+    }
     // Alternate spellings could carry a second, conflicting input.
-    if ["toolInput", "tool_args", "arguments", "input", "parameters"]
+    if ["tool_args", "arguments", "input", "parameters"]
         .iter()
         .any(|key| root.contains_key(*key))
     {
         return None;
     }
-    let input = root.get("tool_input")?.as_object()?;
     if input
         .keys()
         .any(|key| !CLAUDE_GREP_KEYS.contains(&key.as_str()))
