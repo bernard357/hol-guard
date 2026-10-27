@@ -810,6 +810,7 @@ mod workspace_fix;
 mod workspace_fix_diff;
 mod workspace_fix_fs;
 mod workspace_fix_manifest;
+mod workspace_inventory_dependencies;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
 mod workspace_mcp_config;

@@ -520,3 +520,40 @@ fn each_workspace_keeps_the_direct_requirement_of_its_own_version() {
         ]
     );
 }
+
+#[test]
+fn every_version_one_lockfile_installs_is_listed() {
+    // yarn.lock names a package once per version it resolves, and yarn installs
+    // each copy, so the old lodash under another package is audited too.
+    let scratch = Scratch::new("lockfile-versions");
+    let workspace = scratch.0.join("ws");
+    write_files(
+        &workspace,
+        &json!({
+            "package.json": r#"{"dependencies": {"lodash": "^4", "a": "^1"}}"#,
+            "yarn.lock": "a@^1:\n  version \"1.0.0\"\n\nlodash@^3:\n  version \"3.10.1\"\n\nlodash@^4:\n  version \"4.17.21\"\n",
+        }),
+    );
+    let payload = run(&request(&workspace, None, &[], "inventory")).unwrap();
+    let mut lodash: Vec<(String, bool, Value)> = payload["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["name"] == "lodash")
+        .map(|item| {
+            (
+                item["version"].as_str().unwrap().to_owned(),
+                item["direct"].as_bool().unwrap(),
+                item["range"].clone(),
+            )
+        })
+        .collect();
+    lodash.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        lodash,
+        vec![
+            ("3.10.1".to_owned(), false, Value::Null),
+            ("4.17.21".to_owned(), true, json!("^4")),
+        ]
+    );
+}
