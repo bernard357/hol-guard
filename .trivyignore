@@ -16,9 +16,9 @@ CVE-2023-54404 exp:2027-01-01
 # 4.1.0 for 3.10. Revisit when the floor rises to 3.11.
 CVE-2026-112940 exp:2027-01-01
 
-# dnspython 2.8.0 and litellm 1.93.2, both reached only through the optional
-# `cisco` extra and the Cisco scanner's action runtime. Neither is a base
-# dependency, so a default `pip install hol-guard` pulls in neither.
+# litellm 1.93.2, reached only through the optional `cisco` extra and the Cisco
+# scanner's action runtime, and dnspython 2.8.0, which outlives that extra: see
+# its own paragraph below.
 #
 # The litellm advisories are both against the LiteLLM proxy server: a
 # privilege escalation to proxy admin through a cookie reused across domains,
@@ -31,11 +31,21 @@ CVE-2026-112940 exp:2027-01-01
 #
 # dnspython's denial of service needs an attacker-chosen DNS response, and the
 # only consumer is email-validator's deliverability check, which nothing in
-# this project calls. 2.8.0 is resolved solely for Python 3.10: 2.9.0 requires
-# 3.11, so the fix cannot be locked for every supported interpreter until the
-# floor rises.
+# this project calls.
 #
-# Revisit when the cisco pins move or the Python floor rises to 3.11.
+# A Trivy ignore matches a CVE everywhere in the repository, so this one has to
+# account for every copy rather than the first one found. The action's
+# `pypi-attestations` lock carried its own 2.8.0 pin, installed by
+# `action/action.yml` and `plugin-release/action.yml` on every run regardless
+# of `install_cisco`; both pin Python 3.12, so that copy is bumped to 2.9.0
+# here rather than silenced.
+#
+# What is left is `uv.lock`'s Python 3.10 resolve: 2.9.0 requires 3.11, so for
+# that interpreter alone there is no fixed release to pin. The lock already
+# takes 2.9.0 on 3.11 and above.
+#
+# Revisit when the cisco pins move or the Python floor rises to 3.11, which
+# retires the dnspython entry outright.
 CVE-2026-114605 exp:2027-01-01
 CVE-2026-114612 exp:2027-01-01
 GHSA-g5ff-637f-6q2m exp:2027-01-01
