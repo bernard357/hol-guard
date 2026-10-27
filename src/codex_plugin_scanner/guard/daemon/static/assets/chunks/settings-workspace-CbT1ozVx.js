@@ -1,8 +1,8 @@
-import { r as reactExports, aF as fetchResolvedApprovalGate, j as jsxRuntimeExports, A as ActionButton, aG as ApprovalProofModal, T as Tag, av as PROTECTION_POSTURE_COPY, aH as POSTURE_OUTCOME_COLUMNS, aI as getDefaultExportFromCjs, aJ as React, R as HiMiniShieldCheck, aK as HiMiniSquares2X2, v as HiMiniLockClosed, aL as HiMiniBellAlert, aM as HiMiniAdjustmentsHorizontal, aN as HiMiniCircleStack, aO as TabBar, H as HiMiniChevronRight, S as SectionLabel, a2 as useFocusTrap, aP as fetchCloudReviewSettings, a0 as HiMiniCloud, d as HiMiniArrowPath, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, aR as isApprovalProofSubmitDisabled, aS as buildApprovalProofCredentials, aT as changeCloudReviewSettings, aU as resolveProtectionLevelCopy, aq as fetchSettings, aV as fetchRuntimeSnapshot, aW as clearHarnessWatchOverrides, aX as withHarnessPosturePatch, I as updateSettings, aY as clearPolicy, aZ as clearReviewQueue, a_ as revokeApprovalGateCooldown, a$ as disableApprovalGateTotp, b0 as importSettings, b1 as resetSettings, b2 as enrollApprovalGateTotp, b3 as verifyApprovalGateTotp, b4 as clearEvidence, b5 as exportDiagnostics, b6 as repairApprovalCenter, b7 as exportSettings, b8 as setupDesktopNotifications, N as EmptyState, b9 as settingsWatchBannerModel, ba as WorkspacePageHeader, W as WatchProtectionBanner, p as HiMiniMagnifyingGlass, bb as commitDashboardLocation, bc as guardAwareHref, c as HiMiniChevronDown, s as HiMiniCheckCircle, a4 as HiMiniExclamationTriangle, bd as humanizeList, be as isProtectionPosture, bf as deriveProtectionPosture, bg as normalizeHarnessPostures, bh as approvalGateCooldownLabel } from "../guard-dashboard.js";
-import { p as planGuardHookRemoval, r as removeAllGuardHooks, a as GuardRepairRequestError, b as resolveSettingsSaveProofKind, c as requiresSettingsSaveProof, d as HarnessPostureSummaryCard, e as HarnessPostureManager, G as GuardRepairControl, S as SettingsSaveProofModal, f as resolveSettingsSaveProofModalCopy } from "./settings-save-proof-modal-CZZvxWFO.js";
+import { r as reactExports, aF as fetchResolvedApprovalGate, j as jsxRuntimeExports, A as ActionButton, aG as ApprovalProofModal, T as Tag, av as PROTECTION_POSTURE_COPY, aH as POSTURE_OUTCOME_COLUMNS, aI as getDefaultExportFromCjs, aJ as reactExports$1, aK as React, R as HiMiniShieldCheck, aL as HiMiniSquares2X2, v as HiMiniLockClosed, aM as HiMiniBellAlert, aN as HiMiniAdjustmentsHorizontal, aO as HiMiniCircleStack, aP as TabBar, H as HiMiniChevronRight, S as SectionLabel, a2 as useFocusTrap, aQ as fetchCloudReviewSettings, a0 as HiMiniCloud, d as HiMiniArrowPath, _ as HiMiniXMark, aR as ApprovalProofFieldInputs, aS as isApprovalProofSubmitDisabled, aT as buildApprovalProofCredentials, aU as changeCloudReviewSettings, aV as resolveProtectionLevelCopy, aq as fetchSettings, aW as fetchRuntimeSnapshot, aX as clearHarnessWatchOverrides, aY as withHarnessPosturePatch, I as updateSettings, aZ as clearPolicy, a_ as clearReviewQueue, a$ as revokeApprovalGateCooldown, b0 as disableApprovalGateTotp, b1 as importSettings, b2 as resetSettings, b3 as enrollApprovalGateTotp, b4 as verifyApprovalGateTotp, b5 as clearEvidence, b6 as exportDiagnostics, b7 as repairApprovalCenter, b8 as exportSettings, b9 as setupDesktopNotifications, N as EmptyState, ba as settingsWatchBannerModel, bb as WorkspacePageHeader, W as WatchProtectionBanner, p as HiMiniMagnifyingGlass, bc as commitDashboardLocation, bd as guardAwareHref, c as HiMiniChevronDown, s as HiMiniCheckCircle, a4 as HiMiniExclamationTriangle, be as humanizeList, bf as isProtectionPosture, bg as deriveProtectionPosture, bh as normalizeHarnessPostures, bi as approvalGateCooldownLabel } from "../guard-dashboard.js";
+import { p as planGuardHookRemoval, r as removeAllGuardHooks, a as GuardRepairRequestError, b as resolveSettingsSaveProofKind, c as requiresSettingsSaveProof, d as HarnessPostureSummaryCard, e as HarnessPostureManager, G as GuardRepairControl, S as SettingsSaveProofModal, f as resolveSettingsSaveProofModalCopy } from "./settings-save-proof-modal-uzgF4A0a.js";
 import { f as filterSettingsBySearch, R as RISK_CONTROL_CONSEQUENCES } from "./app-catalog-By01oDVd.js";
-import { u as useConfirmDialog } from "./confirm-dialog-C2SCoXLE.js";
-import { C as ConnectGuardCloudButton } from "./connect-guard-cloud-button-DZLEHj7B.js";
+import { u as useConfirmDialog } from "./confirm-dialog-B-lkfSIH.js";
+import { C as ConnectGuardCloudButton } from "./connect-guard-cloud-button-Cok_V0m1.js";
 function describeAffectedHarness(item) {
   const count = item.hook_count ?? item.swept_hook_count;
   if (typeof count === "number" && count > 0) {
@@ -1953,7 +1953,7 @@ var propTypes$1 = {
   viewBoxSize: PropTypes.number.isRequired,
   xmlns: PropTypes.string
 };
-var QRCodeSvg = /* @__PURE__ */ reactExports.forwardRef(function(_ref, ref) {
+var QRCodeSvg = /* @__PURE__ */ reactExports$1.forwardRef(function(_ref, ref) {
   var bgColor = _ref.bgColor, bgD = _ref.bgD, fgD = _ref.fgD, fgColor = _ref.fgColor, size = _ref.size, title = _ref.title, viewBoxSize = _ref.viewBoxSize, _ref$xmlns = _ref.xmlns, xmlns = _ref$xmlns === void 0 ? "http://www.w3.org/2000/svg" : _ref$xmlns, props = _objectWithoutProperties(_ref, _excluded$1);
   return /* @__PURE__ */ React.createElement("svg", _extends({}, props, {
     height: size,
@@ -1982,7 +1982,7 @@ var propTypes = {
   size: PropTypes.number,
   value: PropTypes.string.isRequired
 };
-var QRCode = /* @__PURE__ */ reactExports.forwardRef(function(_ref, ref) {
+var QRCode = /* @__PURE__ */ reactExports$1.forwardRef(function(_ref, ref) {
   var _ref$bgColor = _ref.bgColor, bgColor = _ref$bgColor === void 0 ? "#FFFFFF" : _ref$bgColor, _ref$fgColor = _ref.fgColor, fgColor = _ref$fgColor === void 0 ? "#000000" : _ref$fgColor, _ref$level = _ref.level, level = _ref$level === void 0 ? "L" : _ref$level, _ref$size = _ref.size, size = _ref$size === void 0 ? 256 : _ref$size, value = _ref.value, props = _objectWithoutProperties(_ref, _excluded);
   var qr = qrcode(0, level);
   qr.addData(value);
