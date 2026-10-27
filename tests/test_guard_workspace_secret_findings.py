@@ -137,6 +137,7 @@ def test_a_deeply_nested_path_is_kept() -> None:
         {"fingerprint": "short"},
         {"fingerprint": "G" * 32},
         {"severity": "catastrophic"},
+        {"severity": ["high"]},
     ],
 )
 def test_malformed_findings_are_dropped_and_leave_the_detector_incomplete(bad: dict[str, object]) -> None:
@@ -255,6 +256,7 @@ def test_runner_hands_the_native_scan_a_stable_per_install_key(tmp_path: Path, m
         hooks: bool = False,
         plugins: bool = False,
         workflows: bool = False,
+        editor_tasks: bool = False,
     ):
         if secrets:
             keys.append(secret_key)
@@ -284,6 +286,7 @@ def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Pat
         hooks: bool = False,
         plugins: bool = False,
         workflows: bool = False,
+        editor_tasks: bool = False,
     ) -> native.WorkspaceSnapshot:
         requested.append(secrets)
         if secrets:
@@ -302,6 +305,7 @@ def test_older_runtime_falls_back_and_reports_the_detector_not_run(tmp_path: Pat
         "detector_not_run:hook_config_v1",
         "detector_not_run:plugin_manifest_v1",
         "detector_not_run:ci_workflow_v1",
+        "detector_not_run:editor_task_v1",
     ]
     assert outcome.coverage["detectors"]["secrets"] == "not_run"
 

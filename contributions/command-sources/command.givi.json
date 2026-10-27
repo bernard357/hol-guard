@@ -99,7 +99,8 @@
             "subcommands": ["auto-review", "enable"],
             "options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
             "forbidden_flags": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"]
+            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
+            "fail_secure_unknown_options": true
           }
         },
         "safe_variants": [
@@ -157,7 +158,8 @@
             "subcommands": ["auto-review", "disable"],
             "options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
             "forbidden_flags": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"]
+            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
+            "fail_secure_unknown_options": true
           }
         },
         "safe_variants": [
@@ -215,7 +217,8 @@
             "subcommands": ["auto-review", "acknowledge"],
             "options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
             "forbidden_flags": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"]
+            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
+            "fail_secure_unknown_options": true
           }
         },
         "safe_variants": [
@@ -273,7 +276,8 @@
             "subcommands": ["auto-review", "run"],
             "options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
             "forbidden_flags": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"]
+            "interleaved_options_with_values": ["--repo", "--task-id", "--checks", "--file", "--run-id", "--client", "--repositoryPath", "-f"],
+            "fail_secure_unknown_options": true
           }
         },
         "safe_variants": [
@@ -335,7 +339,8 @@
                 "subcommands": ["findings", "add"],
                 "options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
                 "forbidden_flags": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"]
+                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
+                "fail_secure_unknown_options": true
               }
             },
             {
@@ -345,7 +350,8 @@
                 "subcommands": ["findings", "--json", "add"],
                 "options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
                 "forbidden_flags": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"]
+                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
+                "fail_secure_unknown_options": true
               }
             }
           ]
@@ -409,7 +415,8 @@
                 "subcommands": ["findings", "update"],
                 "options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
                 "forbidden_flags": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"]
+                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
+                "fail_secure_unknown_options": true
               }
             },
             {
@@ -419,7 +426,8 @@
                 "subcommands": ["findings", "--json", "update"],
                 "options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
                 "forbidden_flags": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--version", "--help", "-h", "--json", "--repositoryPath", "-f"],
-                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"]
+                "interleaved_options_with_values": ["--repo", "--run-id", "--id", "--title", "--claim", "--status", "--reason", "--evidence", "--file", "--repositoryPath", "-f"],
+                "fail_secure_unknown_options": true
               }
             }
           ]

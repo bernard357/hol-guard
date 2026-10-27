@@ -261,19 +261,6 @@ def native_external_archive_binding_required(evaluation: object, *, guard_home: 
     return required if isinstance(required, bool) else True
 
 
-def native_package_reason_signals(reasons: Sequence[object], *, guard_home: Path) -> tuple[dict[str, Any], ...]:
-    """The risk signals the resident projects from a package evaluation's reasons."""
-
-    payload = native_mcp_proxy_decide(
-        {"check": "package_reason_signals", "reasons": list(reasons)},
-        guard_home=guard_home,
-    )
-    signals = payload.get("signals")
-    if not isinstance(signals, list):
-        raise _fail("native_mcp_proxy_decision_payload_invalid")
-    return tuple(signals)
-
-
 def native_package_answer(
     kind: str,
     *,

@@ -172,6 +172,79 @@ fn uninstall_plan_removes_only_the_plugin_entry() {
 }
 
 #[test]
+fn uninstall_offers_to_remove_only_marketplaces_guard_added() {
+    let home = guard_home();
+    let record_owned = |runtime: &str, installed: bool, added: bool| {
+        call(json!({
+            "command": "record", "guard_home": home_str(&home), "slug": "acme/toolgate",
+            "runtime": runtime, "installed": installed, "spec": spec(),
+            "marketplace_added": added,
+        }))
+    };
+    assert_eq!(record_owned("codex", true, true)["ok"], json!(true));
+    assert_eq!(record_owned("claude-code", true, false)["ok"], json!(true));
+    // A reinstall that finds the marketplace keeps the earlier answer.
+    assert_eq!(record_owned("codex", true, false)["ok"], json!(true));
+
+    let response = uninstall(&home, "acme/toolgate", &[]);
+    let steps = &response["result"]["steps"];
+    assert_eq!(steps[0]["runtime"], json!("claude-code"), "{response}");
+    assert!(steps[0].get("remove_marketplace").is_none(), "{response}");
+    assert_eq!(
+        steps[0]["note"],
+        json!("The marketplace stays registered, since other plugins may use it.")
+    );
+    assert_eq!(
+        steps[1]["remove_marketplace"],
+        json!(["codex", "plugin", "marketplace", "remove", "acme-tools"])
+    );
+
+    // Dropping a runtime forgets that Guard added its marketplace.
+    assert_eq!(record_owned("codex", false, false)["ok"], json!(true));
+    assert_eq!(record_owned("codex", true, false)["ok"], json!(true));
+    let response = uninstall(&home, "acme/toolgate", &["codex"]);
+    assert!(
+        response["result"]["steps"][0]
+            .get("remove_marketplace")
+            .is_none(),
+        "{response}"
+    );
+}
+
+#[test]
+fn a_reinstall_into_another_marketplace_does_not_inherit_ownership() {
+    let home = guard_home();
+    let record_with = |spec: Value, added: bool| {
+        call(json!({
+            "command": "record", "guard_home": home_str(&home), "slug": "acme/toolgate",
+            "runtime": "codex", "installed": true, "spec": spec, "marketplace_added": added,
+        }))
+    };
+    assert_eq!(record_with(spec(), true)["ok"], json!(true));
+    let response = uninstall(&home, "acme/toolgate", &["codex"]);
+    let step = &response["result"]["steps"][0];
+    assert_eq!(
+        step["remove_marketplace"],
+        json!(["codex", "plugin", "marketplace", "remove", "acme-tools"]),
+        "{response}"
+    );
+    assert_eq!(step["marketplace_repository"], json!("acme/toolgate"));
+
+    // The listing moved to a marketplace the user already had: Guard did not
+    // add that one, so uninstall must not offer to remove it.
+    let mut moved = spec();
+    moved["targets"][0]["marketplace"] = json!({"repository": "acme/other", "name": "acme-tools"});
+    assert_eq!(record_with(moved, false)["ok"], json!(true));
+    let response = uninstall(&home, "acme/toolgate", &["codex"]);
+    assert!(
+        response["result"]["steps"][0]
+            .get("remove_marketplace")
+            .is_none(),
+        "{response}"
+    );
+}
+
+#[test]
 fn uninstall_only_plans_what_guard_recorded_installing() {
     let home = guard_home();
     let missing = uninstall(&home, "acme/toolgate", &[]);

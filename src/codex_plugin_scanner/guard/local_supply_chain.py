@@ -189,6 +189,7 @@ def evaluate_package_request_artifact(
     now: str | None = None,
     external_archive_network_authorized: bool = False,
     retain_external_archive_blob: bool = False,
+    record_evidence: bool = True,
 ):
     """Evaluate a package request in the resident, which owns every verdict.
 
@@ -205,6 +206,7 @@ def evaluate_package_request_artifact(
         now=now,
         external_archive_network_authorized=external_archive_network_authorized,
         retain_external_archive_blob=retain_external_archive_blob,
+        record_evidence=record_evidence,
     )
 
 

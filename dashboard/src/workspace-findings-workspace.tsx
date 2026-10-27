@@ -15,7 +15,10 @@ import {
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
 import {
+  CarriedNote,
   Cell,
+  EditorTaskFindingsTable,
+  EvidenceNote,
   HookFindingsTable,
   McpFindingsTable,
   PluginFindingsTable,
@@ -52,6 +55,8 @@ const COVERAGE_REASONS: Record<string, string> = {
   hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened.",
   plugin_manifest_incomplete: "Some agent plugin files could not be fully read, so not every plugin hook or MCP server was checked.",
   ci_workflow_incomplete: "Some GitHub Actions workflows could not be fully read, so not every workflow was checked.",
+  editor_task_incomplete:
+    "Some editor task or dev container files could not be fully read, so not every file was checked.",
 };
 
 const FAILURE_REASONS: Record<string, string> = {
@@ -73,6 +78,7 @@ const DETECTOR_LABELS: Record<string, string> = {
   hook_config_v1: "Project hook checking",
   plugin_manifest_v1: "Agent plugin checking",
   ci_workflow_v1: "CI workflow checking",
+  editor_task_v1: "Editor task checking",
 };
 
 export type WorktreeStatus = { label: string; tone: TagTone; detail: string | null };
@@ -99,6 +105,25 @@ export function worktreeStatus(
   return { label: "Up to date", tone: "green", detail: null };
 }
 
+// When the newest run has not produced a result yet, or failed, the findings
+// on screen still come from the last finished assessment, so say when that was.
+export function checkedSummary(
+  worktree: WorkspaceWorktree,
+  newestRun: WorkspaceRun | undefined,
+  assessment: WorkspaceAssessment | undefined,
+): string {
+  const pending = newestRun?.state === "running" || newestRun?.state === "queued" || newestRun?.state === "failed";
+  // lastScanAtMs also moves when a run fails, so it cannot stand in for a finished check.
+  if (assessment === undefined && pending) return "No check has finished yet.";
+  const earlier = assessment !== undefined && pending && newestRun?.runId !== assessment.runId;
+  // The two endpoints are read separately, so a finished run can arrive before its assessment.
+  const runAtMs = newestRun?.state === "completed" || newestRun?.state === "partial" ? newestRun.finishedAtMs : null;
+  const atMs = assessment?.finishedAtMs ?? (earlier ? null : (runAtMs ?? worktree.lastScanAtMs));
+  if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
+  const when = formatRelativeTime(new Date(atMs).toISOString());
+  return earlier ? `Showing results from the check ${when.replace(/^Yesterday/, "yesterday")}.` : `Checked ${when}`;
+}
+
 function trimTrailingSeparators(root: string): string {
   const trimmed = root.replace(/[\\/]+$/, "");
   return trimmed === "" ? root : trimmed;
@@ -115,7 +140,10 @@ function decisionTone(decision: string): TagTone {
   return "slate";
 }
 
-const DECISION_LABELS: Record<string, string> = { block: "Blocked", ask: "Needs review", warn: "Warning" };
+// Package policy's verdict on this version. A finding in the worktree is not
+// itself a blocked action, and a saved approval or observe mode can still
+// change what happens at install.
+const DECISION_LABELS: Record<string, string> = { block: "Block", ask: "Ask", warn: "Warn" };
 
 export function WorkspaceFindingsWorkspace(props: {
   suggestedRoot: string;
@@ -282,9 +310,8 @@ export function WorktreeRow(props: {
           <p className="mt-1 truncate font-mono text-xs text-slate-500" title={worktree.root}>
             {worktree.root}
           </p>
-          <p className="mt-1 text-sm text-slate-600">
-            {status.detail ?? (worktree.lastScanAtMs ? `Checked ${formatRelativeTime(new Date(worktree.lastScanAtMs).toISOString())}` : "Waiting for the first check.")}
-          </p>
+          {status.detail && <p className="mt-1 text-sm text-slate-600">{status.detail}</p>}
+          <p className="mt-1 text-sm text-slate-500">{checkedSummary(worktree, props.newestRun, assessment)}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <ActionButton
@@ -347,6 +374,7 @@ function FindingsSections(props: FindingsSectionsProps) {
   const hooks = props.findings.filter((finding) => finding.kind === "hook");
   const plugins = props.findings.filter((finding) => finding.kind === "plugin");
   const workflows = props.findings.filter((finding) => finding.kind === "workflow");
+  const editorTasks = props.findings.filter((finding) => finding.kind === "editor_task");
   if (props.findings.length === 0) {
     return <p className="text-sm text-slate-600">{emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked)}</p>;
   }
@@ -360,6 +388,7 @@ function FindingsSections(props: FindingsSectionsProps) {
       {hooks.length > 0 && <HookFindingsTable findings={hooks} />}
       {plugins.length > 0 && <PluginFindingsTable findings={plugins} />}
       {workflows.length > 0 && <WorkflowFindingsTable findings={workflows} />}
+      {editorTasks.length > 0 && <EditorTaskFindingsTable findings={editorTasks} />}
     </div>
   );
 }
@@ -374,7 +403,7 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
             <th scope="col" className="px-3 py-2">Package</th>
             <th scope="col" className="px-3 py-2">Installed</th>
             <th scope="col" className="px-3 py-2">Fixed in</th>
-            <th scope="col" className="px-3 py-2">Decision</th>
+            <th scope="col" className="px-3 py-2">Policy</th>
             <th scope="col" className="px-3 py-2">Severity</th>
             <th scope="col" className="px-3 py-2">Advisories</th>
             <th scope="col" className="px-3 py-2">Fix</th>
@@ -389,8 +418,10 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
               </Cell>
               <Cell label="Installed"><Mono value={finding.packageVersion} /></Cell>
               <Cell label="Fixed in"><Mono value={finding.fixVersion} fallback="No fix yet" /></Cell>
-              <Cell label="Decision">
+              <Cell label="Policy">
                 <Tag tone={decisionTone(finding.decision)}>{DECISION_LABELS[finding.decision] ?? finding.decision}</Tag>
+                <EvidenceNote finding={finding} />
+                <CarriedNote finding={finding} />
               </Cell>
               <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
               <Cell label="Advisories" wide>

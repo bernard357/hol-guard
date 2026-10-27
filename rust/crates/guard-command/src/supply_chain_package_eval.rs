@@ -202,6 +202,8 @@ use package_results::{
 mod bundle_results;
 #[path = "supply_chain_package_eval/bundle_transitive.rs"]
 mod bundle_transitive;
+#[path = "supply_chain_package_eval/lockfile_direct_copies.rs"]
+mod lockfile_direct_copies;
 use bundle_transitive::lockfile_dependency_versions;
 #[path = "supply_chain_package_eval/archive_dependencies.rs"]
 mod archive_dependencies;
