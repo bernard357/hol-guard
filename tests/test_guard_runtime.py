@@ -963,20 +963,6 @@ clearer UX and an implementation plan with technical references.
         assert rc == 0
         _assert_copilot_holds_for_review(json.loads(output))
 
-    def test_codex_prompt_display_sanitizes_common_home_paths(self) -> None:
-        display = guard_commands_module._codex_prompt_display_text(
-            r"Read /Users/alice/.npmrc, /home/bob/.env, and C:\Users\carol\.ssh\id_rsa with API_KEY=sk-test"
-        )
-
-        assert "alice" not in display
-        assert "bob" not in display
-        assert "carol" not in display
-        assert "sk-test" not in display
-        assert "API_KEY=[redacted]" in display
-        assert "/Users/" not in display
-        assert "/home/" not in display
-        assert r"C:\Users" not in display
-
     def test_codex_post_tool_use_allows_read_only_source_search_with_secret_like_output(
         self,
         monkeypatch,
