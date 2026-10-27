@@ -19,7 +19,6 @@ from uuid import uuid4
 from ..adapters.base import HarnessContext
 from ..approval_gate import ApprovalGateError
 from ..approval_scope_support import package_request_runtime_workspace_scope
-from ..native_package_workspace_scope import NativePackageWorkspaceScopeError
 from ..approvals import approval_prompt_flow, build_approval_browser_url, first_approval_url, queue_blocked_approvals
 from ..blocked_request_mode import asks_for_approval, safe_alternative_reason
 from ..browser_opener import open_browser_url
@@ -69,6 +68,7 @@ from ..native_mcp_proxy_decision import (
 )
 from ..native_mcp_relay_server_report import report_mcp_relay_server
 from ..native_package_authority import NativePackageArtifactUnavailableError
+from ..native_package_workspace_scope import NativePackageWorkspaceScopeError
 from ..package_execution_context import build_package_execution_context
 from ..runtime.approval_context import (
     build_configured_environment_hash,

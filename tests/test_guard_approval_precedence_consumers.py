@@ -157,7 +157,9 @@ def test_package_saved_allow_never_lowers_terminal_current_action(
     assert store.claimed is False
 
 
-def test_package_durable_exact_saved_allow_satisfies_reapproval(tmp_path: Path, package_workspace_scope_native: Path) -> None:
+def test_package_durable_exact_saved_allow_satisfies_reapproval(
+    tmp_path: Path, package_workspace_scope_native: Path
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     artifact = _package_artifact(workspace)
@@ -179,7 +181,9 @@ def test_package_durable_exact_saved_allow_satisfies_reapproval(tmp_path: Path, 
     assert store.claimed is True
 
 
-def test_package_exact_saved_allow_satisfies_only_current_review(tmp_path: Path, package_workspace_scope_native: Path) -> None:
+def test_package_exact_saved_allow_satisfies_only_current_review(
+    tmp_path: Path, package_workspace_scope_native: Path
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     artifact = _package_artifact(workspace)
@@ -251,7 +255,9 @@ def test_package_weaker_supplied_current_action_cannot_erase_package_block(
     assert store.claimed is False
 
 
-def test_package_local_saved_allow_without_exact_hash_is_rejected(tmp_path: Path, package_workspace_scope_native: Path) -> None:
+def test_package_local_saved_allow_without_exact_hash_is_rejected(
+    tmp_path: Path, package_workspace_scope_native: Path
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     artifact = _package_artifact(workspace)
