@@ -168,3 +168,47 @@ def test_hook_copy_probe_matches_the_daemon() -> None:
     probe = _hook_copy()["_cursor_shell_route_probe"]
     for payload in (_SHELL, _BEFORE_SHELL, {**_SHELL, "tool_name": "Write"}):
         assert probe(payload) == route.is_cursor_shell_probe({**payload, "cursor_route_probe": True})
+
+
+@posix_only
+def test_a_routed_probe_reaches_the_rewrite(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The probe's last step calls the real rewrite, so its signature stays honoured.
+
+    Every other test stops before this call, so a stale keyword here used to
+    raise inside the probe's ``except Exception`` and answer a plain allow:
+    the contained route would be gone with nothing to show for it.
+    """
+
+    from codex_plugin_scanner.guard import native_hook_containment_route as containment
+    from codex_plugin_scanner.guard import native_policy_snapshot_harness_postures as postures
+    from codex_plugin_scanner.guard.adapters import zcode_contained_tests as zcode
+    from codex_plugin_scanner.guard.daemon import hook_fail_closed
+
+    class _RoutedWorker:
+        def _native_policy_snapshot(self, *_args: object, **_kwargs: object) -> object:
+            return {"snapshot": True}
+
+        def _review_raw_hook_native(self, **_kwargs: object) -> dict[str, object]:
+            return {"harness": "cursor", "event_name": "PreToolUse", "result": {"policy_action": "ask"}}
+
+    routed = {"policy_action": "allow", "reason_code": _ROUTED, "updated_input": _SINK}
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(postures, "recording_only_for_binding", lambda *_args: False)
+    monkeypatch.setattr(containment, "edge_containment_route", lambda *_args, **_kwargs: "sink")
+    monkeypatch.setattr(hook_fail_closed, "render_pre_tool", lambda *_args, **_kwargs: {"policy_action": "ask"})
+    monkeypatch.setattr(
+        containment,
+        "native_containment_sink",
+        lambda *_args, **_kwargs: containment.ContainmentSink("read-only", "contained"),
+    )
+
+    def _rewrite(response: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return containment.ContainmentRewrite(profile="read-only", kept_because=None, response=routed)
+
+    monkeypatch.setattr(zcode, "native_containment_rewrite", _rewrite)
+
+    assert _respond(_PROBE, tmp_path, _RoutedWorker()) == routed  # type: ignore[arg-type]
+    assert seen["harness"] == "cursor"
+    assert seen["workspace"] == tmp_path

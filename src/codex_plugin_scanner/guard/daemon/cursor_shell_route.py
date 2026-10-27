@@ -174,7 +174,6 @@ def _probe_response(
         guard_home=guard_home,
         home_dir=home_dir,
         workspace=workspace,
-        sink=sink,
         deadline=deadline,
     )
     if routed.get("policy_action") != "allow" or routed.get("reason_code") != _ROUTED_REASON:
