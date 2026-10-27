@@ -527,6 +527,22 @@ def test_relative_workspace_resolves_against_the_calling_process_directory(
     assert relative != resolve_portable_project_identity(repository)
 
 
+def test_nested_relative_workspace_resolves_under_the_calling_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    _init_repository(repository, "https://example.invalid/owner/repository.git")
+    nested = repository / "apps" / "first"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(repository)
+
+    relative = resolve_portable_project_identity("apps/first")
+
+    assert relative is not None
+    assert relative == resolve_portable_project_identity(nested)
+    assert relative != resolve_portable_project_identity(repository)
+
+
 def test_unsettled_workspace_keeps_a_saved_block_and_drops_a_saved_allow(tmp_path: Path) -> None:
     workspace = _unsettled_workspace(tmp_path)
 

@@ -69,15 +69,14 @@ pub(crate) fn resolve(workspace: &str) -> PortableIdentity {
 /// workspace the calling process names relative to its own directory, which
 /// `Path(...).resolve(strict=False)` reads against that process's `cwd`. The
 /// relay never runs in that directory, so the join is mirrored from the `cwd`
-/// the caller reports and only in the one shape a relative workspace takes:
-/// a plain name, under a directory that is already canonical, naming nothing
-/// on disk. Every other relative workspace is `Unknown`.
+/// the caller reports and then read exactly as an absolute workspace is read.
+/// A `~` name and a reported directory that is not absolute are `Unknown`.
 pub(crate) fn resolve_relative(workspace: &str, cwd: &str) -> PortableIdentity {
     let stripped = python_strip(workspace);
     if is_portable_project_identity(stripped) {
         return PortableIdentity::Identity(stripped.to_owned());
     }
-    if stripped.is_empty() || stripped.starts_with('/') {
+    if stripped.is_empty() || Path::new(stripped).is_absolute() {
         return resolve(stripped);
     }
     match relative_path(stripped, cwd).and_then(|path| derive_resolved(&path)) {
@@ -88,28 +87,28 @@ pub(crate) fn resolve_relative(workspace: &str, cwd: &str) -> PortableIdentity {
 }
 
 /// `Path(workspace).expanduser().resolve(strict=False)` against `cwd`.
+///
+/// `resolve` reads the name joined under the asking process's directory the
+/// same way it reads an absolute workspace, so a relative name that exists,
+/// or that carries separators or dot segments, is read here rather than left
+/// unsettled. Only a `~` name, whose expansion reads an environment this
+/// reader does not read, and a reported directory that is not absolute stay
+/// unknown.
 fn relative_path(workspace: &str, cwd: &str) -> Mirror<PathBuf> {
-    if workspace.starts_with('~') || workspace.contains('/') || workspace.starts_with('.') {
-        // `expanduser` rewrites a `~` name, and a separator or a dot segment
-        // is a resolution this reader does not reproduce.
+    if workspace.starts_with('~') {
+        // `expanduser` rewrites a `~` name against an environment this reader
+        // does not read.
         return Err(Unmirrored);
     }
-    if !cfg!(unix) || !cwd.starts_with('/') {
+    let directory = Path::new(cwd);
+    if !directory.is_absolute() {
+        // `resolve` joins a relative directory against the process's own
+        // directory, which is not the one the caller reported.
         return Err(Unmirrored);
     }
-    let resolved = fs::canonicalize(cwd).map_err(|_| Unmirrored)?;
-    if resolved.as_os_str() != cwd {
-        // A directory `resolve` would rewrite resolves the name under the
-        // rewritten path, which this reader does not reproduce.
-        return Err(Unmirrored);
-    }
-    let candidate = resolved.join(workspace);
-    match status(&candidate, false)? {
-        // Only a name that is absent resolves to the join itself; one that
-        // exists may be a link `resolve` follows.
-        None => Ok(candidate),
-        Some(_) => Err(Unmirrored),
-    }
+    let directory = fs::canonicalize(directory).map_err(|_| Unmirrored)?;
+    let resolved = resolve_existing_prefix(&directory.join(workspace))?;
+    without_verbatim_prefix(resolved)
 }
 
 /// `is_portable_project_identity(value)` (`project_identity.py`): the
@@ -231,6 +230,12 @@ fn resolve_existing_prefix(path: &Path) -> Mirror<PathBuf> {
         unread.push(name);
         match fs::canonicalize(parent) {
             Ok(mut resolved) => {
+                if fs::symlink_metadata(current).is_ok() {
+                    // A name that exists but did not read is a link whose
+                    // target is gone; `resolve` follows it to that target,
+                    // which this reader does not reproduce.
+                    return Err(Unmirrored);
+                }
                 resolved.extend(unread.iter().rev());
                 return Ok(resolved);
             }

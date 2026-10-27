@@ -154,9 +154,9 @@ mod tests {
         for (workspace, cwd) in [
             ("relative/repository", None),
             ("~/repository", None),
-            // A separator and a `~` name stay unsettled even with a reported
-            // directory, because `resolve` and `expanduser` rewrite them.
-            ("relative/repository", Some("/")),
+            // A `~` name stays unsettled even with a reported directory,
+            // because `expanduser` rewrites it against an environment the
+            // runtime does not read.
             ("~/repository", Some("/")),
         ] {
             let result = run(PROJECT_IDENTITY_REQUEST_SCHEMA, workspace, cwd);
