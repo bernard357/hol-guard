@@ -12,6 +12,7 @@ from typing import Any
 
 from codex_plugin_scanner.guard.cli.commands_support_runtime_policy import _optional_string
 from codex_plugin_scanner.guard.models import GuardArtifact
+from codex_plugin_scanner.guard.native_directory_trust import _memo_lock, _remembered_asks
 from codex_plugin_scanner.guard.native_request_context import (
     _DEFAULT_BUDGET_MS,
     NativeRequestContextFailure,
@@ -111,3 +112,14 @@ def native_read_only_lookup_target_is_safe(target: str, *, allow_dirs: bool, hom
             home_dir=home_dir,
         )
     )
+
+
+def clear_remembered_directory_trust() -> None:
+    """Forget the directory-trust answers this process has already settled.
+
+    Only tests need this: a run keeps the memo for its whole life, so nothing
+    in production ever clears it.
+    """
+
+    with _memo_lock:
+        _remembered_asks.clear()
