@@ -10,8 +10,8 @@ use guard_contracts::{
     CodexToolOutputRequestV1, CommandEffectBatchRequestV1, CommandEffectRequestV1,
     CompoundGitInspectionRequestV1, ConnectorSetupContextRequestV1,
     ConsumerArtifactComposeRequestV1, ConsumerArtifactProjectRequestV1, ContainedExecuteRequestV1,
-    ContainedNodeExecuteRequestV1, ContainedPackageScriptExecuteRequestV1,
-    ContainedTypescriptExecuteRequestV1, ContainedWorkspaceWriteExecuteRequestV1,
+    ContainedNodeExecuteRequestV2, ContainedPackageScriptExecuteRequestV1,
+    ContainedTypescriptExecuteRequestV2, ContainedWorkspaceWriteExecuteRequestV1,
     ContextDigestRequestV1, ContributedMcpDecisionRequestV1, CursorObserverProofRequestV1,
     DaemonHandlerRequestV1, DaemonLifecycleDecisionRequestV1, DaemonRouteRequestV1,
     DataFlowAnalyzeRequestV1, GitExecutionSafetyRequestV1, GithubCliClassifyRequestV1,
@@ -249,9 +249,9 @@ pub(crate) enum ResidentOperationV1 {
     ApplyStoredPackagePolicy(ApplyStoredPackagePolicyRequestV1),
     PackageAuthorityDecide(PackageAuthorityDecideRequestV1),
     #[allow(dead_code)]
-    ContainedNodeExecute(ContainedNodeExecuteRequestV1),
+    ContainedNodeExecute(ContainedNodeExecuteRequestV2),
     #[allow(dead_code)]
-    ContainedTypescriptExecute(ContainedTypescriptExecuteRequestV1),
+    ContainedTypescriptExecute(ContainedTypescriptExecuteRequestV2),
     #[allow(dead_code)]
     ContainedPackageScriptExecute(ContainedPackageScriptExecuteRequestV1),
     #[allow(dead_code)]

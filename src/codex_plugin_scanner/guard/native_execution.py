@@ -40,6 +40,10 @@ _MCP_STDIO_SESSION_FEATURE = "mcp-stdio-session-v1"
 _MCP_STDIO_SESSION_OPEN_SCHEMA = "guard-mcp-stdio-session-open-request.v1"
 _MCP_STDIO_SESSION_IO_SCHEMA = "guard-mcp-stdio-session-io-request.v1"
 _MCP_STDIO_SESSION_RESULT_SCHEMA = "guard-mcp-stdio-session-result.v1"
+# Result envelopes that carry more than ``schema`` and ``result``.
+_RESULT_KEYS = {
+    "contained_node_execute": frozenset({"schema", "result", "refusal"}),
+}
 
 
 # Terminal/vocab statuses each session op may legitimately return. A reported
@@ -135,7 +139,7 @@ def _resident_request(
     result_schema = {
         "prompt_analyze": "guard-prompt-analyze-result.v1",
         "mcp_stdio_probe": "guard-mcp-stdio-probe-result.v1",
-        "contained_node_execute": "guard-contained-node-execute-result.v1",
+        "contained_node_execute": "guard-contained-node-execute-result.v2",
         "contained_typescript_execute": "guard-contained-typescript-execute-result.v1",
         "contained_package_script_execute": "guard-contained-package-script-execute-result.v1",
         "contained_workspace_write_execute": "guard-contained-workspace-write-execute-result.v1",
@@ -162,7 +166,8 @@ def _resident_request(
     elif result_schema is not None:
         # These versioned Rust replies have no status field. Do not discard
         # valid native results or reinterpret them through a Python fallback.
-        if decoded.get("schema") != result_schema or set(decoded) != {"schema", "result"}:
+        result_keys = _RESULT_KEYS.get(operation, frozenset({"schema", "result"}))
+        if decoded.get("schema") != result_schema or set(decoded) != result_keys:
             return None
     else:
         # Session/terminal ops report success under their own status, not
@@ -238,7 +243,6 @@ def _contained_request(
     manager: str,
     argv: Sequence[str],
     guard_home: Path,
-    evidence: dict[str, object] | None = None,
     extra_fields: dict[str, object] | None = None,
     timeout_seconds: float = 10.0,
 ) -> dict[str, object] | None:
@@ -250,8 +254,6 @@ def _contained_request(
         "argv": list(argv),
         "guard_home": str(guard_home),
     }
-    if evidence is not None:
-        request["evidence"] = evidence
     if extra_fields:
         request.update(extra_fields)
     decoded = _resident_request(
@@ -263,6 +265,11 @@ def _contained_request(
     )
     if decoded is None:
         return None
+    refusal = decoded.get("refusal")
+    if isinstance(refusal, str) and refusal:
+        # The resident decided this launch must stop rather than return to
+        # review, where it would otherwise run uncontained.
+        raise SystemExit(refusal)
     result = decoded.get("result")
     return result if isinstance(result, dict) else None
 
@@ -287,7 +294,6 @@ def _contained_runner_request(
     shim_directory: Path,
     environment: Mapping[str, str],
     timeout_seconds: float,
-    evidence: dict[str, object] | None,
 ) -> dict[str, object] | None:
     """Send one contained local-runner request.
 
@@ -309,16 +315,18 @@ def _contained_runner_request(
         manager=manager,
         argv=argv,
         guard_home=guard_home,
-        evidence=evidence,
         extra_fields=extra_fields,
         timeout_seconds=process_timeout + _CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS,
     )
 
 
+# runner -> (resident operation, request schema). The node and TypeScript
+# requests carry only the shim's manager and argv; the resident parses the
+# launch intent itself.
 _RUNNER_OPERATIONS = {
-    "node": "contained_node_execute",
-    "typescript": "contained_typescript_execute",
-    "package_script": "contained_package_script_execute",
+    "node": ("contained_node_execute", "guard-contained-node-execute-request.v2"),
+    "typescript": ("contained_typescript_execute", "guard-contained-typescript-execute-request.v2"),
+    "package_script": ("contained_package_script_execute", "guard-contained-package-script-execute-request.v1"),
 }
 
 
@@ -331,15 +339,18 @@ def contained_runner_execute_native(
     guard_home: Path,
     shim_directory: Path,
     environment: Mapping[str, str],
-    evidence: dict[str, object] | None = None,
     timeout_seconds: float = 120.0,
 ) -> ContainedRunnerResult | None:
-    """Run one exact local runner in the resident and decode its typed result."""
+    """Run one exact local runner in the resident and decode its typed result.
 
-    operation = _RUNNER_OPERATIONS[runner]
+    A node launch the resident refuses outright raises ``SystemExit`` with
+    the resident's reason instead of returning to review.
+    """
+
+    operation, request_schema = _RUNNER_OPERATIONS[runner]
     result = _contained_runner_request(
         op_prefix=operation,
-        request_schema=f"guard-{operation.replace('_', '-')}-request.v1",
+        request_schema=request_schema,
         workspace=workspace,
         manager=manager,
         argv=argv,
@@ -347,7 +358,6 @@ def contained_runner_execute_native(
         shim_directory=shim_directory,
         environment=environment,
         timeout_seconds=timeout_seconds,
-        evidence=evidence,
     )
     if result is None:
         return None
