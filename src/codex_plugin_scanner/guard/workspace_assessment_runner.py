@@ -26,7 +26,8 @@ from typing import Any, Final
 from . import workspace_assessment_store as assessments
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
-from .store_workspace_assessment_schema import MAX_FINDINGS_JSON_BYTES
+from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
+from .workspace_assessment_carry import listed_packages
 from .workspace_ci_workflow_findings import (
     CI_WORKFLOW_DETECTOR,
     project_ci_workflow_findings,
@@ -81,9 +82,6 @@ _CONTENT_SCANS: Final = ("secrets", "skills", "hooks", "plugins", "workflows", "
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
-MAX_FINDINGS: Final = 500
-# Leave room under the column bound for the list brackets and separators.
-_FINDINGS_BYTE_BUDGET: Final = MAX_FINDINGS_JSON_BYTES - 1024
 _MAX_LIST_ITEMS: Final = 8
 _SEVERITY_ORDER: Final = ("critical", "high", "medium", "low", "info", "unknown")
 _FINDING_DECISIONS: Final = frozenset({"block", "ask", "warn"})
@@ -219,6 +217,7 @@ def execute(
         feed_context_digest=context_digest,
         coverage=coverage,
         findings=findings,
+        listed_packages=listed_packages(payload),
     )
 
 
@@ -421,7 +420,7 @@ def _within_budget(ordered: list[dict[str, object]]) -> tuple[list[dict[str, obj
     used = 0
     for finding in ordered[:MAX_FINDINGS]:
         used += len(json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
-        if used > _FINDINGS_BYTE_BUDGET:
+        if used > FINDINGS_BYTE_BUDGET:
             break
         kept.append(finding)
     return kept, len(kept) < len(ordered)

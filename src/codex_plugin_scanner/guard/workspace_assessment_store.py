@@ -67,6 +67,8 @@ class RunOutcome:
     coverage: Mapping[str, object] | None = None
     findings: Sequence[Mapping[str, object]] = ()
     error_code: str | None = None
+    # (ecosystem, name, version) of every package the audit read; None if it stopped early.
+    listed_packages: frozenset[tuple[str, str, str]] | None = None
 
 
 def admit_worktree(store: Any, keys: WorktreeKeys, *, root: str, now_ms: int, resume: bool = True) -> bool:

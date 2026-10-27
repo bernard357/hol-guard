@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from codex_plugin_scanner.guard import workspace_assessment_fix_proposals as fixes
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_workspace_assessment_schema import MAX_FINDINGS
-from codex_plugin_scanner.guard.workspace_assessment_carry import carry_unchecked_findings
+from codex_plugin_scanner.guard.workspace_assessment_carry import carry_unchecked_findings, listed_packages
 
 DETECTORS = "d" * 64
 T0 = 1_000_000_000
@@ -31,14 +35,30 @@ def finding(finding_id: str, detector: str = "ci_workflow_v1", severity: str = "
     }
 
 
-def outcome(state: str, findings: list[dict[str, object]], **detectors: str) -> assessments.RunOutcome:
+def outcome(
+    state: str,
+    findings: list[dict[str, object]],
+    listed: frozenset[tuple[str, str, str]] | None = None,
+    **detectors: str,
+) -> assessments.RunOutcome:
     reasons = [f"{name}_incomplete" for name, status in detectors.items() if status != "complete"]
     return assessments.RunOutcome(
         state=state,
         snapshot_digest=digest(f"snapshot-{len(findings)}-{sorted(detectors.items())}"),
         coverage={"status": "partial" if reasons else "complete", "reasons": reasons, "detectors": detectors},
         findings=findings,
+        listed_packages=listed,
     )
+
+
+def package_finding(finding_id: str, version: str) -> dict[str, object]:
+    return {
+        **finding(finding_id, detector="supply_chain_local_v1"),
+        "source_kind": "supply_chain",
+        "ecosystem": "npm",
+        "package_name": "minimist",
+        "package_version": version,
+    }
 
 
 def assess(store: GuardStore, result: assessments.RunOutcome, *, at: int) -> dict[str, object]:
@@ -142,4 +162,63 @@ def test_carried_findings_stay_within_the_finding_bound(tmp_path: Path) -> None:
     assert len(run["findings"]) == MAX_FINDINGS
     assert run["findings"][0]["finding_id"] == "f" * 32
     assert run["coverage"]["carried_findings"] == MAX_FINDINGS - 1
-    assert "finding_cap" in run["coverage"]["reasons"]
+    # The run's own findings are whole, so the overflow does not read as a
+    # finding cap that would hold back supply chain fix verification.
+    assert "carried_finding_cap" in run["coverage"]["reasons"]
+    assert "finding_cap" not in run["coverage"]["reasons"]
+    coverage = {**run["coverage"], "detectors": {**run["coverage"]["detectors"], "supply_chain": "complete"}}
+    coverage["reasons"] = [reason for reason in coverage["reasons"] if reason != "ci_workflow_v1_incomplete"]
+    assert fixes._supply_chain_verifiable(coverage)
+
+
+def test_a_package_the_audit_no_longer_lists_settles_its_earlier_finding(tmp_path: Path) -> None:
+    store = admitted(tmp_path)
+    earlier = [package_finding("a" * 32, "1.2.8"), package_finding("b" * 32, "1.2.5")]
+    assess(store, outcome("completed", earlier, supply_chain="complete"), at=T0)
+
+    # The lockfile now pins 1.2.9 and 1.2.5, and the advisory lookup for
+    # 1.2.9 did not finish.
+    listed = frozenset({("npm", "minimist", "1.2.9"), ("npm", "minimist", "1.2.5")})
+    run = assess(store, outcome("partial", [], listed, supply_chain="incomplete"), at=T0 + 10)
+
+    assert [item["finding_id"] for item in run["findings"]] == ["b" * 32]
+
+    # An audit that could not list every package settles nothing.
+    run = assess(store, outcome("partial", [], None, supply_chain="incomplete"), at=T0 + 20)
+    assert [item["finding_id"] for item in run["findings"]] == ["b" * 32]
+
+
+def test_the_listed_packages_name_packages_as_their_findings_do() -> None:
+    packages = [
+        {"ecosystem": " npm ", "name": "minimist", "resolvedVersion": "1.2.9", "requestedVersion": "^1.2.0"},
+        {"name": "left-pad", "requestedVersion": "1.3.0"},
+        {"ecosystem": "npm", "name": "bare"},
+        {"ecosystem": "npm", "resolvedVersion": "1.0.0"},
+        "not a package",
+    ]
+    payload: dict[str, object] = {"audit_status": "complete", "evaluation": {"packages": packages}}
+
+    assert listed_packages(payload) == {
+        ("npm", "minimist", "1.2.9"),
+        ("unknown", "left-pad", "1.3.0"),
+        ("npm", "bare", ""),
+    }
+    assert listed_packages({**payload, "audit_status": "incomplete"}) is None
+    assert listed_packages({**payload, "lockfile_warnings": ["drift"]}) is None
+    assert listed_packages({"audit_status": "complete"}) is None
+
+
+def test_runs_finished_in_the_same_millisecond_carry_from_the_one_queued_last(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Run ids that sort against the queue order, so only the queue order can
+    # pick the later run.
+    store = admitted(tmp_path)
+    ids = iter(["f" * 32, "e" * 32, "0" * 32])
+    monkeypatch.setattr(assessments.uuid, "uuid4", lambda: SimpleNamespace(hex=next(ids)))
+    assess(store, outcome("completed", [finding("a" * 32)], ci_workflow_v1="complete"), at=T0)
+    second = assess(store, outcome("completed", [finding("b" * 32)], ci_workflow_v1="complete"), at=T0)
+
+    assert second["run_id"] == "e" * 32
+    third = assess(store, outcome("partial", [], ci_workflow_v1="incomplete"), at=T0 + 10)
+    assert [item["finding_id"] for item in third["findings"]] == ["b" * 32]
