@@ -52,6 +52,9 @@ function normalizeRuns(value) {
 function strings(value) {
   return list$1(value).filter((entry) => typeof entry === "string");
 }
+function validationState(value) {
+  return value === "confirmed" || value === "unvalidated" ? value : "unknown";
+}
 function normalizeFinding(value) {
   const item = record$1(value);
   const findingId = text$1(item.finding_id);
@@ -62,7 +65,8 @@ function normalizeFinding(value) {
     decision: text$1(item.decision) ?? "warn",
     ruleIds: strings(item.rule_ids),
     advisoryIds: strings(item.advisory_ids),
-    carried: text$1(item.carried_from_run_id) !== null
+    carried: text$1(item.carried_from_run_id) !== null,
+    validation: validationState(item.validation_state)
   };
   if (item.source_kind === "secret") {
     const path = text$1(item.path);
@@ -373,6 +377,18 @@ function CarriedNote({ finding }) {
   if (!finding.carried) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mt-1 block text-xs text-slate-500", children: "Not rechecked in the latest scan" });
 }
+function evidenceSource(finding) {
+  if (finding.advisoryIds.length > 0) return "Advisory match";
+  return finding.kind === "supply_chain" ? "Package policy" : "Rule match";
+}
+const VALIDATION_SUFFIX = { confirmed: ", confirmed", unvalidated: ", not confirmed" };
+function EvidenceNote({ finding }) {
+  const source = evidenceSource(finding);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mt-1 block text-xs text-slate-500", children: [
+    source,
+    source === "Package policy" ? "" : VALIDATION_SUFFIX[finding.validation] ?? ""
+  ] });
+}
 function Cell(props) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("td", { className: `min-w-0 md:px-3 md:py-2.5 ${props.wide ? "col-span-2 md:col-span-1" : ""}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "block text-xs font-semibold text-slate-500 md:hidden", children: props.label }),
@@ -400,7 +416,8 @@ function SecretFindingsTable({ findings }) {
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Status", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "slate", children: "Not verified" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "amber", children: "Warning" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(EvidenceNote, { finding }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(CarriedNote, { finding })
       ] })
     ] }, finding.findingId)) })
@@ -432,6 +449,7 @@ function RuleFindingsTable({ findings, caption, subjectLabel, subject, check }) 
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Status", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "amber", children: "Warning" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(EvidenceNote, { finding }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(CarriedNote, { finding })
         ] })
       ] }, finding.findingId);
@@ -547,6 +565,7 @@ function RuntimeFindingsTable({ findings }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: verdict.tone, children: verdict.label }),
             finding.runtime?.knownExploited && /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: "red", children: "Known exploited" })
           ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(EvidenceNote, { finding }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(CarriedNote, { finding })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),
@@ -1108,7 +1127,7 @@ function decisionTone(decision) {
   if (decision === "ask") return "attention";
   return "slate";
 }
-const DECISION_LABELS = { block: "Blocked", ask: "Needs review", warn: "Warning" };
+const DECISION_LABELS = { block: "Block", ask: "Ask", warn: "Warn" };
 function WorkspaceFindingsWorkspace(props) {
   const [state, setState] = reactExports.useState(null);
   const [loadError, setLoadError] = reactExports.useState(null);
@@ -1293,7 +1312,7 @@ function FindingsTable({ findings, fixes }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Package" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Installed" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Fixed in" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Decision" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Policy" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Advisories" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Fix" })
@@ -1305,8 +1324,9 @@ function FindingsTable({ findings, fixes }) {
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Installed", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mono, { value: finding.packageVersion }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Fixed in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mono, { value: finding.fixVersion, fallback: "No fix yet" }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Decision", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Policy", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: decisionTone(finding.decision), children: DECISION_LABELS[finding.decision] ?? finding.decision }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(EvidenceNote, { finding }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(CarriedNote, { finding })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Severity", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize text-slate-700", children: finding.severity }) }),

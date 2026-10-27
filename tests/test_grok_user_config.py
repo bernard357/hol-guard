@@ -14,6 +14,17 @@ from codex_plugin_scanner.guard.codex_config import tomllib
 from codex_plugin_scanner.guard.shims import PreparedGuardShim
 from tests.grok_managed_config import build_managed_config_block
 
+_LEGACY_MANAGED_BLOCK = (
+    "# BEGIN HOL GUARD MANAGED GROK\n"
+    "# Permission rules below are managed by HOL Guard. Do not edit manually.\n"
+    "[permission]\n"
+    'deny = ["Read(~/.grok/auth/**)"]\n'
+    "\n"
+    "[[hooks.PreToolUse]]\n"
+    'hooks = [{ type = "command", command = "old guard hook", timeout = 30 }]\n'
+    "# END HOL GUARD MANAGED GROK"
+)
+
 
 def test_merge_preserves_comments_existing_permissions_and_hooks() -> None:
     existing = """# User preferences
@@ -149,7 +160,7 @@ def test_legacy_backup_hooks_migrate_without_changing_vendor_settings(
     vendor = context.home_dir / ".grok" / "managed_config.toml"
     vendor.parent.mkdir(parents=True)
     enterprise = '# Enterprise settings\nmodel="synthetic-enterprise-model"\n'
-    vendor.write_text(enterprise + build_managed_config_block("old guard hook"))
+    vendor.write_text(enterprise + _LEGACY_MANAGED_BLOCK)
     GrokHarnessAdapter().install(context)
     assert tomllib.loads(vendor.read_text()) == tomllib.loads(enterprise)
     assert "old guard hook" not in vendor.read_text()

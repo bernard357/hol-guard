@@ -150,7 +150,7 @@ def test_missing_native_fail_safe_codes_continue_mutating_pretool(tmp_path: Path
 
 
 def test_cursor_maps_before_write_file_to_a_write_pretooluse() -> None:
-    from codex_plugin_scanner.guard.adapters._modules.cursor.cursor_hook_payload import prepare_cursor_hook_payload
+    from tests.cursor_hook_payload_support import prepare_cursor_hook_payload
 
     mapped = prepare_cursor_hook_payload(
         {"hook_event_name": "beforeWriteFile", "file_path": "src/app.ts", "tool_name": "Read"}

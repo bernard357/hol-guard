@@ -532,12 +532,6 @@ def overlay_synced_guard_policy(
     return _overlay(config, payload)
 
 
-def _reapply_managed_config(config: GuardConfig) -> GuardConfig:
-    if config.managed_policy is None:
-        return config
-    return _overlay(config, None)
-
-
 def _overlay(config: GuardConfig, payload: dict[str, object] | None) -> GuardConfig:
     """Compose ``payload`` and the managed policy onto ``config`` natively."""
 

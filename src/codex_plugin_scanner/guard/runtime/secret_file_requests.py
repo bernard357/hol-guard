@@ -31,7 +31,6 @@ from .secret_file_request_services.constants_core import COMMAND_SEQUENCE_KEYS a
 from .secret_file_request_services.github_shell_capabilities import (
     classify_github_shell_capabilities as classify_github_shell_capabilities,
 )
-from .secret_file_request_services.request_artifacts import _candidate_command_texts as _candidate_command_texts
 from .secret_file_request_services.request_models import FileReadRequestMatch as FileReadRequestMatch
 from .secret_file_request_services.request_models import FileWriteRequestMatch as FileWriteRequestMatch
 from .secret_file_request_services.request_models import ToolActionRequestMatch as ToolActionRequestMatch
@@ -195,7 +194,6 @@ __all__ = [
     "FileReadRequestMatch",
     "FileWriteRequestMatch",
     "ToolActionRequestMatch",
-    "_candidate_command_texts",
     "_normalize_tool_name",
     "_read_only_lookup_target_is_safe",
     "build_tool_action_request_artifact",

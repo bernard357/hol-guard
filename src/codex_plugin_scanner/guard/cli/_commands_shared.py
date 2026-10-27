@@ -73,7 +73,6 @@ from ..bridge import (
     TelegramBackend,
     WebhookBackend,
 )
-from ..codex_app_server import codex_resume_metadata_from_hook_payload
 from ..codex_resume import inspect_codex_resume_capabilities
 from ..config import (
     DEFAULT_SECURITY_LEVEL,
@@ -110,7 +109,6 @@ from ..desktop_notifications import (
     ensure_desktop_notification_setup,
     macos_notification_guidance,
 )
-from ..harness_usage import record_harness_usage_events
 from ..incident import build_incident_context
 from ..local_dashboard_session import build_local_dashboard_session_token
 from ..local_supply_chain import (
@@ -133,7 +131,6 @@ from ..mcp_tool_calls import (
 from ..models import GUARD_ACTION_VALUES, SEVERITY_RANK, GuardArtifact, HarnessDetection, PolicyDecision
 from ..native_cisco_preflight import (
     build_cisco_deep_scan_payload,
-    cisco_risk_signal_v3_to_v2,
     policy_action_for_cisco_signals,
     scan_action_for_cisco_evidence,
 )
@@ -144,19 +141,12 @@ from ..package_firewall_entitlement import (
     PACKAGE_FIREWALL_AUTHORITY_UNAVAILABLE_MESSAGE,
     package_firewall_access,
 )
-from ..policy.engine import SAFE_CHANGED_HASH_ACTION, VALID_GUARD_ACTIONS, build_decision_v2, guard_action_severity
+from ..policy.engine import VALID_GUARD_ACTIONS, build_decision_v2, guard_action_severity
 from ..protect import build_protect_payload
 from ..receipts import build_receipt
 from ..risk import artifact_risk_profile, artifact_risk_summary
 from ..runtime.actions import GuardActionEnvelope, command_text_from_tool_payload, normalize_harness_payload
-from ..runtime.false_positive_rules import (
-    SOURCE_INSPECTION_BENIGN_DOTFILES,
-    SOURCE_INSPECTION_EXTENSIONS,
-    SOURCE_INSPECTION_PARTS,
-    SOURCE_INSPECTION_SENSITIVE_PARTS,
-    fd_arg_requests_exec,
-    target_is_known_skill_doc_path,
-)
+from ..runtime.false_positive_rules import target_is_known_skill_doc_path
 from ..runtime.guard_run_evaluation import prompt_requests_to_artifacts
 from ..runtime.harness_attribution import resolve_runtime_hook_harness
 from ..runtime.package_intent_common import build_package_request_artifact
@@ -189,7 +179,6 @@ from ..runtime.secret_sensitivity import (
     classify_secret_content,
     classify_secret_path,
 )
-from ..runtime.sed_scripts import sed_script_is_bounded_print
 from ..runtime.signals import RiskSignalV2
 from ..runtime.surface_server import GuardSurfaceRuntime
 from ..runtime.wrapper_run import guard_run

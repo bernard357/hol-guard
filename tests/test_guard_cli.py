@@ -43,13 +43,10 @@ from codex_plugin_scanner.guard.cli.render import emit_guard_payload
 from codex_plugin_scanner.guard.codex_config import dump_toml
 from codex_plugin_scanner.guard.config import GuardConfig, load_guard_config, resolve_risk_action
 from codex_plugin_scanner.guard.desktop_notifications import DesktopNotificationSetupResult
-from codex_plugin_scanner.guard.policy_bundle_parser import (
-    computed_policy_bundle_hash,
-    payload_hash_for_policy_bundle,
-)
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, payload_hash_for_policy_bundle
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
 from tests.support.network import stub_authenticated_urlopen
 from tests.update_context_test_support import build_legacy_update_context, stage_legacy_wheel

@@ -10,10 +10,6 @@ import codex_plugin_scanner.guard.runtime.runner as runner
 from codex_plugin_scanner.guard import policy_bundle_trusted_keys as trusted_keys_module
 from codex_plugin_scanner.guard.config import update_guard_settings
 from codex_plugin_scanner.guard.models import GuardReceipt
-from codex_plugin_scanner.guard.policy_bundle_parser import (
-    computed_policy_bundle_hash,
-    payload_hash_for_policy_bundle,
-)
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     load_policy_bundle_verification_keys,
 )
@@ -31,6 +27,7 @@ from codex_plugin_scanner.guard.runtime.runner import (
     _resolve_cloud_receipt_redaction_level,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, payload_hash_for_policy_bundle
 from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_keyring,
     policy_bundle_test_verification_key,

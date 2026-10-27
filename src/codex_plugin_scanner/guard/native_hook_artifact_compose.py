@@ -29,12 +29,23 @@ HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE = "hook-artifact-compose-package-reu
 HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE = "hook-artifact-compose-package-firewall-access-v1"
 HOOK_ARTIFACT_COMPOSE_POLICY_LOOKUP_FEATURE = "hook-artifact-compose-policy-lookup-v1"
 HOOK_ARTIFACT_COMPOSE_SIGNAL_COMPOSITION_FEATURE = "hook-artifact-compose-signal-composition-v1"
+# The precheck and the settle are two halves of one live-allow decision, with
+# the fresh review running between them, so a runtime that serves one serves
+# both and they share a feature.
+HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE = "hook-artifact-compose-codex-live-allow-v1"
 # Shipped with the policy-tail query kinds; the native artifact facts op is
 # gated on the same feature, since a runtime with one has the other.
 HOOK_ARTIFACT_COMPOSE_POLICY_TAIL_FEATURE = "hook-artifact-compose-policy-tail-v1"
 _REQUEST_SCHEMA = "guard-hook-artifact-compose-request.v1"
 _RESULT_SCHEMA = "guard-hook-artifact-compose-result.v1"
 _RESIDENT_CODE = re.compile(r"^native_hook_artifact_compose_[a-z_]{1,64}$")
+_MAX_REQUEST_BYTES = 256 * 1024
+# The live-allow precheck carries the stored and the freshly built action
+# envelopes, which the hook adapter accepts at its own bound. Sending them
+# under the smaller default would refuse a large command here and deny an
+# action the user had already approved, so this kind is bounded where the
+# envelopes themselves are.
+_LIVE_ALLOW_PRECHECK_MAX_REQUEST_BYTES = 4 * 1024 * 1024
 _UNAVAILABLE = "native_hook_artifact_compose_unavailable"
 _TIMEOUT_SECONDS = 5.0
 # Every field is sent explicitly (nulls included) so the digest bound here
@@ -95,6 +106,21 @@ _FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "policy_lookup_select": frozenset({"lookups"}),
+    "codex_live_allow_precheck": frozenset(
+        {
+            "resolution_action",
+            "artifact_hash",
+            "row_request_id",
+            "stored_envelope",
+            "previous_resolution_action",
+            "previous_status",
+            "request_id",
+            "authority_resolved",
+            "hook_event_name",
+            "fresh_envelope",
+        }
+    ),
+    "codex_live_allow_settle": frozenset({"fresh_review"}),
     "package_reuse_settle": frozenset(
         {
             "reasons",
@@ -113,6 +139,8 @@ _FIELDS: dict[str, frozenset[str]] = {
 # The feature a kind needs beyond the op itself. A runtime that predates the
 # kind rejects it as an unknown kind, so the gate is per kind, not per op.
 _KIND_FEATURES: dict[str, str] = {
+    "codex_live_allow_precheck": HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE,
+    "codex_live_allow_settle": HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE,
     "package_firewall_access": HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE,
     "package_firewall_entitlement": HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE,
     "package_reuse_settle": HOOK_ARTIFACT_COMPOSE_PACKAGE_REUSE_FEATURE,
@@ -141,6 +169,12 @@ _ANSWERS: dict[str, dict[str, str]] = {
         "trusted_request_override_applied": "b",
         "trusted_request_override_reason": "S",
     },
+    "codex_live_allow_precheck": {
+        "review_required": "b",
+        "claimed_saved_allow_hash": "S",
+        "claimed_approval_request_id": "S",
+    },
+    "codex_live_allow_settle": {"fresh_allow_authorized": "b"},
     "policy_lookup_select": {
         "authority_revision": "i",
         "decision": "D",
@@ -240,6 +274,9 @@ def native_hook_compose(kind: str, fields: Mapping[str, object], *, guard_home: 
         timeout_seconds=_TIMEOUT_SECONDS,
         required_feature=_KIND_FEATURES.get(kind, HOOK_ARTIFACT_COMPOSE_FEATURE),
         response_schema=_RESULT_SCHEMA,
+        max_request_bytes=(
+            _LIVE_ALLOW_PRECHECK_MAX_REQUEST_BYTES if kind == "codex_live_allow_precheck" else _MAX_REQUEST_BYTES
+        ),
     )
     if (
         response is None
@@ -270,6 +307,7 @@ def native_hook_compose(kind: str, fields: Mapping[str, object], *, guard_home: 
 
 
 __all__ = [
+    "HOOK_ARTIFACT_COMPOSE_CODEX_LIVE_ALLOW_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ACCESS_FEATURE",
     "HOOK_ARTIFACT_COMPOSE_PACKAGE_FIREWALL_ENTITLEMENT_FEATURE",
