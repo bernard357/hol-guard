@@ -120,8 +120,10 @@ def _resident_caution(monkeypatch: pytest.MonkeyPatch) -> list[tuple[frozenset[s
     return asked
 
 
-def _items(monkeypatch: pytest.MonkeyPatch, *, state: str = "unset", identity_hash: str = _HASH) -> None:
-    item = {"cli_id": _CLI_ID, "identity_hash": identity_hash, "surface": "cli", "state": state}
+def _items(
+    monkeypatch: pytest.MonkeyPatch, *, state: str = "unset", identity_hash: str = _HASH, stale: bool = False
+) -> None:
+    item = {"cli_id": _CLI_ID, "identity_hash": identity_hash, "surface": "cli", "state": state, "stale": stale}
     monkeypatch.setattr(recommendation, "listed_public_items", lambda _store: [item])
 
 
@@ -253,6 +255,25 @@ def test_available_while_the_connector_is_unset(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.parametrize("state", ["allowed", "blocked", "forgotten"])
 def test_gone_once_the_connector_has_a_decision(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     _items(monkeypatch, state=state)
+
+    assert _build(_approval(_hint())) is None
+
+
+def test_offered_again_when_the_allow_covers_an_earlier_version_of_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The script was allowed, then edited: the grant names the old file and no
+    # longer applies, so the held calls wait on a setup of this version.
+    _items(monkeypatch, state="allowed", stale=True)
+
+    result = _build(_approval(_hint()))
+
+    assert result is not None
+    assert result["status"] == "available"
+    assert result["setup_request"]["state"] == "allowed"  # type: ignore[index]
+    assert result["setup_request"]["connector_group_request_id"] == "req-1"  # type: ignore[index]
+
+
+def test_an_earlier_block_stays_a_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    _items(monkeypatch, state="blocked", stale=True)
 
     assert _build(_approval(_hint())) is None
 
