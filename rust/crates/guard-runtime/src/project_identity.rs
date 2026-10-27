@@ -12,9 +12,12 @@
 //! input this reader does not settle: an I/O error or a file that changed
 //! while it was read, a workspace path `expanduser` or `resolve` would
 //! rewrite, a stat error that is not plain absence, or a remote or config
-//! shape the old resolver read differently across Python releases. In-process
-//! callers defer on `Unknown`; the resident operation answers it as no
-//! identity, which only ever narrows what a portable decision matches.
+//! shape the old resolver read differently across Python releases. Every
+//! caller defers on `Unknown`: the in-process ones read no saved decision,
+//! and the resident operation answers `native_project_identity_unresolved`
+//! rather than no identity, because a lookup that lost its portable half
+//! composes a local decision alone and can land on a weaker action than the
+//! portable half would have forced.
 
 use crate::context_digest::{is_python_space, python_strip};
 use sha2::{Digest, Sha256};
@@ -185,8 +188,9 @@ fn is_symlink(metadata: &Option<Metadata>) -> bool {
 /// is what `realpath` answers for a name that exists, so a workspace reached
 /// through a symlink is read as the directory it names rather than deferred.
 /// A name that does not exist resolves the part that does and appends the
-/// rest without reading it, and a loop or an unreadable parent answers the
-/// part reached so far; neither is read here, so both stay unknown.
+/// rest without reading it, which is what `resolve_existing_prefix` reads. A
+/// loop or an unreadable parent answers the part reached so far, which is
+/// not read here, so it stays unknown.
 fn workspace_path(workspace: &str) -> Mirror<Option<PathBuf>> {
     let stripped = python_strip(workspace);
     if stripped.is_empty() {
@@ -198,8 +202,42 @@ fn workspace_path(workspace: &str) -> Mirror<Option<PathBuf>> {
         // A relative or `~` name resolves against the asking process.
         return Err(Unmirrored);
     }
-    let resolved = fs::canonicalize(path).map_err(|_| Unmirrored)?;
+    let resolved = resolve_existing_prefix(path)?;
     without_verbatim_prefix(resolved).map(Some)
+}
+
+/// `resolve(strict=False)`: the longest prefix of `path` that exists, read
+/// through its links, with the names below it appended unread.
+///
+/// A workspace whose directory is gone is an ordinary answer rather than an
+/// unsettled one, so only a name this reader cannot read at all — a link
+/// loop, an unreadable parent — stays unknown. A `..` below the prefix is
+/// rewritten against what the part before it resolved to, which is not read
+/// here, so it stays unknown too.
+fn resolve_existing_prefix(path: &Path) -> Mirror<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => return Ok(resolved),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err(Unmirrored),
+    }
+    let mut unread = Vec::new();
+    let mut current = path;
+    loop {
+        // `file_name` is `None` for a name ending in `..`, which `resolve`
+        // rewrites against what the part before it resolved to.
+        let (Some(parent), Some(name)) = (current.parent(), current.file_name()) else {
+            return Err(Unmirrored);
+        };
+        unread.push(name);
+        match fs::canonicalize(parent) {
+            Ok(mut resolved) => {
+                resolved.extend(unread.iter().rev());
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => current = parent,
+            Err(_) => return Err(Unmirrored),
+        }
+    }
 }
 
 /// `canonicalize` answers a verbatim (`\\?\`) path on Windows, where

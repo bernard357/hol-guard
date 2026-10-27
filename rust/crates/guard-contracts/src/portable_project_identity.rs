@@ -2,7 +2,9 @@
 //! identity op.
 //!
 //! The request names one workspace; the result carries the portable Git
-//! project identity its conventional clone derives, or none. The identity is
+//! project identity its conventional clone derives, or none. A workspace the
+//! resolver cannot settle is neither: the result is an error, so no caller
+//! reads an unsettled workspace as one that has no identity. The identity is
 //! classification only: it lives in repository-controlled metadata, so no
 //! caller may grant authority on it alone.
 
@@ -30,7 +32,14 @@ pub struct ProjectIdentityRequestV1 {
 pub enum ProjectIdentityQueryV1 {
     /// The identity of `workspace`: itself when it already is a portable
     /// identity, otherwise the one its Git metadata derives.
-    Resolve { workspace: String },
+    Resolve {
+        workspace: String,
+        /// The asking process's working directory, which a workspace named
+        /// relative to it is read under. A caller that sends none leaves a
+        /// relative workspace unsettled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

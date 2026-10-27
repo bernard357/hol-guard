@@ -344,3 +344,55 @@ fn a_relative_workspace_python_would_rewrite_is_unknown() {
     assert_eq!(resolve_relative(&token, &cwd), PortableIdentity::Unknown);
     fs::remove_dir_all(&root).ok();
 }
+
+#[cfg(unix)]
+#[test]
+fn a_workspace_that_is_gone_reads_the_repository_above_it() {
+    let root = scratch("absent-workspace");
+    repository(&root);
+    let present = root.join("apps/first");
+    fs::create_dir_all(&present).expect("present dir");
+
+    // `resolve(strict=False)` appends the names that do not exist to the
+    // part that does, so a workspace under a directory that was removed is
+    // read under the repository above it rather than left unsettled.
+    let absent = root.join("apps/second/deeper");
+    let PortableIdentity::Identity(derived) = resolve(absent.to_str().expect("utf-8")) else {
+        panic!("an absent workspace under a repository has an identity");
+    };
+    let PortableIdentity::Identity(sibling) = resolve(present.to_str().expect("utf-8")) else {
+        panic!("a present workspace under a repository has an identity");
+    };
+    assert_ne!(derived, sibling);
+
+    // A name that exists nowhere near a repository is still no identity.
+    assert_eq!(
+        resolve("/guard-no-such-root/workspace"),
+        PortableIdentity::Absent
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_workspace_this_reader_cannot_read_is_unknown() {
+    let root = scratch("unreadable-workspace");
+    repository(&root);
+
+    // A link that names itself answers `ELOOP`, which is not absence.
+    let loop_path = root.join("loop");
+    std::os::unix::fs::symlink(&loop_path, &loop_path).expect("link loop");
+    assert_eq!(
+        resolve(loop_path.to_str().expect("utf-8")),
+        PortableIdentity::Unknown
+    );
+
+    // `..` below the part that exists is rewritten against what that part
+    // resolved to, which this reader does not reproduce.
+    let traversal = root.join("gone/../apps");
+    assert_eq!(
+        resolve(traversal.to_str().expect("utf-8")),
+        PortableIdentity::Unknown
+    );
+    fs::remove_dir_all(&root).ok();
+}

@@ -6,11 +6,20 @@ Git metadata, keeping local filesystem paths out of the identity itself; this
 module asks it and keeps only the metadata glue. Repository-controlled
 metadata is not an authentication boundary; callers must never use the
 identity alone to grant permissive authority.
+
+A workspace with no identity and a workspace whose identity nothing could
+settle are different answers and are kept apart here. ``None`` is the first:
+the workspace names no conventional clone. ``ProjectIdentityError`` is the
+second, and covers both a resident that could not read the workspace and a
+resident that was not there to ask. A caller that read the second as the
+first would compose policy as if the workspace belonged to no project, which
+drops the portable half of a most-restrictive composition.
 """
 
 from __future__ import annotations
 
 import functools
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -39,11 +48,18 @@ def resolve_portable_project_identity(workspace: str | Path | None, *, guard_hom
     same canonical origin remote and the initial HEAD reflog records that
     origin. Both files are repository-controlled and therefore do not
     authenticate the workspace. The resident reads them directly and never
-    launches a subprocess. A workspace the resident cannot settle, or no
-    resident at all, has no identity: that only narrows what portable memory
-    matches. ``guard_home`` names the store asking the question, so a caller
-    holding a home other than the context-bound one is answered by that home's
-    resident rather than the default one.
+    launches a subprocess. ``None`` means the workspace names no conventional
+    clone; a workspace the resident cannot settle, and a resident that is not
+    there to ask, both raise ``ProjectIdentityError`` so the caller can fail
+    closed instead of reading the workspace as having no project.
+    ``guard_home`` names the store asking the question, so a caller holding a
+    home other than the context-bound one is answered by that home's resident
+    rather than the default one.
+
+    A workspace named relative to this process is resolved against this
+    process's working directory, so the request reports it; the resident
+    reads the name under it exactly as the retired
+    ``Path(workspace).resolve(strict=False)`` did.
     """
     if isinstance(workspace, Path):
         workspace = str(workspace)
@@ -68,17 +84,40 @@ def resolve_portable_project_identity(workspace: str | Path | None, *, guard_hom
         if set(payload) != {"kind", "identity"} or not (identity is None or is_portable_project_identity(identity)):
             raise ProjectIdentityError(operation.invalid)
 
+    query: dict[str, object] = {"kind": "resolve", "workspace": workspace}
+    cwd = _process_directory()
+    if cwd is not None:
+        query["cwd"] = cwd
+    payload = resident_decide(
+        operation,
+        functools.partial(_resident_request, max_request_bytes=_MAX_REQUEST_BYTES),
+        query,
+        guard_home,
+        validate,
+    )
+    return payload["identity"]
+
+
+def portable_project_identity_or_none(workspace: str | Path | None, *, guard_home: Path | None = None) -> str | None:
+    """The identity, or ``None`` when there is none and when none could be settled.
+
+    Only callers whose use of the identity can only ever widen a match may
+    collapse the two answers: metadata enrichment labels a row with the
+    project it belongs to, so a row left unlabelled is matched by fewer
+    lookups rather than by more.
+    """
     try:
-        payload = resident_decide(
-            operation,
-            functools.partial(_resident_request, max_request_bytes=_MAX_REQUEST_BYTES),
-            {"kind": "resolve", "workspace": workspace},
-            guard_home,
-            validate,
-        )
+        return resolve_portable_project_identity(workspace, guard_home=guard_home)
     except ProjectIdentityError:
         return None
-    return payload["identity"]
+
+
+def _process_directory() -> str | None:
+    """This process's working directory, or ``None`` when it no longer has one."""
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
 
 
 def resolve_project_identity_from_metadata(
@@ -90,7 +129,7 @@ def resolve_project_identity_from_metadata(
         return explicit
 
     workspace = _first_string(metadata, "workspace_path", "workspacePath") or explicit
-    portable = resolve_portable_project_identity(workspace, guard_home=guard_home)
+    portable = portable_project_identity_or_none(workspace, guard_home=guard_home)
     if portable is not None:
         return portable
     return explicit
