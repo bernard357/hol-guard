@@ -50,6 +50,7 @@ from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_keyring,
     sign_policy_bundle,
 )
+from tests.policy_store_support import replace_remote_policies, resolve_policy
 from tests.test_guard_supply_chain_evaluator import WORKSPACE_ID, _bundle_response, _package
 
 
@@ -2643,7 +2644,7 @@ def test_headless_policy_sync_accepts_policy_bundle_and_returns_bundle_metadata(
     assert payload["bundle_version"] == "policy-2026-04-19.3"
     assert payload["bundle_hash"] == bundle["bundleHash"]
     assert store.get_sync_payload("policy_bundle")["bundleVersion"] == "policy-2026-04-19.3"
-    assert store.resolve_policy("codex", "codex:project:package-request:abc", "hash") == "block"
+    assert resolve_policy(store, "codex", "codex:project:package-request:abc", "hash") == "block"
     policy_bundle_ack = store.get_sync_payload("policy_bundle_ack")
     assert isinstance(policy_bundle_ack, dict)
     assert policy_bundle_ack["bundleHash"] == bundle["bundleHash"]
@@ -2740,7 +2741,7 @@ def test_headless_policy_sync_passes_approval_gate_grant_to_atomic_activation(tm
         daemon.stop()
 
     assert status == 200, payload
-    assert store.resolve_policy("codex", "codex:project:package-request:abc", "hash") == "allow"
+    assert resolve_policy(store, "codex", "codex:project:package-request:abc", "hash") == "allow"
 
 
 @pytest.mark.parametrize("rollout_state", ["draft", "simulated", "pending_approval"])
@@ -2793,7 +2794,8 @@ def test_headless_signed_empty_policy_bundle_clears_stale_remote_authority(tmp_p
         policy_bundle_test_keyring(),
         "2026-07-17T00:00:00Z",
     )
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         [
             PolicyDecision(
                 harness="codex",
