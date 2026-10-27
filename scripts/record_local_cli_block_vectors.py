@@ -25,14 +25,13 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))
 
 from codex_plugin_scanner.guard.daemon import hook_native_local_cli as block  # noqa: E402
 from codex_plugin_scanner.guard.daemon import hook_native_saved_approval as saved  # noqa: E402
-from codex_plugin_scanner.guard.runtime.local_cli_commands import (  # noqa: E402
-    LocalCliCommand,
-    match_command_id,
-)
+from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand  # noqa: E402
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity  # noqa: E402
+from tests.local_cli_command_id_client import match_command_id  # noqa: E402
 
 OUT = ROOT / "rust/crates/guard-runtime/tests/fixtures/local_cli_block_vectors.json"
 WORKER = ROOT / "src/codex_plugin_scanner/guard/daemon/hook_worker_native.py"
