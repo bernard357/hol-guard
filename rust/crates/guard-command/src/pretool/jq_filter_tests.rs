@@ -1,4 +1,4 @@
-use super::safe_filter;
+use super::{safe_filter, variables_bound};
 
 #[test]
 fn admits_projection_and_reshaping_pipelines() {
@@ -355,7 +355,41 @@ fn rejects_variables_from_outside_the_filter() {
         ". as $1 | $1",
         // Interpolated text is code, so its names are read too.
         ". as $x | \"\\($ENV)\"",
+        // A binding reaches the end of its own group, and no earlier.
+        "map(. as $x | .) | $x",
+        "(.a as $x | .b) | $x",
+        "$x | . as $x | $x",
+        // `as $x` written in string text binds nothing.
+        "\"as $x \\(.foo)\" | $x",
+        "\"as $x\" | $x",
     ] {
         assert!(!safe_filter(filter), "expected rejected: {filter}");
+    }
+}
+
+/// The `gh --jq` path checks bindings alone, without the read grammar, so the
+/// scope rules hold on their own.
+#[test]
+fn a_binding_is_read_only_inside_its_scope() {
+    for filter in [
+        ". as $x | $x",
+        ".[] | select((.state // \"\") as $s | ($s != \"OPEN\"))",
+        ".a as $x | {b: [$x]}",
+        "\"\\(.a)\" as $x | $x",
+        "\"$x is text\"",
+    ] {
+        assert!(variables_bound(filter), "expected bound: {filter}");
+    }
+    for filter in [
+        "map(. as $x | .) | $x",
+        "[.[] | . as $x | $x] | $x",
+        "$x | . as $x | $x",
+        "\"as $x \\(.foo)\" | $x",
+        "\"\\(. as $x | $x)\" | $x",
+        "(. as $x | $x",
+        ". as $x | $x)",
+        "\"open",
+    ] {
+        assert!(!variables_bound(filter), "expected unbound: {filter}");
     }
 }

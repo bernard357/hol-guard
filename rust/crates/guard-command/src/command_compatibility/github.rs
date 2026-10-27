@@ -1,5 +1,6 @@
 //! Closed static CLI grammar. Ambiguous flags, bindings and GraphQL stay unsupported.
 use super::{catalog::github_owner, CommandSegmentV1, CompatibilityObservations};
+use crate::pretool::shell_literal::literal_everywhere;
 
 #[path = "github_api.rs"]
 mod api;
@@ -69,30 +70,6 @@ pub(super) fn arguments_are_read_only(arguments: &[String], text: &str) -> bool 
                 .iter()
                 .all(|capability| matches!(*capability, "read_local" | "read_remote"))
     })
-}
-
-/// True when every `target` in the raw segment text is literal: inside single
-/// quotes, or escaped with a backslash, so the shell passes it through instead
-/// of expanding a variable or running a command substitution.
-fn literal_everywhere(text: &str, target: char) -> bool {
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    for character in text.chars() {
-        match quote {
-            Some('\'') => {
-                if character == '\'' {
-                    quote = None;
-                }
-            }
-            _ if escaped => escaped = false,
-            _ if character == '\\' => escaped = true,
-            _ if character == target => return false,
-            Some(_) if character == '"' => quote = None,
-            None if matches!(character, '\'' | '"') => quote = Some(character),
-            _ => {}
-        }
-    }
-    true
 }
 
 /// `--jq @tsv`: a bare jq rendering format given as the whole filter, which

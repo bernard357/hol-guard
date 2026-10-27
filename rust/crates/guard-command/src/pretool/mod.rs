@@ -176,6 +176,7 @@ mod search_scope_walk;
 mod secret_aliases;
 pub(crate) mod sed_edits;
 mod segment_proof;
+pub(crate) mod shell_literal;
 mod shell_script;
 mod sink_peel;
 mod stderr_merge;

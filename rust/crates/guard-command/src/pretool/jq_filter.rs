@@ -149,31 +149,59 @@ fn variable_name(name: &str) -> bool {
 }
 
 /// Whether every `$name` in `filter` is a variable the filter binds itself
-/// with `... as $name`, so each one holds a value the filter computed from
-/// its input. jq looks any other name up outside the filter: `$ENV` is the
-/// process environment, `$__loc__` the source position, and the rest come
-/// from `--arg` and friends. Those names are refused even when bound, and so
-/// is a `$` that opens no name. A binding jq reads differently, such as a
-/// destructuring `as [$a, $b]`, binds nothing here, so its names stay out.
+/// with `... as $name`, read inside that binding's scope, so each one holds a
+/// value the filter computed from its input. jq looks any other name up
+/// outside the filter: `$ENV` is the process environment, `$__loc__` the
+/// source position, and the rest come from `--arg` and friends. Those names
+/// are refused even when bound, and so is a `$` that opens no name. A binding
+/// jq reads differently, such as a destructuring `as [$a, $b]`, binds nothing
+/// here, so its names stay out.
 ///
-/// String contents are skipped unless a string interpolates, because the
-/// text of an interpolation is code jq runs.
+/// A binding reaches the end of the group it was made in, so a name read
+/// before its `as`, or after the bracket around its binding closes, is not
+/// bound. String text is skipped and the code of an interpolation is read,
+/// so `as $x` written inside a string binds nothing.
 pub(crate) fn variables_bound(filter: &str) -> bool {
-    let interpolates = filter.contains("\\(");
     let bytes = filter.as_bytes();
+    // Each open group with the number of bindings in scope when it opened. A
+    // `\(` interpolation returns to string text when its `)` closes.
+    let mut groups: Vec<(u8, usize)> = Vec::new();
     let mut bound: Vec<&str> = Vec::new();
-    let mut read: Vec<&str> = Vec::new();
+    let mut in_string = false;
     let mut index = 0;
     while index < bytes.len() {
-        match bytes[index] {
-            b'"' if !interpolates => {
-                index += 1;
-                while bytes.get(index).is_some_and(|byte| *byte != b'"') {
-                    index += if bytes[index] == b'\\' { 2 } else { 1 };
+        let byte = bytes[index];
+        if in_string {
+            match byte {
+                b'"' => in_string = false,
+                b'\\' if bytes.get(index + 1) == Some(&b'(') => {
+                    groups.push((b'\\', bound.len()));
+                    in_string = false;
+                    index += 1;
                 }
-                if index >= bytes.len() {
+                b'\\' => index += 1,
+                _ => {}
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'(' | b'[' | b'{' => groups.push((byte, bound.len())),
+            b')' | b']' | b'}' => {
+                let Some((open, in_scope)) = groups.pop() else {
+                    return false;
+                };
+                let close = match open {
+                    b'[' => b']',
+                    b'{' => b'}',
+                    _ => b')',
+                };
+                if byte != close {
                     return false;
                 }
+                bound.truncate(in_scope);
+                in_string = open == b'\\';
             }
             b'$' => {
                 let rest = &filter[index + 1..];
@@ -190,8 +218,8 @@ pub(crate) fn variables_bound(filter: &str) -> bool {
                     .is_some_and(|term| term.ends_with(' '))
                 {
                     bound.push(name);
-                } else {
-                    read.push(name);
+                } else if !bound.contains(&name) {
+                    return false;
                 }
                 index += end;
             }
@@ -199,7 +227,7 @@ pub(crate) fn variables_bound(filter: &str) -> bool {
         }
         index += 1;
     }
-    read.iter().all(|name| bound.contains(name))
+    !in_string && groups.is_empty()
 }
 
 /// `,` is admitted only inside a bracket, so a sequence of outputs is reached
