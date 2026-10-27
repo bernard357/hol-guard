@@ -191,6 +191,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_low_trust_floor;
 mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
@@ -348,6 +349,7 @@ mod guard_store_connect_effective;
 mod guard_store_connect_vectors_tests;
 mod guard_store_connector_context;
 mod guard_store_db;
+mod guard_store_exact_cloud_apply;
 mod guard_store_guard_event;
 #[cfg(test)]
 mod guard_store_guard_event_tests;
@@ -465,6 +467,7 @@ mod hermes_yaml_resolve;
 #[path = "adapters/hook_adapter_op.rs"]
 mod hook_adapter_op;
 mod hook_approval_context;
+mod hook_artifact_compose_codex_live_allow;
 mod hook_artifact_compose_op;
 mod hook_artifact_compose_package_firewall;
 mod hook_artifact_compose_package_firewall_entitlement;
@@ -654,6 +657,7 @@ mod package_approval_hash_op;
 mod package_audit_projection_op;
 mod package_authority_config;
 mod package_authority_op;
+mod package_config_mirror;
 mod package_context_build_op;
 mod package_evaluation_compose_op;
 mod package_evaluation_view_op;
@@ -779,6 +783,7 @@ mod state_directory_lock;
 #[cfg(test)]
 mod store_vectors_support_tests;
 mod strict_json;
+mod supply_chain_bundle_verify_op;
 #[cfg(test)]
 mod supply_chain_cloud_vectors_tests;
 mod supply_chain_egress;

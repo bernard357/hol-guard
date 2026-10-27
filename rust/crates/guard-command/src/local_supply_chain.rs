@@ -5865,6 +5865,24 @@ pub fn package_config_policy_context(
     artifact: &GuardArtifact,
     config: Option<&GuardConfig>,
 ) -> Map<String, Value> {
+    package_config_policy_context_for(
+        &artifact.artifact_id,
+        artifact.publisher.as_deref(),
+        &artifact.harness,
+        config,
+    )
+}
+
+/// The same context for a caller that holds the artifact's identity rather
+/// than the artifact itself: a request the resident answers carries the
+/// artifact as a payload, and these three fields are all of it the context
+/// reads.
+pub fn package_config_policy_context_for(
+    artifact_id: &str,
+    publisher: Option<&str>,
+    harness: &str,
+    config: Option<&GuardConfig>,
+) -> Map<String, Value> {
     let mut out = Map::new();
     let Some(config) = config else {
         out.insert("available".into(), json!(false));
@@ -5879,12 +5897,10 @@ pub fn package_config_policy_context(
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    let artifact_override = map_lookup("artifact_actions", &artifact.artifact_id);
-    let publisher_override = artifact
-        .publisher
-        .as_deref()
-        .and_then(|publisher| map_lookup("publisher_actions", publisher));
-    let harness_override = map_lookup("harness_actions", &artifact.harness);
+    let artifact_override = map_lookup("artifact_actions", artifact_id);
+    let publisher_override =
+        publisher.and_then(|publisher| map_lookup("publisher_actions", publisher));
+    let harness_override = map_lookup("harness_actions", harness);
     out.insert("artifact_override".into(), option_json(artifact_override));
     out.insert("available".into(), json!(true));
     out.insert(
@@ -5892,19 +5908,19 @@ pub fn package_config_policy_context(
         option_json(resolve_risk_action(
             config,
             Some("package_script"),
-            Some(&artifact.harness),
+            Some(harness),
         )),
     );
     out.insert(
         "global_package_script_action".into(),
         option_json(resolve_risk_action(config, Some("package_script"), None)),
     );
-    out.insert("harness".into(), json!(artifact.harness));
+    out.insert("harness".into(), json!(harness));
     out.insert("harness_override".into(), option_json(harness_override));
     out.insert(
         "harness_package_script_action".into(),
         option_json(config.harness_risk_actions.as_ref().and_then(|map| {
-            map.get(&artifact.harness)
+            map.get(harness)
                 .and_then(|inner| inner.get("package_script"))
                 .cloned()
         })),

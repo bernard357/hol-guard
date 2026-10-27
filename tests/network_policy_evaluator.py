@@ -6,9 +6,17 @@ import ipaddress
 from dataclasses import dataclass
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
+    NetworkAction,
+)
+from tests.network_broker_contract import (
+    ConnectionObservation,
+    CorrelationStatus,
+    DnsResolutionBinding,
+    correlate_dns_connection,
+)
+from tests.network_policy_model import (
     Destination,
     DestinationKind,
-    NetworkAction,
     NetworkDecision,
     NetworkFlowRequest,
     NetworkPolicy,
@@ -20,12 +28,6 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     ProcessTreeIdentity,
     canonical_digest,
     classify_private_address,
-)
-from tests.network_broker_contract import (
-    ConnectionObservation,
-    CorrelationStatus,
-    DnsResolutionBinding,
-    correlate_dns_connection,
 )
 
 _ACTION_ORDER = {

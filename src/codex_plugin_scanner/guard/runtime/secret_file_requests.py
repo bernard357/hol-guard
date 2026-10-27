@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from ..native_sensitive_request import (
     native_command_list_candidate_texts,
-    native_read_only_lookup_target_is_safe,
     native_sensitive_file_read_request,
     native_sensitive_file_read_request_artifact,
     native_sensitive_file_read_request_artifact_from_action,
@@ -31,7 +30,6 @@ from .secret_file_request_services.constants_core import COMMAND_SEQUENCE_KEYS a
 from .secret_file_request_services.github_shell_capabilities import (
     classify_github_shell_capabilities as classify_github_shell_capabilities,
 )
-from .secret_file_request_services.request_artifacts import _candidate_command_texts as _candidate_command_texts
 from .secret_file_request_services.request_models import FileReadRequestMatch as FileReadRequestMatch
 from .secret_file_request_services.request_models import FileWriteRequestMatch as FileWriteRequestMatch
 from .secret_file_request_services.request_models import ToolActionRequestMatch as ToolActionRequestMatch
@@ -183,10 +181,6 @@ def command_list_candidate_texts(values: list[str], *, preserve_items: bool = Fa
     return native_command_list_candidate_texts(values, preserve_items=preserve_items)
 
 
-def _read_only_lookup_target_is_safe(target: str, *, allow_dirs: bool, home_dir: Path | None = None) -> bool:
-    return native_read_only_lookup_target_is_safe(target, allow_dirs=allow_dirs, home_dir=home_dir)
-
-
 __all__ = [
     "COMMAND_CANDIDATE_LIST_KEYS",
     "COMMAND_LIST_KEYS",
@@ -195,9 +189,7 @@ __all__ = [
     "FileReadRequestMatch",
     "FileWriteRequestMatch",
     "ToolActionRequestMatch",
-    "_candidate_command_texts",
     "_normalize_tool_name",
-    "_read_only_lookup_target_is_safe",
     "build_tool_action_request_artifact",
     "classify_github_shell_capabilities",
     "classify_sensitive_path",
