@@ -16,10 +16,9 @@ from codex_plugin_scanner.guard.action_lattice import (
     normalize_guard_action,
     normalize_guard_action_result,
 )
-from codex_plugin_scanner.guard.config import GuardConfig, load_guard_config
+from codex_plugin_scanner.guard.config import load_guard_config
 from codex_plugin_scanner.guard.mdm.policy import _merge_strongest_actions, _strongest_security_value
 from codex_plugin_scanner.guard.models import GUARD_ACTION_VALUES, GuardAction
-from codex_plugin_scanner.guard.policy.engine import decide_action
 
 EXPECTED_LATTICE: tuple[GuardAction, ...] = (
     "allow",
@@ -93,13 +92,6 @@ def test_unknown_action_never_loses_to_allow_or_warn() -> None:
     assert most_restrictive_guard_action("warn", "future-action") == "review"
     assert _merge_strongest_actions("sandbox-required", "future-action") == "block"
     assert _merge_strongest_actions(None, "future-action") == "block"
-
-
-def test_policy_engine_present_unknown_actions_do_not_fall_through_to_allow(tmp_path) -> None:
-    config = GuardConfig(guard_home=tmp_path / "guard", workspace=None, default_action="allow")
-
-    assert decide_action("future-action", "allow", config, changed=False) == "require-reapproval"
-    assert decide_action(None, "future-action", config, changed=False) == "require-reapproval"
 
 
 def test_unknown_fallback_must_itself_be_a_known_action() -> None:

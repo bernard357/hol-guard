@@ -231,7 +231,13 @@ def _pretool_gate() -> None:
         raise RuntimeError("native PreToolUse transport imports the Python command evaluator")
     if "evaluate_command(" in _read(pretool):
         raise RuntimeError("native PreToolUse transport calls the Python command evaluator")
-    _assert_policy_floor_fail_closed(pretool)
+    # The resident holds a PreToolUse verdict at its own floor; Python never
+    # asks for one or picks one.
+    if (
+        "native_pre_tool_policy_floor" in _read(pretool)
+        or Path("src/codex_plugin_scanner/guard/native_hook_pretool_floor.py").exists()
+    ):
+        raise RuntimeError("native PreToolUse transport still carries a Python policy floor")
     _assert_containment_routed_by_resident()
     hook = _read(Path("src/codex_plugin_scanner/guard/daemon/hook_worker.py"))
     native_hook = _read(Path("src/codex_plugin_scanner/guard/daemon/hook_worker_native.py"))
@@ -379,43 +385,6 @@ def _ordered_call_names(node: ast.AST) -> list[str]:
             names.append(child.func.id)
         names.extend(_ordered_call_names(child))
     return names
-
-
-def _assert_policy_floor_fail_closed(path: Path) -> None:
-    tree = ast.parse(_read(path), filename=str(path))
-    fn = next(
-        (
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "native_pre_tool_policy_floor"
-        ),
-        None,
-    )
-    if fn is None:
-        raise RuntimeError("native PreToolUse policy floor is missing")
-    for node in ast.walk(fn):
-        if isinstance(node, ast.Attribute) and node.attr == "available":
-            raise RuntimeError("PreToolUse policy floor still inspects native availability")
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "native_mode":
-            raise RuntimeError("PreToolUse policy floor still calls native_mode")
-    # The resident answers the floor; Python never picks one. A missing review
-    # is the host outage, raised as ``NativeHookDecisionError``.
-    if any(
-        isinstance(node, ast.Return) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
-        for node in ast.walk(fn)
-    ):
-        raise RuntimeError("PreToolUse policy floor returns an action Python picked")
-    raises_outage = any(
-        isinstance(node, ast.Raise)
-        and isinstance(node.exc, ast.Call)
-        and isinstance(node.exc.func, ast.Name)
-        and node.exc.func.id == "NativeHookDecisionError"
-        for node in ast.walk(fn)
-    )
-    if not raises_outage:
-        raise RuntimeError("PreToolUse policy floor does not fail closed to the host outage")
-    if "native_pretool_floor" not in _ordered_call_names(fn):
-        raise RuntimeError("PreToolUse policy floor does not ask the resident for the floor")
 
 
 _CONTAINMENT_ADAPTER = Path("src/codex_plugin_scanner/guard/adapters/zcode_contained_tests.py")

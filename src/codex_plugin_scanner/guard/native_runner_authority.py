@@ -77,9 +77,6 @@ def native_runner_authority(
 
     guard_home = _resolve_digest_home(guard_home)
     if kind in {
-        "projection_approval",
-        "projection_receipt",
-        "projection_surfaces",
         "projection_surfaces_batch",
         "projection_artifact_surfaces",
     }:
