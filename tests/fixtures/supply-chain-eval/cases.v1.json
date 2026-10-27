@@ -119,6 +119,26 @@
    }
   },
   {
+   "name": "cargo_lock_two_versions",
+   "path": "Cargo.lock",
+   "text": "version = 3\n\n[[package]]\nname = \"syn\"\nversion = \"1.0.109\"\n\n[[package]]\nname = \"syn\"\nversion = \"2.0.66\"\n",
+   "expect": {
+    "complete": true,
+    "entries": [
+     [
+      "syn",
+      "syn",
+      "1.0.109"
+     ],
+     [
+      "syn",
+      "syn",
+      "2.0.66"
+     ]
+    ]
+   }
+  },
+  {
    "name": "uv_lock_clean",
    "path": "uv.lock",
    "text": "version = 1\n\n[[package]]\nname = \"requests\"\nversion = \"2.32.3\"\n",

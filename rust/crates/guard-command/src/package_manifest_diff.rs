@@ -424,11 +424,11 @@ pub fn parse_manifest_dependencies_ordered(
 /// parsing). The error is the lockfile `error_reason` the Python evaluator
 /// reports: `deadline_exceeded` or `parse_error`.
 ///
-/// A JavaScript lockfile can resolve one package to several versions, each
-/// installed beside the others, so every version is returned, sorted by
-/// package; a package's last-listed version comes last. Other lockfiles keep
-/// one version per package: several versions there are alternatives for
-/// different environments, and only one of them is installed.
+/// A JavaScript lockfile or Cargo.lock can resolve one package to several
+/// versions, each installed or built beside the others, so every version is
+/// returned, sorted by package; a package's last-listed version comes last.
+/// Other lockfiles keep one version per package: several versions there are
+/// alternatives for different environments, and only one of them is installed.
 pub fn try_dependency_versions_for_path(
     path: &str,
     text: &str,
@@ -450,8 +450,8 @@ pub fn try_dependency_versions_for_path(
         })
 }
 
-/// Lockfiles whose package manager installs every version they resolve a
-/// package to, side by side.
+/// Lockfiles whose package manager installs or builds every version they
+/// resolve a package to, side by side.
 fn installs_every_version(path: &str) -> bool {
     let lower_path = path.to_lowercase();
     [
@@ -459,6 +459,7 @@ fn installs_every_version(path: &str) -> bool {
         "pnpm-lock.yaml",
         "yarn.lock",
         "bun.lock",
+        "cargo.lock",
     ]
     .iter()
     .any(|name| lower_path.ends_with(name))
