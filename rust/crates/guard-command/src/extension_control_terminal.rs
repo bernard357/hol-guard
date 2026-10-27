@@ -151,12 +151,6 @@ fn windows_verdict(signals: &WindowsTerminalSignalsV1) -> ExtensionControlTermin
     ExtensionControlTerminalVerdictV1::Local
 }
 
-/// Whether this session may confirm a first extension-control enrollment.
-///
-/// `remote_environment` names the remote-terminal variables the caller found
-/// set and non-empty. Exactly one of `posix` and `windows` carries the probes
-/// for the platform the caller is on; neither, or both, is a malformed request
-/// and is refused rather than guessed at.
 /// A request that does not name exactly one platform's probes.
 ///
 /// Neither block means the caller collected nothing; both mean it claims to be
@@ -165,6 +159,12 @@ fn windows_verdict(signals: &WindowsTerminalSignalsV1) -> ExtensionControlTermin
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalSignalsMalformed;
 
+/// Whether this session may confirm a first extension-control enrollment.
+///
+/// `remote_environment` names the remote-terminal variables the caller found
+/// set and non-empty. Exactly one of `posix` and `windows` carries the probes
+/// for the platform the caller is on; neither, or both, is a malformed request
+/// and is refused rather than guessed at.
 pub fn extension_control_terminal_verdict(
     remote_environment: &[String],
     posix: Option<&PosixTerminalSignalsV1>,
