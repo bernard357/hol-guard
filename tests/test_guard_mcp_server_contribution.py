@@ -11,9 +11,10 @@ import pytest
 from codex_plugin_scanner.guard.runtime import mcp_server_contribution as mcp_module
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
     load_mcp_contribution_payloads,
-    mcp_tool_state,
     validate_mcp_contribution,
 )
+
+from .mcp_contribution_client import mcp_tool_state
 
 _FILESYSTEM = Path(__file__).resolve().parents[1] / "contributions/mcp-servers/mcp.filesystem.json"
 _TETHER = _FILESYSTEM.with_name("mcp.tether.json")

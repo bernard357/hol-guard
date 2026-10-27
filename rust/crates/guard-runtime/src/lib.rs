@@ -77,6 +77,7 @@ mod bounded_hook_bridge_grok;
 mod bounded_hook_bridge_grok_render;
 mod bounded_hook_bridge_grok_script;
 mod bounded_hook_bridge_hermes;
+mod bounded_hook_bridge_remediation;
 mod bounded_hook_bridge_render;
 mod browser_open;
 #[cfg(test)]
@@ -372,6 +373,8 @@ mod guard_store_local_cli_inventory_rows_tests;
 mod guard_store_local_cli_inventory_tests;
 #[cfg(test)]
 mod guard_store_local_cli_inventory_vectors_tests;
+#[cfg(test)]
+mod guard_store_local_cli_mcp_skills_tests;
 mod guard_store_local_cli_mcp_snapshot;
 #[cfg(test)]
 mod guard_store_local_cli_vectors_tests;

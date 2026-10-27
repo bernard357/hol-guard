@@ -31,6 +31,8 @@ fn request(root: &Path) -> SnapshotRequest {
         skills: false,
         hooks: true,
         plugins: false,
+        workflows: false,
+        editor_tasks: false,
     }
 }
 
