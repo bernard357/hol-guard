@@ -482,3 +482,43 @@ fn an_administrative_directory_named_by_a_gitfile_keeps_its_review() {
     assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// A `.git` symlink points at the administrative directory just as a gitfile
+/// names it, and the canonical read path then spells the target rather than
+/// `.git`, so the component screen never sees it. Creating the link needs a
+/// POSIX symlink, so the proof is Unix-only; the rule itself resolves the link
+/// on every platform.
+#[cfg(unix)]
+#[test]
+fn an_administrative_directory_a_git_symlink_points_at_keeps_its_review() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".vcs-meta/hooks")).unwrap();
+    std::os::unix::fs::symlink(".vcs-meta", repo.join(".git")).unwrap();
+    plant(&repo.join(".vcs-meta/hooks/pre-commit.sh"), "#!/bin/sh\n");
+    assert!(!read(
+        &repo.join(".vcs-meta/hooks/pre-commit.sh"),
+        &home,
+        &repo
+    ));
+    // Repository content beside it still reads quietly.
+    plant(&repo.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A `.git` symlink this rule cannot resolve names an unknown administrative
+/// directory, and an unknown one holds the read.
+#[cfg(unix)]
+#[test]
+fn an_unresolvable_git_symlink_holds_a_hidden_read() {
+    let root = fixture_root();
+    let home = root.join("home");
+    let repo = home.join("app");
+    std::fs::create_dir_all(repo.join(".codex-plugin")).unwrap();
+    std::os::unix::fs::symlink("nowhere", repo.join(".git")).unwrap();
+    plant(&repo.join(".codex-plugin/plugin.json"), "{}\n");
+    assert!(!read(&repo.join(".codex-plugin/plugin.json"), &home, &repo));
+    std::fs::remove_dir_all(root).unwrap();
+}

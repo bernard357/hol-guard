@@ -293,7 +293,7 @@ fn work_tree_marker(directory: &Path) -> bool {
 }
 
 /// Whether `canonical` sits inside the administrative directory a `.git`
-/// *file* at the root of `repository` points at.
+/// *file* or symlink at the root of `repository` points at.
 ///
 /// A work tree whose `.git` is a directory is answered by the component screen
 /// above and never reaches here. A pointer this rule cannot read in full, or
@@ -306,6 +306,19 @@ fn administrative_tree_holds(repository: &Path, canonical: &Path) -> bool {
     let Ok(metadata) = std::fs::symlink_metadata(&pointer) else {
         return false;
     };
+    // Git also accepts `.git` as a *symlink* to the administrative directory;
+    // `repo` and `git-new-workdir` both lay a checkout out that way. The
+    // canonical read path then spells the target's name rather than `.git`, so
+    // the component screen above never sees it and this rule resolves the link
+    // itself. A link to anything but a directory, or one that cannot be
+    // resolved, leaves the administrative directory unknown, and an unknown
+    // one cannot be shown to be elsewhere.
+    if metadata.file_type().is_symlink() {
+        return match std::fs::canonicalize(&pointer) {
+            Ok(target) if target.is_dir() => canonical.starts_with(target),
+            _ => true,
+        };
+    }
     if !metadata.is_file() {
         return false;
     }
