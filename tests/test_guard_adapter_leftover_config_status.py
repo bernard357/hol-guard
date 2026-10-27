@@ -16,9 +16,16 @@ class _StubAdapter(HarnessAdapter):
     harness = "stubtool"
     executable = "stubtool"
 
-    def __init__(self, *, command_available: bool, warnings: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        command_available: bool,
+        warnings: tuple[str, ...] = (),
+        has_config: bool = True,
+    ) -> None:
         self._command_available = command_available
         self._warnings = warnings
+        self._has_config = has_config
 
     def detect(self, context: HarnessContext) -> HarnessDetection:
         config_path = context.home_dir / ".stubtool" / "config.json"
@@ -26,7 +33,7 @@ class _StubAdapter(HarnessAdapter):
             harness=self.harness,
             installed=True,
             command_available=self._command_available,
-            config_paths=(str(config_path),),
+            config_paths=(str(config_path),) if self._has_config else (),
             artifacts=(
                 GuardArtifact(
                     artifact_id="stubtool:hook",
@@ -93,3 +100,38 @@ def test_other_setup_failures_stay_broken_when_tool_is_installed(tmp_path: Path)
     adapter = _StubAdapter(command_available=True, warnings=("Guard native hooks are disabled for stubtool.",))
 
     assert _diagnostics(adapter, tmp_path)["setup_status"] == "broken"
+
+
+def test_guard_launcher_without_tool_config_stays_broken(tmp_path: Path) -> None:
+    diagnostics = _diagnostics(_StubAdapter(command_available=False, has_config=False), tmp_path)
+
+    assert diagnostics["setup_status"] == "broken"
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "The configured stubtool executable was rejected as untrusted.",
+        "Stale or duplicate Guard-managed stubtool entries detected.",
+    ],
+)
+def test_a_fault_in_the_adapter_own_words_stays_broken(tmp_path: Path, fault: str) -> None:
+    # An adapter words its own faults, and an unavailable command does not explain
+    # any of them: a rejected executable may sit beside a working one on PATH, and
+    # duplicate managed entries are wrong however the tool was installed.
+    diagnostics = _diagnostics(_StubAdapter(command_available=False, warnings=(fault,)), tmp_path)
+
+    assert diagnostics["setup_status"] == "broken"
+    assert _protection_state(diagnostics) == "broken"
+
+
+class _EditorStubAdapter(_StubAdapter):
+    """A harness whose Guard hooks keep running without its command."""
+
+    command_absence_proves_uninstalled = False
+
+
+def test_a_harness_running_without_its_command_stays_broken(tmp_path: Path) -> None:
+    diagnostics = _diagnostics(_EditorStubAdapter(command_available=False), tmp_path)
+
+    assert diagnostics["setup_status"] == "broken"

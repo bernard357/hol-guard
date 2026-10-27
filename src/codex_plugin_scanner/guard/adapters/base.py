@@ -316,6 +316,10 @@ class HarnessAdapter:
     fallback_hint = "Use the Guard approval center or native harness prompt to resolve pending requests."
     approval_prompt_channel = "browser"
     approval_auto_open_browser = True
+    #: Whether an unavailable command is enough to conclude the tool itself is gone.
+    #: A harness whose Guard hooks keep running without its CLI sets this False, so
+    #: leftover configuration is never mistaken for an absent tool.
+    command_absence_proves_uninstalled = True
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -605,7 +609,11 @@ class HarnessAdapter:
         return {
             "harness": self.harness,
             "installed": detection.installed,
-            "setup_status": _diagnostic_setup_status(detection, warnings),
+            "setup_status": _diagnostic_setup_status(
+                detection,
+                warnings,
+                command_absence_proves_uninstalled=self.command_absence_proves_uninstalled,
+            ),
             "command_available": detection.command_available,
             "config_paths": list(detection.config_paths),
             "artifacts": [artifact.to_dict() for artifact in detection.artifacts],
@@ -641,10 +649,15 @@ class HarnessAdapter:
         )
 
 
-def _diagnostic_setup_status(detection: HarnessDetection, warnings: list[str]) -> str:
+def _diagnostic_setup_status(
+    detection: HarnessDetection,
+    warnings: list[str],
+    *,
+    command_absence_proves_uninstalled: bool = True,
+) -> str:
     guard_managed = _detection_has_guard_management(detection)
     if guard_managed and _warnings_include_setup_failure(warnings):
-        if _only_tool_command_missing(detection, warnings):
+        if command_absence_proves_uninstalled and _only_tool_command_missing(detection, warnings):
             # Guard config left behind for a tool that is no longer installed. Nothing can run
             # unprotected, so report the tool as absent rather than as a broken Guard setup.
             return "not_found"
@@ -710,11 +723,23 @@ def _warnings_include_setup_failure(warnings: list[str]) -> bool:
     return any(any(marker in warning.lower() for marker in setup_markers) for warning in warnings)
 
 
+def setup_failures_besides_missing_command(warnings: Sequence[str]) -> bool:
+    """Whether any warning remains once the one about the missing tool command is set aside.
+
+    Adapters word their own faults, from a rejected executable override to duplicate
+    managed entries, so a list of known phrases would quietly drop the ones it does
+    not know. Anything the missing command does not already explain keeps the setup
+    broken, which is what Guard reported before leftover configuration was recognised.
+    """
+
+    return any(_MISSING_COMMAND_MARKER not in warning.lower() for warning in warnings)
+
+
 def _only_tool_command_missing(detection: HarnessDetection, warnings: list[str]) -> bool:
-    if detection.command_available:
+    # A Guard launcher with no tool config is kept broken so it stays visible rather than vanishing.
+    if detection.command_available or not detection.config_paths:
         return False
-    other_warnings = [warning for warning in warnings if _MISSING_COMMAND_MARKER not in warning.lower()]
-    return not _warnings_include_setup_failure(other_warnings)
+    return not setup_failures_besides_missing_command(warnings)
 
 
 __all__ = [
@@ -726,4 +751,5 @@ __all__ = [
     "_json_payload",
     "_resolve_command",
     "_run_command_probe",
+    "setup_failures_besides_missing_command",
 ]
