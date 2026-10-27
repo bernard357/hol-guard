@@ -39,9 +39,10 @@ def hook_authority_integrity_key(store: GuardStore, *, create_key: bool = False)
         key, key_id = store._policy_integrity_secret_material(create=create_key)
     except (AttributeError, OSError, RuntimeError, ValueError):
         return None
-    if key is None or key_id is None:
+    encoded = encode_key(key)
+    if encoded is None or key_id is None:
         return None
-    return {"integrity_key_b64": encode_key(key), "integrity_key_id": key_id}
+    return {"integrity_key_b64": encoded, "integrity_key_id": key_id}
 
 
 def hook_authority_state(

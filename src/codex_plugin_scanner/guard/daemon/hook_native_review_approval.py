@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..approval_link_output import native_review_reason
 from ..models import GuardApprovalRequest
@@ -47,6 +47,7 @@ from .native_review_records import native_review_approval_center_url, record_sil
 
 if TYPE_CHECKING:
     from ..local_cli_hook import SetupConnector
+    from ..store import GuardStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -484,7 +485,7 @@ def _claude_review_notice(
     ordinary prompt.
     """
 
-    key = hook_authority_integrity_key(store, create_key=True)
+    key = hook_authority_integrity_key(cast("GuardStore", store), create_key=True)
     if key is None:
         return None
     return {
