@@ -91,18 +91,6 @@ def recognize_package_json_scripts(
     )
 
 
-def identify_package_json_scripts(
-    command_text: str,
-    *,
-    cwd: Path,
-    home_dir: Path | None,
-) -> UnlistedCliIdentity | None:
-    """Return the package.json identity for a live npm/pnpm/yarn/bun run command."""
-
-    found = _native_package_scripts(command_text, cwd=cwd, home_dir=home_dir or cwd)
-    return None if found is None else found.identity
-
-
 def package_script_command_tokens(command_text: str, *, cwd: Path, home_dir: Path | None) -> tuple[str, ...] | None:
     """Return colon-nested tokens for one package script name.
 

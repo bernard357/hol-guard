@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..native_rich_command_model import NativeCommandModelError, request, string_tuple
+from codex_plugin_scanner.guard.native_rich_command_model import NativeCommandModelError, request, string_tuple
 
 __all__ = [
     "EnvEnvironmentDelta",

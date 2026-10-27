@@ -426,10 +426,7 @@ def test_native_failure_is_reported_so_grant_callers_fail_closed(tmp_path: Path,
     monkeypatch.setattr(package_json_scripts, "native_context_digest", lambda *_args, **_kwargs: replies.pop(0))
     with track_local_cli_identity_failures() as failures:
         for _ in range(3):
-            assert (
-                package_json_scripts.identify_package_json_scripts("npm run build", cwd=project, home_dir=tmp_path)
-                is None
-            )
+            assert package_json_scripts._native_package_scripts("npm run build", cwd=project, home_dir=tmp_path) is None
     assert failures == ["native_package_json_scripts_unavailable", "native_package_json_scripts_malformed"]
 
 
