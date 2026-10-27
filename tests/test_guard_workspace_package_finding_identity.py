@@ -168,3 +168,17 @@ def test_a_bare_name_both_packages_could_take_stays_with_the_unscoped_package(tm
     )
 
     assert sorted(item["finding_id"] for item in run["findings"]) == ["a" * 32, "b" * 32]
+
+
+def test_a_bare_name_the_audit_lists_stays_with_the_unscoped_package(tmp_path: Path) -> None:
+    # The audit lists plain minimist without a finding, so the earlier bare
+    # name may be that package's and is not handed to the scoped one.
+    store = admitted(tmp_path)
+    assess(store, outcome("completed", [_named("a" * 32, "minimist")], supply_chain="complete"), at=T0)
+    listed = frozenset({("npm", "minimist", "1.2.8"), ("npm", "@acme/minimist", "1.2.8")})
+
+    run = assess(
+        store, outcome("completed", [_named("b" * 32, "@acme/minimist")], listed, supply_chain="complete"), at=T0 + 10
+    )
+
+    assert [item["finding_id"] for item in run["findings"]] == ["b" * 32]

@@ -104,9 +104,10 @@ def keep_package_identities(outcome: RunOutcome, previous: Mapping[str, object] 
     for item in earlier:
         if isinstance(item, Mapping) and item.get("source_kind") == "supply_chain" and item.get("finding_id"):
             known.setdefault(_coordinate(item), item.get("finding_id"))
-    packages = [_coordinate(item) for item in outcome.findings if item.get("source_kind") == "supply_chain"]
+    packages = {_coordinate(item) for item in outcome.findings if item.get("source_kind") == "supply_chain"}
+    packages |= outcome.listed_packages or frozenset()
     # A bare name is only another run's name for one package when no other
-    # reported package has or would take it.
+    # reported or listed package has or would take it.
     names = Counter([*packages, *filter(None, map(_unscoped, packages))])
 
     def earlier_id(item: Mapping[str, object]) -> object:
