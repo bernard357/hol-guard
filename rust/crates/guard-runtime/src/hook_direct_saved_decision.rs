@@ -543,7 +543,7 @@ mod portable;
 mod review_request;
 
 #[path = "hook_direct_review_queue.rs"]
-mod review_queue;
+pub(crate) mod review_queue;
 
 #[path = "hook_direct_review_hint.rs"]
 pub(crate) mod review_hint;

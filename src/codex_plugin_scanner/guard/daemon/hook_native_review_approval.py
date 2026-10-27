@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from ..approval_link_output import native_review_reason
 from ..models import GuardApprovalRequest
 from ..native_hook_adapter import NativeHookAdapterError
+from ..native_hook_authority_state import hook_authority_integrity_key
 from .hook_fail_closed import canonical_harness, render_accepted_allow, render_pre_tool, render_pre_tool_review
 from .hook_native_exact_action import native_exact_action, native_review_binding, native_review_evidence
 from .hook_native_local_cli import native_local_cli_grant_response
@@ -46,7 +47,6 @@ from .native_review_records import native_review_approval_center_url, record_sil
 
 if TYPE_CHECKING:
     from ..local_cli_hook import SetupConnector
-    from ..store import GuardStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -280,6 +280,7 @@ def pause_native_pre_tool_for_approval(
         approval_center_url=approval_center_url,
         review_binding=identity,
         connector=connector,
+        claude_notice=canonical_harness(harness) == "claude-code",
     )
     if queued is None:
         failed = dict(native_result)
@@ -318,6 +319,7 @@ def queue_native_pre_tool_review(
     review_binding: str | None | TokenUnset = TOKEN_UNSET,
     connector: SetupConnector | None = None,
     bound_bash: Mapping[str, object] | None = None,
+    claude_notice: bool = False,
 ) -> dict[str, object] | None:
     try:
         native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
@@ -434,8 +436,18 @@ def queue_native_pre_tool_review(
             store, payload, native_result, workspace, home_dir, deadline, connector
         ),
     )
+    now = datetime.now(tz=timezone.utc).isoformat()
+    # A prompted Claude review also gets the permission notice its
+    # PermissionRequest hook answers from; the resident builds and signs it in
+    # the same store write.
+    claude_review = (
+        _claude_review_notice(store, harness, payload, native_result, binding, request) if claude_notice else None
+    )
     try:
-        persisted_id = persist(request, datetime.now(tz=timezone.utc).isoformat())
+        if claude_review is None:
+            persisted_id = persist(request, now)
+        else:
+            persisted_id = persist(request, now, claude_review=claude_review)
         stored = lookup(persisted_id)
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
@@ -457,42 +469,33 @@ def _native_review_artifact_id(harness: str, tool_name: str) -> str:
     return f"{harness}:native-pretool:{tool_name}"
 
 
-def record_claude_permission_notice_for_native_review(
-    store: GuardStore,
-    *,
+def _claude_review_notice(
+    store: object,
     harness: str,
     payload: Mapping[str, object],
     native_result: Mapping[str, object],
-    native_receipt: Mapping[str, object] | None,
-    workspace: Path | None,
-    guard_home: Path,
-) -> None:
-    """Persist the Claude permission-prompt notice for a queued native review."""
-    from ..cli.commands_support_hook_state import _record_claude_permission_notice
-    from ..models import GuardArtifact
+    binding: str | None,
+    request: GuardApprovalRequest,
+) -> dict[str, object] | None:
+    """The facts the resident needs to sign a Claude review's notice, or ``None``.
 
-    tool_name = _native_review_tool_name(payload)
-    command = pre_tool_command(payload)
-    artifact_id = _native_review_artifact_id(harness, tool_name)
-    binding = native_review_binding(harness, payload, native_result, native_receipt, workspace, guard_home)
-    metadata: dict[str, object] = {"raw_command_text": command} if command else {}
-    artifact = GuardArtifact(
-        artifact_id=artifact_id,
-        name=tool_name,
-        harness=harness,
-        artifact_type="tool_call",
-        source_scope="project" if workspace is not None else "harness",
-        config_path=str(workspace if workspace is not None else guard_home),
-        command=command,
-        metadata=metadata,
-    )
-    _record_claude_permission_notice(
-        store=store,
-        payload=dict(payload),
-        reason=str(native_result.get("reason") or "HOL Guard requires review before this action can execute."),
-        artifact=artifact,
-        artifact_hash=binding or artifact_id,
-    )
+    The notice is best effort, as the retired Python notice was: without an
+    integrity key the review still queues and the hook falls back to its
+    ordinary prompt.
+    """
+
+    key = hook_authority_integrity_key(store, create_key=True)
+    if key is None:
+        return None
+    return {
+        "harness": harness,
+        "hook_payload": dict(payload),
+        "reason": native_result.get("reason"),
+        "review_binding": binding,
+        "config_path": request.config_path,
+        "source_scope": request.source_scope,
+        **key,
+    }
 
 
 def _native_review_launch_target(payload: Mapping[str, object]) -> str:
@@ -511,5 +514,4 @@ def _native_review_launch_target(payload: Mapping[str, object]) -> str:
 __all__ = [
     "pause_native_pre_tool_for_approval",
     "queue_native_pre_tool_review",
-    "record_claude_permission_notice_for_native_review",
 ]

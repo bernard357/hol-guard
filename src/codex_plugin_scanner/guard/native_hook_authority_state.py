@@ -32,6 +32,18 @@ _TIMEOUT_SECONDS = 5.0
 _MAX_REQUEST_BYTES = 512 * 1024
 
 
+def hook_authority_integrity_key(store: GuardStore, *, create_key: bool = False) -> dict[str, str] | None:
+    """The integrity key fields a resident store write signs Claude state under, or ``None``."""
+
+    try:
+        key, key_id = store._policy_integrity_secret_material(create=create_key)
+    except (AttributeError, OSError, RuntimeError, ValueError):
+        return None
+    if key is None or key_id is None:
+        return None
+    return {"integrity_key_b64": encode_key(key), "integrity_key_id": key_id}
+
+
 def hook_authority_state(
     store: GuardStore,
     op: str,

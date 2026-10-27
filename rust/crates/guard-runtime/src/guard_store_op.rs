@@ -34,7 +34,9 @@ use crate::guard_store_approval_resolve::{
 use crate::guard_store_approval_sweep::resolve_matching_approval_requests;
 use crate::guard_store_approval_write::{add_approval_request, add_native_review_approval_request};
 use crate::guard_store_args::Args;
-use crate::guard_store_claude_review::add_claude_native_review_approval_request;
+use crate::guard_store_claude_review::{
+    add_claude_approval_request, add_claude_native_review_approval_request,
+};
 use crate::guard_store_clients as clients;
 use crate::guard_store_cmd_activity as activity;
 use crate::guard_store_cmd_api as api;
@@ -387,6 +389,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "add_native_review_approval_request"
         | "add_silent_native_review_approval_request"
         | "add_claude_native_review_approval_request"
+        | "add_claude_approval_request"
         | "refresh_review_event_outbox_binding_for_identity"
         | "refresh_review_event_outbox_binding"
         | "reassign_quarantined_review_events"
@@ -573,6 +576,7 @@ fn dispatch(
         "add_claude_native_review_approval_request" => {
             add_claude_native_review_approval_request(connection, source, args)
         }
+        "add_claude_approval_request" => add_claude_approval_request(connection, source, args),
         "workflow_capability_plan" => wfcap::plan(connection, args),
         "workflow_capability_commit" => wfcap::commit(connection, args),
         "record_local_cli_observation" => local_cli::record_observation(connection, args),
