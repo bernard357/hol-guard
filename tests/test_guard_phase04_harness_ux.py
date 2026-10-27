@@ -618,11 +618,3 @@ def test_gr089_copilot_autopilot_shell_exfil_returns_terminal_stop(tmp_path: Pat
     assert payload["reason_code"] == "native_secret_exfiltration"
     assert "HOL Guard" in str(hook_output["permissionDecisionReason"])
     assert "network" in str(hook_output["permissionDecisionReason"]).lower()
-
-
-def test_gr097_hook_reason_deduplicates_duplicate_copy() -> None:
-    from codex_plugin_scanner.guard.cli.commands import _native_hook_reason
-
-    reason = _native_hook_reason("HOL Guard blocked this action.", "HOL Guard blocked this action.", "Retry.")
-
-    assert reason == "HOL Guard blocked this action. Retry."

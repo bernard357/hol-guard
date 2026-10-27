@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import urllib.error
@@ -10,11 +11,20 @@ import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 
-from codex_plugin_scanner.guard.adapters._modules.claude.claude_daemon_hook_transport import (
-    authenticated_claude_hook_response,
-)
-from codex_plugin_scanner.guard.adapters._modules.codex.codex_daemon_hook_transport import _daemon_response_once
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
+
+# Probes run this file with ``python -I`` against an installed wheel, so the
+# repository root is not importable; load the shared hook client by path.
+_DAEMON_HOOK_CLIENT_SPEC = importlib.util.spec_from_file_location(
+    "hol_guard_daemon_hook_client",
+    Path(__file__).resolve().parents[2] / "scripts" / "daemon_hook_client.py",
+)
+if _DAEMON_HOOK_CLIENT_SPEC is None or _DAEMON_HOOK_CLIENT_SPEC.loader is None:
+    raise RuntimeError("installed hook client could not load the daemon hook client")
+_DAEMON_HOOK_CLIENT = importlib.util.module_from_spec(_DAEMON_HOOK_CLIENT_SPEC)
+_DAEMON_HOOK_CLIENT_SPEC.loader.exec_module(_DAEMON_HOOK_CLIENT)
+authenticated_claude_hook_response = _DAEMON_HOOK_CLIENT.authenticated_claude_hook_response
+_daemon_response_once = _DAEMON_HOOK_CLIENT._daemon_response_once
 
 _SAFE_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{0,95}\Z")
 _DECISIONS = frozenset({"allow", "deny", "ask", "block", "review", "continue"})

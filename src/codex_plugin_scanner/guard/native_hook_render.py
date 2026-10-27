@@ -261,28 +261,6 @@ def native_render_pre_tool(
     return _render({"kind": "pre_tool", "harness": harness, "verdict": dict(verdict)}, guard_home, deadline)
 
 
-def native_render_pre_tool_review(
-    harness: str,
-    verdict: Mapping[str, object],
-    *,
-    approval: Mapping[str, object] | None,
-    linked_reason: str | None,
-    guard_home: Path | None = None,
-    deadline: float | None = None,
-) -> dict[str, object] | None:
-    """Render a paused review; ``linked_reason`` already carries the signed approval link."""
-
-    request: dict[str, object] = {"kind": "pre_tool_review", "harness": harness, "verdict": dict(verdict)}
-    if approval is not None:
-        # The renderer reads only the link and the request id; the stored row can be large.
-        request["approval"] = {
-            key: approval[key] for key in ("approval_url", "request_id") if isinstance(approval.get(key), str)
-        }
-    if linked_reason is not None:
-        request["linked_reason"] = linked_reason
-    return _render(request, guard_home, deadline)
-
-
 def native_render_recording_only_pre_tool(
     harness: str, *, reason_code: str, reason: str, guard_home: Path | None = None, deadline: float | None = None
 ) -> dict[str, object] | None:
@@ -302,6 +280,5 @@ __all__ = [
     "native_evaluation_has_terminal_policy_action",
     "native_render_cli",
     "native_render_pre_tool",
-    "native_render_pre_tool_review",
     "native_render_recording_only_pre_tool",
 ]

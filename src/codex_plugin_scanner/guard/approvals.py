@@ -495,6 +495,8 @@ def apply_approval_resolution(
             target=local_tool_grant_target,
             duration=local_tool_grant_duration,
             now=resolved_at,
+            harness=str(request["harness"]),
+            reason=reason,
         )
     contract, exact_token = (
         request_scope_observation(request, guard_home=store.guard_home)
@@ -671,11 +673,7 @@ def apply_approval_resolution(
             if isinstance(error, str) and error:
                 raise ValueError(error)
     if local_tool_selection is not None:
-        local_tool_decision = local_tool_grant_decision(
-            harness=str(request["harness"]),
-            selection=local_tool_selection,
-            reason=reason,
-        )
+        local_tool_decision = local_tool_grant_decision(local_tool_selection)
         store.ensure_policy_integrity_ready_for_write(
             harness=local_tool_decision.harness,
             approval_gate_grant=resolved_gate_grant,
@@ -802,8 +800,8 @@ def _local_tool_grant_result(selection: LocalToolGrantSelection) -> dict[str, ob
         "target": selection.target,
         "duration": selection.duration,
         "expires_at": selection.expires_at,
-        "tool_name": selection.eligibility.tool_name,
-        "capability": selection.eligibility.capability,
+        "tool_name": selection.tool_name,
+        "capability": selection.capability,
     }
 
 
