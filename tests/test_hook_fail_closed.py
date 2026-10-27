@@ -202,8 +202,9 @@ def test_review_render_failure_drops_a_raw_approval_url(monkeypatch: pytest.Monk
     rendered = render_pre_tool_review("omp", verdict, approval={"approval_url": url}, guard_home=_HOME)
     assert rendered["decision"] == "deny"
     assert rendered["reason_code"] == "native_pre_tool_review"
-    assert url not in str(rendered["reason"])
-    assert "Needs review." in str(rendered["reason"])
+    # The separator that introduced the link goes with it, the way the resident
+    # strips the same text: no "keep this blocked: ." is left for the agent.
+    assert rendered["reason"] == "Needs review. Open HOL Guard to approve or keep this blocked."
 
 
 def test_silent_block_fallback_drops_a_raw_approval_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,3 +222,99 @@ def test_silent_block_fallback_drops_a_raw_approval_url(monkeypatch: pytest.Monk
     assert rendered["prompted"] is False
     assert rendered["approval_resume"] == {"request_id": "r", "poll_path": "/v1/requests/r"}
     assert url not in str(rendered)
+
+
+def test_silent_block_fallback_keeps_the_safe_alternative_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An outage must not hand the agent the bare native reason.
+
+    The native text says what Guard stopped and offers an inbox approval. On its
+    own it never tells the agent to stop retrying, and here no approval is waiting
+    at all, so the fallback composes the same reason the resident would have.
+    """
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    inputs = {
+        "harness": "pi",
+        "result": {"reason": "HOL Guard requires review before this action.", "reason_code": "native_network_review"},
+        "queued": False,
+        "retry_reuses_approval": False,
+    }
+    reason = str(render_silent_review_block("pi", inputs, guard_home=_HOME)["reason"])
+    assert reason.startswith("HOL Guard requires review before this action.")
+    assert "This makes a network request that Guard has not seen before." in reason
+    assert "No approval is waiting in HOL Guard for this action." in reason
+    assert "Do not retry the same action" in reason
+
+
+def test_silent_block_fallback_does_not_send_the_agent_to_an_approval_that_cannot_help(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued row bound to neither the retry nor an exact-action Always."""
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    inputs = {
+        "harness": "pi",
+        "result": {
+            "reason": (
+                "HOL Guard requires review before this action."
+                " Approve it in the HOL Guard inbox (choose Always for a repeated read-only command),"
+                " or split it into simpler commands."
+            ),
+            "reason_code": "native_command_review_required",
+        },
+        "queued": True,
+        "request_id": "r",
+        "retry_reuses_approval": False,
+        "exact_action_allowable": False,
+    }
+    reason = str(render_silent_review_block("pi", inputs, guard_home=_HOME)["reason"])
+    assert "Approve it in the HOL Guard inbox" not in reason
+    assert "approving it there will not let you run it" in reason
+
+
+def test_silent_block_fallback_uses_the_connector_setup_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A queued setup review reads as a setup review, not as the raw native reason."""
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    setup_reason = "HOL Guard has not been set up for `ripgrep` (local CLI) on this device."
+    inputs = {
+        "harness": "pi",
+        "result": {
+            "reason": "HOL Guard requires review before this action.",
+            "reason_code": "native_command_review_required",
+        },
+        "setup_reason": setup_reason,
+        "queued": True,
+        "request_id": "r",
+        "retry_reuses_approval": True,
+    }
+    assert render_silent_review_block("pi", inputs, guard_home=_HOME)["reason"] == setup_reason
+
+
+def test_silent_block_fallback_drops_the_setup_text_when_nothing_was_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A review that never reached the inbox has no setup row to point at."""
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    inputs = {
+        "harness": "pi",
+        "result": {"reason": "HOL Guard requires review before this action.", "reason_code": "native_network_review"},
+        "setup_reason": "HOL Guard has not been set up for `ripgrep` (local CLI) on this device.",
+        "queued": False,
+        "retry_reuses_approval": True,
+    }
+    reason = str(render_silent_review_block("pi", inputs, guard_home=_HOME)["reason"])
+    assert "has not been set up" not in reason
+    assert "No approval is waiting in HOL Guard for this action." in reason
+
+
+def test_silent_block_fallback_falls_back_to_the_shared_blocked_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native result with no reason of its own still reads as a block."""
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    inputs = {"harness": "pi", "result": {"reason": "", "reason_code": ""}, "queued": False}
+    reason = str(render_silent_review_block("pi", inputs, guard_home=_HOME)["reason"])
+    assert reason.startswith("HOL Guard blocked this action.")

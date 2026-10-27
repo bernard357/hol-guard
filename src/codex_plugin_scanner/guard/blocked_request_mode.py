@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+# The deny text for a native result that carries no reason of its own.
+# `blocked_request_mode::BLOCKED_REASON` in Rust is the same string.
+BLOCKED_REASON = "HOL Guard blocked this action."
+
 SAFE_ALTERNATIVE_GUIDANCE = (
     "This action remains blocked. Continue with a safe, permitted alternative that respects "
     "the same protection. Do not retry an equivalent command, bypass Guard, or seek permission "

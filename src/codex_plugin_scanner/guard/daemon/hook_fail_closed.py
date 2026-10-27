@@ -14,11 +14,13 @@ the user why.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final
 
+from ..blocked_request_mode import BLOCKED_REASON, safe_alternative_reason
 from ..native_hook_decision import NativeHookDecisionError, native_review_response
 from ..native_hook_render import native_render_pre_tool, native_render_recording_only_pre_tool
 
@@ -121,6 +123,20 @@ def _verdict_deny(harness: str, verdict: Mapping[str, object]) -> dict[str, obje
     )
 
 
+def _without_raw_url(reason: str, url: str) -> str:
+    """``reason`` without ``url`` and without the separator that introduced it.
+
+    ``native_review_link::without_raw_url`` in Rust, which the resident uses for
+    the same text: removing the URL from "...approve it here: {url}." would
+    otherwise leave the agent reading "...approve it here: .".
+    """
+
+    joined = re.sub(r":\s*\.(?=\s|$)", ".", reason.replace(url, "").strip()).rstrip()
+    if joined.endswith("."):
+        joined = joined[:-1].rstrip(" \t\r\n:;,") + "."
+    return joined.rstrip(" :;,")
+
+
 def _without_approval_url(verdict: Mapping[str, object], url: object) -> Mapping[str, object]:
     """``verdict`` with a raw approval URL removed from its reason.
 
@@ -132,7 +148,7 @@ def _without_approval_url(verdict: Mapping[str, object], url: object) -> Mapping
     reason = _verdict_text(verdict, "reason")
     if not isinstance(url, str) or not url or reason is None or url not in reason:
         return verdict
-    return {**verdict, "reason": reason.replace(url, "").strip().rstrip(":;,") or RENDER_UNAVAILABLE_REASON}
+    return {**verdict, "reason": _without_raw_url(reason, url) or RENDER_UNAVAILABLE_REASON}
 
 
 def _deadline_kwargs(deadline: float | None) -> dict[str, float]:
@@ -193,6 +209,34 @@ def render_pre_tool_review(
     return _verdict_deny(harness, _without_approval_url(verdict, approval_url))
 
 
+def _silent_block_reason(inputs: Mapping[str, Any]) -> str:
+    """The agent text for a silent block the resident could not compose.
+
+    The native reason alone says what Guard stopped, not what the agent should do
+    instead, and it still offers an inbox approval that may not be able to release
+    this row. So the fallback builds the text from the same shared formatter the
+    resident reads, ``hook_decision_review_response::respond``: the connector setup
+    copy once the review reached the inbox, otherwise the safe-alternative reason
+    whose wait note matches what approving this row can actually do. The resident's
+    read-only wait hint is left out, because the resident is what is unavailable here.
+    """
+
+    result = inputs["result"]
+    queued = bool(inputs.get("queued"))
+    setup_reason = inputs.get("setup_reason")
+    if queued and isinstance(setup_reason, str) and setup_reason:
+        return setup_reason
+    reason = result.get("reason")
+    reason_code = result.get("reason_code")
+    return safe_alternative_reason(
+        reason if isinstance(reason, str) and reason else BLOCKED_REASON,
+        reason_code=reason_code if isinstance(reason_code, str) and reason_code else "unknown",
+        approval_queued=queued,
+        retry_reuses_approval=bool(inputs.get("retry_reuses_approval")),
+        exact_action_allowable=bool(inputs.get("exact_action_allowable")),
+    )
+
+
 def render_silent_review_block(
     harness: str, inputs: Mapping[str, Any], *, guard_home: Path, deadline: float | None = None
 ) -> dict[str, object]:
@@ -203,7 +247,13 @@ def render_silent_review_block(
 
     with suppress(NativeHookDecisionError):
         return native_review_response("silent_review_block", inputs, guard_home=guard_home, deadline=deadline)
-    blocked = {**inputs["result"], "decision": "deny", "minimum_action": "block", "policy_action": "block"}
+    blocked = {
+        **inputs["result"],
+        "decision": "deny",
+        "minimum_action": "block",
+        "policy_action": "block",
+        "reason": _silent_block_reason(inputs),
+    }
     response = _verdict_deny(harness, _without_approval_url(blocked, inputs.get("approval_url")))
     response.update(prompted=False, blocked_request_mode="safe-alternative")
     request_id = inputs.get("request_id")

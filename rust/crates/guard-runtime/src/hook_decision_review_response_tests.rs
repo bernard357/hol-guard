@@ -319,7 +319,11 @@ fn an_unsignable_block_link_leaves_no_raw_url_in_the_reason() {
         json!(format!("Blocked. Approve it at {URL}.")),
     );
     let block = respond(&inputs, |_, _, _| None).expect("block");
-    let reason = block.response["reason"].as_str().expect("reason is text");
+    // A claude-code block carries its agent text in the hook envelope, not at
+    // the top level, so the rendered reason is what the agent actually reads.
+    let reason = block.response["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .expect("reason is text");
     assert!(!reason.contains(URL), "{reason}");
     assert!(reason.ends_with(SIGNED_LINK_UNAVAILABLE), "{reason}");
 }

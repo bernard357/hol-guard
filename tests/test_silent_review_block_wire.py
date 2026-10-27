@@ -18,6 +18,7 @@ import pytest
 
 from codex_plugin_scanner.guard import native_hook_decision as decision_module
 from codex_plugin_scanner.guard import native_resident_decision as shared
+from codex_plugin_scanner.guard.blocked_request_mode import safe_alternative_reason
 from codex_plugin_scanner.guard.daemon import hook_fail_closed
 from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError, native_review_response
 
@@ -150,7 +151,21 @@ def test_no_answer_fails_closed_like_render_pre_tool(
         "codex", _inputs(retry_reuses_approval=retry), guard_home=Path("/home/dev/.hol-guard")
     )
 
-    blocked = {**_RESULT, "decision": "deny", "minimum_action": "block", "policy_action": "block"}
+    blocked = {
+        **_RESULT,
+        "decision": "deny",
+        "minimum_action": "block",
+        "policy_action": "block",
+        # The resident is what is unavailable here, so the fallback composes the
+        # agent text itself from the same shared formatter the resident reads.
+        "reason": safe_alternative_reason(
+            _RESULT["reason"],
+            reason_code=_RESULT["reason_code"],
+            approval_queued=True,
+            retry_reuses_approval=retry,
+            exact_action_allowable=False,
+        ),
+    }
     expected = {
         **hook_fail_closed._verdict_deny("codex", blocked),
         "prompted": False,
