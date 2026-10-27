@@ -171,3 +171,45 @@ fn a_requirement_no_lockfile_beside_its_manifest_resolved_stays_unresolved() {
         ]
     );
 }
+
+#[test]
+fn manifest_packages_lead_and_keep_every_version() {
+    let mut inventory = InventoryMap::new();
+    for item in [
+        item("zeta", false, json!(null), json!("1.4.0")),
+        item("pkg", false, json!(null), json!("2.0.1")),
+        item("alpha", false, json!(null), json!("0.9.0")),
+        item("zeta", false, json!(null), json!("1.3.0")),
+        item("jest", true, json!("^29"), json!(null)),
+    ] {
+        merge_inventory_item(&mut inventory, &item);
+    }
+    let keys = ["zeta", "alpha", "jest"].map(|name| ("npm".to_owned(), None, name.to_owned()));
+    inventory.lead_with(keys);
+    // A later item for a version already listed still merges into its slot.
+    merge_inventory_item(
+        &mut inventory,
+        &item("zeta", true, json!("^1"), json!(null)),
+    );
+
+    let names: Vec<(String, Value)> = inventory
+        .into_values()
+        .into_iter()
+        .map(|item| {
+            (
+                item["name"].as_str().unwrap().to_owned(),
+                item["version"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            ("zeta".to_owned(), json!("1.4.0")),
+            ("zeta".to_owned(), json!("1.3.0")),
+            ("alpha".to_owned(), json!("0.9.0")),
+            ("jest".to_owned(), json!(null)),
+            ("pkg".to_owned(), json!("2.0.1")),
+        ]
+    );
+}

@@ -229,6 +229,44 @@ impl InventoryMap {
     pub fn into_values(self) -> Vec<Map<String, Value>> {
         self.items
     }
+
+    /// Moves the packages in `leading` to the front, in that order: the slots
+    /// they held when every manifest was merged before any lockfile. A
+    /// package's versions keep their order, and so does every other package.
+    pub fn lead_with(&mut self, leading: impl IntoIterator<Item = InventoryKey>) {
+        let mut rank: HashMap<InventoryKey, usize> = HashMap::new();
+        for key in leading {
+            let next = rank.len();
+            rank.entry(key).or_insert(next);
+        }
+        let mut items: Vec<(usize, Map<String, Value>)> = std::mem::take(&mut self.items)
+            .into_iter()
+            .map(|item| {
+                let place = rank
+                    .get(&inventory_key(&item))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                (place, item)
+            })
+            .collect();
+        // A stable sort keeps the insertion order within each place.
+        items.sort_by_key(|(place, _)| *place);
+        *self = Self::default();
+        for (_, item) in items {
+            let key = inventory_key(&item);
+            let slot = self.items.len();
+            match resolved_version(&item) {
+                Some(version) if self.index.contains_key(&key) => {
+                    self.versions.insert((key, version.to_owned()), slot);
+                }
+                _ => {
+                    self.index.insert(key.clone(), slot);
+                    self.order.push(key);
+                }
+            }
+            self.items.push(item);
+        }
+    }
 }
 
 /// `_inventory_key` (:3597). `str()`-coerces `ecosystem`/`name`; `namespace`
@@ -403,6 +441,15 @@ impl DirectDependencies {
         let requirement = &mut self.listed[*self.index.get(&key)?];
         requirement.resolved = true;
         Some(requirement.range.clone())
+    }
+
+    /// Every package a manifest lists, in the order the manifests list them.
+    pub fn listed_keys(&self) -> impl Iterator<Item = InventoryKey> + '_ {
+        self.listed.iter().map(|requirement| {
+            let (namespace, name) =
+                dependency_name(&requirement.ecosystem, &requirement.package_name);
+            (requirement.ecosystem.clone(), namespace, name)
+        })
     }
 
     /// The requirements no lockfile beside their manifest resolved, in the

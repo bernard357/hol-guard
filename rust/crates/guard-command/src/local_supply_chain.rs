@@ -3547,6 +3547,7 @@ fn workspace_inventory_from_paths(
         item.insert("version".into(), Value::Null);
         merge_inventory_item(&mut inventory_map, &item);
     }
+    inventory_map.lead_with(direct_dependencies.listed_keys());
 
     inventory_map.into_values()
 }

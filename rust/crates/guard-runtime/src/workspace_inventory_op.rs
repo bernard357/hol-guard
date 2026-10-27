@@ -145,6 +145,7 @@ fn inventory_from_paths(
             &item(ecosystem, namespace, name, true, range, None),
         );
     }
+    inventory.lead_with(direct.listed_keys());
     inventory
 }
 
