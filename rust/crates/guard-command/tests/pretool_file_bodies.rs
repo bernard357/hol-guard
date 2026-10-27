@@ -66,6 +66,21 @@ fn large_write_and_edit_bodies_are_judged_on_their_path() {
 }
 
 #[test]
+fn large_body_beside_a_path_list_is_judged_on_the_paths() {
+    let with_body = cursor(&json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"paths": ["docs/notes.md"], "content": large_body()}
+    }));
+    let without_body = cursor(&json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {"paths": ["docs/notes.md"]}
+    }));
+    assert_same_decision(&with_body, &without_body);
+}
+
+#[test]
 fn oversized_decision_inputs_still_fail_closed() {
     let path = "README.md";
     for payload in [
@@ -75,6 +90,8 @@ fn oversized_decision_inputs_still_fail_closed() {
         json!({"tool_name": "Read", "tool_input": {"file_path": path}, "prompt": large_body()}),
         json!({"tool_name": "Write", "tool_input": {"content": large_body()}}),
         json!({"tool_name": "Write", "tool_input": {"file_path": 7, "content": large_body()}}),
+        json!({"tool_name": "Write", "tool_input": {"paths": [], "content": large_body()}}),
+        json!({"tool_name": "Write", "tool_input": {"paths": [large_body()], "content": "x"}}),
         json!({
             "tool_name": "Write",
             "file_path": path,

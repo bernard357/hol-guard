@@ -60,6 +60,15 @@ const FILE_BODY_KEYS: [&str; 6] = [
     "newString",
 ];
 
+/// A path key names a file when it holds a path or a nonempty list of them.
+fn names_path(value: &Value) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::Array(items) => !items.is_empty() && items.iter().all(Value::is_string),
+        _ => false,
+    }
+}
+
 fn bounded_payload(
     value: &Value,
     depth: usize,
@@ -76,7 +85,7 @@ fn bounded_payload(
             }
             let names_file = signals::PATH_KEYS
                 .iter()
-                .any(|key| record.get(*key).is_some_and(Value::is_string));
+                .any(|key| record.get(*key).is_some_and(names_path));
             for (key, child) in record {
                 if names_file && child.is_string() && FILE_BODY_KEYS.contains(&key.as_str()) {
                     continue;
