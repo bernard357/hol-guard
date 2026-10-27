@@ -20,6 +20,7 @@ from ..daemon.hook_availability_policy import (
     availability_harness_response,
     hook_event_pauses_when_unavailable,
 )
+from ..daemon.hook_fail_closed import fail_closed_response
 from ..daemon.hook_request_parsing import runtime_hook_event_name
 from ..daemon.hook_worker import HookWorker
 from ..daemon.hook_worker_native import withhold_structured_destination, withholds_structured_destination
@@ -28,7 +29,6 @@ from ..hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect
 from ..native_hook_evidence_writer import NativeHookEvidenceWriter
 from ..native_hook_render import native_cli_hook_emit
 from ..store import GuardStore
-from .commands_support_hook_payload import _emit_native_hook_json_document
 from .commands_support_runtime_resolution import _canonical_harness_name
 from .native_hook_exit_code import native_hook_verdict_exit_code
 
@@ -39,6 +39,24 @@ _DIAGNOSTIC_DRAIN_TIMEOUT_SECONDS = 0.25
 # wire format, so the CLI renders it the same way.
 _BRIDGE_RENDERED_HARNESSES = frozenset({"cline", "copilot", "devin", "grok", "hermes", "kimi", "openclaw", "zcode"})
 _RENDER_FAILURE_REASON = "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal."
+# What writing a finished answer is allowed to take when the review itself has
+# already used the hook's whole budget.
+_DELIVERY_BUDGET_SECONDS = 1.0
+
+
+def _delivery_deadline(deadline: float | None) -> float | None:
+    """The budget the resident gets for writing an answer Guard already gave.
+
+    ``deadline`` bounds the review, and the review is over by the time this
+    runs. A review that used all of it would leave the renderer nothing, and
+    the decided verdict - an allow as readily as a block - would be thrown
+    away for a fail-closed document. Writing the answer therefore keeps a
+    small floor of its own; a deadline with more than that left is unchanged.
+    """
+
+    if deadline is None:
+        return None
+    return max(deadline, time.monotonic() + _DELIVERY_BUDGET_SECONDS)
 
 
 def _bridge_hook_output(
@@ -234,6 +252,7 @@ def emit_hook_review(
     """
 
     canonical = _canonical_harness_name(harness)
+    deadline = _delivery_deadline(deadline)
     if canonical in _BRIDGE_RENDERED_HARNESSES:
         stdout, stderr, exit_code = _bridge_hook_output(
             canonical, response, event_name=event_name, guard_home=guard_home, deadline=deadline
@@ -252,22 +271,31 @@ def emit_hook_review(
         # decision; writing nothing lets the harness continue on its own.
         return 0
     # Every other caller reads the daemon's response document; a hook caller
-    # need not pass --json to receive a parseable one. Secrets are masked, but
-    # the signed approval link the user is meant to open stays intact.
-    _emit_native_hook_json_document(response, output_stream=output_stream)
+    # need not pass --json to receive a parseable one. The resident prints it
+    # with secrets masked and the signed approval link the user is meant to
+    # open intact, and names the status the harness reads with it.
+    rendered = native_cli_hook_emit(
+        canonical, response, event_name=event_name, guard_home=guard_home, deadline=deadline, document=True
+    )
+    stdout = rendered.get("stdout") if rendered is not None else None
+    exit_code = rendered.get("exit_code") if rendered is not None else None
+    stream = output_stream or sys.stdout
+    if isinstance(stdout, str) and isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        # stdout is the harness delivery channel; the ephemeral approval
+        # link must reach the operator intact.
+        _ = stream.write(stdout + "\n")  # codeql[py/clear-text-logging-sensitive-data]
+        return exit_code
+    # Without the resident nothing reads the answer here: the harness gets the
+    # fixed fail-closed document, and the exit status follows the outage
+    # policy the bridges' fixed payload uses: block an event that may pause
+    # the turn, and let any other continue.
+    fallback = fail_closed_response(canonical, event_name)
+    _ = stream.write(json.dumps(fallback, ensure_ascii=True, separators=(",", ":")) + "\n")
     if canonical == "claude-code":
         # Claude reads a hook's JSON only on exit 0; any other status discards
         # the document, a PostToolUse block and its reason included.
         return 0
-    # The resident names the verdict the answer gave. When it cannot, the exit
-    # status follows the outage policy the bridges' fixed payload uses: block
-    # an event that may pause the turn, and let any other continue.
-    rendered = native_cli_hook_emit(
-        canonical, response, event_name=event_name, guard_home=guard_home, deadline=deadline
-    )
-    policy_action = rendered.get("policy_action") if rendered is not None else None
-    if not isinstance(policy_action, str):
-        policy_action = "block" if hook_event_pauses_when_unavailable(event_name) else "allow"
+    policy_action = "block" if hook_event_pauses_when_unavailable(event_name) else "allow"
     return native_hook_verdict_exit_code(canonical, policy_action, event_name=event_name)
 
 

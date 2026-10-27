@@ -18,6 +18,7 @@ from .command_capability import (
     command_capability_operations,
     command_capability_status,
     command_environment_allows_queue,
+    command_identity_digest,
     consume_local_command_approval,
     mark_command_job_consumed,
     register_pending_command,
@@ -390,41 +391,70 @@ def poll_command_queue_once(store: GuardStore, context: HarnessContext) -> dict[
             "failureMessage": "The local Guard command capability rejected this job.",
         }
     else:
-        if not consume_local_command_approval(store, authorized):
-            pending = register_pending_command(store, authorized, item)
-            execution = {
-                "waitingLocalConfirm": True,
-                "operation": authorized.operation,
-                "jobId": authorized.identity["id"],
-                "approveCommand": pending["approveCommand"],
-            }
-            audit_command_decision(
-                store,
-                "cloud_command.waiting_local_approval",
-                job=item,
-                reason="local_approval_required",
+        # The job is leased by this point and the lease only closes on a posted
+        # result. Matching the approval grant, recording the replay row and
+        # registering a pending approval all ask the runtime for a signature or
+        # a digest, so each of them can refuse. A refusal is this job's failure
+        # and has to reach the upload below; letting it escape the poll would
+        # leave the lease open with nothing posted and nothing recorded.
+        try:
+            # Spending the grant and recording the replay row both name this
+            # job by the runtime's digest. Ask for it once, before the grant
+            # is deleted: a resident that stopped answering in between would
+            # otherwise fail the job with the user's approval already gone.
+            needs_replay_row = not is_native_workspace_review_job(item)
+            identity_digest = (
+                command_identity_digest(store, authorized)
+                if authorized.requires_local_approval or needs_replay_row
+                else None
             )
-        else:
-            if not is_native_workspace_review_job(item):
-                mark_command_job_consumed(store, authorized)
-            audit_command_decision(
-                store,
-                "cloud_command.accepted",
-                job=item,
-                reason="capability_and_job_valid",
-            )
-            try:
-                _LOGGER.info("Guard command leased.")
-                execution = _execute_job(item, context, store)
-            except Exception as error:
-                _LOGGER.warning(
-                    "Guard command execution failed: error=%s",
-                    _redacted_error(error),
-                )
+            if not consume_local_command_approval(store, authorized, identity_digest=identity_digest):
+                pending = register_pending_command(store, authorized, item)
                 execution = {
-                    "failureCode": "execution_error",
-                    "failureMessage": _redacted_error(error),
+                    "waitingLocalConfirm": True,
+                    "operation": authorized.operation,
+                    "jobId": authorized.identity["id"],
+                    "approveCommand": pending["approveCommand"],
                 }
+                audit_command_decision(
+                    store,
+                    "cloud_command.waiting_local_approval",
+                    job=item,
+                    reason="local_approval_required",
+                )
+            else:
+                if needs_replay_row:
+                    mark_command_job_consumed(store, authorized, identity_digest=identity_digest)
+                audit_command_decision(
+                    store,
+                    "cloud_command.accepted",
+                    job=item,
+                    reason="capability_and_job_valid",
+                )
+                try:
+                    _LOGGER.info("Guard command leased.")
+                    execution = _execute_job(item, context, store)
+                except Exception as error:
+                    _LOGGER.warning(
+                        "Guard command execution failed: error=%s",
+                        _redacted_error(error),
+                    )
+                    execution = {
+                        "failureCode": "execution_error",
+                        "failureMessage": _redacted_error(error),
+                    }
+        except (CommandCapabilityError, CommandCapabilityUnavailableError) as error:
+            reason = error.code if isinstance(error, CommandCapabilityError) else error.reason
+            audit_command_decision(
+                store,
+                "cloud_command.rejected",
+                job=item,
+                reason=reason,
+            )
+            execution = {
+                "failureCode": reason,
+                "failureMessage": "The local Guard command capability could not settle this job.",
+            }
     payload = _result_payload(item, execution)
     try:
         _heartbeat(auth_context, item)

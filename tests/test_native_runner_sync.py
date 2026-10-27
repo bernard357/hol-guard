@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 
 from codex_plugin_scanner.guard.native_runner_authority import NativeRunnerAuthorityError, native_runner_authority
-from codex_plugin_scanner.guard.policy_bundle_parser import POLICY_BUNDLE_RULE_MATCHER_FAMILIES
 from codex_plugin_scanner.guard.runtime import runner_native_sync as sync
+from tests.policy_bundle_parser_support import POLICY_BUNDLE_RULE_MATCHER_FAMILIES
 
 _VECTORS = Path(__file__).parent / "fixtures" / "runner_sync_authority" / "vectors.json"
 

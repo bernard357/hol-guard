@@ -33,7 +33,6 @@ from .hook_native_cli_observer import observe_native_pre_tool_cli
 from .hook_native_local_cli import native_local_cli_block_response
 from .hook_native_review_approval import (
     pause_native_pre_tool_for_approval,
-    record_claude_permission_notice_for_native_review,
 )
 from .hook_policy_fence_window import POLICY_SOURCE_FENCE_ERRORS, PolicySourceFenceBusyError
 from .hook_worker_native_review import (
@@ -605,17 +604,6 @@ class HookWorkerNativeMixin:
                     claimed_saved_allow_hash=claimed_saved_allow_hash,
                     claimed_approval_request_id=claimed_approval_request_id,
                 )
-                if native_harness.strip().lower().replace("_", "-") == "claude-code" and response.get("prompted"):
-                    with suppress(Exception):
-                        record_claude_permission_notice_for_native_review(
-                            self.store,
-                            harness=native_harness,
-                            payload=payload,
-                            native_result=native_result,
-                            native_receipt=accepted_receipt,
-                            workspace=workspace,
-                            guard_home=guard_home,
-                        )
                 return (_record_native_pre_activity(self, native_harness, payload, response, accepted_receipt), True)
             custom_block = native_local_cli_block_response(
                 self.store,

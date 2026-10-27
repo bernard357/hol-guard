@@ -14,11 +14,11 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     NETWORK_PRIVACY_SCHEMA_VERSION,
     BackendCapability,
     EnforcementGrade,
-    FailureMode,
     grade_required_capabilities,
     require_digest,
     require_id,
 )
+from tests.network_policy_model import FailureMode
 
 
 class BackendState(str, Enum):

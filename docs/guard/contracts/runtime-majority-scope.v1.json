@@ -511,7 +511,7 @@
       {
         "id": "cloud-sync-transport",
         "category": "async_control_plane",
-        "reason": "Cloud connect, OAuth refresh/DPoP, receipt, runtime-session, supply-chain-bundle and policy-bundle sync transport (runtime/runner.py). Every public entry point (sync_receipts, sync_runtime_session, sync_supply_chain_bundle, sync_local_guard_cloud_proof, prepare_guard_cloud_connect_authorization, repair_guard_cloud_connect_storage, the cloud-review and command-queue workers and the daemon's cloud policy-bundle and managed-controls delivery handlers that import its urlopen/auth/bundle helpers) runs from `guard connect`/`guard sync`, the cloud-review sync worker or the command-queue loop, never inside hook admission, decision or enforcement. The Rust runtime has no HTTP client, so the network, token refresh and retry loop stay in Python by design; the policy computation inside it (payload shaping, scrubbing, cursor/ack arithmetic, verdict digests, bundle verification) already runs in the resident through runner_native_sync/runner_native_authority. The only request-adjacent caller is the Hermes launch credential lookup (guard_run_launch._resolve_hermes_guard_access_token), which reads the cached token and, when it is absent or near expiry, runs the same OAuth refresh HTTP request as `guard sync` before the harness starts. That refresh is network transport the Rust runtime cannot perform; the lookup is best-effort, runs once at the execution boundary after the authority verdict, and never decides admission. Network protection bundle verification (runtime/network_protection_bundle.py) runs only when `guard sync`, `guard cloud sync-intel` or `guard network sync/status` fetches or summarizes the bundle; the hook reads the saved, verified copy in the Rust runtime. The run-side lookup wrapper stays in scope.",
+        "reason": "Cloud connect, OAuth refresh/DPoP, receipt, runtime-session, supply-chain-bundle and policy-bundle sync transport (runtime/runner.py). Every public entry point (sync_receipts, sync_runtime_session, sync_supply_chain_bundle, sync_local_guard_cloud_proof, prepare_guard_cloud_connect_authorization, repair_guard_cloud_connect_storage, the cloud-review and command-queue workers and the daemon's cloud policy-bundle and managed-controls delivery handlers that import its urlopen/auth/bundle helpers) runs from `guard connect`/`guard sync`, the cloud-review sync worker or the command-queue loop, never inside hook admission, decision or enforcement. The Rust runtime has no HTTP client, so the network, token refresh and retry loop stay in Python by design; the policy computation inside it (payload shaping, scrubbing, cursor/ack arithmetic, verdict digests, bundle verification) already runs in the resident through runner_native_sync/runner_native_authority. The only request-adjacent caller is the Hermes launch credential lookup (guard_run_launch._resolve_hermes_guard_access_token), which reads the cached token and, when it is absent or near expiry, runs the same OAuth refresh HTTP request as `guard sync` before the harness starts. That refresh is network transport the Rust runtime cannot perform; the lookup is best-effort, runs once at the execution boundary after the authority verdict, and never decides admission. Network protection bundle verification runs in the resident through native_network_protection_bundle.py and the network_protection_verify op; runtime/network_protection_bundle.py keeps only the sync state key the saved copy lives under and the status summary read off it, and the hook reads that saved copy in the Rust runtime. The run-side lookup wrapper stays in scope.",
         "path": [
           "src/codex_plugin_scanner/guard/runtime/runner.py",
           "src/codex_plugin_scanner/guard/runtime/network_protection_bundle.py"
@@ -563,11 +563,12 @@
           "src/codex_plugin_scanner/guard/runtime_identity_assessment.py",
           "src/codex_plugin_scanner/guard/runtime_identity_candidates.py",
           "src/codex_plugin_scanner/guard/runtime_identity_probe.py",
+          "src/codex_plugin_scanner/guard/runtime_instance_store.py",
           "src/codex_plugin_scanner/guard/runtime_posture.py",
           "src/codex_plugin_scanner/guard/runtime_advisory_bundle.py",
           "src/codex_plugin_scanner/guard/cli/runtime_posture_command.py"
         ],
-        "reason": "Read-only `guard runtime posture` report: discovers configured MCP servers, sends their launches to the native runtime-identity probe and assessment (launch resolution, shebang following, signed-bundle verification and the decision logic live in Rust), passes the locally cached supply-chain bundle and its sync context through unparsed, and formats the result. Reached only from the CLI dispatcher for that subcommand; no hook, approval, allow or deny path reads it."
+        "reason": "Read-only `guard runtime posture` report: discovers configured MCP servers, sends their launches to the native runtime-identity probe and assessment (launch resolution, shebang following, signed-bundle verification and the decision logic live in Rust), passes the locally cached supply-chain bundle and its sync context through unparsed, carries the running instances the native probe bound to their builds in a Guard-home file between probes, and formats the result. Reached only from the CLI dispatcher for that subcommand; no hook, approval, allow or deny path reads it."
       }
     ],
     "reviewed_runtime": [
@@ -639,11 +640,9 @@
           "src/codex_plugin_scanner/guard/cli/commands_router.py",
           "src/codex_plugin_scanner/guard/cli/commands_support.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_claude_approval.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_codex_commands.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_git_config.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_paths.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_codex_prompt_attachments.py",
-          "src/codex_plugin_scanner/guard/cli/commands_support_codex_reads.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_connect.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_permission_store.py",
           "src/codex_plugin_scanner/guard/cli/commands_support_prompts.py",
@@ -1194,7 +1193,7 @@
           "emit_guard_payload"
         ],
         "reason": "Rich and plain-text renderers, panel and table builders, and the renderer dispatch tables that format Guard command results for a human terminal. They compute no verdicts and read no stores; they only lay out an already-built payload.",
-        "evidence": "The retained reference closure of every symbol other modules import from render.py (_redact_payload, _render_redacted_json_payload, emit_guard_payload) contains none of the excluded symbols except through emit_guard_payload, whose as_json=True branch (the only branch the hook protocol uses: commands_support_hook_payload.py writes JSON through _redact_payload and _render_redacted_json_payload directly) never reads them. The excluded symbols are reached only from emit_guard_payload's as_json=False branch through the _RENDERERS and _PLAIN_TEXT_RENDERERS tables. The report validates this reference closure on every run."
+        "evidence": "The retained reference closure of every symbol other modules import from render.py (emit_guard_payload) contains none of the excluded symbols except through emit_guard_payload, whose as_json=True branch (which writes JSON through _redact_payload and _render_redacted_json_payload; the hook protocol's redacted document is printed by the resident's cli_hook_emit op, not by render.py) never reads them. The excluded symbols are reached only from emit_guard_payload's as_json=False branch through the _RENDERERS and _PLAIN_TEXT_RENDERERS tables. The report validates this reference closure on every run."
       },
       {
         "id": "adapter-base-setup",
@@ -1322,21 +1321,6 @@
         "entry_points": [],
         "reason": "Grok adapter install and uninstall and the hook command builder used only to write the install.",
         "evidence": "install, prepare_install and uninstall have no caller in any in-scope module; they are invoked by the excluded install, uninstall and repair dispatchers. The report validates that no retained symbol or in-scope module references the excluded names."
-      },
-      {
-        "id": "adapter-grok-config-setup",
-        "category": "install_config",
-        "path": "src/codex_plugin_scanner/guard/adapters/grok_config.py",
-        "symbols": [
-          "_toml_inline_command_hook",
-          "foreign_hook_compat_toml",
-          "force_compat_hooks_false",
-          "prepare_managed_config_text",
-          "build_managed_config_block"
-        ],
-        "entry_points": [],
-        "reason": "Managed Grok config block writer used only by the Grok install.",
-        "evidence": "These functions are referenced only by the excluded Grok install path; detect and launch config readers stay in scope. The report validates that no retained symbol or in-scope module references the excluded names."
       },
       {
         "id": "runtime-policy-admin-payloads",
@@ -1974,14 +1958,13 @@
           "_resolve_runtime_headline_state",
           "_runtime_headline_label",
           "_runtime_headline_detail",
-          "is_bulk_allow_once_eligible",
           "bulk_allow_read_only_once",
           "_optional_string",
           "_non_negative_int"
         ],
         "entry_points": [],
         "reason": "Resolving queued approval requests (approve, deny, bulk allow-once) and building the dashboard runtime snapshot. These run when a person acts in the approval center, the dashboard or the guard approvals command; no hook or MCP proxy call reaches them.",
-        "evidence": "Every caller of apply_approval_resolution, build_runtime_snapshot, bulk_allow_read_only_once and is_bulk_allow_once_eligible is outside runtime scope: the daemon control-plane routes (server_control_routes_post.py, server_control_policy.py), the dashboard read routes (server_dashboard_runtime_read.py) and the guard approvals command (cli/approval_commands.py). The remaining symbols are reached only from apply_approval_resolution, build_runtime_snapshot, bulk_allow_read_only_once and is_bulk_allow_once_eligible. The retained in-scope part of approvals.py (request queueing, build_approval_request_url, primary_approval_request, silent_review_center_url) does not reference them, and the report validates this reference closure on every run."
+        "evidence": "Every caller of apply_approval_resolution, build_runtime_snapshot and bulk_allow_read_only_once is outside runtime scope: the daemon control-plane routes (server_control_routes_post.py, server_control_policy.py), the dashboard read routes (server_dashboard_runtime_read.py) and the guard approvals command (cli/approval_commands.py). The remaining symbols are reached only from apply_approval_resolution, build_runtime_snapshot and bulk_allow_read_only_once. The retained in-scope part of approvals.py (request queueing, build_approval_request_url, primary_approval_request, silent_review_center_url) does not reference them, and the report validates this reference closure on every run."
       },
       {
         "id": "daemon-health-details-probe",

@@ -68,6 +68,7 @@ from ..native_mcp_proxy_decision import (
 )
 from ..native_mcp_relay_server_report import report_mcp_relay_server
 from ..native_package_authority import NativePackageArtifactUnavailableError
+from ..native_package_workspace_scope import NativePackageWorkspaceScopeError
 from ..package_execution_context import build_package_execution_context
 from ..runtime.approval_context import (
     build_configured_environment_hash,
@@ -349,6 +350,8 @@ class RuntimeMcpGuardProxy:
         self._tool_catalog_inflight = False
         self._tool_catalog_inflight_cursor: str | None = None
         self._tool_catalog_generation = 0
+        # (state, catalog JSON, fingerprint) of the last native fingerprint.
+        self._tool_catalog_fingerprint_memo: tuple[str, str, str] | None = None
         # The last complete catalog reported for the relay.
         self._relay_reported_catalog: str | None = None
         self._relay_report: threading.Thread | None = None
@@ -764,10 +767,7 @@ class RuntimeMcpGuardProxy:
         public_tool_definition = {key: value for key, value in tool_definition.items() if key != "name"}
         catalog_generation = self._tool_catalog_generation
         catalog_state = self._tool_catalog_state
-        catalog_fingerprint = _tool_catalog_fingerprint(
-            self._tool_catalog,
-            state=catalog_state,
-        )
+        catalog_fingerprint = self._current_catalog_fingerprint()
         identity = build_tool_call_identity(
             arguments=arguments,
             workspace=self.context.workspace_dir or Path.cwd(),
@@ -1418,12 +1418,22 @@ class RuntimeMcpGuardProxy:
                 execution_context=package_context,
                 config=self.config,
             )
-            policy_workspace = package_request_runtime_workspace_scope(
-                artifact_id=artifact.artifact_id,
-                artifact_hash=artifact_digest,
-                artifact_type=artifact.artifact_type,
-                execution_context=package_context,
-            )
+            try:
+                # The home is named so the scope is derived under the store this
+                # lookup reads, not whichever home the process last bound.
+                policy_workspace = package_request_runtime_workspace_scope(
+                    artifact_id=artifact.artifact_id,
+                    artifact_hash=artifact_digest,
+                    artifact_type=artifact.artifact_type,
+                    execution_context=package_context,
+                    guard_home=self.store.guard_home,
+                )
+            except NativePackageWorkspaceScopeError:
+                # No scope means no saved approval can be matched, which is the
+                # same position as a request that was never approved.  The
+                # enclosing handler would instead fail the package request
+                # outright, which an unavailable resident does not warrant here.
+                policy_workspace = None
             stored_package_resolution = _resolve_stored_package_policy_override(
                 package_evaluation,
                 store=self.store,
@@ -1434,6 +1444,7 @@ class RuntimeMcpGuardProxy:
                 execution_context=package_context,
                 current_action=package_current_action,
                 claim_saved_approval=False,
+                policy_workspaces=(policy_workspace,) if policy_workspace is not None else (),
             )
             resolved_package_evaluation = stored_package_resolution.evaluation
             return _PackagePolicyResolution(
@@ -2688,12 +2699,29 @@ class RuntimeMcpGuardProxy:
         return (
             generation == self._tool_catalog_generation
             and state == self._tool_catalog_state
-            and fingerprint
-            == _tool_catalog_fingerprint(
-                self._tool_catalog,
-                state=self._tool_catalog_state,
-            )
+            and fingerprint == self._current_catalog_fingerprint()
         )
+
+    def _current_catalog_fingerprint(self) -> str:
+        """The native fingerprint of the current catalog and state.
+
+        A tools/call asks for it several times against a catalog that has not
+        changed. The native answer is reused only for byte-identical catalog
+        JSON in the same state, so any change, including one made in place,
+        asks the resident again.
+        """
+
+        state = self._tool_catalog_state
+        try:
+            document = json.dumps(self._tool_catalog, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            return _tool_catalog_fingerprint(self._tool_catalog, state=state)
+        memo = self._tool_catalog_fingerprint_memo
+        if memo is not None and memo[0] == state and memo[1] == document:
+            return memo[2]
+        fingerprint = _tool_catalog_fingerprint(self._tool_catalog, state=state)
+        self._tool_catalog_fingerprint_memo = (state, document, fingerprint)
+        return fingerprint
 
     def _drain_and_validate_catalog_authority(
         self,

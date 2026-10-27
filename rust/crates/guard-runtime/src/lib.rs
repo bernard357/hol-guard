@@ -4,6 +4,7 @@
 mod active_pack_security;
 #[path = "adapters/adapter_inventory.rs"]
 mod adapter_inventory;
+mod adapter_state_integrity_op;
 #[cfg(all(test, unix))]
 #[path = "adapters/adapter_vectors_tests.rs"]
 mod adapter_vectors_tests;
@@ -166,6 +167,7 @@ mod codex_value;
 mod codex_vectors_tests;
 mod command_capability_op;
 mod command_effect;
+mod command_envelope_op;
 mod command_expression_validate_op;
 mod command_policy_decide_op;
 mod command_policy_repair;
@@ -191,6 +193,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_low_trust_floor;
 mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
@@ -348,6 +351,7 @@ mod guard_store_connect_effective;
 mod guard_store_connect_vectors_tests;
 mod guard_store_connector_context;
 mod guard_store_db;
+mod guard_store_exact_cloud_apply;
 mod guard_store_guard_event;
 #[cfg(test)]
 mod guard_store_guard_event_tests;
@@ -465,6 +469,7 @@ mod hermes_yaml_resolve;
 #[path = "adapters/hook_adapter_op.rs"]
 mod hook_adapter_op;
 mod hook_approval_context;
+mod hook_artifact_compose_codex_live_allow;
 mod hook_artifact_compose_op;
 mod hook_artifact_compose_package_firewall;
 mod hook_artifact_compose_package_firewall_entitlement;
@@ -478,6 +483,8 @@ mod hook_bridge_daemon_start;
 mod hook_bridge_fallback;
 mod hook_cli_claude_text;
 mod hook_cli_emit;
+mod hook_cli_emit_redaction;
+mod hook_cli_emit_redaction_text;
 #[cfg(test)]
 mod hook_decision_apply_patch_gate_tests;
 mod hook_decision_artifact_directive;
@@ -631,6 +638,7 @@ mod native_review_link;
 mod native_runtime_admission;
 mod native_runtime_resilience;
 mod network_protection;
+mod network_protection_verify_op;
 mod oauth_refresh;
 mod oauth_secret_authority;
 mod oci_bundle_evidence;
@@ -654,6 +662,7 @@ mod package_approval_hash_op;
 mod package_audit_projection_op;
 mod package_authority_config;
 mod package_authority_op;
+mod package_config_mirror;
 mod package_context_build_op;
 mod package_evaluation_compose_op;
 mod package_evaluation_view_op;
@@ -663,6 +672,7 @@ mod package_posture_op;
 mod package_protect_finalize_op;
 mod package_protect_projection_op;
 mod package_review_plan_op;
+mod package_workspace_scope_op;
 mod persistence_action_class;
 #[path = "adapters/detection/pi_detect.rs"]
 mod pi_detect;
@@ -742,6 +752,7 @@ mod runtime_artifact_identity_op;
 mod runtime_cli;
 mod runtime_detector_run_op;
 mod runtime_identity;
+mod runtime_identity_instances;
 mod runtime_identity_launch;
 mod runtime_identity_launch_shebang;
 mod runtime_identity_probe;
@@ -779,6 +790,7 @@ mod state_directory_lock;
 #[cfg(test)]
 mod store_vectors_support_tests;
 mod strict_json;
+mod supply_chain_bundle_verify_op;
 #[cfg(test)]
 mod supply_chain_cloud_vectors_tests;
 mod supply_chain_egress;
@@ -788,6 +800,7 @@ mod supply_chain_eval_seams;
 mod supply_chain_eval_transport;
 mod tool_action_identity_op;
 mod totp;
+mod trust_attestation_verify_op;
 #[cfg(test)]
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
@@ -803,9 +816,11 @@ mod workspace_fix;
 mod workspace_fix_diff;
 mod workspace_fix_fs;
 mod workspace_fix_manifest;
+mod workspace_inventory_dependencies;
 mod workspace_inventory_files;
 mod workspace_inventory_op;
 mod workspace_mcp_config;
+mod workspace_package_findings;
 mod workspace_scan_targets;
 mod workspace_snapshot;
 mod workspace_snapshot_file;

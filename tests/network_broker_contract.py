@@ -8,18 +8,20 @@ from enum import Enum
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     NETWORK_BACKEND_SCHEMA_VERSION,
-    NETWORK_BROKER_SCHEMA_VERSION,
     BackendCapability,
-    DestinationKind,
     EnforcementGrade,
     NetworkAction,
+    grade_required_capabilities,
+    require_digest,
+    require_id,
+)
+from tests.network_policy_model import (
+    NETWORK_BROKER_SCHEMA_VERSION,
+    DestinationKind,
     NetworkProtocol,
     ProcessTreeIdentity,
     canonical_destination,
     canonical_digest,
-    grade_required_capabilities,
-    require_digest,
-    require_id,
 )
 
 

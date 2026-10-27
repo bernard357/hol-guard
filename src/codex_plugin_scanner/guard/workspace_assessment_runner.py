@@ -13,6 +13,7 @@ coordinates the way an interactive audit does.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -24,10 +25,14 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import workspace_assessment_store as assessments
+from .native_package_audit_projection import (
+    NativePackageAuditProjectionError,
+    SupplyChainProjection,
+    native_workspace_package_findings,
+)
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
-from .workspace_assessment_carry import listed_packages
 from .workspace_ci_workflow_findings import (
     CI_WORKFLOW_DETECTOR,
     project_ci_workflow_findings,
@@ -65,9 +70,10 @@ from .workspace_runtime_findings import (
 )
 from .workspace_secret_findings import SECRET_DETECTOR, load_fingerprint_key, project_secret_findings, secret_coverage
 from .workspace_skill_findings import SKILL_DETECTOR, project_skill_findings, with_skill_coverage
+from .workspace_supply_chain_findings import SUPPLY_CHAIN_DETECTOR
 
 DETECTOR_SET: Final = (
-    "supply_chain_local_v1",
+    SUPPLY_CHAIN_DETECTOR,
     SECRET_DETECTOR,
     RUNTIME_DETECTOR,
     SKILL_DETECTOR,
@@ -82,18 +88,7 @@ _CONTENT_SCANS: Final = ("secrets", "skills", "hooks", "plugins", "workflows", "
 DETECTOR_SET_DIGEST: Final = hashlib.sha256(
     ("guard.workspace-detectors.v1\0" + "\0".join(DETECTOR_SET)).encode("utf-8")
 ).hexdigest()
-_MAX_LIST_ITEMS: Final = 8
 _SEVERITY_ORDER: Final = ("critical", "high", "medium", "low", "info", "unknown")
-_FINDING_DECISIONS: Final = frozenset({"block", "ask", "warn"})
-# An automatic run never asks Cloud, so a package the cached bundle does not
-# cover comes back with one of these codes. They mean the answer is unknown,
-# which is a coverage gap rather than evidence that the package is risky.
-_LOOKUP_UNAVAILABLE: Final = frozenset(
-    {"cloud_auth_error", "cloud_http_error", "cloud_timeout", "cloud_validation_error"}
-)
-# With no advisory bundle cached, a package Guard only recorded was never
-# compared with any intelligence: it is unknown, not clean.
-_NO_CACHED_MATCH: Final = "no_cached_match"
 
 
 # A run that lost its lease (canceled, expired or fenced) records nothing;
@@ -122,6 +117,11 @@ def run_next(
         # A result over its storage bound is recorded as a failure instead of
         # leaving the lease to expire and the same run to repeat.
         failed = assessments.RunOutcome(state="failed", error_code="assessment_result_too_large")
+        assessments.finish(store, claimed, failed, now_ms=clock())
+    except NativePackageAuditProjectionError:
+        # Package ids could not be carried, so the run fails now instead of
+        # holding its lease until it expires and the run repeats.
+        failed = assessments.RunOutcome(state="failed", error_code="supply_chain_detector_failed")
         assessments.finish(store, claimed, failed, now_ms=clock())
     return True
 
@@ -154,6 +154,7 @@ def execute(
     try:
         with offline_egress() if automatic else nullcontext(None) as offline:
             payload = _local_audit(store, config, root)
+        supply, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload, store=store)
     except Exception:
         return assessments.RunOutcome(
             state="failed",
@@ -181,12 +182,11 @@ def execute(
             input_manifest_digest=before.input_manifest_digest,
             feed_context_digest=context_digest,
         )
-    supply_findings, supply_truncated = project_supply_chain_findings(run.keys.worktree_key, payload)
     runtime_findings, runtime_truncated = (
         project_runtime_findings(run.keys.worktree_key, posture) if posture is not None else ([], False)
     )
     findings, merge_truncated = merge_findings(
-        supply_findings,
+        supply.findings,
         project_secret_findings(before.secrets),
         runtime_findings,
         project_skill_findings(before.skills),
@@ -199,7 +199,7 @@ def execute(
     truncated = supply_truncated or runtime_truncated or merge_truncated
     refused = offline.refused if offline is not None else 0
     coverage = with_runtime_coverage(
-        coverage_summary(before, payload, findings_truncated=truncated, egress_refused=refused), posture
+        coverage_summary(before, payload, supply, findings_truncated=truncated, egress_refused=refused), posture
     )
     for add_coverage, result in (
         (with_skill_coverage, before.skills),
@@ -217,7 +217,7 @@ def execute(
         feed_context_digest=context_digest,
         coverage=coverage,
         findings=findings,
-        listed_packages=listed_packages(payload),
+        listed_packages=supply.listed,
     )
 
 
@@ -267,6 +267,7 @@ def _local_audit(store: Any, config: Any, root: Path) -> dict[str, object]:
         command_name="workspace-assessment",
         sbom_paths=(),
         allow_cloud_audit=False,
+        record_evidence=False,
     )
     return payload
 
@@ -290,6 +291,7 @@ def feed_context_digest(store: Any) -> str:
 def coverage_summary(
     snapshot: WorkspaceSnapshot,
     payload: Mapping[str, object],
+    supply: SupplyChainProjection,
     *,
     findings_truncated: bool,
     egress_refused: int = 0,
@@ -303,8 +305,8 @@ def coverage_summary(
         supply_chain = "incomplete" if has_inputs else "no_inputs"
     # The audit stopped, or a package needed registry or Cloud data the offline
     # run could not get.
-    missing_lookup = supply_chain == "incomplete" or bool(egress_refused or _unresolved_packages(payload))
-    unchecked = _unchecked_packages(payload) > 0
+    missing_lookup = supply_chain == "incomplete" or bool(egress_refused or supply.unresolved)
+    unchecked = supply.unchecked > 0
     if supply_chain == "complete" and (missing_lookup or unchecked):
         supply_chain = "incomplete"
     if missing_lookup:
@@ -342,58 +344,13 @@ def coverage_summary(
 
 
 def project_supply_chain_findings(
-    worktree_key: str, payload: Mapping[str, object]
-) -> tuple[list[dict[str, object]], bool]:
-    """Project audit packages into bounded workspace findings.
+    worktree_key: str, payload: Mapping[str, object], *, store: Any | None = None
+) -> tuple[SupplyChainProjection, bool]:
+    """Project audit packages into workspace findings within the run's bounds."""
 
-    A finding carries package coordinates, reason codes and advisory
-    identifiers. It never carries file content, commands or local paths.
-    """
-
-    findings: dict[str, dict[str, object]] = {}
-    for package in _packages(payload):
-        decision = str(package.get("decision") or "")
-        if decision not in _FINDING_DECISIONS or _lookup_unavailable(package):
-            continue
-        ecosystem = _text(package.get("ecosystem")) or "unknown"
-        name = _text(package.get("name"))
-        if name is None:
-            continue
-        version = _text(package.get("resolvedVersion")) or _text(package.get("requestedVersion"))
-        raw_reasons = package.get("reasons")
-        reasons = [item for item in raw_reasons if isinstance(item, Mapping)] if isinstance(raw_reasons, list) else []
-        rule_ids = {value[:128] for item in reasons if (value := _text(item.get("code")))}
-        if (rule_id := _text(package.get("ruleId"))) is not None:
-            rule_ids.add(rule_id[:128])
-        advisories = {value for item in reasons if (value := _text(item.get("advisoryId")))}
-        advisories.update(_strings(package.get("relatedAdvisoryIds")))
-        advisories.update(_strings(package.get("advisoryAliases")))
-        rule_list = sorted(rule_ids)[:_MAX_LIST_ITEMS]
-        finding_id = hashlib.sha256(
-            "\0".join(
-                ("guard.workspace-finding.v1", worktree_key, "supply_chain", ecosystem, name, version or "", *rule_list)
-            ).encode("utf-8")
-        ).hexdigest()[:32]
-        findings[finding_id] = {
-            "finding_id": finding_id,
-            "source_kind": "supply_chain",
-            "detector": DETECTOR_SET[0],
-            "severity": _max_severity(reasons),
-            "decision": decision,
-            "ecosystem": ecosystem,
-            "package_name": name,
-            "package_version": version,
-            "fix_version": _text(package.get("recommendedFixVersion")),
-            "rule_ids": rule_list,
-            "advisory_ids": sorted(advisories)[:_MAX_LIST_ITEMS],
-            "validation_state": "confirmed",
-            "lifecycle_state": "open",
-        }
-    ordered = sorted(
-        findings.values(),
-        key=lambda item: (_SEVERITY_ORDER.index(str(item["severity"])), str(item["package_name"])),
-    )
-    return _within_budget(ordered)
+    supply = native_workspace_package_findings(worktree_key, payload, store=store)
+    kept, truncated = _within_budget(supply.findings)
+    return dataclasses.replace(supply, findings=kept), truncated
 
 
 def merge_findings(*groups: list[dict[str, object]]) -> tuple[list[dict[str, object]], bool]:
@@ -429,54 +386,6 @@ def _within_budget(ordered: list[dict[str, object]]) -> tuple[list[dict[str, obj
 def _line(item: Mapping[str, object]) -> int:
     line = item.get("line")
     return line if isinstance(line, int) else 0
-
-
-def _packages(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
-    evaluation = payload.get("evaluation")
-    packages = evaluation.get("packages") if isinstance(evaluation, Mapping) else None
-    return [item for item in packages if isinstance(item, Mapping)] if isinstance(packages, list) else []
-
-
-def _lookup_unavailable(package: Mapping[str, object]) -> bool:
-    if package.get("decision") == "block":
-        return False
-    codes = _reason_codes(package)
-    return bool(codes) and codes <= _LOOKUP_UNAVAILABLE
-
-
-def _reason_codes(package: Mapping[str, object]) -> set[object]:
-    reasons = package.get("reasons")
-    codes = {item.get("code") for item in reasons if isinstance(item, Mapping)} if isinstance(reasons, list) else set()
-    codes.add(package.get("ruleId"))
-    codes.discard(None)
-    return codes
-
-
-def _unresolved_packages(payload: Mapping[str, object]) -> int:
-    return sum(1 for package in _packages(payload) if _lookup_unavailable(package))
-
-
-def _unchecked_packages(payload: Mapping[str, object]) -> int:
-    """Packages that went unchecked because no advisory bundle is cached."""
-
-    evaluation = payload.get("evaluation")
-    if not isinstance(evaluation, Mapping) or evaluation.get("bundle_version") is not None:
-        return 0
-    # The evaluator can add review reasons (an unidentified package, a lockfile
-    # drift) beside the miss; none of them means advisories were consulted.
-    return sum(1 for package in _packages(payload) if _NO_CACHED_MATCH in _reason_codes(package))
-
-
-def _max_severity(reasons: list[Mapping[str, object]]) -> str:
-    found = {str(item.get("severity") or "").lower() for item in reasons}
-    return next((level for level in _SEVERITY_ORDER if level in found), "unknown")
-
-
-def _text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped[:256] if stripped else None
 
 
 def _strings(value: object) -> list[str]:

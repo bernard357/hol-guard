@@ -105,6 +105,25 @@ export function worktreeStatus(
   return { label: "Up to date", tone: "green", detail: null };
 }
 
+// When the newest run has not produced a result yet, or failed, the findings
+// on screen still come from the last finished assessment, so say when that was.
+export function checkedSummary(
+  worktree: WorkspaceWorktree,
+  newestRun: WorkspaceRun | undefined,
+  assessment: WorkspaceAssessment | undefined,
+): string {
+  const pending = newestRun?.state === "running" || newestRun?.state === "queued" || newestRun?.state === "failed";
+  // lastScanAtMs also moves when a run fails, so it cannot stand in for a finished check.
+  if (assessment === undefined && pending) return "No check has finished yet.";
+  const earlier = assessment !== undefined && pending && newestRun?.runId !== assessment.runId;
+  // The two endpoints are read separately, so a finished run can arrive before its assessment.
+  const runAtMs = newestRun?.state === "completed" || newestRun?.state === "partial" ? newestRun.finishedAtMs : null;
+  const atMs = assessment?.finishedAtMs ?? (earlier ? null : (runAtMs ?? worktree.lastScanAtMs));
+  if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
+  const when = formatRelativeTime(new Date(atMs).toISOString());
+  return earlier ? `Showing results from the check ${when.replace(/^Yesterday/, "yesterday")}.` : `Checked ${when}`;
+}
+
 function trimTrailingSeparators(root: string): string {
   const trimmed = root.replace(/[\\/]+$/, "");
   return trimmed === "" ? root : trimmed;
@@ -291,9 +310,8 @@ export function WorktreeRow(props: {
           <p className="mt-1 truncate font-mono text-xs text-slate-500" title={worktree.root}>
             {worktree.root}
           </p>
-          <p className="mt-1 text-sm text-slate-600">
-            {status.detail ?? (worktree.lastScanAtMs ? `Checked ${formatRelativeTime(new Date(worktree.lastScanAtMs).toISOString())}` : "Waiting for the first check.")}
-          </p>
+          {status.detail && <p className="mt-1 text-sm text-slate-600">{status.detail}</p>}
+          <p className="mt-1 text-sm text-slate-500">{checkedSummary(worktree, props.newestRun, assessment)}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <ActionButton

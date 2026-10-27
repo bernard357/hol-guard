@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Final
 from urllib.parse import urlsplit
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import (
+from tests.network_policy_model import (
     Destination,
     DestinationKind,
     NetworkFlowRequest,

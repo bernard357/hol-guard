@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
@@ -125,13 +126,20 @@ def native_cli_hook_emit(
     event_name: str,
     guard_home: Path | None = None,
     deadline: float | None = None,
+    bridge: bool = False,
+    document: bool = False,
 ) -> dict[str, object] | None:
     """Read a daemon answer the way ``hol-guard hook`` prints it.
 
     ``harness`` is canonical. A bridge-rendered harness gets ``stdout``,
     ``stderr`` and ``exit_code``; any other gets the ``policy_action`` its
-    exit status follows. ``None`` when the resident cannot answer, so the
-    caller fails closed rather than reading the answer here. The answer
+    exit status follows. ``bridge`` asks for the bounded bridge's output for
+    every harness, which is what that bridge prints. ``document`` also asks
+    a harness outside the bridges for the redacted document it prints, as
+    ``stdout``, and the ``exit_code`` it exits with; the resident shortens
+    this process's home directory in it. A resident that predates
+    ``document`` answers without ``stdout``. ``None`` when the resident
+    cannot answer, so the caller fails closed rather than reading the answer here. The answer
     travels as compact JSON so the resident reads the exact text Python would
     have printed, lone surrogates included. ``deadline`` is the hook's
     absolute ``time.monotonic()`` budget; the render gets only what remains.
@@ -147,6 +155,12 @@ def native_cli_hook_emit(
         # names it, so a person pasting the command repairs this install and
         # not whichever one the bare command would find.
         params["guard_home"] = str(guard_home)
+    if bridge:
+        params["bridge"] = True
+    if document:
+        params["document"] = True
+        with suppress(RuntimeError):
+            params["home_dir"] = str(Path.home())
     rendered = native_render_cli("cli_hook_emit", harness, params, guard_home=guard_home, deadline=deadline)
     return rendered[1] if rendered is not None else None
 

@@ -17,9 +17,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from .store_workspace_assessment_schema import MAX_COVERAGE_JSON_BYTES, MAX_FINDINGS_JSON_BYTES
-from .workspace_assessment_carry import carry_unchecked_findings
+from .workspace_assessment_carry import carry_unchecked_findings, keep_package_identities
 from .workspace_assessment_reads import (
-    get_run,
     latest_assessed_run,
     latest_assessed_runs,
     latest_runs,
@@ -294,9 +293,11 @@ def finish(store: Any, run: ClaimedRun, outcome: RunOutcome, *, now_ms: int) -> 
 
     if outcome.state not in _FINISHED_STATES:
         raise ValueError("invalid workspace assessment outcome state")
+    # Only one run of a worktree runs at a time, so its last run stays put.
+    previous = latest_assessed_run(store, run.keys)
+    outcome, settled = keep_package_identities(outcome, previous, store=store)
     if outcome.state == "partial":
-        # Only one run of a worktree runs at a time, so its last run stays put.
-        outcome = carry_unchecked_findings(outcome, latest_assessed_run(store, run.keys))
+        outcome = carry_unchecked_findings(outcome, previous, settled)
     coverage_json = _bounded_json(dict(outcome.coverage or {}), MAX_COVERAGE_JSON_BYTES)
     findings_json = _bounded_json([dict(item) for item in outcome.findings], MAX_FINDINGS_JSON_BYTES)
     with store._connect() as connection:
@@ -464,7 +465,6 @@ __all__ = [
     "claim_next",
     "enqueue",
     "finish",
-    "get_run",
     "latest_assessed_run",
     "latest_assessed_runs",
     "latest_runs",

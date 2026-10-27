@@ -534,11 +534,17 @@ Current material gaps include:
   `claude_permission_verdict` or `hook_route` any more.
 - The CLI hook reads the daemon's answer through the resident's
   `hook_render` `cli_hook_emit` kind: a bridge-rendered harness gets its wire
-  output and exit status, any other the policy action its exit status
-  follows. When the resident cannot answer, the CLI prints the fixed
-  fail-closed bridge payload or exits with the harness's block status. The
-  Python bounded bridge still renders with `_daemon_response_to_native` when
-  the native bridge cannot run.
+  output and exit status. Any other harness asks with `document: true` and
+  the caller's `home_dir`, and gets the redacted document it prints (secrets
+  masked, home paths shortened, the signed `guard-token=` approval link kept
+  byte for byte), its exit status, and the policy action; Python no longer
+  redacts or renders that document. When the resident cannot answer, the CLI
+  prints the fixed fail-closed bridge payload, or the fixed
+  `fail_closed_response` envelope with the harness's outage exit status. When
+  the native bridge cannot run, the Python bounded bridge asks the same op with
+  `bridge: true`, which renders the daemon's answer for every harness as the
+  native bridge prints it, and prints the fixed fail-closed payload when the
+  resident cannot answer.
 
 ## No-environment production contract
 

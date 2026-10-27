@@ -34,6 +34,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use guard_contracts::write_canonical_json;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256, Sha512};
 
@@ -50,10 +51,9 @@ use crate::package_manifest_diff::parse_manifest_dependencies;
 use crate::package_policy_override as ppo;
 use crate::package_protect_projection as ppp;
 use crate::workspace_inventory::{
-    inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
-    split_namespace_name, target_for_package_spec, target_from_inventory_item,
-    target_from_manifest_dependency, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST,
-    SEVERITY_RANK,
+    dependency_name, inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
+    target_for_package_spec, target_from_inventory_item, target_from_manifest_dependency,
+    DirectDependencies, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST, SEVERITY_RANK,
 };
 
 pub const WORKSPACE_AUDIT_DISCOVERY_MAX_DEPTH: usize = 3;
@@ -1092,6 +1092,22 @@ pub const VALID_RISK_ACTION_KEYS: &[&str] = &[
 /// `DEFAULT_SECURITY_LEVEL` (config.py).
 pub const DEFAULT_SECURITY_LEVEL: &str = "balanced";
 
+/// Days in a Gregorian month, so an impossible calendar day is rejected
+/// rather than rolled into the next month.
+fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+/// Python's `datetime.fromisoformat` reads the whole string or raises, and it
+/// knows how long each month is. This mirror did neither, so a signed document
+/// carrying `2026-02-31` or an instant with text after it parsed here where it
+/// was refused before.
 pub fn parse_timestamp(value: &str) -> Option<Timestamp> {
     let text = value.trim();
     let bytes = text.as_bytes();
@@ -1104,7 +1120,7 @@ pub fn parse_timestamp(value: &str) -> Option<Timestamp> {
     }
     let month: u32 = text.get(5..7)?.parse().ok()?;
     let day: u32 = text.get(8..10)?.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
         return None;
     }
     let mut hour: u32 = 0;
@@ -1145,21 +1161,35 @@ pub fn parse_timestamp(value: &str) -> Option<Timestamp> {
         } else {
             cursor += 5;
         }
+        if hour > 23 || minute > 59 || second > 59 {
+            return None;
+        }
         if let Some(&marker) = bytes.get(cursor) {
             match marker {
-                b'Z' | b'z' => offset_seconds = 0,
+                b'Z' | b'z' => {
+                    offset_seconds = 0;
+                    cursor += 1;
+                }
                 b'+' | b'-' => {
                     let sign: i64 = if marker == b'-' { -1 } else { 1 };
                     let off_h = two(text, cursor + 1)?;
-                    let off_m = if bytes.get(cursor + 3) == Some(&b':') {
+                    let separated = bytes.get(cursor + 3) == Some(&b':');
+                    let off_m = if separated {
                         two(text, cursor + 4)?
                     } else {
                         two(text, cursor + 3)?
                     };
+                    if off_h > 23 || off_m > 59 {
+                        return None;
+                    }
                     offset_seconds = sign * ((off_h as i64) * 3600 + (off_m as i64) * 60);
+                    cursor += if separated { 6 } else { 5 };
                 }
-                _ => {}
+                _ => return None,
             }
+        }
+        if cursor != bytes.len() {
+            return None;
         }
     }
     let days = days_from_civil(year, month as i64, day as i64);
@@ -3472,6 +3502,7 @@ fn workspace_inventory_from_paths(
     manifest_parser: &dyn ManifestParserApi,
 ) -> Vec<Map<String, Value>> {
     let mut inventory_map = InventoryMap::new();
+    let mut direct_dependencies = DirectDependencies::default();
 
     for relative_path in manifest_paths {
         let text = match read_workspace_audit_text(paths, workspace_dir, relative_path) {
@@ -3489,23 +3520,10 @@ fn workspace_inventory_from_paths(
             DEFAULT_MANIFEST_PARSE_DEADLINE_MS,
         );
         for (package_name, version) in &dependency_map {
-            let mut item = Map::new();
-            item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
-            item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
-            item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(true));
-            let range = version.trim();
-            item.insert(
-                "range".into(),
-                if range.is_empty() {
-                    Value::Null
-                } else {
-                    Value::String(range.to_string())
-                },
-            );
-            item.insert("version".into(), Value::Null);
-            merge_inventory_item(&mut inventory_map, &item);
+            let range = Some(version.trim())
+                .filter(|range| !range.is_empty())
+                .map(str::to_string);
+            direct_dependencies.record(relative_path, ecosystem, package_name, range);
         }
     }
 
@@ -3527,11 +3545,15 @@ fn workspace_inventory_from_paths(
         for (package_name, version) in &dependency_map {
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
+            let (ns, name) = dependency_name(ecosystem, package_name);
             item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
             item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(false));
-            item.insert("range".into(), Value::Null);
+            let range = direct_dependencies.lockfile_range(relative_path, ecosystem, package_name);
+            item.insert("direct".into(), json!(range.is_some()));
+            item.insert(
+                "range".into(),
+                range.flatten().map_or(Value::Null, Value::String),
+            );
             let version = version.trim();
             item.insert(
                 "version".into(),
@@ -3544,6 +3566,19 @@ fn workspace_inventory_from_paths(
             merge_inventory_item(&mut inventory_map, &item);
         }
     }
+
+    for (ecosystem, package_name, range) in direct_dependencies.unresolved() {
+        let mut item = Map::new();
+        item.insert("ecosystem".into(), json!(ecosystem));
+        let (ns, name) = dependency_name(ecosystem, package_name);
+        item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
+        item.insert("name".into(), json!(name));
+        item.insert("direct".into(), json!(true));
+        item.insert("range".into(), range.map_or(Value::Null, Value::String));
+        item.insert("version".into(), Value::Null);
+        merge_inventory_item(&mut inventory_map, &item);
+    }
+    inventory_map.lead_with(direct_dependencies.listed_keys());
 
     inventory_map.into_values()
 }
@@ -3742,7 +3777,7 @@ fn workspace_diff_audit_inventory(
                 Some(v) => v,
                 None => continue,
             };
-            let (ns, name) = split_namespace_name(&change.package_name);
+            let (ns, name) = dependency_name(ecosystem, &change.package_name);
             changed_packages.push(change.package_name.clone());
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
@@ -5400,16 +5435,24 @@ pub fn package_request_runtime_workspace_scope(
         "scope": "package-request-workspace-exact",
         "version": PACKAGE_EXECUTION_CONTEXT_VERSION,
     });
-    let canonical = serde_json::to_string(&material).unwrap_or_default();
-    let digest = stable_digest_hex(canonical.as_bytes());
+    let digest = package_scope_digest(&material)?;
     Some(format!(
         "package-request-workspace-exact:v{PACKAGE_EXECUTION_CONTEXT_VERSION}:{digest}"
     ))
 }
 
+/// The key a saved package approval is already stored under: `json.dumps(
+/// material, sort_keys=True, separators=(",", ":"))` hashed with plain
+/// SHA-256. The crate's keyed `stable_digest_hex` would be a different string,
+/// and a different string is an approval the user has to grant a second time.
+fn package_scope_digest(material: &Value) -> Option<String> {
+    let mut encoded = Vec::new();
+    write_canonical_json(material, &mut encoded).ok()?;
+    Some(sha256_content_digest(&encoded))
+}
+
 /// `approval_scope_support.package_request_portable_workspace_scope`.
-#[allow(dead_code)]
-fn package_request_portable_workspace_scope(
+pub fn package_request_portable_workspace_scope(
     artifact_id: Option<&str>,
     artifact_hash: Option<&str>,
     artifact_type: Option<&str>,
@@ -5433,8 +5476,7 @@ fn package_request_portable_workspace_scope(
         "scope": "package-request-workspace",
         "version": PACKAGE_EXECUTION_CONTEXT_VERSION,
     });
-    let canonical = serde_json::to_string(&material).unwrap_or_default();
-    let digest = stable_digest_hex(canonical.as_bytes());
+    let digest = package_scope_digest(&material)?;
     Some(format!(
         "package-request-workspace:v{PACKAGE_EXECUTION_CONTEXT_VERSION}:{digest}"
     ))
@@ -5865,6 +5907,24 @@ pub fn package_config_policy_context(
     artifact: &GuardArtifact,
     config: Option<&GuardConfig>,
 ) -> Map<String, Value> {
+    package_config_policy_context_for(
+        &artifact.artifact_id,
+        artifact.publisher.as_deref(),
+        &artifact.harness,
+        config,
+    )
+}
+
+/// The same context for a caller that holds the artifact's identity rather
+/// than the artifact itself: a request the resident answers carries the
+/// artifact as a payload, and these three fields are all of it the context
+/// reads.
+pub fn package_config_policy_context_for(
+    artifact_id: &str,
+    publisher: Option<&str>,
+    harness: &str,
+    config: Option<&GuardConfig>,
+) -> Map<String, Value> {
     let mut out = Map::new();
     let Some(config) = config else {
         out.insert("available".into(), json!(false));
@@ -5879,12 +5939,10 @@ pub fn package_config_policy_context(
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    let artifact_override = map_lookup("artifact_actions", &artifact.artifact_id);
-    let publisher_override = artifact
-        .publisher
-        .as_deref()
-        .and_then(|publisher| map_lookup("publisher_actions", publisher));
-    let harness_override = map_lookup("harness_actions", &artifact.harness);
+    let artifact_override = map_lookup("artifact_actions", artifact_id);
+    let publisher_override =
+        publisher.and_then(|publisher| map_lookup("publisher_actions", publisher));
+    let harness_override = map_lookup("harness_actions", harness);
     out.insert("artifact_override".into(), option_json(artifact_override));
     out.insert("available".into(), json!(true));
     out.insert(
@@ -5892,19 +5950,19 @@ pub fn package_config_policy_context(
         option_json(resolve_risk_action(
             config,
             Some("package_script"),
-            Some(&artifact.harness),
+            Some(harness),
         )),
     );
     out.insert(
         "global_package_script_action".into(),
         option_json(resolve_risk_action(config, Some("package_script"), None)),
     );
-    out.insert("harness".into(), json!(artifact.harness));
+    out.insert("harness".into(), json!(harness));
     out.insert("harness_override".into(), option_json(harness_override));
     out.insert(
         "harness_package_script_action".into(),
         option_json(config.harness_risk_actions.as_ref().and_then(|map| {
-            map.get(&artifact.harness)
+            map.get(harness)
                 .and_then(|inner| inner.get("package_script"))
                 .cloned()
         })),

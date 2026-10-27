@@ -52,17 +52,25 @@ class StoreApprovalsMixin:
         now: str,
         *,
         prompt_shown: bool | None = None,
+        claude_review: dict[str, object] | None = None,
     ) -> str:
         # The resident backfills legacy queue rows, derives the canonical
         # surfaces and queue identity, deduplicates and binds the outbox event
         # in one transaction. With ``prompt_shown`` set, a newly queued request
         # also gets its ``approval.created`` (and, when prompted,
-        # ``ask_once_shown``) event there. Its silence keeps the projection
+        # ``ask_once_shown``) event there. With ``claude_review`` set, the
+        # resident also builds and signs the Claude permission notice for a
+        # newly queued request, best effort. Its silence keeps the projection
         # owner's error.
+        args: dict[str, object] = {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown}
+        if claude_review is not None:
+            args["claude_review"] = claude_review["review"]
+            args["integrity_key_b64"] = claude_review["integrity_key_b64"]
+            args["integrity_key_id"] = claude_review["integrity_key_id"]
         try:
             request_id = self._native_store_call(
-                "add_approval_request",
-                {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown},
+                "add_approval_request" if claude_review is None else "add_claude_approval_request",
+                args,
             )
         except NativeGuardStoreUnavailable as error:
             raise NativeSignalProjectionUnavailableError(error.reason) from error

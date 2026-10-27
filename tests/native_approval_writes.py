@@ -129,3 +129,30 @@ def seed_pending_approval_rows(conn: sqlite3.Connection, total: int, *, workspac
         rows,
     )
     conn.commit()
+
+
+def bulk_resolve_approval_requests(
+    connection: sqlite3.Connection,
+    request_ids: list[str],
+    *,
+    resolution_action: str,
+    resolution_scope: str,
+    reason: str | None,
+    resolved_at: str,
+) -> None:
+    if not request_ids:
+        return
+    placeholders = ",".join("?" for _ in request_ids)
+    connection.execute(
+        f"""
+        update approval_requests
+        set status = 'resolved',
+            resolution_action = ?,
+            resolution_scope = ?,
+            reason = ?,
+            resolved_at = ?
+        where request_id in ({placeholders})
+          and status = 'pending'
+        """,
+        [resolution_action, resolution_scope, reason, resolved_at, *request_ids],
+    )

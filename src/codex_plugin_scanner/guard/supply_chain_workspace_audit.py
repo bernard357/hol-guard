@@ -136,6 +136,7 @@ def build_workspace_audit_payload(
     before_workspace_dir: Path | None = None,
     after_workspace_dir: Path | None = None,
     allow_cloud_audit: bool = True,
+    record_evidence: bool = True,
 ) -> tuple[dict[str, object], int]:
     runner = _lsc._runtime_runner_module()
 
@@ -217,6 +218,7 @@ def build_workspace_audit_payload(
                     command_name=command_name,
                     inventory_digest=workspace_inventory.inventory_digest,
                     now=now,
+                    record_evidence=record_evidence,
                 )
         except (runner.GuardSyncAuthorizationExpiredError, runner.GuardSyncNotConfiguredError, RuntimeError) as error:
             fallback_reason = (
@@ -240,6 +242,7 @@ def build_workspace_audit_payload(
                 command_name=command_name,
                 inventory_digest=workspace_inventory.inventory_digest,
                 now=now,
+                record_evidence=record_evidence,
             )
     else:
         evaluation = _workspace_local_evaluation(
@@ -252,6 +255,7 @@ def build_workspace_audit_payload(
             command_name=command_name,
             inventory_digest=workspace_inventory.inventory_digest,
             now=now,
+            record_evidence=record_evidence,
         )
     evaluation = _enrich_evaluation_packages_with_advisory_aliases(evaluation, store)
     payload: dict[str, object] = {
@@ -292,6 +296,7 @@ def _workspace_local_evaluation(
     command_name: str,
     inventory_digest: str,
     now: str,
+    record_evidence: bool,
 ) -> dict[str, object]:
     # The targets walk repeats the audit's inventory options so its snapshot
     # digest is comparable; a workspace that changed in between is rejected
@@ -326,6 +331,7 @@ def _workspace_local_evaluation(
         store=store,
         workspace_dir=workspace_dir,
         now=now,
+        record_evidence=record_evidence,
     )
     return evaluation.to_dict()
 

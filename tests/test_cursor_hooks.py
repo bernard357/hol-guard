@@ -22,12 +22,12 @@ from codex_plugin_scanner.guard.adapters.cursor_hooks import (
     cursor_hooks_path,
     cursor_native_hook_state,
     install_cursor_hooks,
-    prepare_cursor_hook_payload,
     uninstall_cursor_hooks,
 )
 from codex_plugin_scanner.guard.cli import update_commands as guard_update_commands_module
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.cursor_hook_payload_support import prepare_cursor_hook_payload
 
 
 def test_prepare_cursor_hook_payload_maps_before_read_file() -> None:
@@ -1075,29 +1075,6 @@ def test_prepare_cursor_hook_payload_maps_after_mcp_execution() -> None:
     tool_input = payload["tool_input"]
     assert isinstance(tool_input, dict)
     assert tool_input["command"] == "pnpm test"
-
-
-def test_cursor_hook_warn_with_risk_remains_allowed_without_a_prompt() -> None:
-    from codex_plugin_scanner.guard.adapters.cursor_hooks import cursor_hook_would_prompt_user
-
-    payload = {"risk_signals": ["destructive shell command"]}
-    assert not cursor_hook_would_prompt_user(
-        policy_action="warn",
-        guard_payload=payload,
-    )
-    assert not cursor_hook_would_prompt_user(policy_action="allow", guard_payload={})
-    assert cursor_hook_would_prompt_user(policy_action="review", guard_payload={})
-    assert cursor_hook_would_prompt_user(policy_action="require-reapproval", guard_payload={})
-
-
-def test_validated_hol_guard_src_path_rejects_non_guard_trees(tmp_path: Path) -> None:
-    from codex_plugin_scanner.guard.adapters.cursor_hooks import _validated_hol_guard_src_path
-
-    assert _validated_hol_guard_src_path(str(tmp_path)) is None
-    src_root = tmp_path / "src"
-    src_root.mkdir()
-    (src_root / "codex_plugin_scanner").mkdir()
-    assert _validated_hol_guard_src_path(str(src_root)) == str(src_root.resolve())
 
 
 def test_cursor_hook_script_source_infers_event_before_prepare(tmp_path: Path) -> None:

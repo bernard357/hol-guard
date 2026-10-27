@@ -32,7 +32,7 @@ def test_constructing_a_proxy_does_not_leave_a_digest_home_bound(tmp_path: Path)
 
 
 def test_malformed_reuse_answer_is_rejected_as_a_decision_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from codex_plugin_scanner.guard import native_mcp_sensitive_read as transport
+    from tests import native_mcp_sensitive_read_client as transport
 
     monkeypatch.setattr(transport, "native_mcp_proxy_decide", lambda *_a, **_k: {"policy_action": "allow"})
 

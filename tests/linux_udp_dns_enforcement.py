@@ -12,16 +12,18 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
-    DestinationKind,
     EnforcementGrade,
     NetworkAction,
+)
+from tests.linux_tcp_enforcement import LinuxTcpPolicyArtifact
+from tests.network_policy_model import (
+    DestinationKind,
     NetworkPolicy,
     NetworkProtocol,
     ProcessTreeIdentity,
     canonical_digest,
     canonical_json,
 )
-from tests.linux_tcp_enforcement import LinuxTcpPolicyArtifact
 
 LINUX_UDP_DNS_SCHEMA_VERSION: Final = "guard.linux-udp-dns-policy.v1"
 

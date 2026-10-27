@@ -43,13 +43,10 @@ from codex_plugin_scanner.guard.cli.render import emit_guard_payload
 from codex_plugin_scanner.guard.codex_config import dump_toml
 from codex_plugin_scanner.guard.config import GuardConfig, load_guard_config, resolve_risk_action
 from codex_plugin_scanner.guard.desktop_notifications import DesktopNotificationSetupResult
-from codex_plugin_scanner.guard.policy_bundle_parser import (
-    computed_policy_bundle_hash,
-    payload_hash_for_policy_bundle,
-)
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, payload_hash_for_policy_bundle
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
 from tests.support.network import stub_authenticated_urlopen
 from tests.update_context_test_support import build_legacy_update_context, stage_legacy_wheel
@@ -5573,11 +5570,9 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
         ],
     )
     def test_guard_codex_hook_applies_the_saved_network_bundle(self, tmp_path, capsys, command, decision, reason):
-        from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key
-
         from codex_plugin_scanner.guard.runtime.network_protection_bundle import NETWORK_PROTECTION_SYNC_STATE_KEY
 
-        from .test_network_protection_bundle import _iso, _response, _verify
+        from .test_network_protection_bundle import _iso, _saved
 
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
@@ -5585,10 +5580,9 @@ curl --data-binary @"$1" http://127.0.0.1:8787/guard-canary
         _write_codex_pre_tool_payload(payload_path, workspace_dir, command)
         # Indicators older than a week stop applying, so the bundle is current.
         now = datetime.now(timezone.utc)
-        key = generate_private_key(public_exponent=65537, key_size=2048)
         GuardStore(home_dir).set_sync_payload(
             NETWORK_PROTECTION_SYNC_STATE_KEY,
-            _verify(_response(key, generated_at=now), key, now=now.timestamp()),
+            _saved(generated_at=now),
             _iso(now),
         )
 

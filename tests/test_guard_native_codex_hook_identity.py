@@ -28,6 +28,20 @@ def _resident(monkeypatch: pytest.MonkeyPatch, reply) -> list[dict[str, object]]
     return sent
 
 
+def _identity(**question: object) -> str:
+    """Ask the bridge for one handler identity, as a single-entry request."""
+
+    entry = codex_hook_identity._handler_entry(codex_hook_identity.CodexHookHandlerQuestion(**question))
+    return codex_hook_identity._digest_of(bridge.native_codex_hook_identity([entry])[0])
+
+
+def _argv(command: str | None) -> tuple[str, ...] | None:
+    """Ask the bridge to tokenize one command, as a single-entry request."""
+
+    entry = codex_hook_identity._argv_entry(command)
+    return codex_hook_identity._argv_of(bridge.native_codex_hook_identity([entry])[0])
+
+
 def _digests(request: dict[str, object]) -> dict[str, object]:
     entries = request["entries"]
     assert isinstance(entries, list)
@@ -42,7 +56,7 @@ def test_no_entries_never_reaches_the_resident(monkeypatch: pytest.MonkeyPatch) 
 
 def test_the_wire_carries_the_coordinates_and_the_definition(monkeypatch: pytest.MonkeyPatch) -> None:
     sent = _resident(monkeypatch, _digests)
-    codex_hook_identity.canonical_codex_hook_identity(
+    _identity(
         source_scope="user",
         source_hooks_enabled=True,
         event_name="PreToolUse",
@@ -66,7 +80,7 @@ def test_the_wire_carries_the_coordinates_and_the_definition(monkeypatch: pytest
 
 def test_an_argv_request_sends_only_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
     sent = _resident(monkeypatch, lambda _request: {"identities": [{"argv": ["echo", "hi"]}]})
-    assert codex_hook_identity.canonical_codex_command_argv("echo hi") == ("echo", "hi")
+    assert _argv("echo hi") == ("echo", "hi")
     assert sent[0]["entries"] == [
         {
             "kind": "argv",
@@ -80,24 +94,28 @@ def test_an_argv_request_sends_only_the_command(monkeypatch: pytest.MonkeyPatch)
 
 def test_an_argv_answer_of_null_is_not_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     _resident(monkeypatch, lambda _request: {"identities": [{"argv": None}]})
-    assert codex_hook_identity.canonical_codex_command_argv("sh -c 'echo $HOME'") is None
+    assert _argv("sh -c 'echo $HOME'") is None
 
 
 def test_conflict_keys_come_back_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     _resident(monkeypatch, lambda _request: {"identities": [{"digests": ["a", "b"]}]})
-    assert codex_hook_identity.canonical_codex_hook_conflict_keys(
-        source_scope="user",
-        source_hooks_enabled=True,
-        event_name="PreToolUse",
-        group={"hooks": [{"command": "x"}, {"command": "y"}]},
-    ) == ("a", "b")
+    assert codex_hook_identity.canonical_codex_hook_group_conflict_keys(
+        (
+            codex_hook_identity.CodexHookGroupQuestion(
+                source_scope="user",
+                source_hooks_enabled=True,
+                event_name="PreToolUse",
+                group={"hooks": [{"command": "x"}, {"command": "y"}]},
+            ),
+        )
+    ) == (("a", "b"),)
 
 
 def test_scalars_json_cannot_carry_travel_as_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     """A date, a time, a datetime, a non-finite float and a wide integer."""
 
     sent = _resident(monkeypatch, _digests)
-    codex_hook_identity.canonical_codex_hook_identity(
+    _identity(
         source_scope="user",
         source_hooks_enabled=True,
         event_name="PreToolUse",
@@ -133,7 +151,7 @@ def test_a_token_can_never_be_a_string_the_payload_already_holds(
     sent = _resident(monkeypatch, _digests)
     drawn = iter(["collides", "collides", "clear", "request-id"])
     monkeypatch.setattr(bridge, "uuid4", lambda: type("Hex", (), {"hex": next(drawn)})())
-    codex_hook_identity.canonical_codex_hook_identity(
+    _identity(
         source_scope="user",
         source_hooks_enabled=True,
         event_name="PreToolUse",
@@ -149,7 +167,7 @@ def test_a_key_json_cannot_name_arrives_in_its_canonical_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sent = _resident(monkeypatch, _digests)
-    codex_hook_identity.canonical_codex_hook_identity(
+    _identity(
         source_scope="user",
         source_hooks_enabled=True,
         event_name="PreToolUse",
@@ -171,7 +189,7 @@ def test_an_unusable_reply_leaves_the_caller_without_an_identity() -> None:
         monkeypatch_context = pytest.MonkeyPatch()
         _resident(monkeypatch_context, reply)
         with pytest.raises(bridge.CodexHookIdentityUnavailableError):
-            codex_hook_identity.canonical_codex_hook_identity(
+            _identity(
                 source_scope="user",
                 source_hooks_enabled=True,
                 event_name="PreToolUse",
@@ -187,11 +205,15 @@ def test_a_resident_that_cannot_start_is_not_a_missing_identity(
     monkeypatch.setattr(bridge, "_resolve_digest_home", lambda _home: Path("/tmp/codex-hook-identity-home"))
     monkeypatch.setattr(bridge, "ensure_resident_prerequisite", lambda _home: False)
     with pytest.raises(bridge.CodexHookIdentityUnavailableError):
-        codex_hook_identity.canonical_codex_hook_group_identity(
-            source_scope="user",
-            source_hooks_enabled=True,
-            event_name="PreToolUse",
-            group={},
+        codex_hook_identity.canonical_codex_hook_group_identities(
+            (
+                codex_hook_identity.CodexHookGroupQuestion(
+                    source_scope="user",
+                    source_hooks_enabled=True,
+                    event_name="PreToolUse",
+                    group={},
+                ),
+            )
         )
 
 
@@ -210,11 +232,15 @@ def _nested(depth: int) -> dict[str, object]:
 
 def test_a_definition_the_resident_would_read_still_ships(monkeypatch: pytest.MonkeyPatch) -> None:
     sent = _resident(monkeypatch, _digests)
-    codex_hook_identity.canonical_codex_hook_group_identity(
-        source_scope="user",
-        source_hooks_enabled=True,
-        event_name="PreToolUse",
-        group=_nested(bridge._MAX_DEFINITION_DEPTH),
+    codex_hook_identity.canonical_codex_hook_group_identities(
+        (
+            codex_hook_identity.CodexHookGroupQuestion(
+                source_scope="user",
+                source_hooks_enabled=True,
+                event_name="PreToolUse",
+                group=_nested(bridge._MAX_DEFINITION_DEPTH),
+            ),
+        )
     )
     assert len(sent) == 1
 
@@ -224,11 +250,15 @@ def test_a_definition_deeper_than_the_resident_reads_names_the_config(
 ) -> None:
     sent = _resident(monkeypatch, _digests)
     with pytest.raises(bridge.CodexHookDefinitionTooDeepError) as raised:
-        codex_hook_identity.canonical_codex_hook_group_identity(
-            source_scope="user",
-            source_hooks_enabled=True,
-            event_name="PreToolUse",
-            group=_nested(bridge._MAX_DEFINITION_DEPTH + 1),
+        codex_hook_identity.canonical_codex_hook_group_identities(
+            (
+                codex_hook_identity.CodexHookGroupQuestion(
+                    source_scope="user",
+                    source_hooks_enabled=True,
+                    event_name="PreToolUse",
+                    group=_nested(bridge._MAX_DEFINITION_DEPTH + 1),
+                ),
+            )
         )
     assert raised.value.code == "native_codex_hook_definition_too_deep"
     # A caller that only knows the broad failure still fails closed on it.
@@ -242,10 +272,14 @@ def test_a_deep_list_counts_toward_the_same_bound(monkeypatch: pytest.MonkeyPatc
     for _ in range(bridge._MAX_DEFINITION_DEPTH - 1):
         group = {"nested": group}
     with pytest.raises(bridge.CodexHookDefinitionTooDeepError):
-        codex_hook_identity.canonical_codex_hook_group_identity(
-            source_scope="user",
-            source_hooks_enabled=True,
-            event_name="PreToolUse",
-            group=cast("dict[str, object]", group),
+        codex_hook_identity.canonical_codex_hook_group_identities(
+            (
+                codex_hook_identity.CodexHookGroupQuestion(
+                    source_scope="user",
+                    source_hooks_enabled=True,
+                    event_name="PreToolUse",
+                    group=cast("dict[str, object]", group),
+                ),
+            )
         )
     assert sent == []

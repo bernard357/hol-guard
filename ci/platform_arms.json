@@ -1547,6 +1547,14 @@
    "body": "21a1afbb5f71"
   },
   {
+   "verdict": "other-platform",
+   "note": "Windows reads the creation time in its own arm; this one has no change time to read, so it returns `None` and no process is ever bound to the file now at its path. Every process then keeps the artifact an earlier probe carried or stays unidentified, which never clears an advisory.",
+   "file": "rust/crates/guard-runtime/src/runtime_identity_instances.rs",
+   "item": "fn status_changed_secs(_meta: &fs::Metadata) -> Option<u64>",
+   "cfg": "not(any(unix, windows))",
+   "body": "1fbc4cb9c88f"
+  },
+  {
    "verdict": "posix-primitive",
    "note": "Windows has no execute bit, so any existing non-directory file passes the executable check; candidate_names applies PATHEXT instead and the resolved target must still be a regular file. Observation only: the probe never launches a candidate. The launch unit tests are unix-gated, so this arm is not run by a Windows test binary; it is checked through the Windows Gauntlet.",
    "file": "rust/crates/guard-runtime/src/runtime_identity_launch.rs",

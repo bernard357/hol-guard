@@ -7,16 +7,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
-    Destination,
-    DestinationKind,
     EnforcementGrade,
     NetworkAction,
-    NetworkPolicy,
-    NetworkProtocol,
-    NetworkRule,
-    PolicyOwner,
-    PortRange,
-    ProcessTreeIdentity,
 )
 from tests.linux_tcp_enforcement import (
     compile_linux_tcp_policy,
@@ -30,6 +22,16 @@ from tests.linux_udp_dns_enforcement import (
     create_dns_binding_lease,
     create_linux_resolver_route,
     evaluate_linux_udp_dns_artifact,
+)
+from tests.network_policy_model import (
+    Destination,
+    DestinationKind,
+    NetworkPolicy,
+    NetworkProtocol,
+    NetworkRule,
+    PolicyOwner,
+    PortRange,
+    ProcessTreeIdentity,
 )
 
 RESOLVER_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))

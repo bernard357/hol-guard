@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..store import GuardStore
@@ -16,9 +16,7 @@ if TYPE_CHECKING:
 from ._commands_shared import *
 from .commands_parser_helpers import *
 from ..adapters.mcp_servers import ManagedMcpServer, proxy_process_env, stable_mcp_server_identifier
-from ..runtime.mcp_protection import McpServerIdentity
 from ..synced_policy import synced_policy_payload as _synced_policy_payload
-from ..native_cli_runtime_support import cli_runtime_support as _native_cli_support
 
 def _redact_codex_prompt_secret_assignments(value: str) -> str:
     output: list[str] = []
@@ -54,68 +52,12 @@ def _truncate_codex_display_text(value: str, *, limit: int) -> str:
         return value
     return f"{value[: limit - 1].rstrip()}…"
 
-def _resolve_prompt_scan_path(requested_path: str, *, cwd: Path | None) -> Path | None:
-    stripped = requested_path.strip().strip("'\"")
-    if not stripped:
-        return None
-    exact_path = _expand_prompt_scan_path(stripped, cwd=cwd)
-    if _prompt_scan_path_exists(exact_path):
-        return exact_path
-    normalized = stripped.rstrip(".,;:!?)]}")
-    if not normalized or normalized == stripped:
-        return exact_path
-    return _expand_prompt_scan_path(normalized, cwd=cwd)
-
-def _expand_prompt_scan_path(requested_path: str, *, cwd: Path | None) -> Path:
-    try:
-        expanded = Path(requested_path).expanduser()
-    except RuntimeError:
-        return Path(requested_path)
-    if not expanded.is_absolute():
-        expanded = (cwd or Path.cwd()) / expanded
-    with suppress(OSError):
-        return expanded.resolve(strict=False)
-    return expanded
-
-def _prompt_scan_path_exists(path: Path) -> bool:
-    with suppress(OSError):
-        return path.is_file()
-    return False
-
 def _is_copilot_permission_request(payload: dict[str, object]) -> bool:
     from ..daemon.hook_availability_policy import hook_event_is_permission_request as _perm
     return any(
         isinstance(payload.get(key), str) and _perm(str(payload.get(key)))
         for key in ("hook_name", "hook_event_name", "hookEventName")
     )
-
-@dataclass(frozen=True, slots=True)
-class _CopilotMcpRuntimeServer:
-    server_name: str
-    source_scope: str
-    config_path: str
-    server_config: object
-
-def _copilot_identity_dto(value: dict[str, Any]) -> McpServerIdentity:
-    fields: dict[str, Any] = dict(value)
-    fields["env_keys"] = tuple(fields["env_keys"])
-    return McpServerIdentity(**fields)
-
-
-def _copilot_runtime_server_identity(
-    server: _CopilotMcpRuntimeServer, *, launch_cwd: Path,
-) -> tuple[McpServerIdentity, dict[str, object], str]:
-    environment = server.server_config.get("env") if isinstance(server.server_config, Mapping) else None
-    result = _native_cli_support("server_identity", {
-        "server": {"server_name": server.server_name, "source_scope": server.source_scope,
-                   "config_path": server.config_path, "server_config": server.server_config,
-                   "environment_keys": list(environment) if isinstance(environment, Mapping) else []},
-        "launch_cwd": str(launch_cwd), "environment": dict(os.environ),
-    })
-    identity = result["server_identity"]
-    server_identity = _copilot_identity_dto(identity)
-    return server_identity, result["fingerprint"], result["transport"]
-
 
 def _validated_pi_runtime_policy_override(
     home_dir: Path,
@@ -369,11 +311,10 @@ def _server_command(server: dict[str, object]) -> list[str]:
 
 __all__ = [
     "_canonical_harness_name",
-    "_expand_prompt_scan_path", "_is_copilot_permission_request",
+    "_is_copilot_permission_request",
     "_managed_install_for", "_managed_manifest_server",
-    "_prompt_scan_path_exists",
     "_redact_codex_prompt_secret_assignments",
-    "_resolve_prompt_scan_path", "_run_hermes_mcp_proxy",
+    "_run_hermes_mcp_proxy",
     "_runtime_policy_path", "_runtime_request_summary",
     "_server_command", "_server_env", "_server_headers",
     "_truncate_codex_display_text",

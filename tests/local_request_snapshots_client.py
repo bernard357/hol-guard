@@ -20,7 +20,7 @@ from codex_plugin_scanner.guard.review_contracts import (
     build_local_review_request_claim,
     guard_review_oauth_metadata,
 )
-from codex_plugin_scanner.guard.runtime.cloud_request_native import local_request_snapshot, project_request_row
+from codex_plugin_scanner.guard.runtime.cloud_request_native import _call, _invalid, project_request_row
 from codex_plugin_scanner.guard.runtime.cloud_review_sync import _resolve_cloud_receipt_redaction_level
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -30,6 +30,81 @@ LOCAL_REQUEST_CURSORLESS_FALLBACK_LIMIT = 500
 LOCAL_REQUEST_SNAPSHOT_MAX_BYTES = 900_000
 _LOCAL_REQUEST_SNAPSHOT_CURSOR_SYNC_KEY = "guard_command_local_request_snapshot_cursor"
 _NO_CURSOR_UPDATE = object()
+
+# The resident accepts 4 MiB per request: send a snapshot in one call when it fits
+# and otherwise build its items in smaller chunks first.
+_ONE_SHOT_BYTES = 3_000_000
+_CHUNK_BYTES = 2_000_000
+
+
+def cloud_safe_local_request_payload(
+    item: Mapping[str, object],
+    *,
+    redaction_level: str,
+) -> dict[str, object]:
+    payload = _call(
+        "cloud_request_payload",
+        {"item": project_request_row(item), "redaction_level": redaction_level},
+    ).get("payload")
+    if not isinstance(payload, dict):
+        raise _invalid()
+    return payload
+
+
+def _encoded_size(value: object) -> int:
+    return len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+
+
+def _built_page(
+    common: Mapping[str, object],
+    status: str,
+    page: Mapping[str, object],
+) -> dict[str, object]:
+    """Build one page's items in chunks that each fit one resident request."""
+
+    entries = page.get("rows")
+    if not isinstance(entries, list):
+        raise _invalid()
+    items: list[object] = []
+    chunk: list[object] = []
+    chunk_bytes = 0
+    for entry in [*entries, None]:
+        entry_bytes = 0 if entry is None else _encoded_size(entry)
+        if chunk and (entry is None or chunk_bytes + entry_bytes > _CHUNK_BYTES):
+            built = _call("local_request_snapshot_items", {**common, "status": status, "rows": chunk}).get("items")
+            if not isinstance(built, list):
+                raise _invalid()
+            items.extend(built)
+            chunk, chunk_bytes = [], 0
+        if entry is not None:
+            chunk.append(entry)
+            chunk_bytes += entry_bytes
+    return {"items": items, "complete": page.get("complete")}
+
+
+def local_request_snapshot(
+    *,
+    redaction_level: str,
+    routing_inputs: Mapping[str, object],
+    now: str,
+    pending: Mapping[str, object],
+    resolved: Mapping[str, object],
+) -> dict[str, object]:
+    """The bounded snapshot; oversized row sets are built in resident-sized chunks."""
+
+    common: dict[str, object] = {
+        "redaction_level": redaction_level,
+        "routing_inputs": dict(routing_inputs),
+        "now": now,
+    }
+    args: dict[str, object] = {**common, "pending": dict(pending), "resolved": dict(resolved)}
+    if _encoded_size(args) > _ONE_SHOT_BYTES:
+        args["pending"] = _built_page(common, "pending", pending)
+        args["resolved"] = _built_page(common, "resolved", resolved)
+    payload = _call("local_request_snapshot", args)
+    if not isinstance(payload.get("requests"), list):
+        raise _invalid()
+    return payload
 
 
 def local_request_snapshot_payload(store: GuardStore) -> dict[str, object]:

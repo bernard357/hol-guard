@@ -56,85 +56,6 @@ class CodexHookHandlerIdentity:
     canonical_identity: str
 
 
-def canonical_codex_hook_identity(
-    *,
-    source_scope: str,
-    source_hooks_enabled: bool,
-    event_name: str,
-    group: Mapping[str, object],
-    handler: Mapping[str, object],
-) -> str:
-    """Return one format- and coordinate-independent handler identity."""
-
-    return _digest_of(
-        _answer(
-            _handler_entry(
-                CodexHookHandlerQuestion(
-                    source_scope=source_scope,
-                    source_hooks_enabled=source_hooks_enabled,
-                    event_name=event_name,
-                    group=group,
-                    handler=handler,
-                )
-            )
-        )
-    )
-
-
-def canonical_codex_hook_group_identity(
-    *,
-    source_scope: str,
-    source_hooks_enabled: bool,
-    event_name: str,
-    group: Mapping[str, object],
-) -> str:
-    """Return a canonical identity for one complete matcher group."""
-
-    return _digest_of(
-        _answer(
-            _group_entry(
-                CodexHookGroupQuestion(
-                    source_scope=source_scope,
-                    source_hooks_enabled=source_hooks_enabled,
-                    event_name=event_name,
-                    group=group,
-                ),
-                "group",
-            )
-        )
-    )
-
-
-def canonical_codex_hook_conflict_keys(
-    *,
-    source_scope: str,
-    source_hooks_enabled: bool,
-    event_name: str,
-    group: Mapping[str, object],
-) -> tuple[str, ...]:
-    """Identify handler slots whose differing definitions must not be collapsed."""
-
-    return _conflict_keys_of(
-        _answer(
-            _group_entry(
-                CodexHookGroupQuestion(
-                    source_scope=source_scope,
-                    source_hooks_enabled=source_hooks_enabled,
-                    event_name=event_name,
-                    group=group,
-                ),
-                "conflict",
-            )
-        )
-    )
-
-
-def canonical_codex_command_argv(command: str | None) -> tuple[str, ...] | None:
-    """Normalize only commands whose shell tokenization is provably uncomplicated."""
-
-    return _argv_of(_answer(_argv_entry(command)))
-
-
 def canonical_codex_hook_handler_identities(
     questions: Sequence[CodexHookHandlerQuestion],
 ) -> tuple[CodexHookHandlerIdentity, ...]:
@@ -241,12 +162,6 @@ def _argv_of(answer: Mapping[str, object]) -> tuple[str, ...] | None:
     return tuple(argv)
 
 
-def _answer(entry: Mapping[str, object]) -> dict[str, object]:
-    """Ask the resident about one entry and return its answer."""
-
-    return native_codex_hook_identity([entry])[0]
-
-
 __all__ = [
     "CODEX_HOOK_IDENTITY_SCHEMA",
     "CodexHookDefinitionTooDeepError",
@@ -254,11 +169,7 @@ __all__ = [
     "CodexHookHandlerIdentity",
     "CodexHookHandlerQuestion",
     "CodexHookIdentityUnavailableError",
-    "canonical_codex_command_argv",
-    "canonical_codex_hook_conflict_keys",
     "canonical_codex_hook_group_conflict_keys",
     "canonical_codex_hook_group_identities",
-    "canonical_codex_hook_group_identity",
     "canonical_codex_hook_handler_identities",
-    "canonical_codex_hook_identity",
 ]

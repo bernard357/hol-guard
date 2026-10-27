@@ -25,7 +25,7 @@ from ..native_artifact_content_hash import (
     native_artifact_content_hash,
     native_artifact_content_hashes,
 )
-from ..native_consumer_artifact_compose import native_consumer_compose
+from ..native_consumer_artifact_compose import NativeConsumerComposeError, native_consumer_compose
 from ..receipts import build_receipt
 from ..risk import NO_RISK_SIGNAL_SUMMARY, artifact_risk_profile
 from ..runtime.approval_context import (
@@ -43,6 +43,9 @@ from ..store import GuardStore
 from ..types import GuardSignal
 from . import projection
 from .low_trust import low_trust_floor
+from .native_decision_projection import (
+    _compose_unavailable as _compose_unavailable,
+)
 from .native_decision_projection import (
     _ConsumerAuthorityInputs as _ConsumerAuthorityInputs,
 )
@@ -660,14 +663,21 @@ def evaluate_detection(
         artifact_risk = artifact_risk_profile(artifact)
         structured_signals = artifact_risk.signals
         risk_signals_v2 = _merge_risk_signals(artifact_risk.signals_v2, runtime_risk_signals_v2)
-        low_trust = low_trust_floor(
-            getattr(store, "guard_home", None),
-            config,
-            harness=detection.harness,
-            artifact=artifact,
-            configured_action=configured_action,
-            fresh_decision=bool(is_first_seen or evidence["changed"]),
-        )
+        try:
+            low_trust = low_trust_floor(
+                getattr(store, "guard_home", None),
+                config,
+                harness=detection.harness,
+                artifact=artifact,
+                configured_action=configured_action,
+                fresh_decision=bool(is_first_seen or evidence["changed"]),
+            )
+        except NativeConsumerComposeError as error:
+            # The floor only ever strengthens an action, so an unanswered floor
+            # query is not "no floor": the artifact blocks unscored.
+            low_trust, low_trust_unavailable = None, error.code
+        else:
+            low_trust_unavailable = None
         if low_trust is not None:
             risk_signals_v2 = _merge_risk_signals(risk_signals_v2, (low_trust.signal,))
         skill_directory_identity_reusable = _skill_directory_identity_reusable(
@@ -675,21 +685,24 @@ def evaluate_detection(
             metadata=artifact.metadata,
         )
         guard_default_action = artifact.metadata.get("guard_default_action")
-        current = _native_current_action(
-            store,
-            config,
-            composer=native_consumer_compose,
-            removed=False,
-            artifact_type=artifact.artifact_type,
-            configured_action=configured_action,
-            guard_default_action=guard_default_action if isinstance(guard_default_action, str) else None,
-            first_seen=is_first_seen,
-            changed=bool(evidence["changed"]),
-            effective_default_action=effective_default_action,
-            skill_directory_identity_reusable=skill_directory_identity_reusable,
-            scoring=_scoring_inputs(structured_signals, evidence["scoring"]),
-            low_trust_action=low_trust.action if low_trust is not None else None,
-        )
+        if low_trust_unavailable is not None:
+            current = _compose_unavailable(low_trust_unavailable)
+        else:
+            current = _native_current_action(
+                store,
+                config,
+                composer=native_consumer_compose,
+                removed=False,
+                artifact_type=artifact.artifact_type,
+                configured_action=configured_action,
+                guard_default_action=guard_default_action if isinstance(guard_default_action, str) else None,
+                first_seen=is_first_seen,
+                changed=bool(evidence["changed"]),
+                effective_default_action=effective_default_action,
+                skill_directory_identity_reusable=skill_directory_identity_reusable,
+                scoring=_scoring_inputs(structured_signals, evidence["scoring"]),
+                low_trust_action=low_trust.action if low_trust is not None else None,
+            )
         current_policy_action = cast(GuardAction, current["current_action"])
         scanner_action = cast("GuardAction | None", current["scanner_action"])
         verdict = cast("dict[str, Any] | None", current["verdict"])

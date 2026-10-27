@@ -22,15 +22,17 @@ from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
 from codex_plugin_scanner.guard.policy_bundle_v2 import (
     POLICY_BUNDLE_V2_CANONICALIZATION,
     POLICY_BUNDLE_V2_CONTRACT,
-    canonical_policy_bundle_v2_payload,
-    computed_policy_bundle_v2_hash,
     validate_policy_bundle_v2_transition,
     validated_policy_bundle_v2_acknowledgement,
-    validated_policy_bundle_v2_payload,
 )
 from codex_plugin_scanner.guard.policy_document import canonical_json_bytes, canonical_policy_document_bytes
-from codex_plugin_scanner.guard.policy_document_yaml import load_policy_document, parse_policy_document_yaml
+from codex_plugin_scanner.guard.policy_document_yaml import parse_policy_document_yaml
 from codex_plugin_scanner.guard.runtime import runner as guard_runner
+from tests.policy_bundle_v2_support import (
+    canonical_policy_bundle_v2_payload,
+    computed_policy_bundle_v2_hash,
+    validated_policy_bundle_v2_payload,
+)
 
 _FIXTURE = Path(__file__).parents[1] / "spec" / "guard-policy" / "v1alpha1" / "fixtures" / "valid" / "basic.yaml"
 
@@ -64,7 +66,7 @@ def _reference_payload_hash(payload: dict[str, object]) -> str:
 
 
 def _fixture_payload(**edits: object) -> dict[str, object]:
-    payload = copy.deepcopy(load_policy_document(_FIXTURE).to_mapping())
+    payload = copy.deepcopy(parse_policy_document_yaml(_FIXTURE.read_bytes()).to_mapping())
     metadata = cast(dict[str, object], payload["metadata"])
     spec = cast(dict[str, object], payload["spec"])
     rule = cast(list[dict[str, object]], spec["rules"])[0]
@@ -85,7 +87,7 @@ def _signed_bundle(
     payload_extensions: dict[str, object] | None = None,
     payload_hash: str | None = None,
 ) -> dict[str, object]:
-    document = load_policy_document(_FIXTURE)
+    document = parse_policy_document_yaml(_FIXTURE.read_bytes())
     payload = dict(payload_base) if payload_base is not None else document.to_mapping()
     if payload_extensions is not None:
         payload.update(payload_extensions)

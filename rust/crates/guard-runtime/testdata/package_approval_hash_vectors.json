@@ -112,6 +112,25 @@
  },
  {
   "advisory_rows": [],
+  "config_facts": {
+   "artifact_actions": {
+    "command:npm-install": "review"
+   },
+   "harness_actions": null,
+   "harness_postures": {},
+   "harness_risk_actions": {},
+   "managed_locked_settings": [],
+   "managed_policy_hash": null,
+   "managed_policy_status": "absent",
+   "mode": "prompt",
+   "protection_posture": "balanced",
+   "protection_posture_explicit": false,
+   "publisher_actions": null,
+   "risk_actions": {
+    "package_script": "warn"
+   },
+   "security_level": "balanced"
+  },
   "expected": {
    "artifact_hash": "guard-approval-context:v1:eyJjYXBhYmlsaXRpZXMiOiIzZmE3NzNlMjg2MGZjYzU5N2RjNTAxMDRjZThmMGFmN2VhNTAyZmZkNGY3ZTJjMDQ3YTljMWYxNzE4ZTI1ZGM1IiwiY29udGVudCI6IjdmNjQ0MDI5NDIyNDUzZTY2YjY1MWEyNWQwZWI1OTMxNGVkNGU1NTQ5M2Y3OWY5NDU3NGRjODAzZWNjNWQzYTAiLCJpZGVudGl0eSI6ImI4MzdjNmIzMjlkM2NiODQ2YTE0NmU5ODgxNDU0ZGY3MjMxOTgxMGVlOWU1NWQwYWM2YTRiYmI5ODM5YmRiZjYiLCJwb2xpY3kiOiIyM2YwODMzZjhkZGUyYjBmNzhmNGFmYjUxZDAwNTkxODZmM2ZlYTU5NGM4ZjM3MjE5NTVjZjA5Yjc5NGI5NTQxIiwic2FuZGJveCI6ImM2NWNiYzcyYTE1MjZmZWZjMjQwMWE1MDBmM2QyODZkZjY1MjI1N2Y5NTg4YjhjZWI1MjJiMGU1Y2MzZGY5MjUiLCJ2ZXJzaW9uIjoxfQ",
    "current_action": "review",
@@ -226,6 +245,25 @@
  },
  {
   "advisory_rows": [],
+  "config_facts": {
+   "artifact_actions": null,
+   "harness_actions": null,
+   "harness_postures": {},
+   "harness_risk_actions": {},
+   "managed_locked_settings": [],
+   "managed_policy_hash": null,
+   "managed_policy_status": "absent",
+   "mode": "prompt",
+   "protection_posture": "balanced",
+   "protection_posture_explicit": false,
+   "publisher_actions": {
+    "acme": "sandbox-required"
+   },
+   "risk_actions": {
+    "package_script": "warn"
+   },
+   "security_level": "balanced"
+  },
   "expected": {
    "artifact_hash": "guard-approval-context:v1:eyJjYXBhYmlsaXRpZXMiOiIzZmE3NzNlMjg2MGZjYzU5N2RjNTAxMDRjZThmMGFmN2VhNTAyZmZkNGY3ZTJjMDQ3YTljMWYxNzE4ZTI1ZGM1IiwiY29udGVudCI6IjdmNjQ0MDI5NDIyNDUzZTY2YjY1MWEyNWQwZWI1OTMxNGVkNGU1NTQ5M2Y3OWY5NDU3NGRjODAzZWNjNWQzYTAiLCJpZGVudGl0eSI6IjQ4NjZlN2Q2Y2Y0NGFjM2IzZTQyNDgzMGU1MjhkNzY5Y2U2NzBlMGZkMTE2ZGNjMDc4MjE2ODA2MzFjODA2NjAiLCJwb2xpY3kiOiJlMWQ1MTQzNjBmYmQwNTM0ZWM3M2M5Yzg3MTRkMDgzNDJjNDYwNzM2YjBhNjZlOGZmZDUxYmYzZmI0OGNkMDU0Iiwic2FuZGJveCI6IjdhNWZiYmRiMjhiM2E5ZGRhMGQ5ODEyY2NhNDYxNTJjMmJkZTEwNmQyZDFlODdmYjM4N2M1NDJlY2FiYzg1NTQiLCJ2ZXJzaW9uIjoxfQ",
    "current_action": "sandbox-required",
@@ -340,6 +378,28 @@
  },
  {
   "advisory_rows": [],
+  "config_facts": {
+   "artifact_actions": null,
+   "harness_actions": {
+    "codex": "block"
+   },
+   "harness_postures": {},
+   "harness_risk_actions": {},
+   "managed_locked_settings": [
+    "a",
+    "b"
+   ],
+   "managed_policy_hash": "mh",
+   "managed_policy_status": "locked",
+   "mode": "prompt",
+   "protection_posture": "balanced",
+   "protection_posture_explicit": false,
+   "publisher_actions": null,
+   "risk_actions": {
+    "package_script": "require-reapproval"
+   },
+   "security_level": "strict"
+  },
   "expected": {
    "artifact_hash": "guard-approval-context:v1:eyJjYXBhYmlsaXRpZXMiOiIzZmE3NzNlMjg2MGZjYzU5N2RjNTAxMDRjZThmMGFmN2VhNTAyZmZkNGY3ZTJjMDQ3YTljMWYxNzE4ZTI1ZGM1IiwiY29udGVudCI6IjdmNjQ0MDI5NDIyNDUzZTY2YjY1MWEyNWQwZWI1OTMxNGVkNGU1NTQ5M2Y3OWY5NDU3NGRjODAzZWNjNWQzYTAiLCJpZGVudGl0eSI6IjU2MjliZDQyMTMxYWU3NDgwNDIwMzE2YzYyYWNjZmJhNTA1YWRmMDYwNGY4NTk3YzBmYmU3N2Y5YmE4OWYxMjUiLCJwb2xpY3kiOiI5NGNiZDdhZjgxOGMwNDEzNTNhYWRlN2FkNTM4MmNlNjIwNjRiOThjYmU0ZTNiMWJlZDM1NTE5OTQ2NDRlYTIyIiwic2FuZGJveCI6ImM2NWNiYzcyYTE1MjZmZWZjMjQwMWE1MDBmM2QyODZkZjY1MjI1N2Y5NTg4YjhjZWI1MjJiMGU1Y2MzZGY5MjUiLCJ2ZXJzaW9uIjoxfQ",
    "current_action": "block",
