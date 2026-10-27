@@ -54,6 +54,7 @@ from ci.gauntlet.source_output_fixtures import SOURCES as TOKEN_SOURCES
 from tests import codex_containment_route
 from tests.benign_fp_gate_configs import KUBECONFIG, LFS_GITCONFIG
 from tests.benign_fp_gate_connectors import write_connectors
+from tests.benign_fp_gate_cursor_project import cursor_project_path, write_cursor_projects
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
 from tests.benign_fp_gate_feature_app import build_feature_app, feature_app_path
 from tests.benign_fp_gate_git import _git, _session_worktree, _signed_checkout, _stopped_rebase
@@ -144,6 +145,8 @@ class BenignFixture:
             "${STAGE}": str(self.stage),
             # Left unresolved on purpose: the link is what the case is about.
             "${LINKED_WORKTREE}": str(self.linked_worktree),
+            # Cursor's working-file directory for the session workspace.
+            "${CURSOR_PROJECT}": str(cursor_project_path(self.home, self.worktree)),
         }
 
     def cwd(self, name: str) -> Path:
@@ -505,6 +508,7 @@ def build_fixture(root: Path) -> BenignFixture:
     scratch = Path(_system_tmp()) / f"hg-fp-scratch-{os.getpid()}-{secrets.token_hex(4)}"
     # Paths the mined cases name under the scrubbed project stand-ins, derived from the cases themselves.
     materialise({"HOME": home, "PRIVATE_TMP": private_tmp, "WORKTREE": worktree})
+    write_cursor_projects(home, worktree)
     # Sources the mined cases search by pattern. ``materialise`` builds the
     # directory a glob names but not a file inside it, and a pattern that
     # matches nothing makes the case measure an empty expansion instead of the

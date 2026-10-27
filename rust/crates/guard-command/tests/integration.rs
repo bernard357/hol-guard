@@ -69,6 +69,7 @@ pub mod pretool_contained_safety_guide;
 pub mod pretool_contained_script_tests;
 pub mod pretool_contained_tests;
 pub mod pretool_contained_wrappers;
+pub mod pretool_cursor_project_reads;
 pub mod pretool_cwd_compounds;
 pub mod pretool_data_heredocs;
 pub mod pretool_dd_reads;

@@ -8,6 +8,8 @@ pub(crate) mod chain_literals;
 mod command_rewrite;
 #[path = "contained_publish.rs"]
 pub(crate) mod contained_publish;
+#[path = "generic_cursor_project_reads.rs"]
+mod cursor_project_reads;
 #[path = "env_prefix_projection.rs"]
 mod env_prefix_projection;
 pub use env_prefix_projection::bindable_setting;
@@ -812,6 +814,10 @@ fn evaluate_envelope(
         omp_result
     } else if let Some(pure_result) = pure_eval::evaluate(harness, event, payload, &signals) {
         pure_result
+    } else if let Some(cursor_read) =
+        cursor_project_reads::evaluate(harness, event, payload, &signals, home_dir, cwd)
+    {
+        cursor_read
     } else if task_metadata {
         generic_result(
             generic_action(harness, event, PreToolActionTypeV1::Harness,
