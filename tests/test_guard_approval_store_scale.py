@@ -14,7 +14,6 @@ from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_approvals import (
     approval_index_statements,
     approval_schema_statement,
-    bulk_resolve_approval_requests,
     get_approval_request,
     list_approval_requests,
     resolve_request_with_queue_result,
@@ -24,6 +23,7 @@ from tests.coverage_ci import under_coverage_scale
 from tests.native_approval_writes import (
     _store_for,
     add_approval_request,
+    bulk_resolve_approval_requests,
     native_approval_connection,
     native_store,
     page_cursor,

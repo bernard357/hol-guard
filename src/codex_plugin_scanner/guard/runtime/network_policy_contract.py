@@ -86,12 +86,6 @@ def grade_required_capabilities(grade: EnforcementGrade) -> frozenset[BackendCap
     return _GRADE_REQUIREMENTS[grade]
 
 
-class FailureMode(str, Enum):
-    DENY = "deny"
-    OFFLINE = "offline"
-    REQUIRE_APPROVAL = "require-approval"
-
-
 @dataclass(frozen=True, slots=True)
 class BackendAdvertisement:
     backend_id: str

@@ -7,7 +7,6 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     BackendAdvertisement,
     BackendCapability,
     EnforcementGrade,
-    FailureMode,
     NetworkAction,
 )
 from tests.network_policy_model import (
@@ -16,6 +15,7 @@ from tests.network_policy_model import (
     NETWORK_POLICY_SCHEMA_VERSION,
     Destination,
     DestinationKind,
+    FailureMode,
     NetworkFlowRequest,
     NetworkPolicy,
     NetworkProtocol,
