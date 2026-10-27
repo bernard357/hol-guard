@@ -1491,3 +1491,39 @@ def test_a_catalog_entry_that_is_not_an_object_does_not_stop_a_repeat_install(
     exit_code, output, error = _install(spec_file, *base)
     assert exit_code == 0, error
     assert "already installed" in output + error
+
+
+class _Stream(io.StringIO):
+    def __init__(self, tty: bool) -> None:
+        super().__init__()
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def fileno(self) -> int:
+        return 0
+
+
+def test_stream_is_terminal_trusts_isatty_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "_ON_WINDOWS", False)
+    monkeypatch.setattr(runner, "_windows_console", lambda descriptor: pytest.fail("console mode is Windows only"))
+    assert runner.stream_is_terminal(_Stream(True))
+    assert not runner.stream_is_terminal(_Stream(False))
+    assert not runner.stream_is_terminal(None)
+
+
+def test_stream_is_terminal_refuses_windows_nul_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`< NUL` passes isatty() on Windows; only a console has a console mode."""
+
+    monkeypatch.setattr(runner, "_ON_WINDOWS", True)
+    monkeypatch.setattr(runner, "_windows_console", lambda descriptor: False)
+    assert not runner.stream_is_terminal(_Stream(True))
+    monkeypatch.setattr(runner, "_windows_console", lambda descriptor: True)
+    assert runner.stream_is_terminal(_Stream(True))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the NUL device is Windows only")
+def test_windows_nul_device_is_not_a_terminal() -> None:
+    with open(os.devnull) as nul:
+        assert not runner.stream_is_terminal(nul)
