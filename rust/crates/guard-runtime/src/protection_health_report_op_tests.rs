@@ -192,3 +192,24 @@ fn the_reply_binds_to_the_request_that_asked_for_it() {
         request_digest_with_limit(&wire, PROTECTION_HEALTH_REPORT_MAX_REQUEST_BYTES).unwrap()
     );
 }
+
+#[test]
+fn a_bad_row_past_the_reported_hundred_still_refuses_the_request() {
+    // The report names at most a hundred harnesses, but validity is not
+    // decided by where that cut falls: a row's own neighbours would otherwise
+    // make the same malformed status acceptable. A caller that sent a status
+    // the grammar has no word for built a malformed request wherever it sits.
+    let mut harness_signals: BTreeMap<String, ProtectionSignalV1> = (0..100)
+        .map(|index| {
+            (
+                format!("harness-{index:03}"),
+                signal("pass", "hooks_installed"),
+            )
+        })
+        .collect();
+    harness_signals.insert("harness-900".to_owned(), signal("maybe", "hooks_installed"));
+    assert_eq!(
+        evaluate_protection_health_report(&request(proven(), harness_signals)),
+        Err("native_protection_health_report_invalid".to_owned())
+    );
+}

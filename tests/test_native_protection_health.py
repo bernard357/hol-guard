@@ -27,6 +27,22 @@ _PAYLOAD: dict[str, Any] = {
 }
 
 
+def _app(**overrides: Any) -> dict[str, Any]:
+    """One harness row of the report, as the resident publishes it."""
+
+    row: dict[str, Any] = {
+        "harness": "codex",
+        "state": "protected",
+        "label": "Protected",
+        "detail": "All required protection checks have current proof.",
+        "evidence_gap": False,
+        "checks": [{"check_id": "daemon", "status": "pass", "reason_code": "daemon_healthy"}],
+        "reason_codes": ["daemon_healthy"],
+    }
+    row.update(overrides)
+    return row
+
+
 def _signals() -> dict[str, ProtectionSignal]:
     return {
         check_id: ProtectionSignal(ProtectionCheckStatus.PASS, f"{check_id}_proven")
@@ -90,6 +106,13 @@ def test_a_bound_reply_returns_the_report_and_records_success(monkeypatch, tmp_p
     assert recorded == [("success", None)]
 
 
+def test_a_harness_row_the_resident_published_is_returned_whole(monkeypatch, tmp_path) -> None:
+    app = _app()
+    recorded, _sent = _install(monkeypatch, lambda result: result["payload"].update(apps=[app]))
+    assert _call(tmp_path)["apps"] == [app]
+    assert recorded == [("success", None)]
+
+
 def test_the_request_carries_every_signal_as_a_status_and_a_reason(monkeypatch, tmp_path) -> None:
     _recorded, sent = _install(monkeypatch, lambda result: None)
     _call(tmp_path)
@@ -116,6 +139,21 @@ def test_a_free_form_reason_is_refused_before_it_can_be_sent() -> None:
         lambda result: result.update(payload="nope"),
         lambda result: result["payload"].pop("state"),
         lambda result: result["payload"].update(extra={}),
+        # A payload that keeps every key can still be no report at all. None of
+        # these may be rendered as a headline the resident never published.
+        lambda result: result["payload"].update(state="compromised"),
+        lambda result: result["payload"].update(state=1),
+        lambda result: result["payload"].update(schema_version=1),
+        lambda result: result["payload"].update(label=None),
+        lambda result: result["payload"].update(detail=[]),
+        lambda result: result["payload"].update(evidence_gap="false"),
+        lambda result: result["payload"].update(checks={}),
+        lambda result: result["payload"].update(checks=[{"check_id": "daemon", "status": "ok", "reason_code": "x"}]),
+        lambda result: result["payload"].update(checks=[{"check_id": "daemon", "status": "pass"}]),
+        lambda result: result["payload"].update(reason_codes=["daemon_healthy", 7]),
+        lambda result: result["payload"].update(apps=[{"harness": "codex"}]),
+        lambda result: result["payload"].update(apps=[_app(state="compromised")]),
+        lambda result: result["payload"].update(apps=[_app(checks=[{"check_id": "daemon"}])]),
     ],
 )
 def test_an_unusable_reply_raises_the_adapter_error_and_records_a_failure(monkeypatch, tmp_path, mutate) -> None:

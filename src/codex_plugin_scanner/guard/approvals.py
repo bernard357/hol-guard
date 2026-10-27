@@ -1320,10 +1320,14 @@ def _build_runtime_snapshot(
             trust_status=trust_status,
             now=datetime.fromisoformat(snapshot_now.replace("Z", "+00:00")),
         )
-    except NativeProtectionHealthError:
+    except NativeProtectionHealthError as error:
         # Only the native runtime says whether this machine is protected. With
         # it unreachable there is no report to show and no state to claim, so
-        # the snapshot carries neither and the headline falls to degraded.
+        # the snapshot carries neither and the headline falls to degraded. The
+        # reason code is the only thing that tells a missing runtime apart from
+        # one that answered something unusable, and snapshots are polled, so it
+        # goes to the log at debug.
+        _LOGGER.debug("protection health report unavailable: %s", error)
         protection_health = None
     headline_state = _resolve_runtime_headline_state(
         pending_count=pending_count,
