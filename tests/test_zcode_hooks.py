@@ -11,18 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters._modules.zcode.zcode_hooks import (
-    _AUTHORITY_BLOCK_REMEDIATION,
-    _authority_block_remediation,
-    _quote_home,
-    zcode_authority_block_reason,
-    zcode_hook_process_exit,
-)
+from codex_plugin_scanner.guard.adapters._modules.zcode.zcode_hooks import zcode_hook_process_exit
 from codex_plugin_scanner.guard.runtime.actions import (
     normalize_harness_payload,
     normalize_zcode_hook_payload,
 )
 
+from .zcode_remediation_reference import (
+    _AUTHORITY_BLOCK_REMEDIATION,
+    _authority_block_remediation,
+    _quote_home,
+    zcode_authority_block_reason,
+)
 
 _AUTHORITY_REASON = "HOL Guard requires the native command extension policy before this action can execute."
 
@@ -102,9 +102,7 @@ class TestZCodeHookResponses:
         # would never produce.
         assert f"hol-guard command --guard-home {_expected_home(named)} controls recover-authority" in enriched
 
-    def test_authority_block_reason_quotes_a_named_home_for_the_shell(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_authority_block_reason_quotes_a_named_home_for_the_shell(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
         spaced = Path("/opt/shared guards/.hol-guard")
         enriched = zcode_authority_block_reason(_AUTHORITY_REASON, spaced)
@@ -171,9 +169,7 @@ class TestZCodeHookResponses:
             assert _quote_home(home, True) is None, home
             assert _authority_block_remediation(Path(home), True) == _AUTHORITY_BLOCK_REMEDIATION, home
 
-    def test_a_posix_home_holding_those_characters_is_still_named(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_posix_home_holding_those_characters_is_still_named(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Single quotes make all three literal to a POSIX shell.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
         named = _authority_block_remediation(Path("/opt/g$x/ci"), False)
@@ -205,10 +201,10 @@ class TestZCodeHookResponses:
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_TEMPLATE_PATH = _REPO_ROOT / "src" / "codex_plugin_scanner" / "guard" / "adapters" / "bounded_cli_hook_script_template.py"
-_BRIDGE_PATH = (
-    _REPO_ROOT / "rust" / "crates" / "guard-runtime" / "src" / "bounded_hook_bridge_remediation.rs"
+_TEMPLATE_PATH = (
+    _REPO_ROOT / "src" / "codex_plugin_scanner" / "guard" / "adapters" / "bounded_cli_hook_script_template.py"
 )
+_BRIDGE_PATH = _REPO_ROOT / "rust" / "crates" / "guard-runtime" / "src" / "bounded_hook_bridge_remediation.rs"
 # Punctuation only: the alphanumerics are plain in every copy, so the probe is
 # the part of the alphabet a copy could disagree about.
 _PUNCTUATION = "_-.:\\/ ~$'\"@%^&(){}[]|;,<>?*!+=#`"
@@ -279,10 +275,7 @@ class TestAuthorityRemediationParity:
     def test_the_native_bridge_shares_the_plain_character_set(self) -> None:
         arm = re.search(r"matches!\(\s*character,([^)]*)\)", _bridge_source())
         assert arm is not None, "the native bridge no longer spells its plain character set"
-        bridge = {
-            "\\" if literal == "\\\\" else literal
-            for literal in re.findall(r"'(\\\\|[^'])'", arm.group(1))
-        }
+        bridge = {"\\" if literal == "\\\\" else literal for literal in re.findall(r"'(\\\\|[^'])'", arm.group(1))}
         package = {character for character in _PUNCTUATION if _quote_home("a" + character, True) == "a" + character}
         assert bridge == package
 

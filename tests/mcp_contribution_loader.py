@@ -11,6 +11,7 @@ import json
 from importlib import resources
 from pathlib import Path
 
+from codex_plugin_scanner.guard.runtime import mcp_server_contribution
 from codex_plugin_scanner.guard.runtime.extension_contribution import frozen_package_data
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
     _frozen_runtime,
@@ -18,7 +19,6 @@ from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
     direct_mcp_command_name,
     normalized_remote_mcp_url,
     normalized_remote_server_name,
-    remote_mcp_endpoint_identity,
     validate_mcp_contribution,
 )
 
@@ -136,3 +136,12 @@ def _finalize_payloads(payloads: tuple[dict[str, object], ...]) -> tuple[dict[st
                 raise ValueError(f"duplicate MCP remote server name {raw_name} for {previous_name} and {mcp_id}")
             remote_names[server_name] = mcp_id
     return payloads
+
+
+def remote_mcp_endpoint_identity(value: object) -> str | None:
+    """Identify the launch endpoint a configured remote MCP URL points at.
+
+    Only tests ask the resident's grammar for this on its own; the runtime
+    reads it inside the native MCP decision.
+    """
+    return mcp_server_contribution._bound_grammar("remote_endpoint_identity", value)

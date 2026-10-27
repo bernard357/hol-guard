@@ -77,11 +77,6 @@ def normalized_remote_mcp_url(value: object) -> str | None:
     return _bound_grammar("remote_url", value)
 
 
-def remote_mcp_endpoint_identity(value: object) -> str | None:
-    """Identify the launch endpoint a configured remote MCP URL points at."""
-    return _bound_grammar("remote_endpoint_identity", value)
-
-
 def normalized_remote_server_name(value: object) -> str | None:
     """Fold a contributed remote server name to its comparison form."""
     return _bound_grammar("remote_server_name", value)
