@@ -38,7 +38,6 @@ from codex_plugin_scanner.guard.cli import prompt as guard_prompt_module
 from codex_plugin_scanner.guard.cli.approval_commands import run_approval_command
 from codex_plugin_scanner.guard.cli.commands import (
     _persist_claude_native_permission_policy,
-    _queue_claude_native_approval_gate_fallback,
     run_guard_command,
 )
 from codex_plugin_scanner.guard.config import editable_guard_settings, load_guard_config, reset_guard_settings
@@ -52,6 +51,7 @@ from codex_plugin_scanner.guard.proxy.runtime_mcp import RuntimeMcpGuardProxy
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.runtime.self_approval import _AGENT_ENV_MARKERS
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.claude_native_gate_fallback import queue_claude_native_approval_gate_fallback
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
 from tests.guard_totp_support import read_totp_secret, totp_code_at_counter
 from tests.native_permission_plan_stub import answer_persist_plans
@@ -2149,7 +2149,7 @@ def test_approval_gate_native_permission_failure_queues_guard_fallback(
         reason="native approval",
         now="2026-04-11T00:00:00+00:00",
     )
-    queued = _queue_claude_native_approval_gate_fallback(
+    queued = queue_claude_native_approval_gate_fallback(
         store=store,
         harness="claude-code",
         artifact=artifact,

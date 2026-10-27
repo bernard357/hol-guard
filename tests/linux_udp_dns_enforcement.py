@@ -11,7 +11,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from codex_plugin_scanner.guard.runtime.linux_tcp_enforcement import LinuxTcpPolicyArtifact
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     DestinationKind,
     EnforcementGrade,
@@ -22,6 +21,7 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     canonical_digest,
     canonical_json,
 )
+from tests.linux_tcp_enforcement import LinuxTcpPolicyArtifact
 
 LINUX_UDP_DNS_SCHEMA_VERSION: Final = "guard.linux-udp-dns-policy.v1"
 

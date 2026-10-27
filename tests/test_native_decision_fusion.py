@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 from codex_plugin_scanner.guard import native_consumer_artifact_compose
-from codex_plugin_scanner.guard.runtime.decisions import project_native_authoritative_decision
+from tests.authoritative_decision_client import project_native_authoritative_decision
 
 _FIXTURES = Path(__file__).parent.parent / "rust/crates/guard-runtime/tests/fixtures"
 

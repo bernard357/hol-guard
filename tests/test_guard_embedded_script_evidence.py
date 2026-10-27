@@ -14,9 +14,9 @@ from codex_plugin_scanner.guard.cli.commands_dispatch_records import (
     _run_guard_history_command,
 )
 from codex_plugin_scanner.guard.models import GuardReceipt
-from codex_plugin_scanner.guard.native_shell_helpers import call
 from codex_plugin_scanner.guard.runtime.actions import GuardActionEnvelope
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.native_shell_helpers_client import call
 
 _MAX_EMBEDDED_SCRIPT_EVIDENCE_ENTRIES = 8
 

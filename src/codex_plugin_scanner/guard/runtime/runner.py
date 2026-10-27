@@ -3638,18 +3638,6 @@ def _cloud_sync_receipts_payload(
     )
 
 
-def _cloud_sync_receipt_payload(
-    receipt: dict[str, object],
-    *,
-    device_id: str,
-    device_name: str,
-    redaction_level: str = "full",
-) -> dict[str, object]:
-    return _cloud_sync_receipts_payload(
-        [receipt], device_id=device_id, device_name=device_name, redaction_level=redaction_level
-    )[0]
-
-
 def _dedupe_sync_payload_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
     seen: set[str] = set()
     deduped: list[dict[str, object]] = []

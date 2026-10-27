@@ -9,7 +9,6 @@ import pytest
 
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.native_runtime_detectors import native_runtime_detector_entries
-from codex_plugin_scanner.guard.native_shell_helpers import call
 from codex_plugin_scanner.guard.runtime.actions import GuardActionEnvelope
 from codex_plugin_scanner.guard.runtime.detectors import (
     DetectorContext,
@@ -17,6 +16,7 @@ from codex_plugin_scanner.guard.runtime.detectors import (
     register_default_detectors,
 )
 from tests.native_detector_support import NativeDetector
+from tests.native_shell_helpers_client import call
 from tests.shell_data_flow_test_support import (
     NativeShellPipe,
     native_command_segments,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from codex_plugin_scanner.guard.runtime.network_broker_contract import DnsResolutionBinding
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     Destination,
     DestinationKind,
@@ -16,7 +15,8 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     ProcessScopeKind,
     ProcessTreeIdentity,
 )
-from codex_plugin_scanner.guard.runtime.network_policy_evaluator import (
+from tests.network_broker_contract import DnsResolutionBinding
+from tests.network_policy_evaluator import (
     action_is_no_less_restrictive,
     evaluate_policy,
     protocol_requires_dns_binding,

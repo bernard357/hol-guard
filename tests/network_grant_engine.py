@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import cast
 
-from codex_plugin_scanner.guard.runtime.network_local_core import logical_flow_id
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     Destination,
     NetworkFlowRequest,
@@ -16,6 +15,7 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     require_digest,
     require_id,
 )
+from tests.network_local_core import logical_flow_id
 
 
 class GrantUse(str, Enum):

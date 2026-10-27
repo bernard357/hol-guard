@@ -48,7 +48,7 @@ from ci.gauntlet.edge_clone_fixtures import write_edge_clone
 from ci.gauntlet.fixtures import BENCH_CHECKOUT, BENCH_FILES, HOME_TOOLCHAIN_INIT_TEXT
 from ci.gauntlet.realism_fixtures import REVIEW_NOTES, SESSION_SOURCE
 from ci.gauntlet.source_output_fixtures import SOURCES as TOKEN_SOURCES
-from codex_plugin_scanner.guard.adapters import codex_contained_tests
+from tests import codex_containment_route
 from tests.benign_fp_gate_configs import KUBECONFIG, LFS_GITCONFIG
 from tests.benign_fp_gate_connectors import write_connectors
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
@@ -518,11 +518,11 @@ def route_codex(result: dict[str, object], payload: dict[str, object], fixture: 
     file goes to the fixture's own directory, which ``cleanup`` removes.
     """
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(codex_contained_tests, "launching_codex_executable", lambda: Path("/usr/local/bin/codex"))
-        patch.setattr(codex_contained_tests, "codex_applies_updated_input", lambda *_args, **_kwargs: True)
+        patch.setattr(codex_containment_route, "launching_codex_executable", lambda: Path("/usr/local/bin/codex"))
+        patch.setattr(codex_containment_route, "codex_applies_updated_input", lambda *_args, **_kwargs: True)
         fixture.contained_requests.mkdir(exist_ok=True)
         patch.setattr(tempfile, "tempdir", str(fixture.contained_requests))
-        return codex_contained_tests.route_codex_containment(
+        return codex_containment_route.route_codex_containment(
             dict(result),
             hook_input=json.dumps(payload),
             guard_home=fixture.guard_home,
