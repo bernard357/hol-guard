@@ -6,11 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from codex_plugin_scanner.guard import workspace_assessment_carry as carry
 from codex_plugin_scanner.guard import workspace_assessment_fix_proposals as fixes
+from codex_plugin_scanner.guard import workspace_assessment_runner as runner
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
+from codex_plugin_scanner.guard.native_package_audit_projection import NativePackageAuditProjectionError
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_workspace_assessment_schema import MAX_FINDINGS
-from codex_plugin_scanner.guard.workspace_assessment_carry import carry_unchecked_findings, listed_packages
+from codex_plugin_scanner.guard.workspace_assessment_carry import carry_unchecked_findings
 from tests.workspace_fix_support import admit_worktree
 
 DETECTORS = "d" * 64
@@ -199,14 +202,54 @@ def test_the_listed_packages_name_packages_as_their_findings_do() -> None:
     ]
     payload: dict[str, object] = {"audit_status": "complete", "evaluation": {"packages": packages}}
 
-    assert listed_packages(payload) == {
+    def listed(payload: dict[str, object]) -> frozenset[tuple[str, str, str]] | None:
+        return runner.project_supply_chain_findings(KEYS.worktree_key, payload)[0].listed
+
+    assert listed(payload) == {
         ("npm", "minimist", "1.2.9"),
         ("unknown", "left-pad", "1.3.0"),
         ("npm", "bare", ""),
     }
-    assert listed_packages({**payload, "audit_status": "incomplete"}) is None
-    assert listed_packages({**payload, "lockfile_warnings": ["drift"]}) is None
-    assert listed_packages({"audit_status": "complete"}) is None
+    assert listed({**payload, "audit_status": "incomplete"}) is None
+    assert listed({**payload, "lockfile_warnings": ["drift"]}) is None
+    assert listed({"audit_status": "complete"}) is None
+
+
+def test_runs_without_earlier_package_findings_do_not_ask_the_resident(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(carry, "native_package_identities", pytest.fail)
+    store = admitted(tmp_path)
+    assess(store, outcome("completed", [finding("a" * 32)], ci_workflow_v1="complete"), at=T0)
+    assess(store, outcome("completed", [package_finding("b" * 32, "1.2.8")], supply_chain="complete"), at=T0 + 10)
+
+    # Only a partial run carries, so a completed one without package findings
+    # has nothing to ask either.
+    run = assess(store, outcome("completed", [finding("c" * 32)], ci_workflow_v1="complete"), at=T0 + 20)
+
+    assert [item["finding_id"] for item in run["findings"]] == ["c" * 32]
+
+
+def test_a_run_the_resident_cannot_name_packages_for_is_not_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = admitted(tmp_path)
+    first = assess(store, outcome("completed", [package_finding("a" * 32, "1.2.8")], supply_chain="complete"), at=T0)
+
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise NativePackageAuditProjectionError("Native package identities invalid")
+
+    monkeypatch.setattr(carry, "native_package_identities", unavailable)
+    assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=DETECTORS, now_ms=T0 + 10)
+    claimed = assessments.claim_next(store, owner="w", now_ms=T0 + 10)
+    assert claimed is not None
+    result = outcome("partial", [package_finding("b" * 32, "1.2.8")], supply_chain="incomplete")
+
+    with pytest.raises(NativePackageAuditProjectionError):
+        assessments.finish(store, claimed, result, now_ms=T0 + 11)
+
+    latest = assessments.latest_assessed_run(store, KEYS)
+    assert latest is not None and latest["run_id"] == first["run_id"]
 
 
 def test_runs_finished_in_the_same_millisecond_carry_from_the_one_queued_last(

@@ -18,7 +18,8 @@ when that run named the package under an older identity scheme, so the
 finding's history and its Cloud key stay with the package. Earlier runs also
 named a scoped package without its scope, as ``traverse`` for
 ``@babel/traverse``. Such a finding still belongs to the scoped package while
-no other package the run reports would take the bare name.
+no other package the run reports would take the bare name. The resident
+decides both the ids a run keeps and which earlier packages it settled.
 
 Carried findings come after the run's own findings and stop at the same
 count and byte bounds. A finding that does not fit adds the
@@ -30,12 +31,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections import Counter
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Final
 
+from .native_package_audit_projection import native_package_identities
 from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
-from .workspace_supply_chain_findings import package_name
 
 if TYPE_CHECKING:
     from .workspace_assessment_store import RunOutcome
@@ -46,11 +46,15 @@ CARRIED_FINDING_CAP: Final = "carried_finding_cap"
 _COVERAGE_KEYS: Final = {"supply_chain_local_v1": "supply_chain"}
 
 
-def carry_unchecked_findings(outcome: RunOutcome, previous: Mapping[str, object] | None) -> RunOutcome:
+def carry_unchecked_findings(
+    outcome: RunOutcome, previous: Mapping[str, object] | None, settled: Sequence[bool] = ()
+) -> RunOutcome:
     """``outcome`` with the earlier findings its unfinished detectors could not recheck.
 
     ``previous`` is the worktree's last completed or partial run. A detector
     the new run no longer names was retired, so its findings are not kept.
+    ``settled`` marks, by position, the earlier package findings the new
+    audit reports again or no longer lists.
     """
 
     coverage = outcome.coverage or {}
@@ -61,12 +65,11 @@ def carry_unchecked_findings(outcome: RunOutcome, previous: Mapping[str, object]
     run_id = previous.get("run_id") if previous is not None else None
     findings = [dict(item) for item in outcome.findings]
     seen = {item.get("finding_id") for item in findings}
-    reported = {_coordinate(item) for item in findings if item.get("source_kind") == "supply_chain"}
     used = sum(_size(item) for item in findings)
     carried = 0
     truncated = False
-    for item in earlier:
-        if not isinstance(item, Mapping) or item.get("finding_id") in seen or _package_settled(item, outcome, reported):
+    for index, item in enumerate(earlier):
+        if not isinstance(item, Mapping) or item.get("finding_id") in seen or _settled(settled, index):
             continue
         detector = item.get("detector")
         status = detectors.get(_COVERAGE_KEYS.get(detector, detector)) if isinstance(detector, str) else None
@@ -94,95 +97,42 @@ def carry_unchecked_findings(outcome: RunOutcome, previous: Mapping[str, object]
     )
 
 
-def keep_package_identities(outcome: RunOutcome, previous: Mapping[str, object] | None) -> RunOutcome:
-    """``outcome`` with each package finding under the id ``previous`` gave that package."""
+def keep_package_identities(
+    outcome: RunOutcome, previous: Mapping[str, object] | None, *, store: Any | None = None
+) -> tuple[RunOutcome, list[bool]]:
+    """``outcome`` with each package finding under the id ``previous`` gave that package.
+
+    Also returns, by position in ``previous``, the earlier package findings
+    the new run settled, for :func:`carry_unchecked_findings`.
+    """
 
     earlier = previous.get("findings") if previous is not None else None
     if not isinstance(earlier, list):
-        return outcome
-    known: dict[tuple[object, ...], object] = {}
-    for item in earlier:
-        if isinstance(item, Mapping) and item.get("source_kind") == "supply_chain" and item.get("finding_id"):
-            known.setdefault(_coordinate(item), item.get("finding_id"))
-    packages = {_coordinate(item) for item in outcome.findings if item.get("source_kind") == "supply_chain"}
-    packages |= outcome.listed_packages or frozenset()
-    # A bare name is only another run's name for one package when no other
-    # reported or listed package has or would take it.
-    names = Counter([*packages, *filter(None, map(_unscoped, packages))])
-
-    def earlier_id(item: Mapping[str, object]) -> object:
-        coordinate = _coordinate(item)
-        if coordinate in known:
-            return known[coordinate]
-        unscoped = _unscoped(coordinate)
-        if unscoped is not None and names[unscoped] == 1 and unscoped in known:
-            return known[unscoped]
-        return item.get("finding_id")
-
+        return outcome, []
+    reports_packages = any(item.get("source_kind") == "supply_chain" for item in outcome.findings)
+    if not any(_is_package(item) for item in earlier) or (outcome.state != "partial" and not reports_packages):
+        # Nothing to rename and nothing to carry, so the resident is not asked.
+        return outcome, [False] * len(earlier)
+    finding_ids, settled = native_package_identities(outcome.findings, earlier, outcome.listed_packages, store=store)
     findings = [
-        {**item, "finding_id": earlier_id(item)} if item.get("source_kind") == "supply_chain" else item
-        for item in outcome.findings
+        item if item.get("finding_id") == finding_id else {**item, "finding_id": finding_id}
+        for item, finding_id in zip(outcome.findings, finding_ids, strict=True)
     ]
     if findings == list(outcome.findings):
-        return outcome
-    return dataclasses.replace(outcome, findings=findings)
+        return outcome, settled
+    return dataclasses.replace(outcome, findings=findings), settled
 
 
-def listed_packages(payload: Mapping[str, object]) -> frozenset[tuple[str, str, str]] | None:
-    """The package coordinates a local audit read, as its findings name them.
-
-    None when the audit stopped early or warned about a lockfile, since its
-    package list may then be short.
-    """
-
-    evaluation = payload.get("evaluation")
-    packages = evaluation.get("packages") if isinstance(evaluation, Mapping) else None
-    stopped = payload.get("audit_status") == "incomplete" or payload.get("lockfile_warnings")
-    if stopped or not isinstance(packages, list):
-        return None
-    return frozenset(
-        (
-            _text(package.get("ecosystem")) or "unknown",
-            name,
-            _text(package.get("resolvedVersion")) or _text(package.get("requestedVersion")) or "",
-        )
-        for package in packages
-        if isinstance(package, Mapping) and (name := package_name(package)) is not None
-    )
+def _is_package(item: object) -> bool:
+    return isinstance(item, Mapping) and item.get("source_kind") == "supply_chain"
 
 
-def _package_settled(item: Mapping[str, object], outcome: RunOutcome, reported: set[tuple[object, ...]]) -> bool:
-    if item.get("source_kind") != "supply_chain":
-        return False
-    coordinate = _coordinate(item)
-    listed = outcome.listed_packages
-    if coordinate in reported or listed is None or coordinate in listed:
-        return coordinate in reported
-    # An earlier run may have named a scoped package the audit still lists
-    # by its bare name.
-    return all(_unscoped(package) != coordinate for package in listed)
-
-
-def _coordinate(item: Mapping[str, object]) -> tuple[object, ...]:
-    return (item.get("ecosystem"), item.get("package_name"), item.get("package_version") or "")
-
-
-def _unscoped(coordinate: tuple[object, ...]) -> tuple[object, ...] | None:
-    """``coordinate`` under the bare name earlier runs gave a scoped package."""
-
-    ecosystem, name, version = coordinate
-    if not isinstance(name, str) or "/" not in name:
-        return None
-    return (ecosystem, name.rsplit("/", 1)[-1], version)
-
-
-def _text(value: object) -> str | None:
-    stripped = value.strip() if isinstance(value, str) else ""
-    return stripped[:256] if stripped else None
+def _settled(settled: Sequence[bool], index: int) -> bool:
+    return index < len(settled) and settled[index]
 
 
 def _size(item: Mapping[str, object]) -> int:
     return len(json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")) + 1
 
 
-__all__ = ["CARRIED_FINDING_CAP", "RECHECKED", "carry_unchecked_findings", "keep_package_identities", "listed_packages"]
+__all__ = ["CARRIED_FINDING_CAP", "RECHECKED", "carry_unchecked_findings", "keep_package_identities"]
