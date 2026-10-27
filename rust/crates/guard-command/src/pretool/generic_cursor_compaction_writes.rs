@@ -129,9 +129,11 @@ fn plain_note(metadata: &std::fs::Metadata) -> bool {
     metadata.is_file() && metadata.nlink() == 1 && metadata.permissions().mode() & 0o111 == 0
 }
 
+/// The link count is not available on stable Windows, so a note that already
+/// exists keeps its review there; a new segment name is still admitted.
 #[cfg(not(unix))]
-fn plain_note(metadata: &std::fs::Metadata) -> bool {
-    metadata.is_file()
+fn plain_note(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 #[cfg(test)]
