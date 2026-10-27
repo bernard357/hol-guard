@@ -154,8 +154,9 @@ pub struct PackageAuditPackageIdentitiesQueryV1 {
     /// The last assessed run's findings exactly as stored.
     pub earlier: Vec<Value>,
     /// `[ecosystem, name, version]` of every package the audit read; absent
-    /// when the audit stopped early.
-    #[serde(default)]
+    /// when the audit stopped early. Left out again when serialized, as the
+    /// client sent it, so the request digest matches the client's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed: Option<Vec<[String; 3]>>,
 }
 
