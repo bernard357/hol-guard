@@ -8,6 +8,8 @@ pub(crate) mod chain_literals;
 mod command_rewrite;
 #[path = "contained_publish.rs"]
 pub(crate) mod contained_publish;
+#[path = "generic_cursor_compaction_writes.rs"]
+mod cursor_compaction_writes;
 #[path = "generic_cursor_project_reads.rs"]
 mod cursor_project_reads;
 #[path = "env_prefix_projection.rs"]
@@ -826,6 +828,10 @@ fn evaluate_envelope(
         cursor_project_reads::evaluate(harness, event, payload, &signals, home_dir, cwd)
     {
         cursor_read
+    } else if let Some(cursor_note) =
+        cursor_compaction_writes::evaluate(harness, event, payload, &signals, home_dir, cwd)
+    {
+        cursor_note
     } else if task_metadata {
         generic_result(
             generic_action(harness, event, PreToolActionTypeV1::Harness,
