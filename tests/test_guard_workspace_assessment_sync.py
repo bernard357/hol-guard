@@ -133,6 +133,20 @@ def test_partial_runs_report_partial_coverage_never_all_clear(tmp_path: Path) ->
     assert entry["assessment"]["coverage"]["reasons"] == ["lockfile_missing"]
 
 
+def test_a_finding_carried_from_an_earlier_run_is_not_sent_as_seen_again(tmp_path: Path) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    carried = {**finding(2), "carried_from_run_id": "earlier-run"}
+    assessed(guard_store, state="partial", findings=[finding(1), carried])
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None
+    [entry] = built.payload["worktrees"]
+    observed = sync.keyed_digest(sync.load_hash_key(guard_store, NOW), "guard.workspace.finding\0" + f"{1:032x}")
+    assert [item["findingKey"] for item in entry["findings"]] == [observed]
+    assert entry["findingsTruncated"] is False
+
+
 def test_status_reflects_paused_and_queued_worktrees(tmp_path: Path) -> None:
     guard_store = GuardStore(tmp_path / "home")
     assessed(guard_store)
