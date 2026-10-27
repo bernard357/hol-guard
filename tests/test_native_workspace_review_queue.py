@@ -183,7 +183,8 @@ def test_nonnative_operation_with_native_fields_keeps_generic_consumption_mark(
             requires_local_approval=False,
         ),
     )
-    monkeypatch.setattr(command_queue, "consume_local_command_approval", lambda *_args: True)
+    monkeypatch.setattr(command_queue, "command_identity_digest", lambda *_args, **_kwargs: "identity-digest-1")
+    monkeypatch.setattr(command_queue, "consume_local_command_approval", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         command_queue,
         "mark_command_job_consumed",

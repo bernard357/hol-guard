@@ -517,16 +517,29 @@ def approve_pending_command(
     return {"approved": True, "job_id": job_id, "operation": identity["operation"], "issuer": issuer}
 
 
+def command_identity_digest(store: GuardStore, authorized: AuthorizedCommandJob) -> str:
+    """The runtime's digest for ``authorized``, for a caller that needs it twice.
+
+    Spending a grant and recording the replay row both name the job by this
+    digest. A caller that asks for it once, before it touches either, cannot
+    lose an approval to a resident that stops answering between the two.
+    """
+
+    return _identity_digest(store, authorized.identity)
+
+
 def consume_local_command_approval(
     store: GuardStore,
     authorized: AuthorizedCommandJob,
     *,
     now: str | None = None,
+    identity_digest: str | None = None,
 ) -> bool:
     if not authorized.requires_local_approval:
         return True
     items = _state_items(store.get_sync_payload(COMMAND_LOCAL_APPROVALS_STATE_KEY))
-    identity_digest = _identity_digest(store, authorized.identity)
+    if identity_digest is None:
+        identity_digest = _identity_digest(store, authorized.identity)
     matched_index: int | None = None
     for index, item in enumerate(items):
         if item.get("identityDigest") != identity_digest:
@@ -563,7 +576,10 @@ def mark_command_job_consumed(
     authorized: AuthorizedCommandJob,
     *,
     now: str | None = None,
+    identity_digest: str | None = None,
 ) -> None:
+    if identity_digest is None:
+        identity_digest = _identity_digest(store, authorized.identity)
     consumed_at = _now_datetime(now)
     raw_items = _state_items(store.get_sync_payload(COMMAND_REPLAY_STATE_KEY))
     items = [
@@ -573,7 +589,7 @@ def mark_command_job_consumed(
     ]
     items.append(
         {
-            "identityDigest": _identity_digest(store, authorized.identity),
+            "identityDigest": identity_digest,
             "jobId": authorized.identity["id"],
             "idempotencyKey": authorized.identity["idempotencyKey"],
             "operation": authorized.operation,

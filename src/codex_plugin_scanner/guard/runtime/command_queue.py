@@ -18,6 +18,7 @@ from .command_capability import (
     command_capability_operations,
     command_capability_status,
     command_environment_allows_queue,
+    command_identity_digest,
     consume_local_command_approval,
     mark_command_job_consumed,
     register_pending_command,
@@ -397,7 +398,17 @@ def poll_command_queue_once(store: GuardStore, context: HarnessContext) -> dict[
         # and has to reach the upload below; letting it escape the poll would
         # leave the lease open with nothing posted and nothing recorded.
         try:
-            if not consume_local_command_approval(store, authorized):
+            # Spending the grant and recording the replay row both name this
+            # job by the runtime's digest. Ask for it once, before the grant
+            # is deleted: a resident that stopped answering in between would
+            # otherwise fail the job with the user's approval already gone.
+            needs_replay_row = not is_native_workspace_review_job(item)
+            identity_digest = (
+                command_identity_digest(store, authorized)
+                if authorized.requires_local_approval or needs_replay_row
+                else None
+            )
+            if not consume_local_command_approval(store, authorized, identity_digest=identity_digest):
                 pending = register_pending_command(store, authorized, item)
                 execution = {
                     "waitingLocalConfirm": True,
@@ -412,8 +423,8 @@ def poll_command_queue_once(store: GuardStore, context: HarnessContext) -> dict[
                     reason="local_approval_required",
                 )
             else:
-                if not is_native_workspace_review_job(item):
-                    mark_command_job_consumed(store, authorized)
+                if needs_replay_row:
+                    mark_command_job_consumed(store, authorized, identity_digest=identity_digest)
                 audit_command_decision(
                     store,
                     "cloud_command.accepted",

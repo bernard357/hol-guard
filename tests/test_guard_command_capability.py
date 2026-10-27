@@ -15,6 +15,8 @@ from codex_plugin_scanner.guard.runtime import command_capability as command_cap
 from codex_plugin_scanner.guard.runtime import command_queue
 from codex_plugin_scanner.guard.runtime.command_capability import (
     COMMAND_CAPABILITY_STATE_KEY,
+    COMMAND_LOCAL_APPROVALS_STATE_KEY,
+    COMMAND_REPLAY_STATE_KEY,
     LOCAL_CONFIRMATION_COMMAND_OPERATIONS,
     READ_ONLY_COMMAND_OPERATIONS,
     STATE_CHANGING_COMMAND_OPERATIONS,
@@ -550,3 +552,67 @@ def test_cli_and_runtime_snapshot_surface_capability_state(
     assert isinstance(capability, dict)
     assert capability["enabled"] is True
     assert capability["pending_commands"] == []
+
+
+def test_an_approval_is_never_spent_against_a_digest_the_runtime_has_not_given(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One digest serves both the grant match and the replay row.
+
+    The poll used to ask for it twice: once to find the grant it deletes, and
+    again to write the replay row. A resident that stopped answering between
+    the two failed the job with the user's approval already gone, so the next
+    attempt asked them to approve it a second time.
+    """
+
+    store = _connected_store(tmp_path)
+    operation = "guard.app.update"
+    _issue(store, operation)
+    leased = _job(store, operation, payload={"channel": "stable"})
+    authorized = authorize_command_job(store, leased, schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS)
+    register_pending_command(store, authorized, leased)
+    assert approve_pending_command(store, "job-1")["approved"] is True
+
+    real = command_capability_module.native_command_envelope
+    digests = [0]
+
+    def one_digest_only(**kwargs: object) -> dict[str, object]:
+        if kwargs.get("action") == "digest":
+            digests[0] += 1
+            if digests[0] > 1:
+                raise CommandEnvelopeUnavailableError
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(command_capability_module, "native_command_envelope", one_digest_only)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        command_queue,
+        "_resolve_command_queue_auth_context",
+        lambda _store, **_kwargs: {"sync_url": "https://hol.test/sync"},
+    )
+
+    def request(
+        _auth: dict[str, object],
+        *,
+        method: str,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        calls.append((path, payload))
+        return {"item": leased} if path == "/lease" else {"ok": True}
+
+    monkeypatch.setattr(command_queue, "_json_request", request)
+    monkeypatch.setattr(command_queue, "_execute_job", lambda *_args, **_kwargs: {"data": {"ok": True}})
+
+    command_queue.poll_command_queue_once(store, _context(tmp_path))
+
+    result = next(payload for path, payload in calls if path.endswith("/result"))
+    assert result["status"] == "succeeded"
+    assert digests[0] == 1
+    grants = store.get_sync_payload(COMMAND_LOCAL_APPROVALS_STATE_KEY)
+    assert isinstance(grants, dict) and grants["items"] == []
+    replay = store.get_sync_payload(COMMAND_REPLAY_STATE_KEY)
+    assert isinstance(replay, dict)
+    assert [item["jobId"] for item in replay["items"]] == ["job-1"]
