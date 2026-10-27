@@ -553,3 +553,72 @@ def test_raw_hook_bridge_preserves_payload_for_rust_parsing(
             is None
         )
         assert captured == {}
+
+
+@pytest.mark.parametrize(
+    ("features", "resident_called"),
+    (
+        (("resident-protocol-v2",), False),
+        (("resident-protocol-v2", "edge-self-check-v1"), True),
+    ),
+)
+def test_post_tool_review_only_trusts_a_resident_that_checks_its_own_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    features: tuple[str, ...],
+    resident_called: bool,
+) -> None:
+    from codex_plugin_scanner.guard import native_runtime
+    from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest
+
+    runtime = tmp_path / "hol-guard-runtime"
+    runtime.write_bytes(b"runtime")
+    identity = NativeRuntimeIdentity(
+        path=runtime,
+        size=runtime.stat().st_size,
+        mtime_ns=runtime.stat().st_mtime_ns,
+        sha256="a" * 64,
+    )
+    capabilities = NativeRuntimeCapabilities(
+        protocol_version=1,
+        runtime_version="test",
+        rule_digest="b" * 64,
+        build_sha="c" * 40,
+        target="test",
+        features=features,
+    )
+    monkeypatch.setattr(
+        native_runtime,
+        "native_runtime_status",
+        lambda: NativeRuntimeStatus(
+            mode="auto",
+            available=True,
+            compatible=True,
+            reason="ready",
+            identity=identity,
+            capabilities=capabilities,
+        ),
+    )
+    calls: list[object] = []
+
+    def fake_client(**kwargs: object) -> None:
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr(native_runtime, "native_resident_client_request", fake_client)
+    request = HookReviewRequest(
+        harness="claude",
+        event_name="PostToolUse",
+        payload={"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "pwd"}},
+        payload_kind="inline",
+        config_path=None,
+        cwd=tmp_path,
+        home_dir=tmp_path,
+        guard_home=tmp_path,
+        source_scope="workspace",
+    )
+
+    result = native_runtime.review_post_tool_native(request, observe_mode=False, policy_snapshot={"generation": 1})
+
+    assert result is None
+    assert bool(calls) is resident_called
