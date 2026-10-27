@@ -241,9 +241,9 @@ fn a_lost_completion_is_replayed_for_the_same_hook() {
 #[test]
 fn completion_stops_after_three_lost_replies() {
     // A fourth attempt would be answered with a recorded allow; the deny
-    // stands because the bridge never sends it. The daemon thread waits for
-    // that connection and is left behind.
-    let (home, _daemon) = codex_home(
+    // stands because the bridge never sends it. The test then takes that
+    // connection itself so the daemon thread finishes and can be joined.
+    let (home, daemon) = codex_home(
         "codex-approval-lost-every-completion",
         vec![
             Exchange::Plain(200, RESOLVED_ALLOW.to_owned()),
@@ -260,6 +260,18 @@ fn completion_stops_after_three_lost_replies() {
         HOOK_INPUT,
         deadline
     ));
+    let state: Value = serde_json::from_slice(&std::fs::read(&home.state_path).unwrap()).unwrap();
+    let port = state["port"].as_u64().unwrap();
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port as u16)).unwrap();
+    std::io::Write::write_all(
+        &mut stream,
+        b"GET /never-sent HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+    )
+    .unwrap();
+    std::io::Read::read_to_end(&mut stream, &mut Vec::new()).unwrap();
+    let requests = daemon.join().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(requests[4].target, "/never-sent");
 }
 
 #[test]

@@ -623,7 +623,7 @@ def test_gr089_copilot_autopilot_shell_exfil_returns_terminal_stop(tmp_path: Pat
 
 
 @pytest.mark.usefixtures("native_hook_force")
-def test_codex_json_pretool_package_install_reason_includes_request(tmp_path: Path) -> None:
+def test_codex_json_pretool_package_install_names_its_request(tmp_path: Path) -> None:
     review_package_signals(tmp_path / "guard-home")
     exit_code, output = _run_hook(
         tmp_path,
