@@ -267,6 +267,7 @@ def _local_audit(store: Any, config: Any, root: Path) -> dict[str, object]:
         command_name="workspace-assessment",
         sbom_paths=(),
         allow_cloud_audit=False,
+        record_evidence=False,
     )
     return payload
 
