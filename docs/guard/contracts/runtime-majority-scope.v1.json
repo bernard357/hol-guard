@@ -1192,7 +1192,7 @@
           "emit_guard_payload"
         ],
         "reason": "Rich and plain-text renderers, panel and table builders, and the renderer dispatch tables that format Guard command results for a human terminal. They compute no verdicts and read no stores; they only lay out an already-built payload.",
-        "evidence": "The retained reference closure of every symbol other modules import from render.py (_redact_payload, _render_redacted_json_payload, emit_guard_payload) contains none of the excluded symbols except through emit_guard_payload, whose as_json=True branch (the only branch the hook protocol uses: commands_support_hook_payload.py writes JSON through _redact_payload and _render_redacted_json_payload directly) never reads them. The excluded symbols are reached only from emit_guard_payload's as_json=False branch through the _RENDERERS and _PLAIN_TEXT_RENDERERS tables. The report validates this reference closure on every run."
+        "evidence": "The retained reference closure of every symbol other modules import from render.py (emit_guard_payload) contains none of the excluded symbols except through emit_guard_payload, whose as_json=True branch (which writes JSON through _redact_payload and _render_redacted_json_payload; the hook protocol's redacted document is printed by the resident's cli_hook_emit op, not by render.py) never reads them. The excluded symbols are reached only from emit_guard_payload's as_json=False branch through the _RENDERERS and _PLAIN_TEXT_RENDERERS tables. The report validates this reference closure on every run."
       },
       {
         "id": "adapter-base-setup",

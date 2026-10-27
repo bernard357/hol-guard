@@ -483,6 +483,8 @@ mod hook_bridge_daemon_start;
 mod hook_bridge_fallback;
 mod hook_cli_claude_text;
 mod hook_cli_emit;
+mod hook_cli_emit_redaction;
+mod hook_cli_emit_redaction_text;
 #[cfg(test)]
 mod hook_decision_apply_patch_gate_tests;
 mod hook_decision_artifact_directive;

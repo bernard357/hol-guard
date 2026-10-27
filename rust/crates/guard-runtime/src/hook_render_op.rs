@@ -13,7 +13,9 @@
 use std::path::Path;
 
 use crate::hook_cli_claude_text::claude_approval_copy;
-use crate::hook_cli_emit::cli_hook_emit_document;
+use crate::hook_cli_emit::{
+    cli_hook_emit_document, cli_hook_emit_printed_document, PrintedDocument,
+};
 use guard_command::hook_responses::cli_documents::{
     cli_document, cli_response, copilot_hook_response, CliOutcome,
 };
@@ -179,13 +181,34 @@ fn render(request: &HookRenderRequestV1) -> Result<Value, &'static str> {
             .get("bridge")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let document = cli_hook_emit_document(
-            harness,
-            event_name,
-            response_json,
-            guard_home.map(Path::new),
-            bridge,
-        )
+        // A caller that prints the document the resident renders asks for it
+        // with `document`, naming its own home so the paths it shortens are
+        // the caller's. Absent means the policy action alone, which is all a
+        // caller that printed its own document read.
+        let printed = params
+            .get("document")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| PrintedDocument {
+                home_dir: params.get("home_dir").and_then(Value::as_str),
+            });
+        let document = match printed {
+            Some(printed) => cli_hook_emit_printed_document(
+                harness,
+                event_name,
+                response_json,
+                guard_home.map(Path::new),
+                bridge,
+                &printed,
+            ),
+            None => cli_hook_emit_document(
+                harness,
+                event_name,
+                response_json,
+                guard_home.map(Path::new),
+                bridge,
+            ),
+        }
         .ok_or("native_hook_render_unrenderable")?;
         return Ok(cli_payload(CliOutcome::Document(document)));
     }

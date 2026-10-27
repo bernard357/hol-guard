@@ -399,3 +399,93 @@ fn cli_hook_emit_reads_an_answer_larger_than_the_render_budget() {
         "native_hook_render_too_large"
     );
 }
+
+#[path = "hook_render_op_redaction_tests.rs"]
+mod redaction;
+
+/// The `cli_hook_emit` answer for a caller that prints the resident's
+/// document.
+fn printed(harness: &str, event_name: &str, response_json: &str, home_dir: Option<&str>) -> Value {
+    let mut req = request("cli_hook_emit");
+    req.harness = harness.to_owned();
+    let mut params = json!({
+        "event_name": event_name, "response_json": response_json, "document": true,
+    });
+    if let Some(home_dir) = home_dir {
+        params["home_dir"] = json!(home_dir);
+    }
+    req.cli = Some(params);
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.status, "ok", "{response_json}");
+    let payload = result.payload.expect("payload");
+    assert_eq!(payload["outcome"], "document");
+    payload["response"].clone()
+}
+
+#[test]
+fn cli_hook_emit_shortens_only_the_home_the_caller_names() {
+    let response_json = r#"{"m":"/opt/me/x","n":"/opt/me","o":"/opt/mex/y"}"#;
+    let answer = printed("codex", "Stop", response_json, Some("/opt/me//"));
+    assert_eq!(
+        answer["stdout"],
+        "{\n  \"m\": \"~/x\",\n  \"n\": \"~\",\n  \"o\": \"/opt/mex/y\"\n}"
+    );
+    let answer = printed("codex", "Stop", response_json, None);
+    assert_eq!(
+        answer["stdout"],
+        "{\n  \"m\": \"/opt/me/x\",\n  \"n\": \"/opt/me\",\n  \"o\": \"/opt/mex/y\"\n}"
+    );
+}
+
+#[test]
+fn cli_hook_emit_names_the_exit_status_the_harness_expects() {
+    for (harness, event_name, action, exit_code) in [
+        // Claude reads a hook's JSON only on exit 0, a block included.
+        ("claude-code", "Stop", "block", 0),
+        ("claude-code", "PreToolUse", "block", 0),
+        ("codex", "PreToolUse", "block", 0),
+        ("codex", "UserPromptSubmit", "block", 0),
+        ("codex", "Stop", "block", 1),
+        ("pi", "PostToolUse", "sandbox-required", 1),
+        ("cursor", "PreToolUse", "require-reapproval", 2),
+        ("cursor", "PreToolUse", "allow", 0),
+        ("opencode", "PreToolUse", "block", 1),
+        ("superagent", "PreToolUse", "warn", 0),
+        ("unlisted", "PreToolUse", "block", 1),
+    ] {
+        let response_json = format!(r#"{{"policy_action":"{action}"}}"#);
+        let answer = printed(harness, event_name, &response_json, None);
+        assert_eq!(answer["exit_code"], exit_code, "{harness} {event_name}");
+        assert_eq!(answer["policy_action"], action);
+        let stdout = format!("{{\n  \"policy_action\": \"{action}\"\n}}");
+        assert_eq!(answer["stdout"], stdout);
+    }
+}
+
+#[test]
+fn cli_hook_emit_without_document_answers_as_before() {
+    // A caller that prints its own document reads the policy action alone.
+    let mut req = request("cli_hook_emit");
+    req.harness = "codex".to_owned();
+    req.cli = Some(json!({"event_name": "Stop", "response_json": r#"{"policy_action":"block"}"#}));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(
+        result.payload.expect("payload")["response"],
+        json!({"policy_action": "block"})
+    );
+    // A bridge-rendered harness keeps its bridge's output with or without it.
+    let answer = printed(
+        "devin",
+        "PreToolUse",
+        r#"{"policy_action":"block","reason":"denied"}"#,
+        None,
+    );
+    assert_eq!(answer["exit_code"], 2);
+    assert_eq!(answer["stderr"], "denied");
+    // A colliding surrogate-plane character cannot be printed faithfully.
+    req.cli = Some(json!({
+        "event_name": "Stop", "response_json": "{\"m\":\"\u{f0000}\\udcff\"}", "document": true,
+    }));
+    let result = decode(evaluate_hook_render_request(&req).expect("encoded"));
+    assert_eq!(result.code, "native_hook_render_unrenderable");
+}
