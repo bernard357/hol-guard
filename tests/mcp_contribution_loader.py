@@ -14,7 +14,6 @@ from pathlib import Path
 from codex_plugin_scanner.guard.runtime.extension_contribution import frozen_package_data
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
     _frozen_runtime,
-    contributions_dir,
     direct_mcp_command_name,
     normalized_remote_mcp_url,
     normalized_remote_server_name,
@@ -34,7 +33,7 @@ def load_mcp_contribution_payloads(root: Path | None = None) -> tuple[dict[str, 
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
-    return _load_from_directory(contributions_dir())
+    return _load_from_directory(Path(__file__).resolve().parents[1] / "contributions" / "mcp-servers")
 
 
 def validate_mcp_contribution_file(path: Path) -> dict[str, object]:
