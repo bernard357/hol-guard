@@ -40,8 +40,14 @@ pub struct TrustAttestationVerifyPolicyV1 {
     /// Key id to the earliest signing time that key may have been used at.
     #[serde(default)]
     pub key_not_before: BTreeMap<String, String>,
+    /// The lowest sequence the verifier will accept, as decimal digits.
+    ///
+    /// Carried as text because the caller's integers are unbounded. A limit
+    /// too wide for a fixed-width field would otherwise fail to decode, and
+    /// the caller would read a refusal it has every right to see as a
+    /// verifier that could not run at all.
     #[serde(default)]
-    pub minimum_sequence: Option<i64>,
+    pub minimum_sequence: Option<String>,
     #[serde(default)]
     pub seen_replay_keys: Vec<String>,
     /// The verifier's current time, or absent to skip every time-of-day check.

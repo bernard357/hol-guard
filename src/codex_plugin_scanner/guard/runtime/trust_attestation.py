@@ -815,7 +815,13 @@ def verify_trust_attestation(
         policy={
             "revoked_key_ids": sorted(verification_policy.revoked_key_ids),
             "key_not_before": dict(verification_policy.key_not_before),
-            "minimum_sequence": verification_policy.minimum_sequence,
+            # The verifier reads the limit as digits, not as a fixed-width
+            # number: a Python integer has no width bound, and a limit it
+            # cannot decode would reach the caller as an unavailable runtime
+            # instead of the monotonic refusal the verifier owes it.
+            "minimum_sequence": (
+                None if verification_policy.minimum_sequence is None else str(verification_policy.minimum_sequence)
+            ),
             "seen_replay_keys": sorted(verification_policy.seen_replay_keys),
             "now": verification_policy.now,
             "require_nonce": verification_policy.require_nonce,

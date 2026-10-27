@@ -42,7 +42,7 @@ fn verification_policy(
             .cloned()
             .collect::<BTreeSet<_>>(),
         key_not_before: policy.key_not_before.clone(),
-        minimum_sequence: policy.minimum_sequence,
+        minimum_sequence: policy.minimum_sequence.clone(),
         seen_replay_keys: policy
             .seen_replay_keys
             .iter()
