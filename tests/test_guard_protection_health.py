@@ -137,9 +137,7 @@ def collect(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., _C
                 count=activity_count,
                 dropped=dropped,
                 errors=errors,
-                active_errors=(1 if dropped > 0 or errors > 0 else 0)
-                if active_errors is None
-                else active_errors,
+                active_errors=(1 if dropped > 0 or errors > 0 else 0) if active_errors is None else active_errors,
             ),
             guard_home=tmp_path / "guard-home",
             runtime_state=runtime_state,

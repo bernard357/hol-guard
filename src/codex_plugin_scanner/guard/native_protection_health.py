@@ -98,10 +98,7 @@ def protection_health_report(
 
 
 def _signal_rows(signals: Mapping[str, ProtectionSignal]) -> dict[str, dict[str, str]]:
-    return {
-        key: {"status": signal.status.value, "reason_code": signal.reason_code}
-        for key, signal in signals.items()
-    }
+    return {key: {"status": signal.status.value, "reason_code": signal.reason_code} for key, signal in signals.items()}
 
 
 def _validated_report(decoded: dict[str, Any], wire: dict[str, object], request_sha256: str) -> dict[str, object]:

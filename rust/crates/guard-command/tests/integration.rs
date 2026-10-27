@@ -41,6 +41,7 @@ pub mod guard_evidence_hash_parity;
 pub mod guard_jsonc_normalization_parity;
 pub mod guard_mcp_launch_tokens_parity;
 pub mod guard_protection_health_parity;
+pub mod guard_protection_health_truth_table;
 pub mod guard_trust_attestation_verify_parity;
 pub mod guard_trust_claim_parity;
 pub mod hook_fail_closed_envelopes;

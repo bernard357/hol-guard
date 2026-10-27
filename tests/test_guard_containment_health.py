@@ -10,6 +10,7 @@ import pytest
 
 import codex_plugin_scanner.guard.native_execution as native_execution
 import codex_plugin_scanner.guard.runtime.containment_health as containment_health_module
+from codex_plugin_scanner.guard.runtime import protection_health_runtime
 from codex_plugin_scanner.guard.runtime.containment_contract import ContainmentBackend
 from codex_plugin_scanner.guard.runtime.containment_health import (
     CONTAINMENT_POLICY_CONTRACT_DIGEST,
@@ -17,7 +18,6 @@ from codex_plugin_scanner.guard.runtime.containment_health import (
     containment_health_signals,
     probe_containment_health,
 )
-from codex_plugin_scanner.guard.runtime import protection_health_runtime
 from codex_plugin_scanner.guard.runtime.protection_health import ProtectionSignal
 
 _NOW = datetime(2026, 7, 19, 15, 0, tzinfo=timezone.utc)

@@ -57,10 +57,9 @@ fn every_combination_of_check_statuses_lands_where_the_grammar_says() {
             .map(|(check_id, status)| ((*check_id).to_owned(), signal(check_id, *status)))
             .collect();
 
-        let core_all_pass = combination
-            .iter()
-            .enumerate()
-            .all(|(index, status)| index == evidence_index || *status == ProtectionCheckStatus::Pass);
+        let core_all_pass = combination.iter().enumerate().all(|(index, status)| {
+            index == evidence_index || *status == ProtectionCheckStatus::Pass
+        });
         let expected = if core_all_pass {
             match combination[evidence_index] {
                 ProtectionCheckStatus::Pass => ProtectionState::Protected,
