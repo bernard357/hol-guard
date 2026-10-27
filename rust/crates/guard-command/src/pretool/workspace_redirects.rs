@@ -217,7 +217,7 @@ pub(super) fn contained(
     context: crate::pretool::PathContext<'_>,
     execution_environment: Option<&GuardExecutionEnvironmentV1>,
 ) -> Option<PreToolResultV1> {
-    if !crate::pretool::workspace_contained::host_eligible(harness, event) {
+    if !crate::pretool::workspace_contained::host_eligible(harness, event, payload) {
         return None;
     }
     // A command the bounded-write projection takes runs directly instead: a

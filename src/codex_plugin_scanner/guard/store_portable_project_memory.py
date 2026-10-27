@@ -7,10 +7,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
+from .action_lattice import guard_action_severity
 from .project_identity import (
+    ProjectIdentityError,
     enrich_project_identity_metadata,
     is_portable_project_identity,
-    portable_project_identity_revision,
     resolve_portable_project_identity,
 )
 from .store_base import PolicyDecisionLookupResult
@@ -20,36 +21,37 @@ from .store_policy import POLICY_LOOKUP_MEMORY_FEATURE as _MEMORY
 from .store_policy import PORTABLE_COMPOSITION_LOOKUP_FEATURE as _PORTABLE_COMPOSITION
 from .store_policy import RUNTIME_SAVED_REUSE_FEATURE as _SAVED_REUSE
 
-_PROJECT_IDENTITY_CACHE_MAX_ITEMS = 128
-_PROJECT_IDENTITY_CACHE: dict[tuple[str, int], str] = {}
-
-
-def _cached_portable_project_identity(workspace: str) -> str | None:
-    """Cache only successful identities and invalidate on any identity metadata change."""
-    revision = portable_project_identity_revision(workspace)
-    if revision is None:
-        return resolve_portable_project_identity(workspace)
-    cache_key = (workspace, revision)
-    cached = _PROJECT_IDENTITY_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    identity = resolve_portable_project_identity(workspace)
-    if identity is None:
-        return None
-
-    stale_keys = [key for key in _PROJECT_IDENTITY_CACHE if key[0] == workspace]
-    for stale_key in stale_keys:
-        _PROJECT_IDENTITY_CACHE.pop(stale_key, None)
-    if len(_PROJECT_IDENTITY_CACHE) >= _PROJECT_IDENTITY_CACHE_MAX_ITEMS:
-        oldest_key = next(iter(_PROJECT_IDENTITY_CACHE))
-        _PROJECT_IDENTITY_CACHE.pop(oldest_key, None)
-    _PROJECT_IDENTITY_CACHE[cache_key] = identity
-    return identity
+# A decision at or above this rank can only hold a caller back, so a lookup
+# that lost its portable half may still return it.
+_REVIEW_FLOOR = guard_action_severity("review")
 
 
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _restrictive_only(decision: object) -> dict[str, object] | None:
+    """A decision as a lookup whose portable half went unread may still use it.
+
+    This mirrors the resident's own fallback for a portable half it cannot
+    claim (``policy_lookup_portable``). A decision below the review floor
+    grants a permission the unread half might have withheld, so it is
+    dropped. One at or above the floor can only hold the caller back, so it
+    survives, without the preview-only authority revision that would present
+    it as a claim.
+    """
+    if not isinstance(decision, dict):
+        return None
+    if guard_action_severity(decision.get("action")) < _REVIEW_FLOOR:
+        return None
+    return {key: value for key, value in decision.items() if key != "_approval_authority_revision"}
+
+
+def _restrictive_only_lookup(lookup: Any) -> Any:
+    """The same, over a whole lookup result."""
+    if not isinstance(lookup, Mapping):
+        return lookup
+    return {**lookup, "decision": _restrictive_only(lookup.get("decision"))}
 
 
 # Store mixins are composed dynamically in ``GuardStore``. Sibling mixins use
@@ -67,7 +69,7 @@ class StorePortableProjectMemoryMixin:
             return operation
         return {
             **operation,
-            "metadata": enrich_project_identity_metadata(metadata),
+            "metadata": enrich_project_identity_metadata(metadata, guard_home=self.guard_home),
         }
 
     def peek_saved_decision_groups(
@@ -179,8 +181,9 @@ class StorePortableProjectMemoryMixin:
             consume_one_shot=False,
         )
         command, artifact_type, artifact_name = memory
+        portable, unread = self._portable_probe_workspace(workspace)
         request["probe_groups"] = {
-            "portable_workspace": self._portable_project_workspace(workspace),
+            "portable_workspace": portable,
             "groups": [{"artifact_hash": h, "candidate_artifact_ids": [i]} for i, h in probes],
             **({"reuse": reuse} if reuse is not None else {}),
             "memory": {
@@ -195,7 +198,8 @@ class StorePortableProjectMemoryMixin:
         # would answer a narrower question than was asked, and the
         # probe-groups contract would reject the ``memory`` field anyway. The
         # named missing capability says that; a serde error would not.
-        return self.send_policy_decision_lookup(request, required_feature=_MEMORY)
+        lookup = self.send_policy_decision_lookup(request, required_feature=_MEMORY)
+        return _restrictive_only_lookup(lookup) if unread else lookup
 
     def resolve_runtime_saved_decision(
         self,
@@ -224,10 +228,11 @@ class StorePortableProjectMemoryMixin:
             query = None if reuse is None else {"query": self._degraded_saved_reuse_query(current, reuse)}
             return degraded, None, query
         probes = {"current": current, "legacy": legacy, **({"alias": alias} if alias is not None else {})}
-        runtime = {
-            name: {**probe, "portable_workspace": self._portable_project_workspace(_text(probe.get("workspace")))}
-            for name, probe in probes.items()
+        resolved = {
+            name: self._portable_probe_workspace(_text(probe.get("workspace"))) for name, probe in probes.items()
         }
+        unread = any(probe_unread for _, probe_unread in resolved.values())
+        runtime = {name: {**probe, "portable_workspace": resolved[name][0]} for name, probe in probes.items()}
         request = self.policy_decision_lookup_request(
             evidence,
             harness=str(current["harness"]),
@@ -240,7 +245,12 @@ class StorePortableProjectMemoryMixin:
         )
         request["probe_groups"] = {"groups": [], "runtime": {**runtime, **({"reuse": reuse} if reuse else {})}}
         payload = self.send_policy_decision_lookup(request, required_feature=_SAVED_REUSE if reuse else _LOOKUP)
-        return payload["lookup"], payload["decision"], None if reuse is None else payload.get("saved_reuse")
+        saved_reuse = None if reuse is None else payload.get("saved_reuse")
+        if unread:
+            # A probe sent without its identity read only local authority, so
+            # neither its decision nor a reuse built on it may grant anything.
+            return _restrictive_only_lookup(payload["lookup"]), _restrictive_only(payload["decision"]), None
+        return payload["lookup"], payload["decision"], saved_reuse
 
     def _degraded_saved_reuse_query(self, current: Mapping[str, object], reuse: Mapping[str, object]) -> dict[str, Any]:
         """The ``saved_reuse`` query of a store that serves no saved decision."""
@@ -269,6 +279,11 @@ class StorePortableProjectMemoryMixin:
         ``resolve_policy_decision_lookup`` (direct, exact-command and memory ids,
         portable Git workspace, most restrictive wins) over one store connection,
         deriving the candidate ids from the tool-call subject.
+
+        A workspace whose identity nothing settles raises rather than shipping
+        evidence without it: the caller then leaves the read to the
+        ``policy_lookup`` effect, which answers through
+        ``resolve_policy_decision_lookup`` and its restrictive-only fallback.
         """
         evidence = self.policy_lookup_evidence()
         lookup: dict[str, object] = {
@@ -301,12 +316,33 @@ class StorePortableProjectMemoryMixin:
     ) -> PolicyDecisionLookupResult:
         """Resolve the lookup with this clone's portable project identity composed in.
 
-        Python keeps deriving the identity because
-        ``_portable_project_workspace`` answers ``None`` for a workspace whose
-        identity the resident would have to defer on, which a store lookup has
-        no way to do.
+        A workspace with no portable identity resolves locally, because there
+        is no portable half to compose. A workspace whose identity nothing
+        settles is different: the portable half exists and could not be read,
+        and because composition takes the most restrictive of the two, running
+        the local lookup alone there would let a saved local allow take effect
+        where a portable block had been winning. Such a workspace therefore
+        gets the local lookup with only its restrictive part kept, consuming
+        nothing, so the caller is asked again rather than silently allowed.
         """
-        portable_workspace = None if local_once_only else self._portable_project_workspace(workspace)
+        if local_once_only:
+            portable_workspace = None
+        else:
+            try:
+                portable_workspace = self._portable_project_workspace(workspace)
+            except ProjectIdentityError:
+                unread = super().resolve_policy_decision_lookup(
+                    harness,
+                    artifact_id,
+                    artifact_hash=artifact_hash,
+                    workspace=workspace,
+                    publisher=publisher,
+                    now=now,
+                    runtime_exact_match_context=runtime_exact_match_context,
+                    consume_one_shot=False,
+                    local_once_only=False,
+                )
+                return cast("PolicyDecisionLookupResult", _restrictive_only_lookup(unread))
         if portable_workspace is None:
             return super().resolve_policy_decision_lookup(
                 harness,
@@ -352,9 +388,23 @@ class StorePortableProjectMemoryMixin:
             self.send_policy_decision_lookup(request, required_feature=_PORTABLE_COMPOSITION),
         )
 
-    @staticmethod
-    def _portable_project_workspace(workspace: str | None) -> str | None:
+    def _portable_project_workspace(self, workspace: str | None) -> str | None:
+        """The identity to probe under, or ``None`` when the workspace has none.
+
+        A workspace whose identity nothing settles raises
+        ``ProjectIdentityError`` rather than answering ``None``, because a
+        probe sent without the identity reads only local authority.
+        """
         if not isinstance(workspace, str) or not workspace.strip():
             return None
         normalized = workspace.strip()
-        return normalized if is_portable_project_identity(normalized) else _cached_portable_project_identity(normalized)
+        if is_portable_project_identity(normalized):
+            return normalized
+        return resolve_portable_project_identity(normalized, guard_home=self.guard_home)
+
+    def _portable_probe_workspace(self, workspace: str | None) -> tuple[str | None, bool]:
+        """The identity to probe under, and whether it was left unread."""
+        try:
+            return self._portable_project_workspace(workspace), False
+        except ProjectIdentityError:
+            return None, True

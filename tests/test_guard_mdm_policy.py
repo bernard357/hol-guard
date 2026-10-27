@@ -18,8 +18,7 @@ from codex_plugin_scanner.guard.config import load_guard_config, overlay_synced_
 from codex_plugin_scanner.guard.mdm import policy as policy_module
 from codex_plugin_scanner.guard.mdm.contracts import MDM_POLICY_SCHEMA_VERSION, MachinePaths
 from codex_plugin_scanner.guard.mdm.policy import apply_managed_policy, load_managed_policy
-from codex_plugin_scanner.guard.policy_bundle_trusted_keys import policy_bundle_key_fingerprint
-from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring
+from tests.policy_bundle_signing_helpers import policy_bundle_key_fingerprint, policy_bundle_test_keyring
 
 
 def _policy(**overrides: object) -> dict[str, object]:

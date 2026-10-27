@@ -8,9 +8,27 @@
 //! Outside Watch, a review this module leaves takes the shared saved
 //! decision, approve-once and approval inbox path, which keeps a pause the
 //! Cursor client would rewrite with the daemon.
+//!
+//! The daemon alone answers Cursor's `preToolUse` for `Shell`, the silent
+//! probe that may rewrite a test command into the contained sink, and the
+//! `beforeShellExecution` that runs that sink.
 
 use super::{reviewed_edge, HookDirectDefer, PRE_TOOL_USE};
-use serde_json::Value;
+use serde_json::{Map, Value};
+
+/// The client's `preToolUse` for `Shell`, which alone carries no
+/// `cursor_source_hook_event`, and a shell call that names the contained
+/// sink, which the daemon admits or reviews.
+pub(super) fn daemon_only(payload: &Map<String, Value>) -> bool {
+    let probe = payload.get("tool_name").and_then(Value::as_str) == Some("Shell")
+        && !payload.contains_key("cursor_source_hook_event");
+    let sink = payload
+        .get("tool_input")
+        .and_then(|input| input.get("command"))
+        .and_then(Value::as_str)
+        .is_some_and(|command| command.contains("execute-contained-test"));
+    probe || sink
+}
 
 /// The edge result for a Cursor `PreToolUse`, when the daemon would return
 /// it unchanged and the Cursor client renders it without Guard's Python:
@@ -18,9 +36,8 @@ use serde_json::Value;
 /// allow or warn floor or, in Watch, for any verdict; and outside Watch a
 /// response the edge rendered as a block or sandbox requirement, for a
 /// terminal block or sandbox floor. The daemon may pause a review and repair
-/// an authority block, and Cursor has no contained route, so neither of
-/// those is answered here; the caller hands a review to the saved decision
-/// path.
+/// an authority block, so neither of those is answered here; the caller
+/// hands a review to the saved decision path.
 pub(super) fn answer(edge: &[u8], recording_only: bool) -> Result<Value, HookDirectDefer> {
     let parsed = reviewed_edge(edge, PRE_TOOL_USE)?;
     let text = |value: Option<&Value>, name: &str| {

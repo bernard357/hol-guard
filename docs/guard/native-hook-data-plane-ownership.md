@@ -315,19 +315,25 @@ value that is not a string is refused before the call rather than repaired.
 None of this is an approval or an executable authentication; it selects
 which packaged catalog entry a contribution matches.
 
-Which bounded read an admitted argv names is decided in the resident
-(`verified-read-plan-v1`, `guard-command/src/verified_read_plan.rs` behind
-`verified_read_plan_op.rs`). It owns the whole grammar: that the executable is a
-bare name inside the verified-read cohort, which operation each name spells, the
-head and tail line bound and every spelling of it, the quiet-flag and range form
-`sed` is held to, the thousand-line ceiling both carry, and that a target is a
-static relative path with no dynamic shell character in it. The answer is one
-plan — an operation id, an optional target and a selection naming the lines to
-show — so Python reads the argv nowhere. This side opens the target under the
-repository, where the secret-path, symlink and identity checks live, and slices
-the text the plan selected. A refusal names the rule it broke for the
-diagnostics record; the read ends either way. Without a plan there is no read
-and no Python grammar to fall back on: the command returns to ordinary review.
+A verified workspace read happens in the resident from end to end
+(`verified-read-execute-v1`, `guard-runtime/src/verified_read_execute.rs`
+behind `verified_read_execute_op.rs`). The plan comes from
+`guard-command/src/verified_read_plan.rs`, which owns the whole grammar: that
+the executable is a bare name inside the verified-read cohort, which operation
+each name spells, the head and tail line bound and every spelling of it, the
+quiet-flag and range form `sed` is held to, the thousand-line ceiling both
+carry, and that a target is a static relative path with no dynamic shell
+character in it. The resident then checks that the working directory is a
+canonical directory inside a git checkout, refuses secret paths and symlinked
+components, opens each component beneath the repository by descriptor without
+following a link, reads a regular single-link UTF-8 file under its size bound,
+slices the planned lines, rechecks the workspace and repository identity, binds
+the proof digest over all of it and composes the silent-verified decision.
+Python sends the argv and its working directory and prints the text that comes
+back. Every refusal or failure ends the read and the command returns to
+ordinary review; there is no Python grammar or reader to fall back on. The
+executor needs descriptor-relative opens, so on Windows the op answers
+`unsupported` and the read stays under review.
 
 The AIBOM report summaries now come from the resident.
 `aibom_report_summaries_op` counts an inventory report's layers, its trust

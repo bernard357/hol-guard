@@ -94,7 +94,13 @@ from ..models import HarnessDetection
 from ..native_path_anchor import anchor_to_process_directory
 from ..shims import install_guard_shim, prepare_guard_shim, remove_guard_shim
 from ..stable_guard_cli import resolve_frozen_guard_cli
-from .base import HarnessAdapter, HarnessContext, PreparedHarnessInstall, _command_available
+from .base import (
+    HarnessAdapter,
+    HarnessContext,
+    PreparedHarnessInstall,
+    _command_available,
+    setup_failures_besides_missing_command,
+)
 from .codex_detect_sources import (
     json_payload_from_bytes,
     path_restorations,
@@ -1812,7 +1818,17 @@ class CodexHarnessAdapter(HarnessAdapter):
         items = warning_items if isinstance(warning_items, list) else []
         warnings = finalize_codex_doctor_warnings([str(item) for item in items if isinstance(item, str)], hook_state)
         payload["warnings"] = warnings
-        payload["setup_status"] = finalize_codex_doctor_setup_status(payload.get("setup_status"), hook_state, warnings)
+        base_status = payload.get("setup_status")
+        setup_status = finalize_codex_doctor_setup_status(base_status, hook_state, warnings)
+        leftover_only = not setup_failures_besides_missing_command(warnings)
+        if setup_status == "not_found" and not leftover_only:
+            # Hook warnings are added after the base status, so recheck before calling it leftover config.
+            setup_status = "broken"
+        elif setup_status == "broken" and base_status == "not_found" and leftover_only:
+            # A managed hook that Codex is no longer there to run is part of the same
+            # leftover configuration, not a second fault to report as a broken setup.
+            setup_status = "not_found"
+        payload["setup_status"] = setup_status
         apply_codex_hook_trust_doctor(payload, hook_state)
         payload["native_hook_state"] = hook_state
         return payload
