@@ -20492,6 +20492,125 @@
       "expect": "allow"
     },
     {
+      "id": "lanectl-ready-bash-ping",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bash ${HOME}/.local/bin/lanectl-ready ping --config ~/.lanectl/config.toml"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "lanectl-ready-sh-status",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sh ${HOME}/.local/bin/lanectl-ready status --state-dir ~/.lanectl"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "lanectl-ready-ping-tail",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "lanectl-ready ping --config ~/.lanectl/config.toml 2>&1 | tail -15"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "lanectl-ready-bash-ping-tail",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bash ${HOME}/.local/bin/lanectl-ready ping --config ~/.lanectl/config.toml 2>&1 | tail -15"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "lanectl-ready-path-status-head",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "${HOME}/.local/bin/lanectl-ready status --state-dir ~/.lanectl | head -n 5"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "lanectl-bash-ping",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bash ${HOME}/.local/bin/lanectl ping --config ~/.lanectl/config.toml"
+      },
+      "cwd": "worktree",
+      "expect": "setup"
+    },
+    {
+      "id": "lanectl-ready-ping-tee",
+      "fix_area": "connector-setup",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "lanectl-ready ping --config ~/.lanectl/config.toml | tee ~/.lanectl/ping.log"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-folder-redirect-new-file-in-clone",
       "fix_area": "shell",
       "harnesses": [
