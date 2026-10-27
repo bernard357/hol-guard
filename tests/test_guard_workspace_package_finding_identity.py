@@ -115,3 +115,56 @@ def test_a_completed_run_keeps_the_earlier_identity_of_each_package(tmp_path: Pa
 
     # The package the earlier run named keeps its id; another version is new.
     assert [item["finding_id"] for item in run["findings"]] == ["a" * 32, "c" * 32]
+
+
+def _named(finding_id: str, name: str) -> dict[str, object]:
+    return {**package_finding(finding_id, "1.2.8"), "package_name": name}
+
+
+def test_a_scoped_package_keeps_the_id_an_earlier_run_gave_its_bare_name(tmp_path: Path) -> None:
+    # Earlier runs named @acme/minimist as plain minimist.
+    store = admitted(tmp_path)
+    assess(store, outcome("completed", [_named("a" * 32, "minimist")], supply_chain="complete"), at=T0)
+
+    reported = assess(
+        store, outcome("completed", [_named("b" * 32, "@acme/minimist")], supply_chain="complete"), at=T0 + 10
+    )
+    unchecked = assess(
+        store,
+        outcome("partial", [], frozenset({("npm", "@acme/minimist", "1.2.8")}), supply_chain="incomplete"),
+        at=T0 + 20,
+    )
+
+    assert [item["finding_id"] for item in reported["findings"]] == ["a" * 32]
+    assert [item["finding_id"] for item in unchecked["findings"]] == ["a" * 32]
+
+
+def test_an_earlier_bare_name_unchecked_audit_still_lists_is_carried(tmp_path: Path) -> None:
+    store = admitted(tmp_path)
+    assess(store, outcome("completed", [_named("a" * 32, "minimist")], supply_chain="complete"), at=T0)
+
+    run = assess(
+        store,
+        outcome("partial", [], frozenset({("npm", "@acme/minimist", "1.2.8")}), supply_chain="incomplete"),
+        at=T0 + 10,
+    )
+
+    assert [item["finding_id"] for item in run["findings"]] == ["a" * 32]
+    assert run["coverage"]["carried_findings"] == 1
+
+
+def test_a_bare_name_both_packages_could_take_stays_with_the_unscoped_package(tmp_path: Path) -> None:
+    store = admitted(tmp_path)
+    assess(store, outcome("completed", [_named("a" * 32, "minimist")], supply_chain="complete"), at=T0)
+
+    run = assess(
+        store,
+        outcome(
+            "completed",
+            [_named("b" * 32, "@acme/minimist"), _named("c" * 32, "minimist")],
+            supply_chain="complete",
+        ),
+        at=T0 + 10,
+    )
+
+    assert sorted(item["finding_id"] for item in run["findings"]) == ["a" * 32, "b" * 32]

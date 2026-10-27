@@ -15,7 +15,10 @@ run reports again is settled too: its new finding replaces the earlier one.
 
 A package finding keeps the finding id the worktree's last run gave it, even
 when that run named the package under an older identity scheme, so the
-finding's history and its Cloud key stay with the package.
+finding's history and its Cloud key stay with the package. Earlier runs also
+named a scoped package without its scope, as ``traverse`` for
+``@babel/traverse``. Such a finding still belongs to the scoped package while
+no other package the run reports would take the bare name.
 
 Carried findings come after the run's own findings and stop at the same
 count and byte bounds. A finding that does not fit adds the
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections import Counter
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
@@ -100,10 +104,22 @@ def keep_package_identities(outcome: RunOutcome, previous: Mapping[str, object] 
     for item in earlier:
         if isinstance(item, Mapping) and item.get("source_kind") == "supply_chain" and item.get("finding_id"):
             known.setdefault(_coordinate(item), item.get("finding_id"))
+    packages = [_coordinate(item) for item in outcome.findings if item.get("source_kind") == "supply_chain"]
+    # A bare name is only another run's name for one package when no other
+    # reported package has or would take it.
+    names = Counter([*packages, *filter(None, map(_unscoped, packages))])
+
+    def earlier_id(item: Mapping[str, object]) -> object:
+        coordinate = _coordinate(item)
+        if coordinate in known:
+            return known[coordinate]
+        unscoped = _unscoped(coordinate)
+        if unscoped is not None and names[unscoped] == 1 and unscoped in known:
+            return known[unscoped]
+        return item.get("finding_id")
+
     findings = [
-        {**item, "finding_id": known.get(_coordinate(item), item.get("finding_id"))}
-        if item.get("source_kind") == "supply_chain"
-        else item
+        {**item, "finding_id": earlier_id(item)} if item.get("source_kind") == "supply_chain" else item
         for item in outcome.findings
     ]
     if findings == list(outcome.findings):
@@ -139,11 +155,24 @@ def _package_settled(item: Mapping[str, object], outcome: RunOutcome, reported: 
         return False
     coordinate = _coordinate(item)
     listed = outcome.listed_packages
-    return coordinate in reported or (listed is not None and coordinate not in listed)
+    if coordinate in reported or listed is None or coordinate in listed:
+        return coordinate in reported
+    # An earlier run may have named a scoped package the audit still lists
+    # by its bare name.
+    return all(_unscoped(package) != coordinate for package in listed)
 
 
 def _coordinate(item: Mapping[str, object]) -> tuple[object, ...]:
     return (item.get("ecosystem"), item.get("package_name"), item.get("package_version") or "")
+
+
+def _unscoped(coordinate: tuple[object, ...]) -> tuple[object, ...] | None:
+    """``coordinate`` under the bare name earlier runs gave a scoped package."""
+
+    ecosystem, name, version = coordinate
+    if not isinstance(name, str) or "/" not in name:
+        return None
+    return (ecosystem, name.rsplit("/", 1)[-1], version)
 
 
 def _text(value: object) -> str | None:
