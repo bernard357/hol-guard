@@ -45,7 +45,7 @@ _MAX_REQUEST_BYTES = 256 * 1024
 # under the smaller default would refuse a large command here and deny an
 # action the user had already approved, so this kind is bounded where the
 # envelopes themselves are.
-_KIND_REQUEST_BYTES = {"codex_live_allow_precheck": 4 * 1024 * 1024}
+_LIVE_ALLOW_PRECHECK_MAX_REQUEST_BYTES = 4 * 1024 * 1024
 _UNAVAILABLE = "native_hook_artifact_compose_unavailable"
 _TIMEOUT_SECONDS = 5.0
 # Every field is sent explicitly (nulls included) so the digest bound here
@@ -274,7 +274,9 @@ def native_hook_compose(kind: str, fields: Mapping[str, object], *, guard_home: 
         timeout_seconds=_TIMEOUT_SECONDS,
         required_feature=_KIND_FEATURES.get(kind, HOOK_ARTIFACT_COMPOSE_FEATURE),
         response_schema=_RESULT_SCHEMA,
-        max_request_bytes=_KIND_REQUEST_BYTES.get(kind, _MAX_REQUEST_BYTES),
+        max_request_bytes=(
+            _LIVE_ALLOW_PRECHECK_MAX_REQUEST_BYTES if kind == "codex_live_allow_precheck" else _MAX_REQUEST_BYTES
+        ),
     )
     if (
         response is None
