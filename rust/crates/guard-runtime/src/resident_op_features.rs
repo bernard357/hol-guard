@@ -29,6 +29,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::APPROVAL_SCOPE_FEATURE,
     guard_contracts::APPROVAL_SCOPE_SELECT_FEATURE,
     guard_contracts::COMMAND_CAPABILITY_FEATURE,
+    guard_contracts::COMMAND_ENVELOPE_FEATURE,
     guard_contracts::APPROVAL_RESOLUTION_ELIGIBILITY_FEATURE,
     guard_contracts::CONTAINED_WRAPPER_PLAN_FEATURE,
     guard_contracts::APPROVAL_PERSIST_SELECT_FEATURE,
@@ -181,4 +182,5 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::RETRY_LINEAGE_CAPTURE_FEATURE,
     guard_contracts::LOCAL_CLI_HELP_PARSE_FEATURE,
     guard_contracts::POLICY_INTEGRITY_RECONCILE_FEATURE,
+    guard_contracts::ADAPTER_STATE_INTEGRITY_FEATURE,
 ];

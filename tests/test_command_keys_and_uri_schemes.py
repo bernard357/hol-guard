@@ -2,12 +2,11 @@
 
 Verifies:
 1. _command_from_payload recognizes 'pattern', 'query', 'search', 'regex' keys
-2. _hook_command_text recognizes the same keys
+2. command_text_from_tool_payload reads the same keys from a hook payload
 """
 
 import pytest
 
-from codex_plugin_scanner.guard.cli._commands_shared import _hook_command_text
 from codex_plugin_scanner.guard.runtime.actions import command_text_from_tool_payload, normalize_harness_payload
 from tests.codex_read_only_inspection import codex_command_is_read_only_source_inspection
 
@@ -197,6 +196,10 @@ def test_common_reader_unsafe_variants_are_not_source_inspection(tmp_path, comma
 
 def test_command_from_payload_preserves_command_priority():
     assert command_text_from_tool_payload("", {"command": "ls -la", "pattern": "foo"}) == "ls -la"
+
+
+def _hook_command_text(payload):
+    return command_text_from_tool_payload(payload.get("tool_name"), payload.get("tool_input"))
 
 
 def test_hook_command_text_recognizes_pattern():

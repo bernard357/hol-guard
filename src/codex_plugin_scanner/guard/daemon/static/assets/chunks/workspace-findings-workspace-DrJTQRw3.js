@@ -316,7 +316,13 @@ function normalizeWorkspaceFindingsState(assessmentsPayload, findingsPayload) {
   };
 }
 async function readPayload(path, init) {
-  const response = await fetchGuardApi(path, init);
+  let response;
+  try {
+    response = await fetchGuardApi(path, init);
+  } catch (error) {
+    if (init?.signal?.aborted) throw error;
+    throw new Error(workspaceErrorMessage(null));
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok && response.status !== 409) {
     throw new Error(workspaceErrorMessage(text$1(record$1(body).error)));
@@ -1114,6 +1120,16 @@ function worktreeStatus(worktree, newestRun, assessment) {
   if (assessment.partial) return { label: "Partial coverage", tone: "attention", detail: null };
   return { label: "Up to date", tone: "green", detail: null };
 }
+function checkedSummary(worktree, newestRun, assessment) {
+  const pending = newestRun?.state === "running" || newestRun?.state === "queued" || newestRun?.state === "failed";
+  if (assessment === void 0 && pending) return "No check has finished yet.";
+  const earlier = assessment !== void 0 && pending && newestRun?.runId !== assessment.runId;
+  const runAtMs = newestRun?.state === "completed" || newestRun?.state === "partial" ? newestRun.finishedAtMs : null;
+  const atMs = assessment?.finishedAtMs ?? (earlier ? null : runAtMs ?? worktree.lastScanAtMs);
+  if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
+  const when = formatRelativeTime(new Date(atMs).toISOString());
+  return earlier ? `Showing results from the check ${when.replace(/^Yesterday/, "yesterday")}.` : `Checked ${when}`;
+}
 function trimTrailingSeparators(root) {
   const trimmed = root.replace(/[\\/]+$/, "");
   return trimmed === "" ? root : trimmed;
@@ -1240,7 +1256,8 @@ function WorktreeRow(props) {
           /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: status.tone, children: status.label })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 truncate font-mono text-xs text-slate-500", title: worktree.root, children: worktree.root }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-slate-600", children: status.detail ?? (worktree.lastScanAtMs ? `Checked ${formatRelativeTime(new Date(worktree.lastScanAtMs).toISOString())}` : "Waiting for the first check.") })
+        status.detail && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-slate-600", children: status.detail }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-sm text-slate-500", children: checkedSummary(worktree, props.newestRun, assessment) })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex shrink-0 flex-wrap gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -1347,5 +1364,6 @@ function ErrorNotice(props) {
 export {
   WorkspaceFindingsWorkspace,
   WorktreeRow,
+  checkedSummary,
   worktreeStatus
 };

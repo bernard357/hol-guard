@@ -74,6 +74,7 @@ def _isolate_legacy_queue_mechanics(monkeypatch: pytest.MonkeyPatch) -> None:
             requires_local_approval=False,
         ),
     )
+    monkeypatch.setattr(command_queue, "command_identity_digest", lambda *_args, **_kwargs: "identity-digest-1")
     monkeypatch.setattr(command_queue, "consume_local_command_approval", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(command_queue, "mark_command_job_consumed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(command_queue, "audit_command_decision", lambda *_args, **_kwargs: None)
@@ -1037,6 +1038,56 @@ def test_poll_once_posts_rejection_when_capability_is_unavailable(
     assert status["active_job"] is None
     assert result_payloads[0]["status"] == "failed"
     assert result_payloads[0]["failureCode"] == "native_command_capability_unavailable"
+
+
+def test_poll_once_posts_rejection_when_the_approval_grant_cannot_be_settled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.native_command_envelope import CommandEnvelopeUnavailableError
+    from codex_plugin_scanner.guard.runtime.command_capability import CommandCapabilityError
+
+    store = FakeStore(tmp_path / "guard-home")
+    result_payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        command_queue,
+        "_resolve_guard_sync_auth_context",
+        lambda current_store: {"sync_url": "https://hol.test/api/guard/receipts/sync", "access_token": "token"},
+    )
+
+    def fake_json_request(
+        auth_context: dict[str, object],
+        *,
+        method: str,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        if path == "/lease":
+            return {
+                "item": {
+                    "id": "job-unsettled",
+                    "leaseId": "lease-unsettled",
+                    "operation": "guard.packageShims.status",
+                }
+            }
+        if path.endswith("/result"):
+            result_payloads.append(payload)
+        return {"ok": True}
+
+    def unsettled(*_args: object, **_kwargs: object) -> bool:
+        raise CommandCapabilityError(CommandEnvelopeUnavailableError.reason)
+
+    monkeypatch.setattr(command_queue, "_json_request", fake_json_request)
+    monkeypatch.setattr(command_queue, "consume_local_command_approval", unsettled)
+
+    # The job is already leased here, so a runtime that cannot match the grant
+    # has to be posted as this job's failure; escaping the poll would leave the
+    # lease open with no result.
+    status = command_queue.poll_command_queue_once(store, _context(tmp_path))
+
+    assert status["state"] == "idle"
+    assert status["active_job"] is None
+    assert result_payloads[0]["status"] == "failed"
+    assert result_payloads[0]["failureCode"] == "native_command_envelope_unavailable"
 
 
 def test_poll_once_posts_failed_result_when_execution_raises(tmp_path: Path, monkeypatch) -> None:

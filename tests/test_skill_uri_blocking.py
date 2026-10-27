@@ -3,10 +3,10 @@
 import os
 from pathlib import Path
 
-from codex_plugin_scanner.guard.native_sensitive_request import native_benign_file_read
 from codex_plugin_scanner.guard.runtime.false_positive_rules import (
     target_is_known_skill_doc_path,
 )
+from tests.resident_probe_support import native_benign_file_read
 
 
 def is_explicitly_benign_native_file_read_request(

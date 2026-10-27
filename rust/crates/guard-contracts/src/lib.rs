@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod adapter_state_integrity;
+pub use adapter_state_integrity::*;
 mod aibom_report_summaries;
 pub use aibom_report_summaries::*;
 mod approval_contracts;
@@ -86,6 +88,8 @@ mod approval_resolution_eligibility;
 pub use approval_resolution_eligibility::*;
 mod command_capability;
 pub use command_capability::*;
+mod command_envelope;
+pub use command_envelope::*;
 mod approval_persist_select;
 pub use approval_persist_select::*;
 mod approval_scope_select;

@@ -13,7 +13,7 @@ from codex_plugin_scanner.guard.runtime.package_json_scripts import (
 )
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.local_cli_command_id_client import package_script_command_tokens, resolve_command_id_for_text
-from tests.local_cli_grant_client import local_cli_grant_action
+from tests.runtime_wrapper_support import local_cli_grant_action
 
 from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
 

@@ -397,7 +397,15 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
 }
 
 async function readPayload(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
-  const response = await fetchGuardApi(path, init);
+  let response: Response;
+  try {
+    response = await fetchGuardApi(path, init);
+  } catch (error) {
+    // A request that never reaches the daemon fails with the browser's own
+    // wording, such as "Failed to fetch"; give the same advice as any failure.
+    if (init?.signal?.aborted) throw error;
+    throw new Error(workspaceErrorMessage(null));
+  }
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok && response.status !== 409) {
     throw new Error(workspaceErrorMessage(text(record(body).error)));

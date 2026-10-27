@@ -30,7 +30,7 @@ from codex_plugin_scanner.guard.runtime.shell_execution_context import (
 from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
-from tests.shell_segment_validation import validate_shell_execution_segment
+from tests.resident_probe_support import validate_shell_execution_segment
 
 pytestmark = pytest.mark.usefixtures("package_intent_native")
 
