@@ -36,7 +36,7 @@ from tests.benign_fp_gate_connectors import allow_ready_cli, assert_connector_se
 from tests.benign_fp_gate_fixture import BenignFixture, build_fixture, route_codex
 from tests.benign_fp_gate_mcp import McpCase, mcp_cases, mcp_failure, replay
 from tests.benign_fp_gate_projects import host_tool_path
-from tests.gauntlet_replay import OMP_CONTAINED, cursor_hook_fields, source_ref_payload
+from tests.gauntlet_replay import OMP_CONTAINED, cursor_hook_fields, cursor_route_probe, source_ref_payload
 from tests.native_gate_retry import BUDGET_MISS_REASONS, review_with_unavailable_retry
 
 pytestmark = pytest.mark.usefixtures("native_hook_force")
@@ -70,10 +70,7 @@ _FIXED_TOOLS = {
 _ALLOWED_PR = {"unassigned"}
 # The session-* cases replay prompts users approved by hand. Those still
 # reviewed on Linux CI are recorded here until their fixes land.
-# Every entry is the same class: Cursor is the one harness with no containment
-# route, so work the other four run quietly inside the workspace sandbox reaches
-# a Cursor user as a review card. One route fixes all of them at once.
-_PENDING_CEILING = 4
+_PENDING_CEILING = 0
 _RENDERED_KEYS = ("reason", "notice", "message", "systemMessage", "stopReason")
 _RENDERED_SPECIFIC_KEYS = ("permissionDecisionReason", "additionalContext")
 # Pending entries are recorded against the Linux CI host. Git helper context and
@@ -230,6 +227,8 @@ def _review(case: GateCase, fixture: BenignFixture, worker: HookWorker) -> tuple
         assert isinstance(tool_input, dict)
         spelled = str(tool_input.get("path") or tool_input["file_path"])
         payload["guard_source_ref"] = source_ref_payload(spelled, fixture.cwd(case.cwd))
+    if case.harness == "cursor" and case.tool == "shell" and case.event == "PreToolUse":
+        payload = cursor_route_probe(case.case_id, payload, fixture, worker, fixture.cwd(case.cwd))
     if case.harness == "cursor":
         payload.update(cursor_hook_fields(case.tool, payload))
     # Approval baselines stay from before the first attempt, so a retry never hides a row.
@@ -259,7 +258,8 @@ def _harness_route(
 ) -> dict[str, object]:
     """Apply the containment rewrite the harness's own hook performs.
 
-    ``review_http_payload`` already routes Z Code and Claude Code. Codex routes
+    ``review_http_payload`` already routes Z Code and Claude Code, and admits the
+    sink command Cursor's probe wrote. Codex routes
     in its hook bridge and Oh My Pi in its TypeScript extension (every profile
     on macOS, the workspace profile on Linux). Without this the gate
     counts their contained runs as reviews although the user sees nothing.

@@ -2246,19 +2246,27 @@
   },
   {
    "path": "src/codex_plugin_scanner/guard/runtime/verified_read_execution.py",
-   "source_sha256": "6e5394e8e2211428639706ac8d0033cf451d8bdc062f7f529081611963528159",
+   "source_sha256": "097cfa14009cea9c2a5ea4d08aa4b66eb17c916724eee02965b1bd12f0f7a7cb",
    "forbidden_symbols": [
     "_MAX_COUNT",
     "_SED_RANGE",
+    "_WorkspaceContext",
+    "_current_workspace_context",
     "_dynamic",
     "_head_tail",
     "_line_count",
-    "_sed"
+    "_read_bounded_text",
+    "_resolve_target",
+    "_sed",
+    "_stable_file_identity",
+    "verified_read_plan",
+    "workspace_read_decision"
    ],
    "native_replacements": [
     "rust/crates/guard-command/src/verified_read_plan.rs",
-    "rust/crates/guard-contracts/src/verified_read_plan.rs",
-    "rust/crates/guard-runtime/src/verified_read_plan_op.rs"
+    "rust/crates/guard-contracts/src/verified_read_execute.rs",
+    "rust/crates/guard-runtime/src/verified_read_execute.rs",
+    "rust/crates/guard-runtime/src/verified_read_execute_op.rs"
    ]
   },
   {

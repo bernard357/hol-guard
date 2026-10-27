@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   coverageScopeLine,
+  coverageSegmentsBeyond,
   coverageStepLabel,
   normalizeApprovalExtensionCoverage,
 } from "./approval-extension-coverage";
@@ -87,6 +88,65 @@ async function run(): Promise<void> {
     "a compound command says the other steps still need review",
   );
   assert(coverageScopeLine(coverage!) === null, "a single-step command needs no scope line");
+  const prune = { extension_id: "command.container-runtime", rule_id: "command.container-runtime.system-prune" };
+  assert(
+    coverageSegmentsBeyond(coverage!, [prune]).length === 0,
+    "a step the recommendation already links is not listed again",
+  );
+  assert(
+    coverageSegmentsBeyond(coverage!, [{ ...prune, rule_id: "command.container-runtime.volume-prune" }]).length === 1,
+    "another rule of the same extension is a different pattern, so the step stays",
+  );
+  assert(
+    coverageSegmentsBeyond(coverage!, [{ ...prune, rule_id: null }]).length === 1,
+    "a link to the extension page alone does not reach the step's rule",
+  );
+  assert(
+    coverageSegmentsBeyond(compound!, [{ extension_id: "command.git", rule_id: null }])
+      .map((segment) => segment.index)
+      .join(",") === "2",
+    "only steps the recommendation does not already link stay",
+  );
+  assert(
+    coverageSegmentsBeyond(compound!, [{ extension_id: "command.git", rule_id: "command.git.add" }])
+      .map((segment) => segment.index)
+      .join(",") === "2",
+    "a step with no focus rule of its own repeats any link to its extension",
+  );
+  assert(coverageSegmentsBeyond(compound!, []).length === 2, "with no recommendation every step stays");
+
+  // A step two extensions cover keeps only the one the card above does not link.
+  const mixed = normalizeApprovalExtensionCoverage(
+    rawCoverage({
+      segments: [
+        rawSegment({
+          extensions: [
+            {
+              extension_id: "command.container-runtime",
+              name: "Container runtime protection",
+              focus_rule_id: "command.container-runtime.system-prune",
+            },
+            { extension_id: "command.git", name: "Git protection", focus_rule_id: null },
+          ],
+          rules: [
+            { rule_id: "command.container-runtime.system-prune", title: "Docker system prune", severity: "high" },
+            { rule_id: "command.git.add", title: "Git add", severity: "medium" },
+          ],
+        }),
+      ],
+    }),
+  );
+  assert(mixed !== null, "a step with two extensions normalizes");
+  const remaining = coverageSegmentsBeyond(mixed!, [prune]);
+  assert(remaining.length === 1, "the step stays while one of its extensions is unlinked");
+  assert(
+    remaining[0].extensions.map((extension) => extension.extension_id).join(",") === "command.git",
+    "the extension the recommendation already links is not listed again",
+  );
+  assert(
+    remaining[0].rules.map((rule) => rule.rule_id).join(",") === "command.git.add",
+    "the rule the recommendation already links is not named again",
+  );
   assert(coverageStepLabel(compound!.segments[0]) === "Step 1 · git", "a step is labelled by position and executable");
   assert(
     coverageStepLabel({ ...compound!.segments[0], executable: null }) === "Step 1",
@@ -176,7 +236,7 @@ async function run(): Promise<void> {
     "utf8",
   );
   assert(
-    recommendationCardSource.includes("configurable.map("),
+    recommendationCardSource.includes("configurable.map(") && recommendationCardSource.includes("{reviewLinks}"),
     "the recommendation card links every extension it would configure, not just the first",
   );
 
