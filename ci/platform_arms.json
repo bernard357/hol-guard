@@ -830,17 +830,17 @@
    "verdict": "other-platform",
    "note": "Windows resolves the workspace in its own arm (`codex_hook_bridge_contain_windows.rs`); this stub is reached only on a platform Guard does not ship for, where `None` keeps the command reviewed because there is no sink.",
    "file": "rust/crates/guard-runtime/src/codex_hook_bridge_contain.rs",
-   "item": "fn resolved_workspace(_value: &str) -> Option<String>",
+   "item": "pub(crate) fn resolved_workspace(_value: &str) -> Option<String>",
    "cfg": "not(any(unix, windows))",
-   "body": "0c258e1c7d46"
+   "body": "773e21ce6c68"
   },
   {
    "verdict": "other-platform",
    "note": "Windows writes the snapshot under the profile's `AppData\\Local\\Temp` in its own arm; elsewhere `None` writes nothing, so the call keeps its review.",
    "file": "rust/crates/guard-runtime/src/codex_hook_bridge_contain.rs",
-   "item": "fn write_snapshot(_serialized: &[u8]) -> Option<PathBuf>",
+   "item": "pub(crate) fn write_snapshot(_serialized: &[u8]) -> Option<PathBuf>",
    "cfg": "not(any(unix, windows))",
-   "body": "36ec584876e3"
+   "body": "ce02efbefa6e"
   },
   {
    "verdict": "other-platform",
