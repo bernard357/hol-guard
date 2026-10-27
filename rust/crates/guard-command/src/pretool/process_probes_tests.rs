@@ -20,7 +20,7 @@ fn socket_listings_and_local_readiness_checks_are_admitted() {
         "-a -p 22899 -d cwd",
         "-a -p 123,456 -d cwd,txt",
         "-ap 123 -dcwd",
-        "-a -d rtd",
+        "-a -p 123 -d rtd",
         "-n -a -p 123 -d txt",
     ] {
         assert!(safe_lsof_arguments(&arguments(command)), "lsof {command}");
@@ -56,6 +56,8 @@ fn file_operands_hosts_and_connection_strings_are_refused() {
         "-ip 123",
         "-p 123 -d cwd",
         "-d cwd",
+        "-a -d cwd",
+        "-a -d rtd,txt",
         "-a -p 123 -d",
         "-a -p 123 -d 1",
         "-a -p 123 -d 0-255",

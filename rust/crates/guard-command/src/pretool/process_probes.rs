@@ -7,8 +7,9 @@
 //!   selectors with OR, so `-p` needs `-a` to stay a socket listing.
 //! * `lsof -a -p <pid> -d cwd`: the working directory, root directory or
 //!   program file of a process, the paths `pwdx` and `ps` report. `-d` may
-//!   name only `cwd`, `rtd` and `txt`, and needs `-a` so it narrows the
-//!   listing instead of adding every open file of the process to it.
+//!   name only `cwd`, `rtd` and `txt`, needs a `-p` process selector, and
+//!   needs `-a` so it narrows the listing instead of adding every open file
+//!   of the process to it.
 //! * `pg_isready`: asks a local PostgreSQL server whether it accepts
 //!   connections and prints the answer. It sends no query and no password.
 //!   The server is named by a loopback host or by an absolute Unix-socket
@@ -177,8 +178,9 @@ pub(in crate::pretool) fn safe_lsof_arguments(arguments: &[String]) -> bool {
             break;
         }
     }
-    // Without `-a`, `-p` or `-d` also lists every open file of that process.
-    (network || descriptors) && (!(pid || descriptors) || and)
+    // Without `-a`, `-p` or `-d` also lists every open file of that process,
+    // and `-d` without `-p` names the descriptor of every process.
+    (network || (descriptors && pid)) && (!(pid || descriptors) || and)
 }
 
 /// `cwd`, `rtd` or `txt`, alone or as a comma list. A number would name an
