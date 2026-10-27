@@ -1325,21 +1325,6 @@
         "evidence": "install, prepare_install and uninstall have no caller in any in-scope module; they are invoked by the excluded install, uninstall and repair dispatchers. The report validates that no retained symbol or in-scope module references the excluded names."
       },
       {
-        "id": "adapter-grok-config-setup",
-        "category": "install_config",
-        "path": "src/codex_plugin_scanner/guard/adapters/grok_config.py",
-        "symbols": [
-          "_toml_inline_command_hook",
-          "foreign_hook_compat_toml",
-          "force_compat_hooks_false",
-          "prepare_managed_config_text",
-          "build_managed_config_block"
-        ],
-        "entry_points": [],
-        "reason": "Managed Grok config block writer used only by the Grok install.",
-        "evidence": "These functions are referenced only by the excluded Grok install path; detect and launch config readers stay in scope. The report validates that no retained symbol or in-scope module references the excluded names."
-      },
-      {
         "id": "runtime-policy-admin-payloads",
         "category": "cli_only",
         "path": "src/codex_plugin_scanner/guard/cli/commands_support_runtime_policy.py",

@@ -11,13 +11,9 @@ except ModuleNotFoundError:
 
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
 from codex_plugin_scanner.guard.adapters.grok import GrokHarnessAdapter
-from codex_plugin_scanner.guard.adapters.grok_config import (
-    build_managed_config_block,
-    prepare_managed_config_text,
-    remove_managed_block,
-    restore_compat_hooks,
-)
+from codex_plugin_scanner.guard.adapters.grok_config import remove_managed_block, restore_compat_hooks
 from codex_plugin_scanner.guard.shims import PreparedGuardShim
+from tests.grok_managed_config import build_managed_config_block, prepare_managed_config_text
 
 
 def _ctx(tmp_path: Path) -> HarnessContext:

@@ -7,11 +7,12 @@ import tomlkit
 
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
 from codex_plugin_scanner.guard.adapters.grok import GrokHarnessAdapter, grok_runtime_hooks_verified
-from codex_plugin_scanner.guard.adapters.grok_config import MANAGED_DENY_RULES, build_managed_config_block
+from codex_plugin_scanner.guard.adapters.grok_config import MANAGED_DENY_RULES
 from codex_plugin_scanner.guard.adapters.grok_user_config import prepare_user_config_text, remove_user_config_settings
 from codex_plugin_scanner.guard.cli.native_install_checks import _grok_protection_checks
 from codex_plugin_scanner.guard.codex_config import tomllib
 from codex_plugin_scanner.guard.shims import PreparedGuardShim
+from tests.grok_managed_config import build_managed_config_block
 
 
 def test_merge_preserves_comments_existing_permissions_and_hooks() -> None:

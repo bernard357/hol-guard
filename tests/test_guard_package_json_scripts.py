@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from codex_plugin_scanner.guard.daemon.local_cli_api import LocalCliApiService
-from codex_plugin_scanner.guard.local_cli_hook import local_cli_grant_action, observe_unlisted_cli
+from codex_plugin_scanner.guard.local_cli_hook import observe_unlisted_cli
 from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.local_cli_commands import resolve_command_id_for_text
 from codex_plugin_scanner.guard.runtime.package_json_script_memory import (
@@ -14,6 +14,7 @@ from codex_plugin_scanner.guard.runtime.package_json_scripts import (
     recognize_package_json_scripts,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.local_cli_grant_client import local_cli_grant_action
 
 from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
 
