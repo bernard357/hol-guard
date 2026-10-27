@@ -13,8 +13,8 @@ from codex_plugin_scanner.guard import native_guard_store, store_review_event_ou
 from codex_plugin_scanner.guard.cli.connect_flow import build_connect_status_payload
 from codex_plugin_scanner.guard.daemon.cloud_review_settings import cloud_review_settings_status
 from codex_plugin_scanner.guard.native_guard_store import NativeGuardStoreUnavailable
-from codex_plugin_scanner.guard.runtime.cloud_review_sync import cloud_review_sync_status
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.cloud_review_sync_client import cloud_review_sync_status
 
 # pyright: reportAny=false, reportPrivateUsage=false, reportUnknownMemberType=false
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false

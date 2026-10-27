@@ -452,7 +452,7 @@ class TestSyncStatus:
         from codex_plugin_scanner.guard.store import GuardStore
 
         store = GuardStore(tmp_path)
-        from codex_plugin_scanner.guard.runtime.cloud_review_sync import cloud_review_sync_status
+        from tests.cloud_review_sync_client import cloud_review_sync_status
 
         status = cloud_review_sync_status(store)
         assert isinstance(status, dict)
