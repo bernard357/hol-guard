@@ -139,5 +139,6 @@ def test_a_refused_combined_write_still_queues_the_review() -> None:
         return "req-1"
 
     notice = {"review": {}, "integrity_key_b64": "a2V5", "integrity_key_id": "kid"}
-    assert hook_native_review_approval._persist_review(persist, _Request(), "now", notice)  # type: ignore[arg-type] == "req-1"
+    persisted = hook_native_review_approval._persist_review(persist, _Request(), "now", notice)  # type: ignore[arg-type]
+    assert persisted == "req-1"
     assert calls == [{"claude_review": notice}, {}]

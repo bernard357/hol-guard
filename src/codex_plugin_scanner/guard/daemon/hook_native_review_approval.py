@@ -466,11 +466,11 @@ def queue_native_pre_tool_review(
 
 
 def _persist_review(
-    persist: Callable[..., str],
+    persist: Callable[..., object],
     request: GuardApprovalRequest,
     now: str,
     claude_review: dict[str, object] | None,
-) -> str:
+) -> object:
     if claude_review is None:
         return persist(request, now)
     try:
