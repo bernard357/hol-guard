@@ -226,8 +226,11 @@ fn a_malformed_review_is_a_typed_rejection() {
 /// The fields `ReviewRequest` sets, against the requests the retired daemon
 /// builder persisted for the same pause. The recorder accepted any receipt,
 /// while the resident authenticates it (pinned above), so the synthetic
-/// receipt's envelope copy is left out of the comparison. The vectors were
-/// recorded where `os.path.expanduser` reads `HOME`.
+/// receipt's envelope copy is left out of the comparison. The recorder also
+/// stubbed the adapter's review envelope (`envelope`), which the adapter's own
+/// parity vectors pin, so only the keys the builder adds or changes on top of
+/// that stub are compared. The vectors were recorded where
+/// `os.path.expanduser` reads `HOME`.
 #[cfg(unix)]
 #[test]
 fn requests_match_the_retired_daemon_builder() {
@@ -258,10 +261,25 @@ fn requests_match_the_retired_daemon_builder() {
                 .unwrap()
                 .remove("native_origin_receipt");
         }
+        let stub = vector["envelope"].as_object().unwrap();
+        let built_envelope = built["action_envelope_json"].as_object().unwrap();
+        let expected_envelope = expected["action_envelope_json"].as_object().unwrap();
+        let mut built_keys: Vec<_> = built_envelope.keys().collect();
+        let mut expected_keys: Vec<_> = expected_envelope.keys().collect();
+        built_keys.sort();
+        expected_keys.sort();
+        assert_eq!(built_keys, expected_keys, "{name}: envelope keys");
+        for (key, value) in expected_envelope {
+            if stub.get(key) != Some(value) {
+                assert_eq!(&built_envelope[key], value, "{name}: envelope {key}");
+            }
+        }
         let fields = built.as_object().unwrap();
         assert_eq!(fields.len(), 19, "{name}");
         for (key, value) in fields {
-            assert_eq!(value, &expected[key], "{name}: {key}");
+            if key != "action_envelope_json" {
+                assert_eq!(value, &expected[key], "{name}: {key}");
+            }
         }
     }
 }
