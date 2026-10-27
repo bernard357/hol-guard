@@ -143,6 +143,8 @@ def test_a_free_form_reason_is_refused_before_it_can_be_sent() -> None:
         # these may be rendered as a headline the resident never published.
         lambda result: result["payload"].update(state="compromised"),
         lambda result: result["payload"].update(state=1),
+        lambda result: result["payload"].update(state=[]),
+        lambda result: result["payload"].update(checks=[{"check_id": "daemon", "status": {}, "reason_code": "x"}]),
         lambda result: result["payload"].update(schema_version=1),
         lambda result: result["payload"].update(label=None),
         lambda result: result["payload"].update(detail=[]),

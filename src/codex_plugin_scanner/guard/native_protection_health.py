@@ -105,12 +105,24 @@ def _signal_rows(signals: Mapping[str, ProtectionSignal]) -> dict[str, dict[str,
     return {key: {"status": signal.status.value, "reason_code": signal.reason_code} for key, signal in signals.items()}
 
 
+def _is_word(value: Any, words: frozenset[str]) -> bool:
+    """Whether ``value`` is one of ``words``.
+
+    A reply is JSON the resident sent, so a field the grammar expects to be a
+    word can arrive as a list or an object. Testing set membership on one of
+    those raises ``TypeError``, which would escape this adapter instead of
+    being refused as the malformed reply it is.
+    """
+
+    return isinstance(value, str) and value in words
+
+
 def _well_formed_checks(value: Any) -> bool:
     return isinstance(value, list) and all(
         isinstance(row, dict)
         and set(row) == _CHECK_KEYS
         and isinstance(row["check_id"], str)
-        and row["status"] in _CHECK_STATUSES
+        and _is_word(row["status"], _CHECK_STATUSES)
         and isinstance(row["reason_code"], str)
         for row in value
     )
@@ -130,7 +142,7 @@ def _well_formed_verdict(row: Mapping[str, Any]) -> bool:
     """
 
     return (
-        row["state"] in _REPORT_STATES
+        _is_word(row["state"], _REPORT_STATES)
         and isinstance(row["label"], str)
         and isinstance(row["detail"], str)
         and isinstance(row["evidence_gap"], bool)
