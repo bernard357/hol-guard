@@ -7,9 +7,9 @@
   "trustClass": "external",
   "activation": "opt-in",
   "publisher": {
-    "id": "countly.com",
-    "displayName": "Countly",
-    "url": "https://countly.com"
+    "id": "community.kantorcodes",
+    "displayName": "Michael Kantor (HOL)",
+    "url": "https://github.com/kantorcodes"
   },
   "icon": {
     "kind": "none"
