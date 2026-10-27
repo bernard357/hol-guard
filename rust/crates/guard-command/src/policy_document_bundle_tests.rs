@@ -20,7 +20,7 @@ fn rule(id: &str, matcher: Value) -> Value {
         "effect": "allow",
         "match": matcher,
         "lifetime": {"mode": "permanent", "expiresAt": null},
-        "provenance": {"source": "cloud"},
+        "provenance": {"source": "cloud", "createdAt": "2026-01-01T00:00:00Z"},
     })
 }
 
