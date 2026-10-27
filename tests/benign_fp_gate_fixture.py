@@ -379,6 +379,24 @@ def build_fixture(root: Path) -> BenignFixture:
         repository.mkdir(parents=True)
         _git(repository, "init", "--quiet", "--initial-branch=main", home=home)
         _write(repository / ".github" / "workflows" / "ci.yml", "name: ci\n")
+        # Tracked content a checkout keeps in hidden directories: the manifest
+        # a harness is installed from and the card a web client publishes.
+        _write(repository / ".codex-plugin" / "plugin.json", f'{{"name": "{name}"}}\n')
+        _write(repository / ".well-known" / "agent-card.json", f'{{"name": "{name}"}}\n')
+        # A workflow named after a tool, and a published agent card whose name
+        # is the vendor word on its own.
+        _write(repository / ".github" / "workflows" / "docker.yml", "name: docker\n")
+        _write(repository / ".well-known" / "agent.json", f'{{"name": "{name}"}}\n')
+        # Targets for the negatives beside them: the repository's own
+        # administrative tree, a credential store name and a compiled blob.
+        _write(repository / ".git" / "hooks" / "pre-commit.sh", "#!/bin/sh\nexit 0\n")
+        _write(repository / ".codex-plugin" / "credentials.json", "{}\n")
+        _write(repository / ".codex-plugin" / "runtime.node", "\x00binary\n")
+        # A tool's own tree, a config file spelled as a directory and a
+        # credential store holding a file named as source.
+        _write(repository / ".cursor" / "mcp.json", '{"mcpServers": {}}\n')
+        _write(repository / ".dockerignore" / "notes.md", "# fixture\n")
+        _write(repository / ".secrets" / "read.py", "TOKEN = 'fixture'\n")
         _write(repository / "src" / "index.ts", f"export const name = '{name}';\n")
         _write(repository / "README.md", f"# {name}\n")
         _write(repository / "src" / "lib.rs", 'pub fn name() -> &\'static str {\n    "fixture"\n}\n')
