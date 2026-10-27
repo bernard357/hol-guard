@@ -471,3 +471,51 @@ fn every_resolved_version_in_the_workspace_is_listed() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn each_workspace_keeps_the_direct_requirement_of_its_own_version() {
+    // Two workspaces require lodash directly and resolve different versions;
+    // the root lock also nests a copy under `a`, which stays transitive.
+    let scratch = Scratch::new("direct-versions");
+    let workspace = scratch.0.join("ws");
+    write_files(
+        &workspace,
+        &json!({
+            "package.json": r#"{"dependencies": {"lodash": "^4", "a": "^1"}}"#,
+            "package-lock.json": r#"{"lockfileVersion": 3, "packages": {
+                "": {"dependencies": {"lodash": "^4", "a": "^1"}},
+                "node_modules/lodash": {"version": "4.17.21"},
+                "node_modules/a": {"version": "1.0.0"},
+                "node_modules/a/node_modules/lodash": {"version": "3.10.1"}
+            }}"#,
+            "packages/app/package.json": r#"{"dependencies": {"lodash": "~4.17.15"}}"#,
+            "packages/app/package-lock.json": r#"{"lockfileVersion": 3, "packages": {
+                "": {"dependencies": {"lodash": "~4.17.15"}},
+                "node_modules/lodash": {"version": "4.17.15"}
+            }}"#,
+        }),
+    );
+    let payload = run(&request(&workspace, None, &[], "inventory")).unwrap();
+    let mut lodash: Vec<(String, bool, Value)> = payload["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["name"] == "lodash")
+        .map(|item| {
+            (
+                item["version"].as_str().unwrap().to_owned(),
+                item["direct"].as_bool().unwrap(),
+                item["range"].clone(),
+            )
+        })
+        .collect();
+    lodash.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        lodash,
+        vec![
+            ("3.10.1".to_owned(), false, Value::Null),
+            ("4.17.15".to_owned(), true, json!("~4.17.15")),
+            ("4.17.21".to_owned(), true, json!("^4")),
+        ]
+    );
+}

@@ -332,14 +332,70 @@ pub fn merge_inventory_item(inventory_map: &mut InventoryMap, item: &Map<String,
 // Name splitting + target projection.
 // ---------------------------------------------------------------------------
 
-/// `_split_namespace_name` (:3602) — npm `@scope/name` handling only. A
-/// package-lock entry nested under another package (`a/node_modules/b`) is
-/// named after its last `node_modules/` segment, so advisories still match.
+/// Packages each manifest lists itself, by the manifest's directory and
+/// ecosystem. A lockfile beside the manifest resolves them as direct
+/// dependencies, so a second resolved version of a package that another
+/// workspace requires directly keeps its own `direct` flag and range.
+#[derive(Debug, Default)]
+pub struct DirectDependencies(HashMap<(String, String), HashMap<String, Option<String>>>);
+
+fn parent_dir(path: &str) -> &str {
+    path.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir)
+}
+
+impl DirectDependencies {
+    /// The first range a manifest states for a package wins, as in
+    /// `merge_inventory_item`.
+    pub fn record(
+        &mut self,
+        manifest_path: &str,
+        ecosystem: &str,
+        package_name: &str,
+        range: Option<String>,
+    ) {
+        self.0
+            .entry((parent_dir(manifest_path).to_owned(), ecosystem.to_owned()))
+            .or_default()
+            .entry(package_name.to_owned())
+            .or_insert(range);
+    }
+
+    /// `Some(range)` when the manifest beside `lockfile_path` lists
+    /// `package_name` itself. A copy npm nests under another package
+    /// (`a/node_modules/b`) is never direct.
+    pub fn lockfile_range(
+        &self,
+        lockfile_path: &str,
+        ecosystem: &str,
+        package_name: &str,
+    ) -> Option<Option<String>> {
+        if package_name.contains("/node_modules/") {
+            return None;
+        }
+        self.0
+            .get(&(parent_dir(lockfile_path).to_owned(), ecosystem.to_owned()))?
+            .get(package_name)
+            .cloned()
+    }
+}
+
+/// The namespace and name a dependency entry is audited under. An npm
+/// lockfile names a copy nested under another package by its install path
+/// (`a/node_modules/b`), audited as its last `node_modules/` segment so
+/// advisories still match. Other ecosystems keep the whole name: a Go module
+/// path may hold a `node_modules` segment of its own.
+pub fn dependency_name(ecosystem: &str, package_name: &str) -> (Option<String>, String) {
+    if ecosystem == "npm" {
+        if let Some((_, leaf)) = package_name.rsplit_once("/node_modules/") {
+            return split_namespace_name(leaf);
+        }
+    }
+    split_namespace_name(package_name)
+}
+
+/// `_split_namespace_name` (:3602) — npm `@scope/name` handling only.
 pub fn split_namespace_name(package_name: &str) -> (Option<String>, String) {
     let cleaned = python_strip(package_name);
-    let cleaned = cleaned
-        .rsplit_once("/node_modules/")
-        .map_or(cleaned, |(_, leaf)| leaf);
     if cleaned.starts_with('@') && cleaned.contains('/') {
         let (namespace, name) = cleaned.split_once('/').unwrap_or((cleaned, ""));
         return (Some(namespace.to_string()), name.to_string());

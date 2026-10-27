@@ -50,10 +50,9 @@ use crate::package_manifest_diff::parse_manifest_dependencies;
 use crate::package_policy_override as ppo;
 use crate::package_protect_projection as ppp;
 use crate::workspace_inventory::{
-    inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
-    split_namespace_name, target_for_package_spec, target_from_inventory_item,
-    target_from_manifest_dependency, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST,
-    SEVERITY_RANK,
+    dependency_name, inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
+    target_for_package_spec, target_from_inventory_item, target_from_manifest_dependency,
+    DirectDependencies, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST, SEVERITY_RANK,
 };
 
 pub const WORKSPACE_AUDIT_DISCOVERY_MAX_DEPTH: usize = 3;
@@ -3472,6 +3471,7 @@ fn workspace_inventory_from_paths(
     manifest_parser: &dyn ManifestParserApi,
 ) -> Vec<Map<String, Value>> {
     let mut inventory_map = InventoryMap::new();
+    let mut direct_dependencies = DirectDependencies::default();
 
     for relative_path in manifest_paths {
         let text = match read_workspace_audit_text(paths, workspace_dir, relative_path) {
@@ -3491,19 +3491,15 @@ fn workspace_inventory_from_paths(
         for (package_name, version) in &dependency_map {
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
+            let (ns, name) = dependency_name(ecosystem, package_name);
             item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
             item.insert("name".into(), json!(name));
             item.insert("direct".into(), json!(true));
-            let range = version.trim();
-            item.insert(
-                "range".into(),
-                if range.is_empty() {
-                    Value::Null
-                } else {
-                    Value::String(range.to_string())
-                },
-            );
+            let range = Some(version.trim())
+                .filter(|range| !range.is_empty())
+                .map(str::to_string);
+            direct_dependencies.record(relative_path, ecosystem, package_name, range.clone());
+            item.insert("range".into(), range.map_or(Value::Null, Value::String));
             item.insert("version".into(), Value::Null);
             merge_inventory_item(&mut inventory_map, &item);
         }
@@ -3527,11 +3523,15 @@ fn workspace_inventory_from_paths(
         for (package_name, version) in &dependency_map {
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
+            let (ns, name) = dependency_name(ecosystem, package_name);
             item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
             item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(false));
-            item.insert("range".into(), Value::Null);
+            let range = direct_dependencies.lockfile_range(relative_path, ecosystem, package_name);
+            item.insert("direct".into(), json!(range.is_some()));
+            item.insert(
+                "range".into(),
+                range.flatten().map_or(Value::Null, Value::String),
+            );
             let version = version.trim();
             item.insert(
                 "version".into(),
@@ -3742,7 +3742,7 @@ fn workspace_diff_audit_inventory(
                 Some(v) => v,
                 None => continue,
             };
-            let (ns, name) = split_namespace_name(&change.package_name);
+            let (ns, name) = dependency_name(ecosystem, &change.package_name);
             changed_packages.push(change.package_name.clone());
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));

@@ -12,8 +12,8 @@ use guard_command::package_manifest_diff::{
     parse_manifest_dependencies_ordered, parse_manifest_dependency_changes,
 };
 use guard_command::workspace_inventory::{
-    inventory_from_sbom_payload, merge_inventory_item, python_strip, split_namespace_name,
-    InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST,
+    dependency_name, inventory_from_sbom_payload, merge_inventory_item, python_strip,
+    DirectDependencies, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST,
 };
 use guard_contracts::{
     SupplyChainEvalResultV1, WorkspaceInventoryRequestV1, PACKAGE_AUTHORITY_REQUEST_SCHEMA,
@@ -95,18 +95,23 @@ fn merge_dependencies(
     reader: &mut DependencyReader<'_>,
     path: &str,
     ecosystem: &str,
-    direct: bool,
+    manifest: bool,
+    direct_dependencies: &mut DirectDependencies,
 ) {
     let Some(dependencies) = reader.dependencies(path) else {
         return;
     };
     for (package_name, version) in dependencies.iter() {
-        let (namespace, name) = split_namespace_name(package_name);
+        let (namespace, name) = dependency_name(ecosystem, package_name);
         let stripped = stripped_or_none(version);
-        let (range, version) = if direct {
-            (stripped, None)
+        let (direct, range, version) = if manifest {
+            direct_dependencies.record(path, ecosystem, package_name, stripped.clone());
+            (true, stripped, None)
         } else {
-            (None, stripped)
+            match direct_dependencies.lockfile_range(path, ecosystem, package_name) {
+                Some(range) => (true, range, stripped),
+                None => (false, None, stripped),
+            }
         };
         merge_inventory_item(
             inventory,
@@ -122,14 +127,15 @@ fn inventory_from_paths(
     lockfile_paths: &[String],
 ) -> InventoryMap {
     let mut inventory = InventoryMap::new();
+    let mut direct = DirectDependencies::default();
     for path in manifest_paths {
         if let Some(ecosystem) = ECOSYSTEM_BY_MANIFEST.get(basename(path)) {
-            merge_dependencies(&mut inventory, reader, path, ecosystem, true);
+            merge_dependencies(&mut inventory, reader, path, ecosystem, true, &mut direct);
         }
     }
     for path in lockfile_paths {
         if let Some(ecosystem) = ECOSYSTEM_BY_LOCKFILE.get(basename(path)) {
-            merge_dependencies(&mut inventory, reader, path, ecosystem, false);
+            merge_dependencies(&mut inventory, reader, path, ecosystem, false, &mut direct);
         }
     }
     inventory
@@ -192,7 +198,7 @@ fn diff_inventory(
             let Some(after_value) = &change.after else {
                 continue;
             };
-            let (namespace, package) = split_namespace_name(&change.package_name);
+            let (namespace, package) = dependency_name(ecosystem, &change.package_name);
             changed_packages.push(change.package_name.clone());
             let (range, version) = if direct {
                 (Some(after_value.clone()), None)
