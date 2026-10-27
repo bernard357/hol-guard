@@ -99,6 +99,7 @@
       "src/contained_runner/macos_backend_tests.rs",
       "src/contained_runner/mod.rs",
       "src/contained_runner/node_evidence.rs",
+      "src/contained_runner/package_launch.rs",
       "src/contained_runner/pkg_json.rs",
       "src/contained_runner/process.rs",
       "src/contained_runner/real_backend_tests.rs",
