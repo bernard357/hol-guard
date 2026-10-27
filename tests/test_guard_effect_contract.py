@@ -21,7 +21,7 @@ from codex_plugin_scanner.guard.runtime.effect_contract import (
     ProofRoute,
     UncertaintyKind,
     derive_protection_state,
-    maximum_action_floor,
+    most_restrictive_guard_action,
 )
 
 
@@ -128,9 +128,9 @@ def test_unknown_effect_dimensions_require_non_exact_typed_uncertainty(field: st
 
 
 def test_canonical_guard_action_floor_is_used_and_absence_reviews() -> None:
-    assert maximum_action_floor(()) == "review"
+    assert most_restrictive_guard_action() == "review"
     for left, right in itertools.product(GUARD_ACTION_LATTICE, repeat=2):
-        result = maximum_action_floor((left, right))
+        result = most_restrictive_guard_action(left, right)
         assert GUARD_ACTION_SEVERITY[result] >= GUARD_ACTION_SEVERITY[left]
         assert GUARD_ACTION_SEVERITY[result] >= GUARD_ACTION_SEVERITY[right]
 

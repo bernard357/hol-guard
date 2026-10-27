@@ -11,7 +11,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from codex_plugin_scanner.guard.native_local_cli_identity import (
-    LocalCliIdentityUnavailableError,
     record_local_cli_identity_failure,
     track_local_cli_identity_failures,
 )
@@ -26,6 +25,10 @@ from codex_plugin_scanner.guard.runtime.local_cli_commands import (
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity
 from codex_plugin_scanner.guard.runtime.local_cli_runner import runner_inner_arguments
 from codex_plugin_scanner.guard.runtime.package_json_scripts import _native_package_scripts
+
+
+class LocalCliIdentityUnavailableError(RuntimeError):
+    """The resident could not derive an identity the command may need."""
 
 
 def package_script_command_tokens(command_text: str, *, cwd: Path, home_dir: Path | None) -> tuple[str, ...] | None:

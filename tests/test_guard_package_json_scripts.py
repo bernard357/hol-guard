@@ -432,11 +432,9 @@ def test_native_failure_is_reported_so_grant_callers_fail_closed(tmp_path: Path,
 def test_command_tokens_raise_on_native_failure_instead_of_generic_argv(tmp_path: Path, monkeypatch) -> None:
     import pytest
 
-    from codex_plugin_scanner.guard.native_local_cli_identity import (
-        LocalCliIdentityUnavailableError,
-        track_local_cli_identity_failures,
-    )
+    from codex_plugin_scanner.guard.native_local_cli_identity import track_local_cli_identity_failures
     from codex_plugin_scanner.guard.runtime import package_json_scripts
+    from tests.local_cli_command_id_client import LocalCliIdentityUnavailableError
 
     project = _write_package(tmp_path / "app", scripts={"build": "vite build"})
     replies: list[object] = [None, {"status": "ok", "package_json_scripts": {"runner": "npm"}}, {"status": "ok"}]
