@@ -297,6 +297,8 @@ def test_native_client_forwards_absolute_deadline_without_relative_floor(
     assert captured["timeout_seconds"] is None
 
 
+@pytest.mark.parametrize("request_id", [None, "request-1", "different-request"])
+@pytest.mark.parametrize("execution_context_supported", [True, False])
 def test_raw_hook_bridge_preserves_payload_for_rust_parsing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
