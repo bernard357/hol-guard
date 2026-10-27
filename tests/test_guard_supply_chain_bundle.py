@@ -309,6 +309,46 @@ def test_verify_refuses_a_request_larger_than_the_resident_accepts(tmp_path, mon
     assert str(bridge._MAX_REQUEST_BYTES) in str(raised.value)
 
 
+def test_verify_measures_the_bytes_the_transport_actually_sends(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The transport wraps the request in an envelope and encodes it with the
+    # default separators, so a compact encoding of the request on its own is
+    # smaller than what goes over the wire. A request between those two sizes
+    # would pass the pre-check and then be dropped by the transport, which is
+    # the unexplained unreachable verifier this check exists to rule out.
+    from codex_plugin_scanner.guard import native_supply_chain_bundle as bridge
+
+    monkeypatch.setattr(bridge, "ensure_resident_prerequisite", lambda home, **kwargs: True)
+
+    def _unreachable(**kwargs: object) -> None:
+        raise AssertionError("an oversized request must not reach the transport")
+
+    monkeypatch.setattr(bridge, "_resident_request", _unreachable)
+    response = {"records": [{"name": f"record-{index}", "digest": "0" * 16} for index in range(64)]}
+    wire = {
+        "schema": bridge._REQUEST_SCHEMA,
+        "request_id": "supply-chain-bundle-verify-" + "0" * 32,
+        "response": dict(response),
+        "trusted_keys": None,
+        "cached_bundle_version": None,
+        "now": None,
+    }
+    compact_bytes = len(json.dumps(wire, separators=(",", ":")).encode("utf-8"))
+    sent_bytes = len(
+        json.dumps(
+            {
+                "operation": "supply_chain_bundle_verify",
+                "request": wire,
+                "deadline_budget_ms": max(1, int(bridge._TIMEOUT_SECONDS * 1000)),
+            }
+        ).encode("utf-8")
+    )
+    assert compact_bytes < sent_bytes
+    monkeypatch.setattr(bridge, "_MAX_REQUEST_BYTES", (compact_bytes + sent_bytes) // 2)
+
+    with pytest.raises(bridge.SupplyChainBundleTooLargeError):
+        bridge.native_verify_supply_chain_bundle_response(response, guard_home=tmp_path)
+
+
 def test_verify_provisions_the_resident_against_the_caller_s_own_store(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

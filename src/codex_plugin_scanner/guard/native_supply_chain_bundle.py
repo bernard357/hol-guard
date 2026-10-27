@@ -120,8 +120,20 @@ def native_verify_supply_chain_bundle_response(
     }
     # The transport drops an oversized request without saying so, which reads
     # as an unreachable verifier and leaves the workspace on a stale bundle
-    # with nothing to act on. Measure it here instead and name the size.
-    encoded_bytes = len(json.dumps(wire, separators=(",", ":"), default=str).encode("utf-8"))
+    # with nothing to act on. Measure it here instead and name the size. The
+    # bytes measured are the bytes the transport sends: the same envelope, the
+    # same separators. A compact encoding of the request alone is smaller than
+    # what goes over the wire, so a bundle that passed it could still be
+    # dropped and reported as an unreachable verifier.
+    envelope = {
+        "operation": "supply_chain_bundle_verify",
+        "request": wire,
+        "deadline_budget_ms": max(1, int(_TIMEOUT_SECONDS * 1000)),
+    }
+    try:
+        encoded_bytes = len(json.dumps(envelope).encode("utf-8"))
+    except (TypeError, ValueError):
+        raise SupplyChainBundleUnavailableError from None
     if encoded_bytes > _MAX_REQUEST_BYTES:
         raise SupplyChainBundleTooLargeError(encoded_bytes, _MAX_REQUEST_BYTES)
     try:
