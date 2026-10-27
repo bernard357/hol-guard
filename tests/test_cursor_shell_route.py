@@ -168,3 +168,33 @@ def test_hook_copy_probe_matches_the_daemon() -> None:
     probe = _hook_copy()["_cursor_shell_route_probe"]
     for payload in (_SHELL, _BEFORE_SHELL, {**_SHELL, "tool_name": "Write"}):
         assert probe(payload) == route.is_cursor_shell_probe({**payload, "cursor_route_probe": True})
+
+
+class _RoutingWorker:
+    def _native_policy_snapshot(self, *_args: object, **_kwargs: object) -> object:
+        return object()
+
+    def _review_raw_hook_native(self, **_kwargs: object) -> dict[str, object]:
+        return {"harness": "cursor", "event_name": "PreToolUse", "result": {"decision": "deny"}}
+
+
+@posix_only
+def test_a_probe_the_sink_takes_answers_with_the_rewritten_call(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_containment_route, native_policy_snapshot_harness_postures
+    from codex_plugin_scanner.guard.adapters import zcode_contained_tests
+    from codex_plugin_scanner.guard.daemon import hook_fail_closed
+
+    routed = {"policy_action": "allow", "reason_code": _ROUTED, "hookSpecificOutput": {"updatedInput": _SINK}}
+    asked: list[dict[str, object]] = []
+
+    def rewrite(response: dict[str, object], **kwargs: object) -> native_hook_containment_route.ContainmentRewrite:
+        asked.append(kwargs)
+        return native_hook_containment_route.ContainmentRewrite("test", None, routed)
+
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_containment_route, "edge_containment_route", lambda *_a, **_k: "sink")
+    monkeypatch.setattr(hook_fail_closed, "render_pre_tool", lambda *_a, **_k: {"policy_action": "deny"})
+    monkeypatch.setattr(zcode_contained_tests, "native_containment_rewrite", rewrite)
+    assert _respond(_PROBE, tmp_path, _RoutingWorker()) == routed  # type: ignore[arg-type]
+    # Cursor is routed only as a bridge harness: its own hook applies the rewrite.
+    assert [call["bridge"] for call in asked] == [True]
