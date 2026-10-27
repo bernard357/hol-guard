@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import { HiMiniAdjustmentsHorizontal, HiMiniArrowTopRightOnSquare } from "react-icons/hi2";
-import { coverageScopeLine, coverageStepLabel } from "./approval-extension-coverage";
+import {
+  type CoverageLink,
+  coverageScopeLine,
+  coverageSegmentsBeyond,
+  coverageStepLabel,
+} from "./approval-extension-coverage";
 import type { GuardApprovalExtensionCoverage, GuardCoveredSegment } from "./approval-extension-coverage-types";
 import { commitDashboardLocation } from "./dashboard-location";
 import { extensionPatternHref } from "./extension-pattern-href";
@@ -21,14 +26,17 @@ function segmentDetail(segment: GuardCoveredSegment): string | null {
  */
 export function ApprovalExtensionCoverageCard(props: {
   coverage: GuardApprovalExtensionCoverage | undefined;
-  /** True when the recommendation card above already offers an allow. */
-  hasRecommendation: boolean;
+  /** Patterns the recommendation card above already links to; empty when it is not shown. */
+  linkedPatterns: readonly CoverageLink[];
 }) {
-  const { coverage, hasRecommendation } = props;
+  const { coverage, linkedPatterns } = props;
+  const hasRecommendation = linkedPatterns.length > 0;
   const open = useCallback((extensionId: string, ruleId: string | null) => {
     commitDashboardLocation(extensionPatternHref(extensionId, ruleId));
   }, []);
   if (!coverage) return null;
+  const segments = coverageSegmentsBeyond(coverage, linkedPatterns);
+  if (segments.length === 0) return null;
   const scopeLine = coverageScopeLine(coverage);
 
   return (
@@ -48,7 +56,7 @@ export function ApprovalExtensionCoverageCard(props: {
             Decide ahead of time how commands like these are handled, so the ones you trust stop coming here.
           </p>
           <ul className="mt-3 space-y-2" aria-label="Steps an extension covers">
-            {coverage.segments.map((segment) => {
+            {segments.map((segment) => {
               const detail = segmentDetail(segment);
               return (
                 <li key={segment.index} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
