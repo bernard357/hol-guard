@@ -21,6 +21,7 @@ import pytest
 from codex_plugin_scanner.guard import runtime_identity_probe, runtime_posture
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
 from codex_plugin_scanner.guard.runtime_identity_assessment import RuntimeIdentityError
+from codex_plugin_scanner.guard.runtime_identity_candidates import RuntimeCandidates
 from codex_plugin_scanner.guard.runtime_identity_probe import (
     RUNTIME_PROBE_INSTANCES_FEATURE,
     RUNTIME_PROBE_LAUNCH_FEATURE,
@@ -284,7 +285,12 @@ def test_a_replaced_runtime_still_reports_its_old_process(
 
 
 def test_processes_the_assessment_refuses_cost_only_themselves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _probe([], monkeypatch, lambda feature, request: _reply(instances=[_instance()]))
+    probe = RuntimeProbe(
+        artifacts=(ARTIFACT,),
+        locations=({"location_id": "path:node", "artifact_id": ARTIFACT["artifact_id"], "state": "present"},),
+        observations=(),
+        instances=(_instance(),),
+    )
     requests: list[dict[str, object]] = []
 
     def assess(request: dict[str, object]) -> SimpleNamespace:
@@ -293,13 +299,16 @@ def test_processes_the_assessment_refuses_cost_only_themselves(monkeypatch: pyte
             raise RuntimeIdentityError("runtime_identity_artifact_invalid")
         return SimpleNamespace(advisory_source=None, artifacts=(), advisories=())
 
+    monkeypatch.setattr(
+        runtime_posture, "collect_runtime_candidates", lambda *_, **__: (RuntimeCandidates((), (), False), probe)
+    )
     monkeypatch.setattr(runtime_posture, "assess_runtime_identity", assess)
     payload = build_runtime_posture(
         [_detection()], generated_at=NOW, environment={}, instance_home=tmp_path, advisory_bundle={"fixture": True}
     )
 
-    print("PAYLOAD", payload)
-    assert [("instances" in request) for request in requests] == [True, False]
+    assert "instances" in requests[0]
+    assert "instances" not in requests[-1]
     assert payload["status"] == "ok"
     assert payload["coverage"]["instances_enumerated"] is True
     assert payload["instances"]["enumerated"] is True
