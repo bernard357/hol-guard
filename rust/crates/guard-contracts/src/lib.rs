@@ -292,6 +292,8 @@ mod inventory_url_redaction;
 pub use inventory_url_redaction::*;
 mod inventory_scan_findings;
 pub use inventory_scan_findings::*;
+mod supply_chain_bundle_verify;
+pub use supply_chain_bundle_verify::*;
 
 pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 pub const GUARD_HOOK_ENVELOPE_V2_SCHEMA: &str = "guard-hook-envelope.v2";
