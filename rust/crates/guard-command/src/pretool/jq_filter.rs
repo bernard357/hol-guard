@@ -242,9 +242,12 @@ fn stage(part: &str) -> bool {
 
 /// `@tsv`, `@base64`: a bare rendering format, applied to the value read.
 fn format(stage: &str) -> bool {
-    stage
-        .strip_prefix('@')
-        .is_some_and(|name| FORMATS.contains(&name))
+    stage.strip_prefix('@').is_some_and(rendering_format)
+}
+
+/// Whether `name` is a format that only renders the value read as text.
+pub(crate) fn rendering_format(name: &str) -> bool {
+    FORMATS.contains(&name)
 }
 
 /// Outside string literals only names, projections, spaces, call and group

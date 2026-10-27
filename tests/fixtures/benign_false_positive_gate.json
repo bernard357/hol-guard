@@ -9741,6 +9741,23 @@
       "expect": "allow"
     },
     {
+      "id": "gh-api-jq-bare-format",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh api repos/example/app/releases/latest --jq @json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "neg-jq-sh-format-template",
       "fix_area": "negative",
       "harnesses": [
