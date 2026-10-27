@@ -47,16 +47,8 @@ provision_native_policy_verifier_key = _windows_key.provision_native_policy_veri
 
 _snapshot_integrity_mac_v3 = _contract._snapshot_integrity_mac_v3
 _strict_json_loads_v3 = _codec._strict_json_loads_v3
-_clear_v3_snapshot_pending = _storage._clear_v3_snapshot_pending
-_read_v3_generation_state = _storage._read_v3_generation_state
-_read_v3_snapshot_cache = _storage._read_v3_snapshot_cache
 _read_v3_snapshot_file = _storage._read_v3_snapshot_file
-_recover_v3_snapshot_transaction = _storage._recover_v3_snapshot_transaction
-_v3_generation_lock = _storage._v3_generation_lock
 _windows_read_snapshot_bytes = _storage._windows_read_snapshot_bytes
-_write_v3_generation_state = _storage._write_v3_generation_state
-_write_v3_snapshot_cache = _storage._write_v3_snapshot_cache
-_write_v3_snapshot_file = _storage._write_v3_snapshot_file
 _windows_dll = _windows_support._windows_dll
 _windows_file_information_type = _windows_support._windows_file_information_type
 _windows_owner_sid = _windows_support._windows_owner_sid
@@ -77,7 +69,6 @@ _windows_verify_private_dacl = _windows_acl._windows_verify_private_dacl
 _windows_ensure_private_directory = _windows_state._windows_ensure_private_directory
 _windows_private_directory_binding = _windows_state._windows_private_directory_binding
 _windows_private_state_binding = _windows_state._windows_private_state_binding
-_v3_generation_for_policy = _generation._v3_generation_for_policy
 _normalize_scope_text_v3 = _policy._normalize_scope_text_v3
 _utf8_size_v3 = _codec._utf8_size_v3
 _valid_bounded_string_v3 = _codec._valid_bounded_string_v3
@@ -93,10 +84,6 @@ _string_map = _policy._string_map
 _valid_u64_v3 = _contract._valid_u64_v3
 _valid_digest_v3 = _contract._valid_digest_v3
 _policy_snapshot_push_bytes_v3 = _contract._policy_snapshot_push_bytes_v3
-_snapshot_cache_path_v3 = _storage._snapshot_cache_path_v3
-_snapshot_pending_path_v3 = _storage._snapshot_pending_path_v3
-_snapshot_inputs_v3 = _generation._snapshot_inputs_v3
-_snapshot_matches_inputs_v3 = _generation._snapshot_matches_inputs_v3
 _stricter_action = _policy._stricter_action
 
 if TYPE_CHECKING:

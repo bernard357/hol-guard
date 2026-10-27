@@ -84,11 +84,6 @@ def _approval_delivery_payload(
 ) -> dict[str, object]:
     return approval_delivery_payload(approval_prompt_flow(harness, managed_install=managed_install))
 
-def _native_hook_reason(*values: object | None) -> str:
-    from ..approval_hook_copy import join_native_hook_reason
-
-    return join_native_hook_reason(*values)
-
 def _native_approval_center_context(response_payload: dict[str, object], *, harness: str) -> str | None:
     review_url = _preferred_approval_review_url(response_payload, harness=harness)
     if review_url is None:
@@ -381,7 +376,7 @@ __all__ = [
     "_claude_notification_tool_name", "_ensure_terminal_punctuation",
     "_guard_cli_settings_payload", "_guard_settings_doctor_payload", "_guard_settings_explain_payload",
     "_guard_settings_payload", "_is_cloud_inbox_url", "_localize_decision_v2_review_copy",
-    "_localize_pending_approval_copy", "_native_approval_center_context", "_native_hook_reason",
+    "_localize_pending_approval_copy", "_native_approval_center_context",
     "_runtime_artifact_command_action_floor", "_runtime_artifact_policy_action",
     "_runtime_data_flow_sink_type", "_runtime_detector_perf_payload",
     "_runtime_detector_registry_payload", "_strip_cloud_inbox_urls",

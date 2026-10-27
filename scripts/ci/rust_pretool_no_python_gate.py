@@ -285,7 +285,6 @@ def _bridge_failures(root: Path) -> list[str]:
                 "def review_pre_tool_native(",
                 "native_resident_client_request",
                 '"operation": "pre_tool_use"',
-                "def native_pre_tool_policy_floor(",
             ),
         )
     )
@@ -313,7 +312,7 @@ def _bridge_failures(root: Path) -> list[str]:
     if "Python remains authoritative" in bridge_source:
         failures.append(f"{command_bridge.as_posix()} still describes Python as authoritative")
     review_start = bridge_source.find("def review_pre_tool_native(")
-    review_end = bridge_source.find("\ndef native_pre_tool_policy_floor(", review_start)
+    review_end = bridge_source.find("\n__all__", review_start)
     review_body = bridge_source[review_start:review_end] if review_start >= 0 and review_end > review_start else ""
     if "evaluate_command(" in review_body:
         failures.append("review_pre_tool_native invokes the Python command evaluator")

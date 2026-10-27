@@ -79,11 +79,36 @@ pub(super) fn verified_cwd_target(value: &str, context: super::PathContext<'_>) 
     canonical.to_str().map(str::to_owned)
 }
 
+/// A `cd` operand that climbs out of the cwd, such as `cd ..` or
+/// `cd ../app`, proved for read-only steps only (see `sibling::climbed`). It
+/// must name its canonical directory exactly and clear the read screens an
+/// absolute `cd` does. Write, Git write and contained-run routes keep
+/// [`verified_cwd_target`], which proves `..` only into a linked worktree.
+pub(crate) fn verified_climb_target(
+    value: &str,
+    context: super::PathContext<'_>,
+) -> Option<String> {
+    if context.home_dir.is_none() || !safe_directory_target(value) {
+        return None;
+    }
+    let supplied = sibling::climbed(value, std::path::Path::new(context.cwd?))?;
+    let canonical = std::fs::canonicalize(&supplied).ok()?;
+    if canonical != supplied
+        || !canonical.is_dir()
+        || !super::read_paths::resolved_path_allowed(&canonical, context.home_dir, context.cwd)
+    {
+        return None;
+    }
+    canonical.to_str().map(str::to_owned)
+}
+
 /// POSIX `cd` skips the CDPATH search for operands that begin with `.` or
 /// `..`; any other relative operand needs proof that CDPATH is unset. The
 /// lexical join is what a logical `cd` reaches, so the caller's spelling
-/// check rejects symlinked components. `..` is proved only into a linked
-/// worktree of the session's repository (see `sibling`): elsewhere the
+/// check rejects symlinked components. `..` is proved here only into a
+/// linked worktree of the session's repository (see `sibling`); read-only
+/// steps may also follow a plain climb (see `verified_climb_target`).
+/// Elsewhere the
 /// shell resolves it against its logical `$PWD`, which may name a symlinked
 /// parent the reported cwd does not show. On Windows a `:` can name a
 /// drive-relative path (`C:src`) or an alternate data stream, and Git Bash

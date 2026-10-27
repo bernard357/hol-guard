@@ -504,6 +504,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::LocalToolEligibility(request) => {
                 crate::local_tool_eligibility_op::evaluate_local_tool_eligibility_request(&request)
             }
+            ResidentOperationV1::LocalToolGrant(request) => {
+                crate::local_tool_grant_op::evaluate_local_tool_grant_request(&request)
+            }
             ResidentOperationV1::ShellHelpers(request) => {
                 crate::shell_helpers_op::evaluate(&request)
             }
@@ -885,6 +888,17 @@ fn operation_guard_home(operation: &ResidentOperationV1) -> Option<&str> {
         ResidentOperationV1::CodexBindingCapture(request) => Some(&request.guard_home),
         ResidentOperationV1::ProtectRequest(request) => Some(&request.guard_home),
         ResidentOperationV1::CodexRequestResume(request) => Some(&request.guard_home),
+        // Only the review responses read a file (the daemon token that signs
+        // their review link), so only they name the home they read.
+        ResidentOperationV1::HookDecide(request) => match &request.query {
+            guard_contracts::HookDecisionQueryV1::SilentReviewBlock { inputs } => {
+                Some(&inputs.guard_home)
+            }
+            guard_contracts::HookDecisionQueryV1::PausedReview { inputs } => {
+                Some(&inputs.guard_home)
+            }
+            _ => None,
+        },
         ResidentOperationV1::PolicyIntegrityRows(request) => request
             .generation
             .as_ref()

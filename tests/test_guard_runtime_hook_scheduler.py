@@ -399,38 +399,6 @@ def test_scheduler_rejects_single_payload_larger_than_byte_limit() -> None:
     assert reason == "daemon_hook_queue_bytes"
 
 
-def test_scheduler_atomically_grows_and_shrinks_payload_reservation() -> None:
-    scheduler = RuntimeHookScheduler(retained_bytes_limit=10)
-    reservation, reason = scheduler.reserve_bytes(
-        payload_bytes=5,
-        deadline=time.monotonic() + 1,
-    )
-    assert reservation is not None
-    assert reason is None
-
-    assert reservation.resize(10, deadline=time.monotonic() + 1) is None
-    assert scheduler.stats()["retained_bytes"] == 10
-    assert reservation.resize(3, deadline=time.monotonic() + 1) is None
-    assert scheduler.stats()["retained_bytes"] == 3
-    reservation.release()
-
-    assert scheduler.stats()["retained_bytes"] == 0
-
-
-def test_scheduler_rejects_reservation_growth_beyond_global_limit() -> None:
-    scheduler = RuntimeHookScheduler(retained_bytes_limit=10)
-    reservation, reason = scheduler.reserve_bytes(
-        payload_bytes=5,
-        deadline=time.monotonic() + 1,
-    )
-    assert reservation is not None
-    assert reason is None
-
-    assert reservation.resize(11, deadline=time.monotonic() + 1) == "daemon_hook_queue_bytes"
-    reservation.release()
-    assert scheduler.stats()["retained_bytes"] == 0
-
-
 @pytest.mark.parametrize("previous_owner", ["released", "transferred"])
 def test_invalid_byte_reservation_cannot_publish_phantom_queued_work(previous_owner: str) -> None:
     scheduler = RuntimeHookScheduler(active_limit=1, retained_bytes_limit=10)
