@@ -2,32 +2,22 @@
 
 Many routing tests patch ``sys.platform`` to replay another host's sink, and
 point ``guard_home`` at a scratch directory with no enrolled resident. This
-fixture keeps the routing answer the resident's own: it asks the session's
-resident, on the real platform, with the host the test chose. Only the host
-fact and the home are redirected; the routing table is never re-implemented.
+fixture keeps the routing answer the resident's own: every containment query
+is sent to the session's resident, on the real platform, carrying the host the
+test chose. Only the platform the transport runs on and the home it asks are
+redirected; the routing table and the rewrite are never re-implemented.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TypeVar
+from typing import Any
 
 import pytest
 
 from codex_plugin_scanner.guard import native_hook_containment_route as route_module
-
-_T = TypeVar("_T")
-_SINK_USERS = (
-    "codex_plugin_scanner.guard.adapters.zcode_contained_tests",
-    "tests.codex_containment_route",
-    "codex_plugin_scanner.guard.daemon.hook_contained_grant",
-)
-# Both hook paths take the route through ``edge_containment_route``, which
-# asks ``native_containment_route`` when an edge carries no stamped route.
-_ROUTE_USERS = ("codex_plugin_scanner.guard.native_hook_containment_route",)
 
 
 @pytest.fixture
@@ -36,46 +26,22 @@ def containment_resident(monkeypatch: pytest.MonkeyPatch, native_approval_reuse_
 
     home = native_approval_reuse_runtime
     real_platform = sys.platform
-    real_sink = route_module.native_containment_sink
-    real_route = route_module.native_containment_route
+    real_ask = route_module._ask
 
-    def on_real_host(call: Callable[[], _T]) -> _T:
-        # The host the test chose, asked from the platform the resident runs on.
-        host = route_module.host_platform()
+    def ask(
+        kind: str,
+        inputs: Mapping[str, object],
+        guard_home: Path | None,
+        validate: Any,
+        deadline: float | None,
+        feature: str = route_module.HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE,
+    ) -> dict[str, Any]:
+        # The inputs already name the host the test chose; only the transport
+        # runs on the real platform, against the session's resident.
+        del guard_home, deadline
         with monkeypatch.context() as patch:
             patch.setattr(sys, "platform", real_platform)
-            patch.setattr(route_module, "host_platform", lambda: host)
-            return call()
+            return real_ask(kind, inputs, home, validate, None, feature)
 
-    def sink(
-        response: Mapping[str, object],
-        *,
-        harness: str,
-        bridge: bool,
-        payload: Mapping[str, object],
-        guard_home: Path | None,
-        deadline: float | None = None,
-    ) -> route_module.ContainmentSink:
-        del guard_home, deadline
-        return on_real_host(
-            lambda: real_sink(response, harness=harness, bridge=bridge, payload=payload, guard_home=home)
-        )
-
-    def route(
-        result: Mapping[str, object],
-        *,
-        event_name: object,
-        recording_only: bool,
-        guard_home: Path | None,
-        deadline: float | None = None,
-    ) -> str:
-        del guard_home, deadline
-        return on_real_host(
-            lambda: real_route(result, event_name=event_name, recording_only=recording_only, guard_home=home)
-        )
-
-    for name in _SINK_USERS:
-        monkeypatch.setattr(importlib.import_module(name), "native_containment_sink", sink)
-    for name in _ROUTE_USERS:
-        monkeypatch.setattr(importlib.import_module(name), "native_containment_route", route)
+    monkeypatch.setattr(route_module, "_ask", ask)
     return home
