@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from codex_plugin_scanner.guard.runtime.mcp_server_contribution import validate_mcp_contribution
+from .mcp_contribution_loader import validate_mcp_contribution_file
 
 from .mcp_contribution_client import mcp_tool_state
 
@@ -13,13 +13,14 @@ _CONTRIBUTION = (
     Path(__file__).resolve().parents[1]
     / "contributions/mcp-servers/mcp.discourse.json"
 )
+_TRUST_BINDING = (
+    Path(__file__).resolve().parents[1]
+    / "contracts/extensions/trust/command.mcp-discourse.v1.json"
+)
 
 
 def _payload() -> dict[str, object]:
-    result = json.loads(_CONTRIBUTION.read_text(encoding="utf-8"))
-    assert isinstance(result, dict)
-    validate_mcp_contribution(result, filename=_CONTRIBUTION.name)
-    return result
+    return validate_mcp_contribution_file(_CONTRIBUTION)
 
 
 def test_discourse_launch_identity_and_opt_in_trust() -> None:
@@ -27,6 +28,12 @@ def test_discourse_launch_identity_and_opt_in_trust() -> None:
     assert contribution["id"] == "mcp.discourse"
     assert contribution["trustClass"] == "external"
     assert contribution["activation"] == "opt-in"
+    trust = json.loads(_TRUST_BINDING.read_text(encoding="utf-8"))
+    assert trust == {
+        "schemaVersion": "guard.extension-trust-binding.v1",
+        "extension": "command.mcp-discourse",
+        "trustClass": "external",
+    }
     assert contribution["launch"] == {
         "kind": "package-launcher",
         "command": "npx",
