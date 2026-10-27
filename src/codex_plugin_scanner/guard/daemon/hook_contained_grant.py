@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..native_hook_containment_route import native_containment_sink
+from ..native_hook_containment_route import native_containment_rewrite
 from .hook_fail_closed import render_pre_tool
 from .hook_native_exact_action import launch_cwd, launch_path
 from .hook_request_parsing import pre_tool_command
@@ -97,26 +97,23 @@ def granted_containment_response(
     granted = granted_containment_result(store, result, payload=payload, workspace=workspace, home_dir=home_dir)
     if granted is None:
         return None
-    from ..adapters.zcode_contained_tests import route_zcode_containment
+    from ..adapters.zcode_contained_tests import contained_sink_command_prefix
 
     receipt = render_pre_tool(harness, granted, guard_home=guard_home, deadline=deadline)
-    sink = native_containment_sink(
-        receipt, harness=harness, bridge=False, payload=payload, guard_home=guard_home, deadline=deadline
-    )
-    if sink.kept_because == "receipt_only":
-        return receipt
-    if sink.profile is None:
-        return None
-    routed = route_zcode_containment(
+    rewrite = native_containment_rewrite(
         receipt,
         harness=harness,
+        bridge=False,
         payload=payload,
+        workspace=workspace,
         guard_home=guard_home,
         home_dir=home_dir,
-        workspace=workspace,
-        sink=sink,
+        sink_command=contained_sink_command_prefix(),
+        deadline=deadline,
     )
-    return None if routed is receipt else routed
+    if rewrite.kept_because == "receipt_only":
+        return receipt
+    return rewrite.response
 
 
 __all__ = ["granted_containment_response", "granted_containment_result"]

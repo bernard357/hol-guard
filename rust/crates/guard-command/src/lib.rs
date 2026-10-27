@@ -62,6 +62,7 @@ pub mod editor_task_risk;
 pub mod policy_document;
 pub use codex_output_entry::{review_codex_tool_output, ToolOutputOutcome};
 pub use codex_output_env::{Ctx, GitCheck, GitProbe, GitRun, InspectionHost};
+pub use codex_output_inspection::is_bounded_read_only_filter;
 pub mod codex_output_fnmatch;
 mod codex_output_fs;
 mod codex_output_git_conditions;
