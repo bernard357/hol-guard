@@ -316,7 +316,13 @@ function normalizeWorkspaceFindingsState(assessmentsPayload, findingsPayload) {
   };
 }
 async function readPayload(path, init) {
-  const response = await fetchGuardApi(path, init);
+  let response;
+  try {
+    response = await fetchGuardApi(path, init);
+  } catch (error) {
+    if (init?.signal?.aborted) throw error;
+    throw new Error(workspaceErrorMessage(null));
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok && response.status !== 409) {
     throw new Error(workspaceErrorMessage(text$1(record$1(body).error)));
