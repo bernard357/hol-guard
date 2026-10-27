@@ -181,7 +181,10 @@ shows the agent the `connector_setup_reason` text, and records the connector's
 setup context. The resident cannot raise a desktop notice, so it hands the stored
 request id and the CLI name to the evidence drain, which raises the notice from
 the stored row. Any lookup the resident cannot spell exactly as the daemon would,
-and any failed lookup, leaves the review to the daemon.
+and any failed lookup, leaves the review to the daemon. A connector-setup review the
+daemon queues asks the same `extension_review_hint` op for its connector-setup
+hint, handing it the connector with the paused result, so the risk classes read
+from the observed catalog rules are Rust-owned on both lanes.
 
 The recommendation shown with a pending review is that stored hint re-checked
 on every read, and the resident owns it too. The
