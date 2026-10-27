@@ -183,7 +183,9 @@ pub(in crate::pretool) fn safe_lsof_arguments(arguments: &[String]) -> bool {
     // Without `-a`, `-p` or `-d` also lists every open file of that process,
     // and `-d` without `-p` names the descriptor of every process. So does
     // `-p ^<pid>`, which selects every process but the one named.
-    (network || (descriptors && pid && !excluded_pid)) && (!(pid || descriptors) || and)
+    (network || descriptors)
+        && (!descriptors || (pid && !excluded_pid))
+        && (!(pid || descriptors) || and)
 }
 
 /// `cwd`, `rtd` or `txt`, alone or as a comma list. A number would name an

@@ -59,6 +59,8 @@ fn file_operands_hosts_and_connection_strings_are_refused() {
         "-a -d cwd",
         "-a -d rtd,txt",
         "-a -p ^1 -d cwd",
+        "-a -i -d cwd",
+        "-a -i :3000 -d txt",
         "-a -p 123,^1 -d cwd",
         "-a -p^1 -dtxt",
         "-a -p 123 -d",
