@@ -112,6 +112,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::HOOK_DECISION_HOOK_ROUTE_FEATURE,
     guard_contracts::HOOK_DECISION_PRETOOL_FLOOR_FEATURE,
     guard_contracts::HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE,
+    guard_contracts::HOOK_DECISION_REVIEW_RESPONSE_FEATURE,
     guard_contracts::HOOK_DECISION_CLAUDE_PERMISSION_VERDICT_FEATURE,
     guard_contracts::DAEMON_ROUTE_FEATURE,
     guard_contracts::DAEMON_HANDLER_FEATURE,

@@ -15,15 +15,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final
 
-from ..approval_link_output import native_review_reason
-from ..native_hook_render import (
-    native_render_pre_tool,
-    native_render_pre_tool_review,
-    native_render_recording_only_pre_tool,
-)
+from ..native_hook_decision import NativeHookDecisionError, native_review_response
+from ..native_hook_render import native_render_pre_tool, native_render_recording_only_pre_tool
 
 ENVELOPES_CONTRACT_PATH: Final = (
     Path(__file__).resolve().parent.parent / "contracts" / "hook-fail-closed-envelopes.v1.json"
@@ -61,7 +58,6 @@ RENDER_UNAVAILABLE_REASON_CODE: Final = str(_DEFAULTS["reason_code"])
 RENDER_UNAVAILABLE_REASON: Final = str(_DEFAULTS["reason"])
 PROMPT_UNAVAILABLE_REASON: Final = str(_DEFAULTS["prompt_reason"])
 PROMPT_UNAVAILABLE_REASON_CODE = "native_prompt_unavailable"
-_REVIEW_DEFAULT_REASON = "HOL Guard requires review before this action can execute."
 
 
 def canonical_harness(harness: str) -> str:
@@ -107,7 +103,7 @@ def _verdict_text(verdict: Mapping[str, object], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _verdict_deny(harness: str, verdict: Mapping[str, object], *, reason: str | None = None) -> dict[str, object]:
+def _verdict_deny(harness: str, verdict: Mapping[str, object]) -> dict[str, object]:
     """Fixed deny for a verdict the resident reached but could not render.
 
     A blocking verdict keeps its own reason and reason code. An allow keeps the
@@ -117,10 +113,10 @@ def _verdict_deny(harness: str, verdict: Mapping[str, object], *, reason: str | 
     """
 
     if verdict.get("decision") == "allow" and verdict.get("minimum_action") in _ALLOW_FLOORS:
-        return fail_closed_pre_tool(harness, reason=reason or RENDER_UNAVAILABLE_REASON)
+        return fail_closed_pre_tool(harness, reason=RENDER_UNAVAILABLE_REASON)
     return fail_closed_pre_tool(
         harness,
-        reason=reason or _verdict_text(verdict, "reason") or RENDER_UNAVAILABLE_REASON,
+        reason=_verdict_text(verdict, "reason") or RENDER_UNAVAILABLE_REASON,
         reason_code=_verdict_text(verdict, "reason_code") or RENDER_UNAVAILABLE_REASON_CODE,
     )
 
@@ -160,33 +156,45 @@ def render_pre_tool_review(
     verdict: Mapping[str, object],
     *,
     approval: Mapping[str, object] | None,
-    guard_home: Path | None = None,
+    guard_home: Path,
     deadline: float | None = None,
 ) -> dict[str, object]:
-    """Resident-rendered paused review, or a fixed deny when it cannot render.
+    """Resident-rendered paused review with its signed approval link, or a fixed deny.
 
-    The fixed deny keeps the signed approval link in its reason, so a review that
-    is already queued still tells the user where to approve it.
+    The fixed deny carries no link: the review is still queued in the approval inbox.
     """
 
-    linked_reason = None
-    raw_url = approval.get("approval_url") if approval is not None else None
-    if isinstance(raw_url, str) and raw_url.strip():
-        linked_reason = native_review_reason(
-            canonical_harness(harness),
-            str(verdict.get("reason") or _REVIEW_DEFAULT_REASON),
-            raw_url.strip(),
-            guard_home=guard_home,
-        )
-    rendered = native_render_pre_tool_review(
-        harness,
-        verdict,
-        approval=approval,
-        linked_reason=linked_reason,
-        guard_home=guard_home,
-        **_deadline_kwargs(deadline),
-    )
-    return rendered or _verdict_deny(harness, verdict, reason=linked_reason)
+    inputs = {
+        "harness": harness,
+        "verdict": dict(verdict),
+        # The resident reads only the link and the request id; the stored row can be large.
+        "approval": None
+        if approval is None
+        else {key: approval[key] for key in ("approval_url", "request_id") if isinstance(approval.get(key), str)},
+        "guard_home": str(guard_home),
+    }
+    with suppress(NativeHookDecisionError):
+        return native_review_response("paused_review", inputs, guard_home=guard_home, deadline=deadline)
+    return _verdict_deny(harness, verdict)
+
+
+def render_silent_review_block(
+    harness: str, inputs: Mapping[str, Any], *, guard_home: Path, deadline: float | None = None
+) -> dict[str, object]:
+    """Resident-composed silent review block, or the fixed deny ``render_pre_tool`` gives it.
+
+    The fixed deny keeps the never-prompted mode and the resume handle a bound retry watches.
+    """
+
+    with suppress(NativeHookDecisionError):
+        return native_review_response("silent_review_block", inputs, guard_home=guard_home, deadline=deadline)
+    blocked = {**inputs["result"], "decision": "deny", "minimum_action": "block", "policy_action": "block"}
+    response = _verdict_deny(harness, blocked)
+    response.update(prompted=False, blocked_request_mode="safe-alternative")
+    request_id = inputs.get("request_id")
+    if inputs.get("retry_reuses_approval") and isinstance(request_id, str) and request_id:
+        response["approval_resume"] = {"request_id": request_id, "poll_path": f"/v1/requests/{request_id}"}
+    return response
 
 
 def render_recording_only_pre_tool(

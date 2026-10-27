@@ -5,9 +5,11 @@
 //! decision in between: event-name and action normalization, composition of
 //! configured/CLI/payload/edge/daemon inputs, the lookups it permits, the
 //! final action after approval reuse and Watch mode, the receipt and activity
-//! disposition, and the response directive. Every query is pure: no IO, no
-//! SQLite. There is no Python evaluator, so a transport failure is "no
-//! decision" and the caller must fail closed.
+//! disposition, and the response directive. Every query is pure (no IO, no
+//! SQLite) except `silent_review_block` and `paused_review`, which read the Guard
+//! daemon token of the resident's own home to sign a review link. There is no
+//! Python evaluator, so a transport failure is "no decision" and the caller
+//! must fail closed.
 
 use std::collections::BTreeMap;
 
@@ -20,7 +22,8 @@ use crate::{
     ClaudePermissionVerdictInputsV1, ClaudePermissionVerdictV1, CodexToolOutputFactsV1,
     ContainmentRouteInputsV1, ContainmentRouteV1, ContainmentSinkInputsV1, ContainmentSinkV1,
     HookRouteInputsV1, HookRouteV1, NativeExtensionControlLayerV1, NativePermissionPersistInputsV1,
-    NativePermissionPersistPlanV1, PretoolFloorInputsV1, PretoolFloorV1,
+    NativePermissionPersistPlanV1, PausedReviewInputsV1, PausedReviewV1, PretoolFloorInputsV1,
+    PretoolFloorV1, SilentReviewBlockInputsV1, SilentReviewBlockV1,
 };
 
 /// Schema discriminator for the request.
@@ -138,6 +141,14 @@ pub enum HookDecisionQueryV1 {
     ClaudePermissionVerdict {
         inputs: Box<ClaudePermissionVerdictInputsV1>,
     },
+    /// The rendered block a native PreToolUse review shows the agent when the
+    /// user is not asked: composed reason, review link and resume hint.
+    SilentReviewBlock {
+        inputs: Box<SilentReviewBlockInputsV1>,
+    },
+    /// The rendered pause a native PreToolUse review shows while the user is
+    /// asked, with the signed review link in its reason.
+    PausedReview { inputs: Box<PausedReviewInputsV1> },
 }
 
 /// Facts the artifact hook's review route depends on. The transport gathers
@@ -475,6 +486,8 @@ pub enum HookDecisionPayloadV1 {
     PretoolFloor(Box<PretoolFloorV1>),
     ContainmentRoute(Box<ContainmentRouteV1>),
     ContainmentSink(Box<ContainmentSinkV1>),
+    SilentReviewBlock(Box<SilentReviewBlockV1>),
+    PausedReview(Box<PausedReviewV1>),
     ClaudePermissionVerdict {
         /// Facts still missing; resubmit with them when non-empty.
         needs_facts: Vec<String>,

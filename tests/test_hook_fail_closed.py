@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from codex_plugin_scanner.guard.daemon import hook_fail_closed
@@ -10,6 +12,13 @@ from codex_plugin_scanner.guard.daemon.hook_fail_closed import (
     render_pre_tool_review,
     render_recording_only_pre_tool,
 )
+from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError
+
+_HOME = Path("unused-guard-home")
+
+
+def _resident_unavailable(*_args: object, **_kwargs: object) -> dict[str, object]:
+    raise NativeHookDecisionError("resident unavailable")
 
 
 @pytest.mark.parametrize("harness", ["pi", "omp", "grok", "openclaw"])
@@ -51,11 +60,11 @@ def test_recording_only_render_denies_when_the_deadline_already_passed() -> None
 
 def test_unavailable_resident_never_renders_an_allow(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *_a, **_k: None)
-    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool_review", lambda *_a, **_k: None)
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
     monkeypatch.setattr(hook_fail_closed, "native_render_recording_only_pre_tool", lambda *_a, **_k: None)
     allowed = {"decision": "allow", "policy_action": "allow"}
     assert render_pre_tool("pi", allowed)["decision"] == "deny"
-    assert render_pre_tool_review("codex", allowed, approval=None)["policy_action"] == "block"
+    assert render_pre_tool_review("codex", allowed, approval=None, guard_home=_HOME)["policy_action"] == "block"
     assert render_recording_only_pre_tool("pi", reason_code="x", reason="y")["decision"] == "deny"
 
 
@@ -71,21 +80,6 @@ def test_resident_response_is_returned_unchanged(monkeypatch: pytest.MonkeyPatch
     assert seen == {"harness": "pi", "verdict": {"decision": "allow"}}
 
 
-def test_review_ships_the_linked_reason_only_with_an_approval_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: list[dict[str, object]] = []
-
-    def render(harness: str, verdict: object, **kwargs: object) -> dict[str, object]:
-        captured.append(kwargs)
-        return {"ok": True}
-
-    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool_review", render)
-    monkeypatch.setattr(hook_fail_closed, "native_review_reason", lambda _h, reason, url, **_k: f"{reason} {url}")
-    render_pre_tool_review("pi", {"reason": "Needs review."}, approval=None)
-    render_pre_tool_review("pi", {"reason": "Needs review."}, approval={"approval_url": " http://x/a "})
-    assert captured[0]["linked_reason"] is None
-    assert captured[1]["linked_reason"] == "Needs review. http://x/a"
-
-
 def test_accepted_allow_is_marked_only_when_the_resident_rendered_it(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool", lambda *a, **k: {"decision": "allow"})
     assert render_accepted_allow("pi", {"decision": "allow"}) == {
@@ -98,14 +92,29 @@ def test_accepted_allow_is_marked_only_when_the_resident_rendered_it(monkeypatch
     assert "approval_reuse_status" not in failed
 
 
-def test_queued_review_deny_keeps_the_approval_link_when_render_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool_review", lambda *a, **k: None)
-    monkeypatch.setattr(hook_fail_closed, "native_review_reason", lambda *a, **k: "Review at http://127.0.0.1/a")
-    rendered = render_pre_tool_review(
-        "pi", {"reason": "needs review"}, approval={"approval_url": "http://127.0.0.1/a", "request_id": "r"}
-    )
-    assert rendered["decision"] == "deny"
-    assert "http://127.0.0.1/a" in str(rendered["reason"])
+def test_paused_review_asks_the_resident_with_the_link_fields_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, object, object]] = []
+
+    def respond(kind: str, inputs: object, *, guard_home: object, deadline: object = None) -> dict[str, object]:
+        seen.append((kind, inputs, guard_home))
+        return {"decision": "deny", "from": "resident"}
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", respond)
+    approval = {"approval_url": "http://127.0.0.1/a", "request_id": "r", "status": "pending"}
+    rendered = render_pre_tool_review("pi", {"reason": "needs review"}, approval=approval, guard_home=_HOME)
+    assert rendered == {"decision": "deny", "from": "resident"}
+    assert seen == [
+        (
+            "paused_review",
+            {
+                "harness": "pi",
+                "verdict": {"reason": "needs review"},
+                "approval": {"approval_url": "http://127.0.0.1/a", "request_id": "r"},
+                "guard_home": str(_HOME),
+            },
+            _HOME,
+        )
+    ]
 
 
 @pytest.mark.parametrize("harness", ["omp", "codex"])
@@ -124,9 +133,10 @@ def test_blocking_verdict_keeps_its_reason_when_render_fails(monkeypatch: pytest
 
 
 def test_review_render_failure_keeps_the_verdict_reason_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hook_fail_closed, "native_render_pre_tool_review", lambda *_a, **_k: None)
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
     verdict = {"decision": "deny", "reason": "Needs review.", "reason_code": "native_pre_tool_review"}
-    rendered = render_pre_tool_review("omp", verdict, approval=None)
+    approval = {"approval_url": "http://127.0.0.1/a", "request_id": "r"}
+    rendered = render_pre_tool_review("omp", verdict, approval=approval, guard_home=_HOME)
     assert rendered["decision"] == "deny"
     assert rendered["reason_code"] == "native_pre_tool_review"
     assert rendered["reason"] == "Needs review."

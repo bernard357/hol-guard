@@ -13,10 +13,12 @@
 //! dispatches a prepared payload through (`hook_route`), the floor a
 //! PreToolUse verdict is held at (`pretool_floor`), whether that verdict is
 //! rewritten into the contained sink (`containment_route`,
-//! `containment_sink`) and the verdict for Claude Code's permission dialog
-//! (`claude_permission_verdict`). Every query is pure
-//! and fails closed: a malformed request yields a `native_hook_decision_*`
-//! error, never a default verdict.
+//! `containment_sink`), the verdict for Claude Code's permission dialog
+//! (`claude_permission_verdict`) and the response a review shows the agent,
+//! silent (`silent_review_block`) or paused (`paused_review`). Every query is
+//! pure, except that the two review responses read the daemon token of their
+//! pinned Guard home to sign a review link, and every query fails closed: a malformed request
+//! yields a `native_hook_decision_*` error, never a default verdict.
 
 use guard_contracts::{
     HookCompositionV1, HookDecisionPayloadV1, HookDecisionQueryV1, HookDecisionRequestV1,
@@ -36,6 +38,7 @@ use crate::hook_decision_hook_route::hook_route;
 use crate::hook_decision_native_facts::{verdict_handoff, VerdictHandoff};
 use crate::hook_decision_native_permission_persist::native_permission_persist_plan;
 use crate::hook_decision_pretool_floor::pretool_floor;
+use crate::hook_decision_review_response::{paused_review, silent_review_block};
 use crate::hook_decision_settle::settle;
 
 pub(crate) fn evaluate_hook_decision_request(
@@ -156,6 +159,12 @@ pub(crate) fn decide(query: &HookDecisionQueryV1) -> Result<HookDecisionPayloadV
         HookDecisionQueryV1::ContainmentSink { inputs } => Ok(
             HookDecisionPayloadV1::ContainmentSink(Box::new(containment_sink(inputs)?)),
         ),
+        HookDecisionQueryV1::SilentReviewBlock { inputs } => Ok(
+            HookDecisionPayloadV1::SilentReviewBlock(Box::new(silent_review_block(inputs)?)),
+        ),
+        HookDecisionQueryV1::PausedReview { inputs } => Ok(HookDecisionPayloadV1::PausedReview(
+            Box::new(paused_review(inputs)),
+        )),
         HookDecisionQueryV1::ClaudePermissionVerdict { inputs } => {
             Ok(match claude_permission_verdict(inputs)? {
                 Ok(verdict) => HookDecisionPayloadV1::ClaudePermissionVerdict {

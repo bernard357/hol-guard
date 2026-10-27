@@ -206,6 +206,8 @@ mod hook_pretool_floor;
 pub use hook_pretool_floor::*;
 mod hook_containment_route;
 pub use hook_containment_route::*;
+mod hook_review_response;
+pub use hook_review_response::*;
 mod claude_permission_verdict;
 pub use claude_permission_verdict::*;
 mod hook_decision_permission_persist;

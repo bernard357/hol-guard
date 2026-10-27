@@ -59,7 +59,7 @@ fn review_reasons_match_the_daemon() {
 }
 
 #[test]
-fn links_python_would_rewrite_are_left_to_the_daemon() {
+fn links_it_cannot_reproduce_are_left_unlinked() {
     for url in [
         "http://127.0.0.1:4781/requests/r1?x=1",
         "http://127.0.0.1:4781/requests/r1#guard-token=old",
