@@ -38,18 +38,6 @@ class AdapterStateIntegrityUnavailableError(RuntimeError):
     reason: str = "native_adapter_state_integrity_unavailable"
 
 
-def adapter_state_runtime_available(guard_home: Path | None = None) -> bool:
-    """Whether a resident that can stamp adapter state is reachable right now.
-
-    Lifecycle work calls this before its first write. Authentication is the
-    last step of an install, so a resident that is already gone when the
-    install starts would otherwise leave the harness configuration rewritten
-    and no manifest to uninstall from.
-    """
-
-    return ensure_resident_prerequisite(Path(_resolve_digest_home(guard_home)))
-
-
 def native_adapter_state_integrity(
     *,
     action: str,
@@ -98,3 +86,38 @@ def native_adapter_state_integrity(
     if not isinstance(answer, dict):
         raise AdapterStateIntegrityUnavailableError
     return answer
+
+
+_PROBE_HARNESS = "adapter-state-runtime-probe"
+
+
+def adapter_state_runtime_available(guard_home: Path | None = None) -> bool:
+    """Whether a resident that can stamp adapter state answers right now.
+
+    Lifecycle work calls this before its first write. Authentication is the
+    last step of an install, so a resident that is already gone when the
+    install starts would otherwise leave the harness configuration rewritten
+    and no manifest to uninstall from.
+
+    Only the resident can answer that. The on-disk prerequisite says the
+    owner-private verifier key exists, which stays true across a restart, a
+    crash and a binary this feature was never compiled into, so it cannot
+    stand in for a reply. This sends a real ``verify`` instead and takes any
+    bound answer as reachable: the request travels the same transport, feature
+    gate and reply binding a stamp would, and an unsigned empty payload simply
+    authenticates as false. It carries no key, so the probe has no secret to
+    leak and no manifest to change.
+    """
+
+    try:
+        native_adapter_state_integrity(
+            action="verify",
+            harness=_PROBE_HARNESS,
+            payload={},
+            integrity_key_b64=None,
+            integrity_key_id=None,
+            guard_home=guard_home,
+        )
+    except AdapterStateIntegrityUnavailableError:
+        return False
+    return True

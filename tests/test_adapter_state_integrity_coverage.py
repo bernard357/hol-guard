@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from codex_plugin_scanner.guard import native_adapter_state_integrity as native_integrity
 from codex_plugin_scanner.guard.adapters import adapter_state_integrity as integrity
 from codex_plugin_scanner.guard.adapters.adapter_state_integrity import (
     AdapterStateIntegrityUnavailableError,
@@ -19,6 +20,7 @@ from codex_plugin_scanner.guard.adapters.adapter_state_integrity import (
     authenticate_adapter_state,
     authenticated_adapter_path,
 )
+from codex_plugin_scanner.guard.native_context import ensure_resident_prerequisite
 
 
 def _key_payload(*, key_id: str = "race-key") -> dict[str, object]:
@@ -364,6 +366,28 @@ def _stamped_payload() -> dict[str, object]:
     }
 
 
+def _provision_verifier_key(guard_home: Path) -> None:
+    """Write the on-disk prerequisite the resident refuses every request without."""
+
+    from codex_plugin_scanner.guard.native_policy_snapshot_constants import (
+        NATIVE_POLICY_VERIFIER_KEY_NAME,
+        NATIVE_RUNTIME_STATE_DIRECTORY,
+    )
+
+    key = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY / NATIVE_POLICY_VERIFIER_KEY_NAME
+    key.parent.mkdir(parents=True, exist_ok=True)
+    key.write_bytes(base64.urlsafe_b64encode(b"\x00" * 32))
+
+
+def _silence_the_resident(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every adapter-state request fail the way a dead socket does."""
+
+    def refuse(**_kwargs: object) -> dict[str, object]:
+        raise OSError("resident is gone")
+
+    monkeypatch.setattr(native_integrity, "_resident_request", refuse)
+
+
 def test_a_silent_runtime_is_not_read_as_an_unauthenticated_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -417,10 +441,8 @@ def test_a_lifecycle_change_is_refused_before_its_first_write(
     guard_home = tmp_path / "guard-home"
     context = HarnessContext(home_dir=home_dir, workspace_dir=workspace_dir, guard_home=guard_home)
 
-    def unreachable(_guard_home: Path) -> bool:
-        return False
-
-    monkeypatch.setattr(integrity, "adapter_state_runtime_available", unreachable)
+    _provision_verifier_key(guard_home)
+    _silence_the_resident(monkeypatch)
 
     with pytest.raises(AdapterStateIntegrityUnavailableError):
         HermesHarnessAdapter().install(context)
@@ -429,16 +451,39 @@ def test_a_lifecycle_change_is_refused_before_its_first_write(
     assert not (guard_home / "managed").exists()
 
 
-def test_a_reachable_runtime_admits_the_lifecycle_change(
+def test_a_provisioned_home_without_a_resident_is_still_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def reachable(_guard_home: Path) -> bool:
-        return True
+    """The verifier key on disk is not an answer from the resident.
 
-    monkeypatch.setattr(integrity, "adapter_state_runtime_available", reachable)
+    That file survives a restart, a crash and a binary this feature was never
+    compiled into, so reading it as "reachable" would admit exactly the
+    install this gate exists to refuse.
+    """
 
-    integrity.require_adapter_state_runtime(tmp_path / "guard-home")
+    guard_home = tmp_path / "guard-home"
+    _provision_verifier_key(guard_home)
+    assert ensure_resident_prerequisite(guard_home)
+
+    _silence_the_resident(monkeypatch)
+
+    assert not native_integrity.adapter_state_runtime_available(guard_home)
+    with pytest.raises(AdapterStateIntegrityUnavailableError):
+        integrity.require_adapter_state_runtime(guard_home)
+
+
+def test_a_reachable_runtime_admits_the_lifecycle_change(
+    tmp_path: Path,
+    native_adapter_state_integrity_runtime: Path,
+) -> None:
+    """A resident that answers ``verify`` is what admits the first write."""
+
+    del native_adapter_state_integrity_runtime
+    guard_home = tmp_path / "guard-home"
+
+    assert native_integrity.adapter_state_runtime_available(guard_home)
+    integrity.require_adapter_state_runtime(guard_home)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="a Windows spelling is only foreign off Windows")
