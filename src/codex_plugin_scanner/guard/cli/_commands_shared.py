@@ -145,7 +145,6 @@ from ..protect import build_protect_payload
 from ..receipts import build_receipt
 from ..risk import artifact_risk_profile, artifact_risk_summary
 from ..runtime.actions import GuardActionEnvelope, command_text_from_tool_payload, normalize_harness_payload
-from ..runtime.false_positive_rules import target_is_known_skill_doc_path
 from ..runtime.guard_run_evaluation import prompt_requests_to_artifacts
 from ..runtime.harness_attribution import resolve_runtime_hook_harness
 from ..runtime.package_intent_common import build_package_request_artifact
@@ -231,11 +230,6 @@ _SERVICE_RUNTIME_PROFILE_STATE_KEY = "service_runtime_profile"
 _NAMED_SECURITY_LEVELS = {"relaxed", "balanced", "strict", "gentle", "paranoid"}
 _HOOK_DAEMON_UNREACHABLE_REASON_MARKER = "daemon was unreachable"
 _CODEX_BROWSER_APPROVAL_WAIT_MAX_SECONDS = 8
-
-
-def _hook_command_text(payload: Mapping[str, object]) -> str | None:
-    tool_input = payload.get("tool_input")
-    return command_text_from_tool_payload(payload.get("tool_name"), tool_input)
 
 
 _CLAUDE_GUARD_APPROVAL_HEADER = "HOL Guard"

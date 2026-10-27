@@ -620,6 +620,7 @@ def test_unavailable_replay_check_rejects_the_exact_job(monkeypatch: pytest.Monk
         )
 
 
+@pytest.mark.usefixtures("native_command_capability_runtime")
 def test_exact_cloud_review_queue_job_requires_no_generic_capability_or_local_approval(tmp_path: Path) -> None:
     store = _connected_store(tmp_path)
     credentials = store.get_oauth_local_credentials(allow_primary=False)

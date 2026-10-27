@@ -224,39 +224,74 @@ fn granted_operations(operations: Option<&Value>) -> Result<Vec<String>, &'stati
     Ok(granted)
 }
 
-/// `_verify_signed_payload`: the envelope's HMAC over its own canonical bytes,
-/// keyed by the local policy integrity secret.
+/// `_verify_signed_payload` for this op's own capability envelope.
 fn verify_signed_payload(
     request: &CommandCapabilityRequestV1,
 ) -> Result<Map<String, Value>, &'static str> {
-    let capability = request
-        .capability
-        .as_object()
-        .ok_or("signed_payload_missing")?;
-    let signature = capability
+    verify_signed_envelope(
+        &request.capability,
+        request.integrity_key_b64.as_deref(),
+        request.integrity_key_id.as_deref(),
+    )
+}
+
+/// `_verify_signed_payload`: the envelope's HMAC over its own canonical bytes,
+/// keyed by the local policy integrity secret. Shared with the envelope op,
+/// which asks the same question about the local approval grants.
+pub(crate) fn verify_signed_envelope(
+    payload: &Value,
+    integrity_key_b64: Option<&str>,
+    integrity_key_id: Option<&str>,
+) -> Result<Map<String, Value>, &'static str> {
+    let envelope = payload.as_object().ok_or("signed_payload_missing")?;
+    let signature = envelope
         .get("signature")
         .and_then(Value::as_str)
         .filter(|signature| !signature.is_empty())
         .ok_or("signed_payload_missing_signature")?;
-    let key =
-        decode_key(request.integrity_key_b64.as_deref()).ok_or("local_signing_key_unavailable")?;
-    let key_id = request
-        .integrity_key_id
-        .as_deref()
-        .ok_or("local_signing_key_unavailable")?;
-    let mut unsigned = capability.clone();
+    let key = decode_key(integrity_key_b64).ok_or("local_signing_key_unavailable")?;
+    let key_id = integrity_key_id.ok_or("local_signing_key_unavailable")?;
+    let mut unsigned = envelope.clone();
     unsigned.remove("signature");
     if unsigned.get("keyId").and_then(Value::as_str) != Some(key_id) {
         return Err("signed_payload_key_mismatch");
     }
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(&key).map_err(|_| "local_signing_key_unavailable")?;
-    mac.update(&canonical_bytes(&Value::Object(unsigned.clone()))?);
-    let expected = hex::encode(mac.finalize().into_bytes());
+    let expected = hmac_hex(&key, &canonical_bytes(&Value::Object(unsigned.clone()))?)?;
     if !constant_time_equal(signature.as_bytes(), expected.as_bytes()) {
         return Err("signed_payload_invalid_signature");
     }
     Ok(unsigned)
+}
+
+/// `_signed_payload`: the caller's fields, the key id they were signed under,
+/// and the HMAC over exactly those bytes.
+pub(crate) fn sign_envelope(
+    payload: &Value,
+    integrity_key_b64: Option<&str>,
+    integrity_key_id: Option<&str>,
+) -> Result<Map<String, Value>, &'static str> {
+    let fields = payload.as_object().ok_or("signed_payload_missing")?;
+    let key = decode_key(integrity_key_b64).ok_or("local_signing_key_unavailable")?;
+    let key_id = integrity_key_id.ok_or("local_signing_key_unavailable")?;
+    let mut unsigned = fields.clone();
+    unsigned.insert("keyId".to_owned(), Value::from(key_id));
+    let signature = hmac_hex(&key, &canonical_bytes(&Value::Object(unsigned.clone()))?)?;
+    let mut signed = unsigned;
+    signed.insert("signature".to_owned(), Value::from(signature));
+    Ok(signed)
+}
+
+/// `_identity_digest`: the digest the replay rows and the approval grants
+/// both name an identity by.
+pub(crate) fn envelope_digest(payload: &Value) -> Result<String, &'static str> {
+    Ok(content_digest(&canonical_bytes(payload)?))
+}
+
+fn hmac_hex(key: &[u8], message: &[u8]) -> Result<String, &'static str> {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key).map_err(|_| "local_signing_key_unavailable")?;
+    mac.update(message);
+    Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
 fn decode_key(encoded: Option<&str>) -> Option<Vec<u8>> {

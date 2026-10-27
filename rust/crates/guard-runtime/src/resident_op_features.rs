@@ -29,6 +29,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::APPROVAL_SCOPE_FEATURE,
     guard_contracts::APPROVAL_SCOPE_SELECT_FEATURE,
     guard_contracts::COMMAND_CAPABILITY_FEATURE,
+    guard_contracts::COMMAND_ENVELOPE_FEATURE,
     guard_contracts::APPROVAL_RESOLUTION_ELIGIBILITY_FEATURE,
     guard_contracts::CONTAINED_WRAPPER_PLAN_FEATURE,
     guard_contracts::APPROVAL_PERSIST_SELECT_FEATURE,
@@ -46,6 +47,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::PACKAGE_REVIEW_PLAN_FEATURE,
     guard_contracts::PACKAGE_POLICY_RESOLVE_FEATURE,
     guard_contracts::PACKAGE_EVALUATION_VIEW_FEATURE,
+    guard_contracts::PACKAGE_WORKSPACE_SCOPE_FEATURE,
     guard_contracts::PACKAGE_PROTECT_FINALIZE_FEATURE,
     guard_contracts::PACKAGE_POSTURE_FEATURE,
     guard_contracts::PACKAGE_AUDIT_PROJECTION_FEATURE,
@@ -87,6 +89,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::CONNECTOR_SETUP_CONTEXT_FEATURE,
     guard_contracts::ARTIFACT_RISK_FEATURE,
     guard_contracts::SUPPLY_CHAIN_BUNDLE_VERIFY_FEATURE,
+    guard_contracts::TRUST_ATTESTATION_VERIFY_FEATURE,
     guard_contracts::LOCAL_TOOL_ELIGIBILITY_FEATURE,
     guard_contracts::APPROVAL_PROOF_FEATURE,
     guard_contracts::APPROVAL_PROOF_CLAIM_ROW_FEATURE,
@@ -166,6 +169,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     #[cfg(target_os = "macos")]
     guard_contracts::NATIVE_BASH_RESULT_POLICY_FEATURE,
     guard_contracts::SKILL_WORKFLOW_PREFLIGHT_FEATURE,
+    guard_contracts::NETWORK_PROTECTION_VERIFY_FEATURE,
     guard_contracts::INVENTORY_ITEM_CLASSIFICATION_FEATURE,
     guard_contracts::INVENTORY_SCAN_TARGETS_FEATURE,
     guard_contracts::INVENTORY_SNAPSHOT_DIGEST_FEATURE,
@@ -181,4 +185,5 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::RETRY_LINEAGE_CAPTURE_FEATURE,
     guard_contracts::LOCAL_CLI_HELP_PARSE_FEATURE,
     guard_contracts::POLICY_INTEGRITY_RECONCILE_FEATURE,
+    guard_contracts::ADAPTER_STATE_INTEGRITY_FEATURE,
 ];

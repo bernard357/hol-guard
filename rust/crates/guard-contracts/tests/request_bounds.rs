@@ -43,6 +43,7 @@ macro_rules! under_one_frame {
 #[test]
 fn every_declared_bound_fits_one_resident_frame() {
     under_one_frame!(
+        ADAPTER_STATE_INTEGRITY_MAX_BYTES,
         AIBOM_REPORT_SUMMARIES_MAX_REQUEST_BYTES,
         APPROVAL_BULK_ELIGIBILITY_MAX_BYTES,
         APPROVAL_CONTEXT_TOKEN_MAX_BYTES,
@@ -67,6 +68,7 @@ fn every_declared_bound_fits_one_resident_frame() {
         COMMAND_CAPABILITY_MAX_BYTES,
         COMMAND_EFFECT_BATCH_MAX_BYTES,
         COMMAND_EFFECT_MAX_BYTES,
+        COMMAND_ENVELOPE_MAX_BYTES,
         COMMAND_POLICY_DECISION_MAX_BYTES,
         COMPOSIO_ROLE_MAX_BYTES,
         COMPOUND_GIT_INSPECTION_MAX_BYTES,
@@ -111,6 +113,7 @@ fn every_declared_bound_fits_one_resident_frame() {
         PACKAGE_CONTEXT_BUILD_MAX_BYTES,
         PACKAGE_EVALUATION_VIEW_MAX_REQUEST_BYTES,
         PACKAGE_INTENT_EXTRACT_MAX_BYTES,
+        PACKAGE_WORKSPACE_SCOPE_MAX_BYTES,
         POLICY_BUNDLE_AUTHORITY_MAX_BYTES,
         POLICY_DECISION_LOOKUP_MAX_BYTES,
         POLICY_DOCUMENT_DECISION_MAX_BYTES,
