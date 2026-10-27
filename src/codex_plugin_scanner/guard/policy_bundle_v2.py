@@ -12,7 +12,6 @@ from .native_policy_bundle import (
     PolicyBundleNativeError,
     native_rejection_code,
     policy_bundle_chunks,
-    policy_bundle_paged_text,
     policy_bundle_verdict,
 )
 
@@ -23,22 +22,6 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 def policy_bundle_v2_now_micros(now: datetime | None) -> int:
     return ((now or datetime.now(timezone.utc)) - _EPOCH) // timedelta(microseconds=1)
-
-
-def _document(policy_bundle: dict[str, object]) -> dict[str, object]:
-    return {"bundle_chunks": policy_bundle_chunks(policy_bundle)}
-
-
-def computed_policy_bundle_v2_hash(policy_bundle: dict[str, object]) -> str:
-    """Return the integrity hash for the signed v2 envelope core."""
-
-    return str(policy_bundle_verdict("v2_bundle_hash", _document(policy_bundle))["value"])
-
-
-def canonical_policy_bundle_v2_payload(policy_bundle: dict[str, object]) -> bytes:
-    """Return the exact bytes covered by the v2 RSA-PSS signature."""
-
-    return policy_bundle_paged_text("v2_canonical_payload", _document(policy_bundle)).encode("utf-8")
 
 
 def validate_policy_bundle_v2_transition(
