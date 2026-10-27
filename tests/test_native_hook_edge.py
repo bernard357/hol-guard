@@ -183,53 +183,21 @@ def test_edge_decoder_refuses_a_containment_route_it_does_not_know(route: object
     assert _decode_edge({**_edge_result(), "containment_route": route}) is None
 
 
-def test_edge_decoder_requires_receipt_bound_to_result() -> None:
+def test_edge_decoder_requires_a_receipt() -> None:
+    # Whether the receipt records this result is the edge's own check now.
     missing_receipt = _edge_result()
     del missing_receipt["receipt"]
     assert _decode_edge(missing_receipt) is None
 
-    mutated_result = _edge_result()
-    result = mutated_result["result"]
-    assert isinstance(result, dict)
-    result["reason_code"] = "native_other_reason"
-    assert _decode_edge(mutated_result) is None
 
-
-def test_edge_decoder_accepts_only_bound_native_prompt_decision() -> None:
+def test_edge_decoder_keeps_a_repair_link() -> None:
+    # The edge adds the link and its status to a block the user can repair;
+    # this decoder used to refuse the whole answer and drop the link.
     edge = _edge_result()
     result = edge["result"]
-    receipt = edge["receipt"]
-    assert isinstance(result, dict) and isinstance(receipt, dict)
-    action = result["action"]
-    assert isinstance(action, dict)
-    edge["event_name"] = receipt["event_name"] = action["event"] = "UserPromptSubmit"
-    action.update(action_type="prompt", operation="submit", sensitive_target=True)
-    result.update(
-        decision="deny",
-        minimum_action="block",
-        policy_action="block",
-        reason_code="native_guard_bypass_prompt",
-        reason="HOL Guard blocked this prompt because it asks to disable Guard protection.",
-        explicitly_benign=False,
-        prompt_risk_classes=["local_env_read", "exfil_intent", "guard_bypass_intent"],
-    )
-    receipt.update(
-        decision="deny",
-        policy_action="block",
-        reason_code="native_guard_bypass_prompt",
-        prompt_risk_classes=["local_env_read", "exfil_intent", "guard_bypass_intent"],
-    )
-    receipt["decision_id"] = hashlib.sha256(canonical_receipt_bytes(receipt)).hexdigest()
+    assert isinstance(result, dict)
+    result.update(repair_url="http://127.0.0.1:1/repair", repair_status="approval_required")
     assert _decode_edge(edge) == edge
-
-    wrong_action = json.loads(json.dumps(edge))
-    wrong_action["result"]["action"]["event"] = "PreToolUse"
-    assert _decode_edge(wrong_action) is None
-    wrong_classes = json.loads(json.dumps(edge))
-    wrong_classes["result"]["prompt_risk_classes"] = ["guard_bypass_intent"]
-    assert _decode_edge(wrong_classes) is None
-    wrong_kind = {**edge, "payload_kind": "source_file_ref"}
-    assert _decode_edge(wrong_kind) is None
 
 
 def test_python_launcher_only_invokes_package_bound_native_client(
