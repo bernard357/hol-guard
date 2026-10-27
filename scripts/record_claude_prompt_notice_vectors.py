@@ -23,12 +23,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))
 
-from codex_plugin_scanner.guard.cli.commands_support_prompts import (  # noqa: E402
+from codex_plugin_scanner.guard.models import GuardArtifact  # noqa: E402
+from scripts.ci.claude_prompt_oracle import (  # noqa: E402
     _claude_prompt_additional_context,
     _claude_prompt_system_message,
 )
-from codex_plugin_scanner.guard.models import GuardArtifact  # noqa: E402
 
 OUT = ROOT / "rust/crates/guard-runtime/tests/fixtures/claude_prompt_notice_vectors.json"
 ACTIONS = ("require-reapproval", "block", "sandbox-required")
