@@ -134,6 +134,8 @@ mod artifact_risk;
 pub use artifact_risk::*;
 mod local_tool_eligibility;
 pub use local_tool_eligibility::*;
+mod local_tool_grant;
+pub use local_tool_grant::*;
 mod contributed_mcp_decision;
 pub use contributed_mcp_decision::*;
 mod local_mcp_grant;

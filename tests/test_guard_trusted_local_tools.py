@@ -10,6 +10,7 @@ import pytest
 from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard.trusted_local_tools import (
     local_tool_approval_eligibility,
+    local_tool_approval_payload,
     parse_local_tool_grant_selection,
 )
 
@@ -158,19 +159,24 @@ def test_impeccable_local_scan_can_receive_conditional_package_trust(tmp_path: P
     assert eligibility.tool_name == "impeccable"
     assert eligibility.capability == "scan"
     assert eligibility.trust_basis == "package-profile"
-    assert eligibility.to_payload()["allowed_durations"] == [
+    offered = local_tool_approval_payload({"scanner_evidence": [eligibility.to_evidence()]})
+    assert offered is not None
+    assert offered["allowed_durations"] == [
         "once",
         "15m",
         "1h",
         "5h",
     ]
+    assert offered["allowed_targets"] == ["capability"]
     pinned = local_tool_approval_eligibility(
         command.replace("npx impeccable", "npx impeccable@3.3.1"),
         cwd=tmp_path,
         home_dir=tmp_path,
     )
     assert pinned is not None
-    assert "always" in cast(list[object], pinned.to_payload()["allowed_durations"])
+    pinned_offer = local_tool_approval_payload({"scanner_evidence": [pinned.to_evidence()]})
+    assert pinned_offer is not None
+    assert "always" in cast(list[object], pinned_offer["allowed_durations"])
     latest = local_tool_approval_eligibility(
         command.replace("npx impeccable ", "npx impeccable@latest "),
         cwd=tmp_path,
@@ -229,6 +235,8 @@ def test_indefinite_trust_is_limited_to_package_profiles(
             target="capability",
             duration="always",
             now="2026-08-02T12:00:00+00:00",
+            harness="codex",
+            reason=None,
         )
 
 

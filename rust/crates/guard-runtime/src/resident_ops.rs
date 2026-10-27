@@ -501,6 +501,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             ResidentOperationV1::LocalToolEligibility(request) => {
                 crate::local_tool_eligibility_op::evaluate_local_tool_eligibility_request(&request)
             }
+            ResidentOperationV1::LocalToolGrant(request) => {
+                crate::local_tool_grant_op::evaluate_local_tool_grant_request(&request)
+            }
             ResidentOperationV1::ShellHelpers(request) => {
                 crate::shell_helpers_op::evaluate(&request)
             }
