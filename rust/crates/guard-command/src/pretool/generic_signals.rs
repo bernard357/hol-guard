@@ -248,6 +248,7 @@ pub(crate) fn extract_generic_signals(
         request_body_or_method: request_body_or_method(&maps),
         retrieval_arguments_only: retrieval_arguments_only(&argument_maps(root)),
         github_read_only: false,
+        mirrored_input_unproven: false,
         prompt_present: !prompt_values.is_empty(),
         env_reference,
         benign_prompt,

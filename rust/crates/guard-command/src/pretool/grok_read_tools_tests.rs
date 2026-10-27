@@ -162,6 +162,19 @@ fn grok_searches_keep_review_for_unmodeled_input() {
         );
         assert_ne!(decision.1, SEARCH_SCOPE, "{input}");
     }
+    // A folder read keeps review when its copy differs or Grok cut it short.
+    let folder = json!({"target_directory": docs});
+    for (copy, truncated) in [
+        (json!({"target_directory": text(&home)}), false),
+        (folder.clone(), true),
+    ] {
+        let decision = evaluate(
+            grok_payload("Read", folder.clone(), copy, truncated),
+            &home,
+            &workspace,
+        );
+        assert_ne!(decision.1, DIRECTORY_READ, "{truncated}");
+    }
     std::fs::create_dir_all(home.join(".ssh")).unwrap();
     let decision = grok(
         "Read",

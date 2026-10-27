@@ -408,6 +408,10 @@ fn evaluate_envelope(
         Ok(value) => value,
         Err(error) => return generic_error_result(harness, event, error),
     };
+    signals.mirrored_input_unproven = harness == "grok"
+        && !payload
+            .as_object()
+            .is_some_and(super::search_scope::mirrored_input_matches);
     signals.github_read_only = harness == "omp"
         && event == "PreToolUse"
         && omp::strict_tool_input(payload)

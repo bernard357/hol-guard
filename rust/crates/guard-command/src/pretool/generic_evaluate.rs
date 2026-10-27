@@ -226,6 +226,7 @@ pub(super) fn evaluate_signals(
         && !signals.sensitive_target
         && signals.url_values.is_empty()
         && signals.command.is_none()
+        && !signals.mirrored_input_unproven
         && signals.path_values.len() == 1
         && super::super::read_paths::omp_targets::bounded_directory_read_tool_target(
             harness,

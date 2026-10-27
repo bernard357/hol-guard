@@ -386,6 +386,21 @@ fn unfiltered_directory_root(
         .filter(|root| root.is_dir())
 }
 
+/// Whether Grok's camel-case copies of the tool name and input repeat the
+/// snake-case values and the host did not cut the input short. A copy that
+/// differs from the value a proof reads could be the one the host acts on.
+pub(super) fn mirrored_input_matches(root: &Map<String, Value>) -> bool {
+    let differs = |copy: &str, original: &str| {
+        root.get(copy)
+            .is_some_and(|value| Some(value) != root.get(original))
+    };
+    !differs("toolInput", "tool_input")
+        && !differs("toolName", "tool_name")
+        && root
+            .get("toolInputTruncated")
+            .is_none_or(|truncated| truncated == &Value::Bool(false))
+}
+
 fn claude_grep_input(payload: &Value) -> Option<&Map<String, Value>> {
     grep_input(payload, false)
 }
@@ -399,18 +414,8 @@ fn grep_input(payload: &Value, mirrored: bool) -> Option<&Map<String, Value>> {
         return None;
     }
     let input = root.get("tool_input")?.as_object()?;
-    // A copy that differs from the value the proof reads could be the one
-    // the host acts on.
-    let differs = |copy: &str, original: &str| {
-        root.get(copy)
-            .is_some_and(|value| Some(value) != root.get(original))
-    };
     let unmatched_copy = if mirrored {
-        differs("toolInput", "tool_input")
-            || differs("toolName", "tool_name")
-            || root
-                .get("toolInputTruncated")
-                .is_some_and(|truncated| truncated != &Value::Bool(false))
+        !mirrored_input_matches(root)
     } else {
         root.contains_key("toolInput")
     };
