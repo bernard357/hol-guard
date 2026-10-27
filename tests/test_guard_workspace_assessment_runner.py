@@ -687,5 +687,5 @@ def test_a_failed_package_id_carry_is_recorded_as_failure(tmp_path: Path, monkey
     monkeypatch.setattr(runner, "execute", lambda store, config, run, **_: found)
     monkeypatch.setattr(assessments, "keep_package_identities", unavailable)
     assert runner.run_next(store, None, owner="test", clock=lambda: T0 + 1)
-    run = assessments.get_run(store, claimed.run_id)
+    run = get_run(store, claimed.run_id)
     assert run is not None and (run["state"], run["error_code"]) == ("failed", "supply_chain_detector_failed")
