@@ -17,8 +17,15 @@ def _native_receipt_valid(
     guard_home: Path | None,
     deadline_monotonic: float | None,
 ) -> bool:
-    # A caller under a deadline bounds the resident call by what it has left.
-    budget = {} if deadline_monotonic is None else {"timeout_seconds": deadline_monotonic - time.monotonic()}
+    # A caller under a deadline bounds every resident attempt by what it has left.
+    budget = (
+        {}
+        if deadline_monotonic is None
+        else {
+            "timeout_seconds": deadline_monotonic - time.monotonic(),
+            "hard_deadline_monotonic": deadline_monotonic,
+        }
+    )
     result = native_context_digest(
         "native_decision_receipt_validation",
         {"receipt": dict(receipt), "edge": dict(edge) if edge is not None else None},

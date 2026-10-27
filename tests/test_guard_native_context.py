@@ -355,6 +355,43 @@ def test_native_context_digest_retries_a_timeout_that_already_had_the_allowance(
     assert remaining[1] > allowance_ms - 500
 
 
+def test_native_context_digest_caps_every_attempt_by_a_hard_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller's absolute deadline bounds the cold-start allowance and the retry."""
+
+    deadlines: list[float] = []
+    budgets: list[int] = []
+    monkeypatch.setattr(native_context, "native_runtime_status", lambda: _status())
+    monkeypatch.setattr(native_context, "ensure_resident_prerequisite", lambda _home: True)
+    monkeypatch.setattr(native_context, "_isolated_environment", lambda: {})
+    monkeypatch.setattr(native_context, "native_resident_client_ready", lambda _executable, _home: False)
+    monkeypatch.setattr(native_context, "native_resident_client_failure_code", lambda: "native_client_timed_out")
+
+    def _client(*_args: object, **kwargs: object) -> bytes | None:
+        deadlines.append(kwargs["deadline_monotonic"])
+        budgets.append(json.loads(kwargs["payload"])["deadline_budget_ms"])
+        return None
+
+    monkeypatch.setattr(native_context, "native_resident_client_request", _client)
+    guard_home = tmp_path / "guard-home"
+    guard_home.mkdir()
+    hard_deadline = time.monotonic() + 0.25
+    assert (
+        native_context.native_context_digest(
+            "launch_argv_digest",
+            {"argv": ["a"]},
+            guard_home=guard_home,
+            timeout_seconds=0.25,
+            hard_deadline_monotonic=hard_deadline,
+        )
+        is None
+    )
+    assert deadlines
+    assert all(deadline <= hard_deadline for deadline in deadlines)
+    assert all(budget <= 250 for budget in budgets)
+
+
 def test_native_context_digest_does_not_retry_other_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failure more time cannot fix must fail once, not twice."""
 

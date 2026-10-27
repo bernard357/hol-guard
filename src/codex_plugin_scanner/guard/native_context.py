@@ -446,14 +446,23 @@ def _decode_result(
     return payload
 
 
+def _capped_deadline(budget_seconds: float, hard_deadline_monotonic: float | None) -> float:
+    deadline = time.monotonic() + budget_seconds
+    return deadline if hard_deadline_monotonic is None else min(deadline, hard_deadline_monotonic)
+
+
 def native_context_digest(
     kind: str,
     kind_fields: dict[str, Any],
     *,
     guard_home: Path,
     timeout_seconds: float = _TIMEOUT_SECONDS,
+    hard_deadline_monotonic: float | None = None,
 ) -> dict[str, Any] | None:
     """Run one ``context_digest`` sub-operation and return its typed result.
+
+    ``hard_deadline_monotonic`` caps every attempt, cold-start allowance and
+    retry included, for a caller that must answer by an absolute deadline.
 
     Returns ``None`` when the native runtime is unavailable, incompatible,
     overloaded, or the result fails strict binding checks.  A returned result
@@ -502,8 +511,10 @@ def native_context_digest(
     # answer exactly that again.  The client's deadline is what keeps the steady
     # state cheap.
     retry_budget_seconds = timeout_seconds + _RETRY_ALLOWANCE_MULTIPLIER * _COLD_START_ALLOWANCE_SECONDS
+    if hard_deadline_monotonic is not None:
+        retry_budget_seconds = min(retry_budget_seconds, hard_deadline_monotonic - time.monotonic())
     resident_budget_ms = max(1, min(9_000, int(retry_budget_seconds * 1_000)))
-    deadline_monotonic = time.monotonic() + budget_seconds
+    deadline_monotonic = _capped_deadline(budget_seconds, hard_deadline_monotonic)
     request_id = uuid.uuid4().hex
     request: dict[str, Any] = {
         "schema": _REQUEST_SCHEMA,
@@ -565,7 +576,7 @@ def native_context_digest(
         return _digest_failed("native_context_digest_request_too_large")
     output = None
     attempts = 0
-    while attempts < _DIGEST_ATTEMPTS:
+    while attempts < _DIGEST_ATTEMPTS and time.monotonic() < deadline_monotonic:
         attempts += 1
         output = native_resident_client_request(
             executable=status.identity.path,
@@ -583,7 +594,7 @@ def native_context_digest(
         # not help" is true only of a resident that is gone, which the failure
         # code distinguishes after the retry.
         budget_seconds = retry_budget_seconds
-        deadline_monotonic = time.monotonic() + budget_seconds
+        deadline_monotonic = _capped_deadline(budget_seconds, hard_deadline_monotonic)
     if output is None:
         # The client's own code ("native_client_timed_out",
         # "native_client_pool_exhausted", ...) is the actionable half of this.
