@@ -127,7 +127,7 @@ def test_unavailable_transport_is_refused_and_recorded(recorder: _Recorder) -> N
     recorder.raw_output = None
 
     assert bridge.git_execution_safety_native("config_environment_clean") is None
-    assert recorder.failures == ["native_git_execution_safety_resident_unavailable"]
+    assert recorder.failures == ["native_git_execution_safety_unavailable"]
 
 
 def test_overloaded_resident_is_refused(recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
