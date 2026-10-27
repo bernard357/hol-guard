@@ -11,10 +11,10 @@ import pytest
 
 from codex_plugin_scanner.guard.native_command_observations import validate_native_command_observations
 from codex_plugin_scanner.guard.native_decision_receipt import (
-    canonical_receipt_bytes,
     receipt_matches_edge,
     validate_native_decision_receipt,
 )
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 
 
 def _evidence() -> dict[str, object]:

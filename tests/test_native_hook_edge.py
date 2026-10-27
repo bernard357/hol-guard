@@ -13,7 +13,6 @@ from codex_plugin_scanner.guard.hook_execution_environment import (
     LIBRARY_SEARCH_PATH_NAMES,
     collect_hook_execution_environment,
 )
-from codex_plugin_scanner.guard.native_decision_receipt import canonical_receipt_bytes
 from codex_plugin_scanner.guard.native_hook_edge import _decode_edge, review_raw_hook_native
 from codex_plugin_scanner.guard.native_resident_client import (
     native_resident_client_failure_code,
@@ -25,6 +24,7 @@ from codex_plugin_scanner.guard.native_runtime import (
     NativeRuntimeIdentity,
     NativeRuntimeStatus,
 )
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 
 
 @pytest.mark.parametrize("value", ("1", "true", "TRUE", "yes", "on"))

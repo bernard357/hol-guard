@@ -87,7 +87,6 @@ _TRANSPORT_IDENTITY_PATHS: Final = frozenset(
 _TRANSPORT_INTEGRITY_PATHS: Final = frozenset(
     {
         # Reassembled resident fragments are bound by the native result digest.
-        "src/codex_plugin_scanner/guard/native_decision_receipt.py",
         "src/codex_plugin_scanner/guard/native_rich_command_model.py",
         "src/codex_plugin_scanner/guard/native_command_observations.py",
         "src/codex_plugin_scanner/guard/native_context.py",

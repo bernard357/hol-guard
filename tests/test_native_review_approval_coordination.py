@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
-from codex_plugin_scanner.guard.native_decision_receipt import canonical_receipt_bytes
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 
 
 def _edge(harness: str, *, url: str = "https://example.test", action_type: str = "network") -> dict[str, object]:

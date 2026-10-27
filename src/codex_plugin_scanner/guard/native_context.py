@@ -68,6 +68,7 @@ _RESULT_OPTIONAL_KEYS = {
     "mcp_launch_environment",
     "mcp_redacted_value",
     "native_bash_reply_valid",
+    "native_decision_receipt_valid",
     "runtime_identity",
     "runtime_identity_match",
     "runtime_identity_reusable",

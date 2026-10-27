@@ -21,10 +21,10 @@ from codex_plugin_scanner.guard.daemon.hook_native_saved_approval import (
 )
 from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
 from codex_plugin_scanner.guard.models import GuardAction, PolicyDecision
-from codex_plugin_scanner.guard.native_decision_receipt import canonical_receipt_bytes
 from codex_plugin_scanner.guard.store import GuardStore
 from tests import native_launch_evidence_helpers
 from tests.native_launch_evidence_helpers import _inventory, _permission, native_launch_evidence
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
 _HARNESS = "claude-code"

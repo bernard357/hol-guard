@@ -9,7 +9,6 @@ import pytest
 
 from codex_plugin_scanner.guard.daemon.hook_native_review_approval import _native_review_action_envelope
 from codex_plugin_scanner.guard.native_decision_receipt import (
-    canonical_receipt_bytes,
     receipt_matches_edge,
     validate_native_decision_receipt,
 )
@@ -21,6 +20,7 @@ from codex_plugin_scanner.guard.runtime.actions import (
 )
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_native_decision_receipts import native_decision_receipt_schema_statement
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 
 
 def _receipt(**overrides: object) -> dict[str, object]:
