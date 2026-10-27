@@ -584,7 +584,11 @@ def test_the_resident_s_own_reply_discriminator_is_accepted(
     )
 
     assert portable is not None and portable.startswith("package-request-workspace:v2:")
-    assert runtime is not None and runtime.startswith("package-request-workspace-exact:v2:")
+    # A portable context has no second identity. The runtime scope a policy
+    # lookup uses is that same portable scope, so the reply carries it twice;
+    # the exact scope is the fallback for a context that cannot travel, and
+    # test_oversized_or_dynamic_configuration_is_not_portable covers it.
+    assert runtime == portable
 
 
 def test_a_request_without_an_execution_context_never_reaches_the_resident(
