@@ -636,6 +636,7 @@ mod native_review_link;
 mod native_runtime_admission;
 mod native_runtime_resilience;
 mod network_protection;
+mod network_protection_verify_op;
 mod oauth_refresh;
 mod oauth_secret_authority;
 mod oci_bundle_evidence;

@@ -298,6 +298,8 @@ mod inventory_url_redaction;
 pub use inventory_url_redaction::*;
 mod inventory_scan_findings;
 pub use inventory_scan_findings::*;
+mod network_protection_verify;
+pub use network_protection_verify::*;
 mod supply_chain_bundle_verify;
 pub use supply_chain_bundle_verify::*;
 mod trust_attestation_verify;
