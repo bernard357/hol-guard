@@ -320,3 +320,42 @@ fn rejects_a_filter_longer_than_the_bound() {
     let filter = format!(".{}", "a".repeat(300));
     assert!(!safe_filter(&filter));
 }
+
+#[test]
+fn admits_variables_the_filter_binds_itself() {
+    for filter in [
+        "empty",
+        ".[] | empty",
+        ". as $x | $x",
+        ".[] | select((.conclusion // .state // \"\") as $s | ($s != \"SUCCESS\" and $s != \"SKIPPED\"))",
+        ".items as $items | $items[0]",
+        ".check as $check | {name: $check.name}",
+        ".[] | .name as $name | $name | length",
+    ] {
+        assert!(safe_filter(filter), "expected admitted: {filter}");
+    }
+}
+
+#[test]
+fn rejects_variables_from_outside_the_filter() {
+    for filter in [
+        // Named outside the filter, bound or not.
+        ". as $ENV | $ENV",
+        ". as $__loc__ | $__loc__",
+        "$ENV.HOME",
+        // A `--arg` value, or a name bound by a form this grammar does not read.
+        ".a as $a | $b",
+        ". as [$a] | $a",
+        "{a: $a}",
+        // `as` binds tighter than `//`, so only `.b` is bound here.
+        ".a // .b as $s | $s",
+        // A binding needs a body, and a `$` needs a name.
+        ".a as $s",
+        ".a | $",
+        ". as $1 | $1",
+        // Interpolated text is code, so its names are read too.
+        ". as $x | \"\\($ENV)\"",
+    ] {
+        assert!(!safe_filter(filter), "expected rejected: {filter}");
+    }
+}

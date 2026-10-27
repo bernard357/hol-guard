@@ -54,9 +54,11 @@ pub(super) fn jq_is_static(value: &str) -> bool {
 }
 
 /// A `--jq` filter may render with a format string such as `@tsv`; in jq `@`
-/// only names a formatter, never a file the way a typed `-F` value does.
+/// only names a formatter, never a file the way a typed `-F` value does. A
+/// `$` may only name a variable the filter binds itself.
 fn jq_filter_is_static(value: &str) -> bool {
-    !value.contains(['$', '`', '\0', '\n', '\r'])
+    !value.contains(['`', '\0', '\n', '\r'])
+        && (!value.contains('$') || crate::pretool::safe_reads::jq_variables_bound(value))
         && jq_is_static(value)
         && jq_formats_are_bare(value)
 }
@@ -486,6 +488,7 @@ mod encoded_endpoint_tests {
             ".workflow_runs[] | [.id, .name] | @tsv",
             ".[] | @base64",
             ".[] | select(.email | endswith(\"@example.com\")) | .login",
+            ".workflow_runs[] | (.conclusion // \"\") as $c | select($c != \"success\") | .id",
         ] {
             let arguments = vec![endpoint.to_owned(), "--jq".to_owned(), format.to_owned()];
             assert_eq!(classify(&arguments), Some(vec!["read_remote"]), "{format}");

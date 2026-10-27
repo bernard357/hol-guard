@@ -10,12 +10,15 @@
 //! parenthesised group. Stages may compare two such operands against each
 //! other or against a plain literal, combine comparisons with `and`/`or`, and
 //! fall back to a second filter with `//`. A stage may also be a bare
-//! format such as `@tsv` or `@base64`, which only renders the value as text.
+//! format such as `@tsv` or `@base64`, which only renders the value as text,
+//! or bind a term to a name (`(.state // "") as $state`) that later stages
+//! read back as `$state`.
 //!
 //! Every form here is a pure function of the value read: none of them reaches
 //! the environment, further input, files or modules, and the characters that
-//! would let one do so are refused outright. `$` (variable bindings, `$ENV`,
-//! `$__loc__`), `@` outside a bare rendering format (so `@sh` and a
+//! would let one do so are refused outright. A `$` that names anything but a
+//! variable the filter binds itself (so `$ENV`, `$__loc__` and a `--arg`
+//! value stay out), `@` outside a bare rendering format (so `@sh` and a
 //! `@fmt "string"` template stay out), `;` (which every multi-argument and
 //! binding builtin needs: `def`, `reduce`, `foreach`, `limit`, `range`,
 //! `getpath`), string interpolation, a `,` or `:` outside a bracket, computed
@@ -36,6 +39,7 @@ const VALUE_BUILTINS: &[&str] = &[
     "ascii_downcase",
     "ascii_upcase",
     "booleans",
+    "empty",
     "first",
     "flatten",
     "floor",
@@ -111,14 +115,91 @@ const FORMATS: &[&str] = &[
 const COMPARISONS: &[&str] = &["==", "!=", "<=", ">=", "<", ">"];
 
 pub(super) fn safe_filter(filter: &str) -> bool {
-    filter.len() <= 256 && valid_characters(filter) && pipeline(filter)
+    filter.len() <= 256 && valid_characters(filter) && variables_bound(filter) && pipeline(filter)
 }
 
 fn pipeline(filter: &str) -> bool {
     let Some(stages) = split_marker(filter, b"|") else {
         return false;
     };
-    stages.len() <= MAX_STAGES && stages.iter().all(|stage| sequence(stage))
+    stages.len() <= MAX_STAGES
+        && stages
+            .iter()
+            .enumerate()
+            .all(|(index, part)| match binding(part) {
+                Some(term) => index + 1 < stages.len() && stage(term),
+                None => sequence(part),
+            })
+}
+
+/// The term of `(.a // .b) as $s`, which the stages after it read back as
+/// `$s`. jq binds `as` tighter than every operator, so `.a // .b as $s`
+/// binds `.b` alone; only a lone term is read here, and the operator form
+/// fails as a stage.
+fn binding(part: &str) -> Option<&str> {
+    let (term, name) = part.rsplit_once(" as $")?;
+    variable_name(name).then(|| term.trim_end())
+}
+
+fn variable_name(name: &str) -> bool {
+    name.starts_with(|value: char| value.is_ascii_alphabetic() || value == '_')
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Whether every `$name` in `filter` is a variable the filter binds itself
+/// with `... as $name`, so each one holds a value the filter computed from
+/// its input. jq looks any other name up outside the filter: `$ENV` is the
+/// process environment, `$__loc__` the source position, and the rest come
+/// from `--arg` and friends. Those names are refused even when bound, and so
+/// is a `$` that opens no name. A binding jq reads differently, such as a
+/// destructuring `as [$a, $b]`, binds nothing here, so its names stay out.
+///
+/// String contents are skipped unless a string interpolates, because the
+/// text of an interpolation is code jq runs.
+pub(crate) fn variables_bound(filter: &str) -> bool {
+    let interpolates = filter.contains("\\(");
+    let bytes = filter.as_bytes();
+    let mut bound: Vec<&str> = Vec::new();
+    let mut read: Vec<&str> = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if !interpolates => {
+                index += 1;
+                while bytes.get(index).is_some_and(|byte| *byte != b'"') {
+                    index += if bytes[index] == b'\\' { 2 } else { 1 };
+                }
+                if index >= bytes.len() {
+                    return false;
+                }
+            }
+            b'$' => {
+                let rest = &filter[index + 1..];
+                let end = rest
+                    .find(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+                    .unwrap_or(rest.len());
+                let name = &rest[..end];
+                if !variable_name(name) || name == "ENV" || name.starts_with("__") {
+                    return false;
+                }
+                let before = filter[..index].trim_end();
+                if before
+                    .strip_suffix("as")
+                    .is_some_and(|term| term.ends_with(' '))
+                {
+                    bound.push(name);
+                } else {
+                    read.push(name);
+                }
+                index += end;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    read.iter().all(|name| bound.contains(name))
 }
 
 /// `,` is admitted only inside a bracket, so a sequence of outputs is reached
@@ -238,6 +319,24 @@ fn stage(part: &str) -> bool {
         || array(part)
         || group(part)
         || format(part)
+        || variable(part)
+}
+
+/// `$state`, `$check.name` or `$items[0]`: a variable read back, optionally
+/// projected. [`variables_bound`] has already checked that the filter binds
+/// the name itself.
+fn variable(part: &str) -> bool {
+    let Some(rest) = part.strip_prefix('$') else {
+        return false;
+    };
+    let end = rest
+        .find(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+        .unwrap_or(rest.len());
+    let (name, suffix) = rest.split_at(end);
+    variable_name(name)
+        && (suffix.is_empty()
+            || (suffix.starts_with('.') && projection(suffix))
+            || (suffix.starts_with('[') && projection(&format!(".{suffix}"))))
 }
 
 /// `@tsv`, `@base64`: a bare rendering format, applied to the value read.
@@ -252,8 +351,8 @@ pub(crate) fn rendering_format(name: &str) -> bool {
 
 /// Outside string literals only names, projections, spaces, call and group
 /// parentheses, comparison operators, the `+` and `-` a number literal
-/// uses, `//`, a `@` that opens a known rendering format, and bracket
-/// punctuation may appear; inside one only printable
+/// uses, `//`, a `@` that opens a known rendering format, a `$` that opens a
+/// variable name, and bracket punctuation may appear; inside one only printable
 /// ASCII and the `\n`, `\t` and `\\`
 /// escapes, so neither `\(` interpolation nor an escaped quote can appear.
 /// Brackets must balance and close in the kind they opened.
@@ -286,6 +385,16 @@ fn valid_characters(filter: &str) -> bool {
                     .next()
                     .unwrap_or_default();
                 if !FORMATS.contains(&name) {
+                    return false;
+                }
+                index += name.len();
+            }
+            b'$' => {
+                let name = filter[index + 1..]
+                    .split(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+                    .next()
+                    .unwrap_or_default();
+                if name.is_empty() {
                     return false;
                 }
                 index += name.len();

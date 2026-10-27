@@ -9811,6 +9811,108 @@
       "expect": "allow"
     },
     {
+      "id": "jq-empty-validates-json",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq empty ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-self-bound-variable",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '.scripts | to_entries[] | .key as $name | $name' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "gh-pr-view-jq-self-bound-variable",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr view 12 --repo example/app --json statusCheckRollup --jq '[.statusCheckRollup[] | select((.conclusion // .state // \"\") as $s | ($s != \"SUCCESS\" and $s != \"SKIPPED\"))]'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pgrep-children-of-parent",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pgrep -P 4120 -fl ."
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "ps-column-width",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ps -o pid,etime,wchan:30,state -p 4120"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "test-tty-descriptor",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "test -t 0; echo tty_status:$?"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "neg-jq-sh-format-template",
       "fix_area": "negative",
       "harnesses": [

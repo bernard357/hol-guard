@@ -105,11 +105,29 @@ fn bare_jq_format(original: &[String], index: usize) -> bool {
             .is_some_and(crate::pretool::safe_reads::jq_rendering_format)
 }
 
+/// `--jq '.[] | (.state // "") as $state | $state'`: a response filter whose
+/// every `$` names a variable it binds itself, written where the shell passes
+/// each `$` through. Such a variable holds a value the filter computed from
+/// the response, never the environment or an outside argument.
+fn self_bound_jq_filter(original: &[String], index: usize, text: &str) -> bool {
+    let value = original[index].as_str();
+    let filter = value
+        .strip_prefix("--jq=")
+        .or_else(|| (value.starts_with("-q") && value.len() > 2).then(|| &value[2..]))
+        .or_else(|| {
+            (index > 0 && matches!(original[index - 1].as_str(), "--jq" | "-q")).then_some(value)
+        });
+    filter.is_some_and(|filter| {
+        literal_everywhere(text, '$') && crate::pretool::safe_reads::jq_variables_bound(filter)
+    })
+}
+
 fn classify(original: &[String], text: &str) -> Capabilities {
     // Quoted dynamic-looking values are deliberately outside this small native
     // grammar too. Distinguishing their expansion provenance needs literal proof.
     // The one exception is a single-quoted `gh api graphql` document whose
-    // `$variables` it declares itself: the shell never expands those.
+    // `$variables` it declares itself: the shell never expands those. A
+    // `--jq` filter that binds its own `$variables` is the other.
     // A backtick the raw text escapes or single-quotes is Markdown code
     // formatting in a body, never a command substitution.
     let graphql = original.len() > 1 && original[0] == "api" && original[1] == "graphql";
@@ -122,7 +140,8 @@ fn classify(original: &[String], text: &str) -> Capabilities {
                     && literal_everywhere(text, '$')
                     && value
                         .strip_prefix("query=")
-                        .is_some_and(api::graphql_text_is_static)))
+                        .is_some_and(api::graphql_text_is_static))
+                && !self_bound_jq_filter(original, index, text))
     }) {
         return None;
     }
