@@ -90,19 +90,6 @@ def object_field(payload: dict[str, object] | None, name: str) -> dict[str, obje
     return value if isinstance(value, dict) else None
 
 
-def text_field(payload: dict[str, object] | None, name: str) -> str | None:
-    """A non-empty string reply field, else ``None``."""
-
-    value = payload.get(name) if payload is not None else None
-    return value if isinstance(value, str) and value else None
-
-
-def flag_field(payload: dict[str, object] | None, name: str) -> bool:
-    """Whether a reply field is exactly ``true``."""
-
-    return payload is not None and payload.get(name) is True
-
-
 def keys_field(payload: dict[str, object] | None, name: str) -> list[str]:
     """A list-of-strings reply field; anything else is no keys."""
 
