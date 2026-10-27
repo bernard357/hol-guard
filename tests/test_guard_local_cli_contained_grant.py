@@ -8,6 +8,7 @@ widened by exactly that grant, and refuses one that changed before launch.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -227,10 +228,16 @@ def test_daemon_routes_the_grant_and_answers_the_sink_with_the_receipt(
     monkeypatch.setattr(
         routing, "render_pre_tool", lambda harness, verdict, **kwargs: rendered.append(dict(verdict)) or receipt()
     )
-    monkeypatch.setattr(zcode_contained_tests, "route_zcode_containment", lambda response, **kwargs: {"routed": True})
     common = {"harness": "claude-code", "guard_home": tmp_path, "home_dir": tmp_path, "workspace": tmp_path}
     routed = routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **common)
-    assert routed == {"routed": True}
+    assert routed is not None
+    assert routed["reason_code"] == "native_contained_execution_routed"
+    argv = shlex.split(routed["hookSpecificOutput"]["updatedInput"]["command"])
+    prefix = zcode_contained_tests.contained_sink_command_prefix()
+    assert argv[: len(prefix)] == list(prefix)
+    request = Path(argv[argv.index("--request-file") + 1])
+    request.unlink()
+    request.parent.rmdir()
     assert rendered[0]["policy_action"] == "sandbox-required"
     receipt_only = payload("lanectl status") | {"guard_containment_receipt_only": True}
     assert routing.granted_containment_response(object(), _review(), payload=receipt_only, **common) == receipt()
@@ -239,10 +246,10 @@ def test_daemon_routes_the_grant_and_answers_the_sink_with_the_receipt(
     assert routing.granted_containment_response(object(), _review(), payload=receipt_only, **omp) == receipt()
     # A harness the sink does not route keeps its review.
     assert routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **omp) is None
-    # A call the sink cannot take keeps its review.
-    monkeypatch.setattr(zcode_contained_tests, "route_zcode_containment", lambda response, **kwargs: response)
+    # A call the sink cannot snapshot keeps its review.
+    missing = common | {"workspace": tmp_path / "missing"}
     assert (
-        routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **common) is None
+        routing.granted_containment_response(object(), _review(), payload=payload("lanectl status"), **missing) is None
     )
 
 

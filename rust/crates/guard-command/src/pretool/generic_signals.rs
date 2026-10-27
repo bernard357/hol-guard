@@ -17,7 +17,7 @@ pub(crate) const EMBEDDED_ARGUMENT_KEYS: [&str; 12] = [
 ];
 
 /// Every key whose value may name a file the tool reads or writes.
-const PATH_KEYS: [&str; 11] = [
+pub(super) const PATH_KEYS: [&str; 11] = [
     "path",
     "paths",
     "file",

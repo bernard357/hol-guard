@@ -213,7 +213,7 @@ def _resident_request(
             "command_expression_validate",
             "reviewed_invocation_bindings_validate",
             "tool_action_request_identity",
-            "verified_read_plan",
+            "verified_read_execute",
         }:
             accepted = frozenset({"ok", "error"})
         elif operation == "mcp_tool_policy_decide":

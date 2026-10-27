@@ -309,6 +309,7 @@ _PRESENTATION_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/approvals.py",
         "src/codex_plugin_scanner/guard/codex_app_server.py",
         "src/codex_plugin_scanner/guard/continuation_runtime.py",
+        "src/codex_plugin_scanner/guard/daemon/cursor_shell_route.py",
         "src/codex_plugin_scanner/guard/edge_events.py",
         "src/codex_plugin_scanner/guard/local_authority_integrity.py",
         "src/codex_plugin_scanner/guard/mcp_tool_calls.py",
