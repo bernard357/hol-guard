@@ -98,7 +98,12 @@ fn grok_lists_and_searches_project_folders_without_review() {
         &workspace,
     );
     assert!(allowed(&decision, SEARCH_SCOPE), "{decision:?}");
-    let decision = grok("Grep", json!({"pattern": "main"}), &home, &project);
+    let decision = grok(
+        "Grep",
+        json!({"pattern": "main", "path": "src"}),
+        &home,
+        &project,
+    );
     assert!(allowed(&decision, SEARCH_SCOPE), "{decision:?}");
 }
 
