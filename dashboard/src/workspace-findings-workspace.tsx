@@ -18,6 +18,7 @@ import {
   CarriedNote,
   Cell,
   EditorTaskFindingsTable,
+  EvidenceNote,
   HookFindingsTable,
   McpFindingsTable,
   PluginFindingsTable,
@@ -120,7 +121,9 @@ function decisionTone(decision: string): TagTone {
   return "slate";
 }
 
-const DECISION_LABELS: Record<string, string> = { block: "Blocked", ask: "Needs review", warn: "Warning" };
+// What the package firewall does if an agent installs this version. A finding
+// in the worktree is not itself a blocked action.
+const DECISION_LABELS: Record<string, string> = { block: "Would block", ask: "Would ask", warn: "Warning" };
 
 export function WorkspaceFindingsWorkspace(props: {
   suggestedRoot: string;
@@ -381,7 +384,7 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
             <th scope="col" className="px-3 py-2">Package</th>
             <th scope="col" className="px-3 py-2">Installed</th>
             <th scope="col" className="px-3 py-2">Fixed in</th>
-            <th scope="col" className="px-3 py-2">Decision</th>
+            <th scope="col" className="px-3 py-2">At install</th>
             <th scope="col" className="px-3 py-2">Severity</th>
             <th scope="col" className="px-3 py-2">Advisories</th>
             <th scope="col" className="px-3 py-2">Fix</th>
@@ -396,8 +399,9 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
               </Cell>
               <Cell label="Installed"><Mono value={finding.packageVersion} /></Cell>
               <Cell label="Fixed in"><Mono value={finding.fixVersion} fallback="No fix yet" /></Cell>
-              <Cell label="Decision">
+              <Cell label="At install">
                 <Tag tone={decisionTone(finding.decision)}>{DECISION_LABELS[finding.decision] ?? finding.decision}</Tag>
+                <EvidenceNote finding={finding} />
                 <CarriedNote finding={finding} />
               </Cell>
               <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
