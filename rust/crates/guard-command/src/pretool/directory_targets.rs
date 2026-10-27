@@ -82,10 +82,11 @@ pub(super) fn verified_cwd_target(value: &str, context: super::PathContext<'_>) 
 /// POSIX `cd` skips the CDPATH search for operands that begin with `.` or
 /// `..`; any other relative operand needs proof that CDPATH is unset. The
 /// lexical join is what a logical `cd` reaches, so the caller's spelling
-/// check rejects symlinked components. `..` is proved only into a linked
-/// worktree of the session's repository (see `sibling`): elsewhere the
-/// shell resolves it against its logical `$PWD`, which may name a symlinked
-/// parent the reported cwd does not show. On Windows a `:` can name a
+/// check rejects symlinked components. `..` is proved only as a leading climb
+/// from a cwd that is its own canonical path (see `sibling`), where the
+/// lexical parent is the physical one: the shell resolves it against its
+/// logical `$PWD`, which names a symlinked parent only when the session was
+/// entered through a link the reported cwd does not show. On Windows a `:` can name a
 /// drive-relative path (`C:src`) or an alternate data stream, and Git Bash
 /// resolves a root-relative `/etc` against its own root rather than the
 /// cwd's drive, so neither is joined; the caller's exact-spelling check
@@ -109,7 +110,7 @@ fn relative_cwd_target(value: &str, context: super::PathContext<'_>) -> Option<s
         match component {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                return sibling::linked_root(value, base);
+                return sibling::linked_root(value, base).or_else(|| sibling::climbed(value, base));
             }
             other => joined.push(other),
         }
