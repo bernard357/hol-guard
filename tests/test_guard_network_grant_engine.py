@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import (
+from tests.network_grant_engine import GrantUse, ScopedGrantEngine
+from tests.network_policy_model import (
     Destination,
     DestinationKind,
     NetworkFlowRequest,
     NetworkProtocol,
     ProcessTreeIdentity,
 )
-from tests.network_grant_engine import GrantUse, ScopedGrantEngine
 
 _DIGEST = "b" * 64
 

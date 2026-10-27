@@ -7,9 +7,11 @@ from dataclasses import asdict, dataclass
 from typing import Final
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
-    DestinationKind,
     EnforcementGrade,
     NetworkAction,
+)
+from tests.network_policy_model import (
+    DestinationKind,
     NetworkPolicy,
     NetworkProtocol,
     ProcessTreeIdentity,

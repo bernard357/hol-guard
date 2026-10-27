@@ -6,9 +6,6 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     BackendCapability,
     EnforcementGrade,
     NetworkAction,
-    NetworkProtocol,
-    ProcessTreeIdentity,
-    canonical_digest,
 )
 from tests.network_broker_contract import (
     BackendReceipt,
@@ -20,6 +17,11 @@ from tests.network_broker_contract import (
     ReceiptVerification,
     correlate_dns_connection,
     receipt_authority_current,
+)
+from tests.network_policy_model import (
+    NetworkProtocol,
+    ProcessTreeIdentity,
+    canonical_digest,
 )
 
 _DIGEST = "a" * 64

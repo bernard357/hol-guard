@@ -19,11 +19,11 @@ from codex_plugin_scanner.guard.runtime.mcp_protection import (
     build_mcp_server_identity,
 )
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
-    load_mcp_contribution_payloads,
     normalized_remote_mcp_url,
     validate_mcp_contribution,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.mcp_contribution_loader import load_mcp_contribution_payloads
 from tests.runtime_wrapper_support import _copilot_runtime_server_identity, _CopilotMcpRuntimeServer
 
 from . import mcp_extension_driver as extension_driver

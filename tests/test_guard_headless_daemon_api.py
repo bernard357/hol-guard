@@ -30,10 +30,6 @@ from codex_plugin_scanner.guard.local_dashboard_session import LOCAL_DASHBOARD_S
 from codex_plugin_scanner.guard.models import PolicyDecision
 from codex_plugin_scanner.guard.native_daemon_handler import native_headless_action_error
 from codex_plugin_scanner.guard.native_hook_artifact_compose import NativeHookComposeError
-from codex_plugin_scanner.guard.policy_bundle_parser import (
-    computed_policy_bundle_hash,
-    payload_hash_for_policy_bundle,
-)
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.runtime.runner import (
     GuardSyncAuthorizationExpiredError,
@@ -46,6 +42,7 @@ from tests.daemon_control_patching import patch_daemon_global
 from tests.guard_review_signing_helpers import (
     review_trusted_keyring_payload,
 )
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, payload_hash_for_policy_bundle
 from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_keyring,
     sign_policy_bundle,

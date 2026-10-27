@@ -7,15 +7,17 @@ from enum import Enum
 from typing import cast
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
+    require_digest,
+    require_id,
+)
+from tests.network_local_core import logical_flow_id
+from tests.network_policy_model import (
     Destination,
     NetworkFlowRequest,
     NetworkProtocol,
     ProcessTreeIdentity,
     canonical_digest,
-    require_digest,
-    require_id,
 )
-from tests.network_local_core import logical_flow_id
 
 
 class GrantUse(str, Enum):

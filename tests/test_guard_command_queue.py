@@ -33,7 +33,6 @@ from codex_plugin_scanner.guard.runtime import (
     command_queue_authority,
 )
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
-from codex_plugin_scanner.guard.runtime.cloud_request_native import cloud_safe_local_request_payload
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.guard_oauth_token_support import oauth_binding_access_token
 from tests.guard_review_signing_helpers import (
@@ -42,6 +41,7 @@ from tests.guard_review_signing_helpers import (
     review_verification_keys,
     sign_review_payload,
 )
+from tests.local_request_snapshots_client import cloud_safe_local_request_payload
 
 
 @pytest.fixture(autouse=True)

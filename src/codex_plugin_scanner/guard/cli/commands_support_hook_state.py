@@ -53,10 +53,6 @@ def _canonical_harness_name(value: str) -> str:
     return _runtime_resolution_module()._canonical_harness_name(value)
 
 
-def _claude_pending_permission_index_key(session_id: str) -> str:
-    return f"claude_pending_permissions:{session_id}"
-
-
 def _state_now(now: str | None) -> str:
     return now or _now()
 
@@ -244,7 +240,6 @@ def _remove_claude_pending_permission(
 
 __all__ = [
     "_claude_guard_approval_question_text",
-    "_claude_pending_permission_index_key",
     "_load_claude_pending_permission_index",
     "_load_claude_permission_notice",
     "_load_single_claude_pending_permission",

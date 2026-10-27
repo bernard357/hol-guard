@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import (
-    Destination,
-    DestinationKind,
-    NetworkFlowRequest,
-    NetworkProtocol,
-    ProcessTreeIdentity,
-)
 from tests.network_local_core import (
     bind_resolution,
     consolidate_network_intent,
     detect_proxy_tunnel,
     logical_flow_id,
     resolution_allows,
+)
+from tests.network_policy_model import (
+    Destination,
+    DestinationKind,
+    NetworkFlowRequest,
+    NetworkProtocol,
+    ProcessTreeIdentity,
 )
 
 _DIGEST = "a" * 64

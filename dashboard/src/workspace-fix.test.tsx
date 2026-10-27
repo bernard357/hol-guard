@@ -59,6 +59,7 @@ const finding: WorkspaceFinding = {
   findingId: FINDING,
   severity: "high",
   decision: "block",
+  validation: "confirmed",
   ecosystem: "npm",
   packageName: "lodash",
   packageVersion: "4.17.15",

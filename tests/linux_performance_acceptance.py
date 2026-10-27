@@ -10,7 +10,10 @@ from dataclasses import asdict, dataclass, field
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import canonical_digest, canonical_json
+from tests.network_policy_model import (
+    canonical_digest,
+    canonical_json,
+)
 
 
 class LinuxPerformanceAcceptanceError(ValueError):
