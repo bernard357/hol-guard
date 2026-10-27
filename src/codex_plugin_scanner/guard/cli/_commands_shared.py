@@ -232,12 +232,6 @@ _HOOK_DAEMON_UNREACHABLE_REASON_MARKER = "daemon was unreachable"
 _CODEX_BROWSER_APPROVAL_WAIT_MAX_SECONDS = 8
 
 
-_CLAUDE_GUARD_APPROVAL_HEADER = "HOL Guard"
-_CLAUDE_GUARD_APPROVAL_OPTIONS = (
-    "Allow once",
-    "Allow during this session",
-    "Keep blocked",
-)
 _SETTINGS_POLICY_RISK_ACTIONS: dict[str, dict[str, dict[str, str]]] = {
     "mcp": {
         "allow-known": {"mcp_dangerous_tool": "warn"},

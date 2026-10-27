@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..models import GuardApprovalRequest
 from ..native_hook_adapter import NativeHookAdapterError
+from ..native_hook_authority_state import hook_authority_integrity_key
 from .hook_fail_closed import (
+    canonical_harness,
     render_accepted_allow,
     render_pre_tool,
     render_pre_tool_review,
@@ -271,6 +274,7 @@ def pause_native_pre_tool_for_approval(
         approval_center_url=approval_center_url,
         review_binding=identity,
         connector=connector,
+        claude_notice=canonical_harness(harness) == "claude-code",
     )
     if queued is None:
         failed = dict(native_result)
@@ -309,6 +313,7 @@ def queue_native_pre_tool_review(
     review_binding: str | None | TokenUnset = TOKEN_UNSET,
     connector: SetupConnector | None = None,
     bound_bash: Mapping[str, object] | None = None,
+    claude_notice: bool = False,
 ) -> dict[str, object] | None:
     try:
         native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
@@ -425,9 +430,17 @@ def queue_native_pre_tool_review(
             store, payload, native_result, workspace, home_dir, deadline, connector
         ),
     )
+    now = datetime.now(tz=timezone.utc).isoformat()
+    # A prompted Claude review also gets the permission notice its
+    # PermissionRequest hook answers from; the resident builds and signs it in
+    # the same store write.
+    claude_review = (
+        _claude_review_notice(store, harness, payload, native_result, binding, request, deadline)
+        if claude_notice
+        else None
+    )
     try:
-        persisted_id = persist(request, datetime.now(tz=timezone.utc).isoformat())
-        stored = lookup(persisted_id)
+        stored = lookup(_persist_review(persist, request, now, claude_review))
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if connector is not None and isinstance(stored, dict):
@@ -444,46 +457,78 @@ def queue_native_pre_tool_review(
     return stored if isinstance(stored, dict) else None
 
 
+def _persist_review(
+    persist: Callable[..., object],
+    request: GuardApprovalRequest,
+    now: str,
+    claude_review: dict[str, object] | None,
+) -> object:
+    if claude_review is None:
+        return persist(request, now)
+    try:
+        return persist(request, now, claude_review=claude_review)
+    except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        # The notice is best effort: a combined write the resident refuses
+        # (too large, older resident) still queues the review.
+        return persist(request, now)
+
+
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:
     return f"{harness}:native-pretool:{tool_name}"
 
 
-def record_claude_permission_notice_for_native_review(
-    store: GuardStore,
-    *,
+def _claude_review_notice(
+    store: object,
     harness: str,
     payload: Mapping[str, object],
     native_result: Mapping[str, object],
-    native_receipt: Mapping[str, object] | None,
-    workspace: Path | None,
-    guard_home: Path,
-) -> None:
-    """Persist the Claude permission-prompt notice for a queued native review."""
-    from ..cli.commands_support_hook_state import _record_claude_permission_notice
-    from ..models import GuardArtifact
+    binding: str | None,
+    request: GuardApprovalRequest,
+    deadline: float | None,
+) -> dict[str, object] | None:
+    """The facts the resident needs to sign a Claude review's notice, or ``None``.
 
-    tool_name = _native_review_tool_name(payload)
+    The notice is best effort, as the retired Python notice was: without an
+    integrity key, or once reading it leaves too little of the hook deadline
+    for the queue write, the review still queues and the hook falls back to
+    its ordinary prompt. The key goes in the store request's top-level
+    ``integrity_key_b64`` and ``integrity_key_id`` args, which the request
+    digest never covers. The hook payload carries only what the notice reads,
+    so the command is not copied in full a second time.
+    """
+
+    if not _notice_time_left(deadline):
+        return None
+    key = hook_authority_integrity_key(cast("GuardStore", store), create_key=True)
+    if key is None or not _notice_time_left(deadline):
+        return None
+    hook_payload = {name: payload[name] for name in _NOTICE_PAYLOAD_FIELDS if name in payload}
     command = pre_tool_command(payload)
-    artifact_id = _native_review_artifact_id(harness, tool_name)
-    binding = native_review_binding(harness, payload, native_result, native_receipt, workspace, guard_home)
-    metadata: dict[str, object] = {"raw_command_text": command} if command else {}
-    artifact = GuardArtifact(
-        artifact_id=artifact_id,
-        name=tool_name,
-        harness=harness,
-        artifact_type="tool_call",
-        source_scope="project" if workspace is not None else "harness",
-        config_path=str(workspace if workspace is not None else guard_home),
-        command=command,
-        metadata=metadata,
-    )
-    _record_claude_permission_notice(
-        store=store,
-        payload=dict(payload),
-        reason=str(native_result.get("reason") or "HOL Guard requires review before this action can execute."),
-        artifact=artifact,
-        artifact_hash=binding or artifact_id,
-    )
+    if command:
+        hook_payload["tool_input"] = {"command": command}
+    return {
+        "review": {
+            "harness": harness,
+            "hook_payload": hook_payload,
+            "reason": native_result.get("reason"),
+            "review_binding": binding,
+            "config_path": request.config_path,
+            "source_scope": request.source_scope,
+        },
+        **key,
+    }
+
+
+# What the resident's notice reads from the hook payload: the session and the
+# tool name fields (`TOOL_NAME_FIELDS`); the command goes under `tool_input`.
+_NOTICE_PAYLOAD_FIELDS = ("session_id", "tool_name", "toolName", "tool")
+# Below this much of the hook deadline the notice is dropped, so the key read
+# never costs the review its queue write.
+_NOTICE_DEADLINE_MARGIN_SECONDS = 1.0
+
+
+def _notice_time_left(deadline: float | None) -> bool:
+    return deadline is None or deadline - time.monotonic() > _NOTICE_DEADLINE_MARGIN_SECONDS
 
 
 def _native_review_launch_target(payload: Mapping[str, object]) -> str:
@@ -502,5 +547,4 @@ def _native_review_launch_target(payload: Mapping[str, object]) -> str:
 __all__ = [
     "pause_native_pre_tool_for_approval",
     "queue_native_pre_tool_review",
-    "record_claude_permission_notice_for_native_review",
 ]

@@ -404,7 +404,7 @@ use blocked::silent;
 pub(super) mod connector;
 
 #[path = "hook_direct_review_notice.rs"]
-mod notice;
+pub(crate) mod notice;
 
 #[path = "hook_direct_review_package.rs"]
 mod package;

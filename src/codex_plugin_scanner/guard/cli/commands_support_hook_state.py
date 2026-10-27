@@ -15,8 +15,6 @@ from ..native_hook_authority_state import (
 
 if TYPE_CHECKING:
     from ._commands_shared import (
-        _CLAUDE_GUARD_APPROVAL_HEADER,
-        _CLAUDE_GUARD_APPROVAL_OPTIONS,
         _now,
     )
 
@@ -67,19 +65,6 @@ def _load_claude_pending_permission_index(
     return keys_field(reply, "pending_keys")
 
 
-def _claude_guard_approval_question_text(approval_code: str) -> str:
-    return f"HOL Guard intercepted this sensitive action (approval code: {approval_code}). What should Claude do?"
-
-
-def _claude_artifact_command_binding(artifact: GuardArtifact) -> str:
-    raw_command_text = artifact.metadata.get("raw_command_text")
-    if isinstance(raw_command_text, str) and raw_command_text:
-        return raw_command_text
-    if isinstance(artifact.command, str) and artifact.command:
-        return artifact.command
-    return f"artifact:{artifact.artifact_id}"
-
-
 def _load_verified_claude_pending_permission(
     store: GuardStore,
     *,
@@ -106,56 +91,6 @@ def _load_verified_claude_pending_permission(
         expected_command=expected_command,
     )
     return object_field(reply, "pending")
-
-
-def _record_claude_permission_notice(
-    *,
-    store: GuardStore,
-    payload: dict[str, object],
-    reason: str,
-    artifact: GuardArtifact,
-    artifact_hash: str,
-) -> None:
-    session_id = _optional_string(payload.get("session_id"))
-    if session_id is None:
-        return
-    saved_at = _now()
-    tool_name = _optional_string(payload.get("tool_name"))
-    approval_code = secrets.token_hex(6)
-    approval_question = _claude_guard_approval_question_text(approval_code)
-    notice_payload: dict[str, object] = {
-        "session_id": session_id,
-        "saved_at": saved_at,
-        "reason": reason,
-        "artifact_id": artifact.artifact_id,
-        "artifact_hash": artifact_hash,
-        "artifact_name": artifact.name,
-        "artifact_type": artifact.artifact_type,
-        "config_path": artifact.config_path,
-        "source_scope": artifact.source_scope,
-        "approval_header": _CLAUDE_GUARD_APPROVAL_HEADER,
-        "approval_question": approval_question,
-        "approval_options": list(_CLAUDE_GUARD_APPROVAL_OPTIONS),
-        "approval_code": approval_code,
-        "command": _claude_artifact_command_binding(artifact),
-    }
-    raw_command_text = artifact.metadata.get("raw_command_text")
-    if isinstance(raw_command_text, str) and raw_command_text:
-        notice_payload["raw_command_text"] = raw_command_text
-    wrapper_chain = artifact.metadata.get("wrapper_chain")
-    if isinstance(wrapper_chain, list):
-        notice_payload["wrapper_chain"] = [item for item in wrapper_chain if isinstance(item, str) and item]
-    if tool_name is not None:
-        notice_payload["tool_name"] = tool_name
-    hook_authority_state(
-        store,
-        "claude_record_notice",
-        now=saved_at,
-        create_key=True,
-        session_id=session_id,
-        tool_name=tool_name,
-        payload=notice_payload,
-    )
 
 
 def _load_verified_claude_permission_notice(
@@ -239,13 +174,11 @@ def _remove_claude_pending_permission(
 
 
 __all__ = [
-    "_claude_guard_approval_question_text",
     "_load_claude_pending_permission_index",
     "_load_claude_permission_notice",
     "_load_single_claude_pending_permission",
     "_load_verified_claude_pending_permission",
     "_mark_claude_pending_permission_prompt_seen",
     "_peek_claude_permission_notice",
-    "_record_claude_permission_notice",
     "_remove_claude_pending_permission",
 ]
