@@ -451,7 +451,7 @@ mod approval;
 #[path = "codex_hook_bridge_client.rs"]
 mod client;
 #[path = "codex_hook_bridge_contain.rs"]
-mod contain;
+pub(crate) mod contain;
 #[path = "codex_hook_bridge_handoff.rs"]
 mod handoff;
 #[path = "codex_hook_bridge_observation.rs"]

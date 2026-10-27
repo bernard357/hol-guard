@@ -148,7 +148,7 @@ fn sed_targets_are_read_only_source_like(args: &[String], scope: Scope) -> bool 
 }
 
 /// `_codex_command_is_bounded_read_only_filter`.
-pub(crate) fn is_bounded_read_only_filter(command_text: &str) -> bool {
+pub fn is_bounded_read_only_filter(command_text: &str) -> bool {
     let Some(parts) = shlex_split(command_text) else {
         return false;
     };
