@@ -12,6 +12,7 @@ import {
 } from "./connector-setup-groups";
 import type { GuardAction, GuardActionEnvelope, GuardApprovalGatePublicConfig, GuardApprovalRequest } from "./guard-types";
 import type { LocalCliItem } from "./local-cli-api";
+import { connectorSetupLinkFromSearch } from "./protection-center/custom-extension-profile";
 import { queuePageSyncTarget } from "./review-queue-page-sync";
 
 function assert(condition: boolean, message: string): void {
@@ -70,7 +71,7 @@ const BASE_REQUEST: GuardApprovalRequest = {
 
 // Connector setup: rows held only because a local CLI was never set up share
 // `connector:<identity_hash>:<action>` and collapse into one pinned card.
-const IDENTITY = "a1b2c3d4e5f6a7b8c9d0";
+const IDENTITY = `a1b2c3d4e5f6a7b8c9d0${"e".repeat(44)}`;
 const connectorRow = (
   id: string,
   digest: string,
@@ -128,6 +129,11 @@ assert(lane!.callCount === 4, "merged retries count toward calls waiting on the 
 assert(
   lane!.setupHref === `/extensions/local-cli/local-cli.lanectl?setup=conn-1&identity=${IDENTITY}`,
   "a resolved connector links to its Protect page, opened on the newest held request",
+);
+const parsedLink = connectorSetupLinkFromSearch(lane!.setupHref.slice(lane!.setupHref.indexOf("?")));
+assert(
+  parsedLink?.requestId === "conn-1" && parsedLink.identityHash === IDENTITY,
+  "the Protect page accepts the link the card builds",
 );
 assert(
   lane!.triedCommands.join(",") === "listen,status",
