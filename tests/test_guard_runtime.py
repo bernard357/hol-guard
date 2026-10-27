@@ -9320,7 +9320,7 @@ def test_guard_hook_claude_tampered_pending_state_cannot_bootstrap_signed_allow(
         artifact=artifact,
         artifact_hash="hash-authentic",
     )
-    index_payload = store.get_sync_payload(guard_commands_module._claude_pending_permission_index_key(session_id))
+    index_payload = store.get_sync_payload(f"claude_pending_permissions:{session_id}")
     assert isinstance(index_payload, dict)
     pending_keys = index_payload.get("pending_keys")
     assert isinstance(pending_keys, list)
@@ -9452,7 +9452,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_legacy_pending_state_canno
         now,
     )
     store.set_sync_payload(
-        guard_commands_module._claude_pending_permission_index_key(session_id),
+        f"claude_pending_permissions:{session_id}",
         [pending_key],
         now,
     )
@@ -9496,7 +9496,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_legacy_pending_state_canno
 
     assert persisted is None
     assert policies == []
-    assert store.get_sync_payload(guard_commands_module._claude_pending_permission_index_key(session_id)) is None
+    assert store.get_sync_payload(f"claude_pending_permissions:{session_id}") is None
     events = store.list_events(event_name="rule.ignored.local_integrity")
     event_payloads = [event_payload for event in events if isinstance(event_payload := event.get("payload"), dict)]
     assert any(event_payload.get("integrity_status") == "missing_integrity" for event_payload in event_payloads)
@@ -9528,7 +9528,7 @@ def test_guard_hook_claude_ask_user_question_unsigned_bound_pending_cannot_persi
         now,
     )
     store.set_sync_payload(
-        guard_commands_module._claude_pending_permission_index_key(session_id),
+        f"claude_pending_permissions:{session_id}",
         [pending_key],
         now,
     )
@@ -11262,7 +11262,7 @@ def test_guard_hook_claude_notification_stale_notice_falls_back_to_generic_conte
     capsys.readouterr()
 
     store = GuardStore(home_dir)
-    pending_index_key = guard_commands_module._claude_pending_permission_index_key(session_id)
+    pending_index_key = f"claude_pending_permissions:{session_id}"
     pending_index = store.get_sync_payload(pending_index_key)
     assert isinstance(pending_index, dict)
     pending_keys = pending_index.get("pending_keys")
