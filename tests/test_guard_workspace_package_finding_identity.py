@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from codex_plugin_scanner.guard import workspace_assessment_runner as runner
+from codex_plugin_scanner.guard.workspace_assessment_carry import listed_packages
 from tests.test_guard_workspace_assessment_carry import T0, admitted, assess, outcome, package_finding
 from tests.test_guard_workspace_assessment_runner import AUDIT, BLOCKED_PACKAGE, KEYS
 
@@ -35,6 +36,16 @@ def test_another_version_of_the_package_is_a_separate_finding() -> None:
     first, second = _project(BLOCKED_PACKAGE, {**BLOCKED_PACKAGE, "resolvedVersion": "0.0.8"})
 
     assert first["finding_id"] != second["finding_id"]
+
+
+def test_a_scoped_package_is_not_the_unscoped_package_of_the_same_name() -> None:
+    scoped = {**BLOCKED_PACKAGE, "namespace": "@acme"}
+    findings = _project(BLOCKED_PACKAGE, scoped)
+
+    assert len({item["finding_id"] for item in findings}) == 2
+    assert sorted(item["package_name"] for item in findings) == ["@acme/minimist", "minimist"]
+    listed = listed_packages({"audit_status": "complete", "evaluation": {"packages": [scoped]}})
+    assert listed == {("npm", "@acme/minimist", "1.2.8")}
 
 
 def test_a_package_listed_twice_is_one_finding_with_the_evidence_of_both() -> None:

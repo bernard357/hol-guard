@@ -1,7 +1,7 @@
 """Project the local supply chain audit into workspace findings.
 
 Each package the audit asks about, blocks or warns on becomes one finding
-named by its coordinate: ecosystem, name and resolved version. New rule data,
+named by its coordinate: ecosystem, scoped name and resolved version. New rule data,
 a second lockfile listing the same package or another advisory adds evidence
 to that finding instead of making a new one. A package whose lookup could not
 be answered offline is a coverage gap, not a finding.
@@ -43,7 +43,7 @@ def supply_chain_findings(worktree_key: str, payload: Mapping[str, object]) -> l
         if decision not in _FINDING_DECISIONS or _lookup_unavailable(package):
             continue
         ecosystem = _text(package.get("ecosystem")) or "unknown"
-        name = _text(package.get("name"))
+        name = package_name(package)
         if name is None:
             continue
         version = _text(package.get("resolvedVersion")) or _text(package.get("requestedVersion"))
@@ -88,6 +88,20 @@ def supply_chain_findings(worktree_key: str, payload: Mapping[str, object]) -> l
         findings.values(),
         key=lambda item: (_SEVERITY_ORDER.index(str(item["severity"])), str(item["package_name"])),
     )
+
+
+def package_name(package: Mapping[str, object]) -> str | None:
+    """The package name with its namespace, such as `@scope/pkg` for npm.
+
+    The audit reports a scoped package's namespace apart from its name, and
+    `@a/pkg` is a different package from `pkg`.
+    """
+
+    name = _text(package.get("name"))
+    namespace = _text(package.get("namespace"))
+    if name is None or namespace is None or name.startswith(f"{namespace}/"):
+        return name
+    return f"{namespace}/{name}"[:256]
 
 
 def _packages(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -144,4 +158,10 @@ def _strings(value: object) -> list[str]:
     return [item[:256] for item in value if isinstance(item, str) and item]
 
 
-__all__ = ["SUPPLY_CHAIN_DETECTOR", "supply_chain_findings", "unchecked_packages", "unresolved_packages"]
+__all__ = [
+    "SUPPLY_CHAIN_DETECTOR",
+    "package_name",
+    "supply_chain_findings",
+    "unchecked_packages",
+    "unresolved_packages",
+]

@@ -31,6 +31,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
+from .workspace_supply_chain_findings import package_name
 
 if TYPE_CHECKING:
     from .workspace_assessment_store import RunOutcome
@@ -129,7 +130,7 @@ def listed_packages(payload: Mapping[str, object]) -> frozenset[tuple[str, str, 
             _text(package.get("resolvedVersion")) or _text(package.get("requestedVersion")) or "",
         )
         for package in packages
-        if isinstance(package, Mapping) and (name := _text(package.get("name"))) is not None
+        if isinstance(package, Mapping) and (name := package_name(package)) is not None
     )
 
 
