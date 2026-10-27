@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifact_native_fields import artifact_native_fields as _artifact_fields
-from .config import GuardConfig, resolve_risk_action
+from .config import GuardConfig, risk_action_config_facts
 from .harness_posture import config_for_harness, harness_posture_override
 from .models import GuardArtifact
 from .native_context import _resolve_digest_home
@@ -35,7 +35,8 @@ def _config_facts(config: object, *, artifact: GuardArtifact, harness: str) -> d
     return {
         "view_override": view.resolve_action_override(harness, artifact.artifact_id, artifact.publisher),
         "view_default_action": view.default_action,
-        "risk_action": resolve_risk_action(view, "local_secret_read", harness=harness),
+        "guard_config": risk_action_config_facts(view),
+        "harness": harness,
         "artifact_override": config.resolve_action_override(artifact.harness, artifact.artifact_id, artifact.publisher),
         "default_action": config.default_action,
         "managed_locked_settings": list(config.managed_locked_settings),
@@ -127,21 +128,6 @@ def sensitive_read_context(
         required_feature=MCP_SENSITIVE_READ_ARTIFACT_FEATURE,
     )
     return _text(payload, "current_action"), _text(payload, "artifact_hash")
-
-
-def lookup_facts(policy_lookup: Mapping[str, Any] | None, diagnosed_reason: str | None) -> dict[str, object] | None:
-    """The policy-store lookup for one context hash; ``None`` without a store."""
-
-    if policy_lookup is None:
-        return None
-    decision = policy_lookup["decision"]
-    return {
-        "decision_present": decision is not None,
-        "decision_action": decision.get("action") if decision is not None else None,
-        "decision_artifact_hash": decision.get("artifact_hash") if decision is not None else None,
-        "ignored_integrity": policy_lookup["ignored_local_integrity"] is not None,
-        "diagnosed_reason": diagnosed_reason,
-    }
 
 
 def sensitive_read_reuse(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import importlib.metadata
 import io
@@ -1219,6 +1220,8 @@ def _fetch_supply_chain_bundle_payload(request: urllib.request.Request) -> dict[
             raise GuardSyncNotAvailableError(message, retryable=True) from error
         raise RuntimeError(message) from error
     except OSError as error:
+        if _is_guard_cloud_unreachable_error(error):
+            raise GuardSyncNotAvailableError(_GUARD_CLOUD_UNREACHABLE_MESSAGE, retryable=True) from error
         raise RuntimeError(_sync_url_error_message(error)) from error
 
 
@@ -1380,6 +1383,8 @@ def sync_supply_chain_bundle(
                     trusted_keys=trusted_keys or None,
                     cached_bundle_version=cached_bundle_version,
                 )
+            except GuardSyncNotAvailableError:
+                raise
             except (RuntimeError, SupplyChainBundleError) as error:
                 raise RuntimeError(f"Guard supply-chain bundle sync failed: {error}") from error
     else:
@@ -2378,6 +2383,8 @@ def _refresh_guard_oauth_access_token_once(
             refresh_error_message = _oauth_refresh_error_message(error)
             raise RuntimeError(f"Guard OAuth token refresh failed: {refresh_error_message}") from error
         except OSError as error:
+            if _is_guard_cloud_unreachable_error(error):
+                raise GuardSyncNotAvailableError(_GUARD_CLOUD_UNREACHABLE_MESSAGE, retryable=True) from error
             raise RuntimeError(_sync_url_error_message(error)) from error
         if not isinstance(payload, dict):
             raise GuardSyncAuthorizationExpiredError(_guard_oauth_reauthorization_message())
@@ -3380,6 +3387,50 @@ def _sync_url_error_message(error: OSError) -> str:
     return "Guard sync failed because the remote endpoint could not be reached."
 
 
+_UNREACHABLE_NETWORK_ERRNOS = frozenset({errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ENETDOWN})
+_MANAGED_PROXY_REQUEST_FAILED = "managed_proxy_request_failed"
+_GUARD_CLOUD_UNREACHABLE_MESSAGE = "Guard Cloud could not be reached. Local Guard keeps protecting this machine."
+
+
+def _is_guard_cloud_unreachable_error(error: OSError) -> bool:
+    """Return whether a sync request failed because Guard Cloud was offline, not misconfigured.
+
+    Refused or reset connections, unreachable hosts or networks, DNS failures and
+    timeouts clear up on their own, so the caller can offer a retry, including
+    when they happen behind a managed proxy. TLS verification failures are not
+    included.
+    """
+    if _is_network_outage_error(error):
+        return True
+    if getattr(error, "reason", None) != _MANAGED_PROXY_REQUEST_FAILED:
+        return False
+    # A managed proxy keeps the transport failure only in the urllib3 error it
+    # wraps, which nests it under reason, original_error or either chain link.
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if current is not error and isinstance(current, OSError) and _is_network_outage_error(current):
+            return True
+        for attribute in ("reason", "original_error", "__cause__", "__context__"):
+            nested = getattr(current, attribute, None)
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return False
+
+
+def _is_network_outage_error(error: OSError) -> bool:
+    if _is_timeout_error(error):
+        return True
+    reason = getattr(error, "reason", error)
+    if isinstance(reason, ConnectionError | socket.gaierror):
+        return True
+    return isinstance(reason, OSError) and reason.errno in _UNREACHABLE_NETWORK_ERRNOS
+
+
 def _is_timeout_error(error: OSError) -> bool:
     if isinstance(error, TimeoutError | socket.timeout):
         return True
@@ -3585,18 +3636,6 @@ def _cloud_sync_receipts_payload(
         redaction_level=redaction_level,
         now=_now(),
     )
-
-
-def _cloud_sync_receipt_payload(
-    receipt: dict[str, object],
-    *,
-    device_id: str,
-    device_name: str,
-    redaction_level: str = "full",
-) -> dict[str, object]:
-    return _cloud_sync_receipts_payload(
-        [receipt], device_id=device_id, device_name=device_name, redaction_level=redaction_level
-    )[0]
 
 
 def _dedupe_sync_payload_items(items: list[dict[str, object]]) -> list[dict[str, object]]:

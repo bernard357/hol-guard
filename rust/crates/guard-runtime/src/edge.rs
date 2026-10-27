@@ -176,11 +176,12 @@ fn canonical_event(value: &str) -> Result<String, String> {
     bounded_nonempty(value, MAX_EVENT_BYTES, "native_hook_event_invalid")?;
     let compact = value.trim().to_ascii_lowercase().replace(['_', '-'], "");
     match compact.as_str() {
-        "pretool" | "pretooluse" => Ok("PreToolUse".to_owned()),
+        // Hermes names its hooks `pre_tool_call` and `post_tool_call`.
+        "pretool" | "pretooluse" | "pretoolcall" => Ok("PreToolUse".to_owned()),
         "beforeshellexecution" | "beforereadfile" | "beforewritefile" | "beforemcpexecution" => {
             Ok("PreToolUse".to_owned())
         }
-        "posttool" | "posttooluse" => Ok("PostToolUse".to_owned()),
+        "posttool" | "posttooluse" | "posttoolcall" => Ok("PostToolUse".to_owned()),
         "aftershellexecution" | "afterreadfile" | "afterwritefile" | "aftermcpexecution" => {
             Ok("PostToolUse".to_owned())
         }
@@ -437,21 +438,21 @@ fn evaluate_validated_envelope(
         crate::policy_store::native_review_origin::authenticate(store, &mut receipt)?;
     }
     if event_name == "PreToolUse" {
-        crate::command_policy_repair::apply(
-            &mut result,
-            policy_snapshot
-                .and_then(|snapshot| snapshot.command_extensions.as_ref())
-                .map(guard_command::native_command_controls::CompiledNativeCommandControls::health),
-            std::path::Path::new(&envelope.source.guard_home),
-        );
+        crate::command_policy_repair::apply_at_edge(&mut result, policy_snapshot, &envelope.source);
     }
-    let harness_response = guard_command::hook_responses::render_edge_response(
+    let mut harness_response = guard_command::hook_responses::render_edge_response(
         &harness,
         &event_name,
         &result,
         envelope.recording_only,
     )
     .map(Value::Object);
+    if let Some(response) = harness_response.as_mut().filter(|_| {
+        event_name == "UserPromptSubmit" && harness == "claude-code" && !envelope.recording_only
+    }) {
+        // Guard's Claude Code notice outside Watch; the typed result's reason is always text.
+        let _ = crate::hook_direct::claude_prompt_text::brand(response, &result);
+    }
     crate::encode_response(&GuardHookEdgeResultV2 {
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),

@@ -20,7 +20,6 @@ from ._modules.cursor.cursor_hook_payload import (
     prepare_cursor_hook_payload,
 )
 from ._modules.cursor.cursor_hook_script_template_head import HOOK_SCRIPT_TEMPLATE_HEAD
-from ._modules.cursor.cursor_hook_script_template_native_reply import HOOK_SCRIPT_TEMPLATE_NATIVE_REPLY
 from ._modules.cursor.cursor_hook_script_template_reason import HOOK_SCRIPT_TEMPLATE_REASON
 from ._modules.cursor.cursor_hook_script_template_tail import HOOK_SCRIPT_TEMPLATE_TAIL
 from .adapter_safe_output import write_text_at_authorized_path
@@ -53,11 +52,7 @@ if TYPE_CHECKING:
     from ..runtime_transition import TransitionFile
 
 _HOOK_SCRIPT_TEMPLATE = (
-    HOOK_SCRIPT_TEMPLATE_HEAD
-    + HOOK_SCRIPT_TEMPLATE_REASON
-    + HOOK_SCRIPT_TEMPLATE_NATIVE_REPLY
-    + HOOK_SCRIPT_TEMPLATE_RESOLVER
-    + HOOK_SCRIPT_TEMPLATE_TAIL
+    HOOK_SCRIPT_TEMPLATE_HEAD + HOOK_SCRIPT_TEMPLATE_REASON + HOOK_SCRIPT_TEMPLATE_RESOLVER + HOOK_SCRIPT_TEMPLATE_TAIL
 )
 _INHERIT_ENV_KEYS = (
     "PATH",

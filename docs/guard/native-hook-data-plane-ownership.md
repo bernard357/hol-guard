@@ -181,7 +181,10 @@ shows the agent the `connector_setup_reason` text, and records the connector's
 setup context. The resident cannot raise a desktop notice, so it hands the stored
 request id and the CLI name to the evidence drain, which raises the notice from
 the stored row. Any lookup the resident cannot spell exactly as the daemon would,
-and any failed lookup, leaves the review to the daemon.
+and any failed lookup, leaves the review to the daemon. A connector-setup review the
+daemon queues asks the same `extension_review_hint` op for its connector-setup
+hint, handing it the connector with the paused result, so the risk classes read
+from the observed catalog rules are Rust-owned on both lanes.
 
 The recommendation shown with a pending review is that stored hint re-checked
 on every read, and the resident owns it too. The
@@ -500,6 +503,8 @@ events.
 Current material gaps include:
 
 - Copilot and Cursor event aliases are normalized by the Rust raw edge.
+- The Rust raw edge renders Guard's Claude Code notice on a reviewed
+  `UserPromptSubmit` outside Watch; the daemon returns the edge response as is.
 - Non-command PreToolUse and native `review` remain native decisions; the
   harness bridge renders an unsupported review as a conservative deny.
 - OpenCode, Grok, Hermes, OpenClaw, ZCode, Gemini, and Antigravity expose partial
@@ -521,18 +526,19 @@ Current material gaps include:
   the opaque challenge and forward the external artifact, but it never signs,
   authorizes, or persists approval state.
 - Rust owns the reuse of a saved approval on the artifact hook: the resident
-  (`artifact_reuse_step`) answers a plan of effects (claim, revalidate, settled)
-  and Python only runs them. A claim that wins is always followed by its
-  revalidation with no resident call between the two, and a resident that
-  fails or answers a malformed plan fails closed to the host outage. The one
-  Python decision left is the package fallback floor, which never ends weaker
-  than the recomputed action.
-- Rust owns the CLI hook's verdict for Claude Code's permission dialog: the
-  resident (`claude_permission_verdict`) picks no decision, the Guard approval
-  question, a review that defers to Claude's dialog, or a deny, and asks for
-  the runtime artifact's policy only when the verdict rests on it. Python
-  gathers that policy, renders the reason, copy and envelope, and answers a
-  verdict the resident cannot supply with the host outage response.
+  (`artifact_reuse_step`) answers a plan of effects (claim, revalidate,
+  settled). The CLI executor that ran this plan, and its package fallback
+  floor, are gone: the CLI hook answers through the daemon review path.
+- The CLI hook answers Claude Code's permission dialog through the daemon
+  review path, as the bridge does. No Python caller asks the resident's
+  `claude_permission_verdict` or `hook_route` any more.
+- The CLI hook reads the daemon's answer through the resident's
+  `hook_render` `cli_hook_emit` kind: a bridge-rendered harness gets its wire
+  output and exit status, any other the policy action its exit status
+  follows. When the resident cannot answer, the CLI prints the fixed
+  fail-closed bridge payload or exits with the harness's block status. The
+  Python bounded bridge still renders with `_daemon_response_to_native` when
+  the native bridge cannot run.
 
 ## No-environment production contract
 

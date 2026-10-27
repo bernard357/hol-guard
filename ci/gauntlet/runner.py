@@ -51,6 +51,7 @@ from .fixtures import (
     scratch_checkout,
     stage_directory,
 )
+from .git_allow_fixtures import GIT_ALLOW_CASES, configure_git_allow_controls
 from .host_process import clean_environment, realistic_environment, run_process
 from .input_evidence import (
     public_native_extension_evidence,
@@ -63,8 +64,8 @@ from .native_tools import CREDENTIAL_REPORT_CASE, TASK_SCHEMA_CASE, cleanup_priv
 from .observed_extension import generate_observed_extension
 from .parallel import HostSlots, Lease, LoadGate, run_scheduled, validate_jobs
 from .provider import InferenceRelay, LoopbackCollector
-from .git_allow_fixtures import GIT_ALLOW_CASES, configure_git_allow_controls
 from .review_fixtures import GITHUB_REVIEW_CASE, GITHUB_STUB_CASES, WORKTREE_CASE, configure_github_review_controls
+from .runtime_cases import stage_runtime_cases
 from .script_cases import stage_script_cases
 from .session_folder import seed_session_folder, session_cwd
 from .source_identity import source_identity
@@ -159,6 +160,7 @@ def run_case(
     )
     stage_supply_chain(fixture.workspace, scenario.id)
     stage_script_cases(fixture.workspace, scenario.id, fixture.home, fixture.canary)
+    stage_runtime_cases(fixture.root / "guard-home", fixture.workspace, scenario.id)
     seed_session_folder(fixture.home, stage_directory(fixture.root), scenario.id)
     session = session_cwd(fixture.home, fixture.workspace, scenario.id)
     private = fixture.root / "private-evidence"
@@ -217,7 +219,7 @@ def run_case(
                 agent_dir,
                 relay,
                 wait_for_tasks=scenario.id
-            in {"omp-native-task-readonly-lookup", TASK_SCHEMA_CASE, CREDENTIAL_REPORT_CASE},
+                in {"omp-native-task-readonly-lookup", TASK_SCHEMA_CASE, CREDENTIAL_REPORT_CASE},
                 memory_bank="learn" in scenario.required_tools,
                 github_tool="github" in scenario.required_tools,
                 structured_tasks=scenario.id == TASK_SCHEMA_CASE,

@@ -22,7 +22,19 @@ export type WorkspaceRun = WorktreeKeys & {
   finishedAtMs: number | null;
 };
 
-export type WorkspaceFindingKind = "supply_chain" | "secret";
+export type WorkspaceFindingKind = "supply_chain" | "secret" | "runtime" | "skill" | "mcp" | "hook" | "plugin" | "workflow" | "editor_task";
+
+/** The fixed wording of the skill content rule that matched; never text from the skill. */
+export type WorkspaceSkillCheck = { title: string; reason: string; confidence: string; falsePositiveHint: string | null };
+
+/** The MCP launch rule that matched and the server it names; never the server's command or URL. */
+export type WorkspaceMcpCheck = WorkspaceSkillCheck & { server: string };
+
+/** The hook rule that matched and the event the hook runs on; never the hook's command. */
+export type WorkspaceHookCheck = WorkspaceSkillCheck & { event: string };
+
+/** An executable a configured tool would launch that matches a runtime advisory. */
+export type WorkspaceRuntime = { family: string; version: string | null; title: string | null; knownExploited: boolean };
 
 export type WorkspaceFinding = {
   findingId: string;
@@ -37,11 +49,37 @@ export type WorkspaceFinding = {
   packageVersion: string | null;
   fixVersion: string | null;
   advisoryIds: string[];
-  /** Root-relative file path of a secret finding. Guard never receives the secret itself. */
+  /**
+   * True when the latest scan could not recheck this finding (its detector did
+   * not finish), so it is still listed from the run that last observed it.
+   */
+  carried: boolean;
+  /**
+   * Root-relative file path of a secret or skill finding, or the executable
+   * path of a runtime finding. Guard never receives the secret itself.
+   */
   path: string | null;
   line: number | null;
   /** Every line the same secret appears on in that file, first to last. */
   lines: number[];
+  /** Set only for a runtime finding; observation only, so it has no fix. */
+  runtime: WorkspaceRuntime | null;
+  /** Set only for an agent skill finding, a warning with no fix. */
+  skill: WorkspaceSkillCheck | null;
+  /**
+   * Set only for an MCP server configuration finding, a warning with no fix,
+   * or for an agent plugin finding about a server the plugin ships.
+   */
+  mcp: WorkspaceMcpCheck | null;
+  /**
+   * Set only for a project hook configuration finding, a warning with no fix,
+   * or for an agent plugin finding about a hook the plugin ships.
+   */
+  hook: WorkspaceHookCheck | null;
+  /** Set only for a GitHub Actions workflow finding, a warning with no fix. */
+  workflow: WorkspaceSkillCheck | null;
+  /** Set only for an editor task or dev container finding, a warning with no fix. */
+  editorTask: WorkspaceSkillCheck | null;
 };
 
 export type WorkspaceAssessment = WorktreeKeys & {
@@ -49,6 +87,8 @@ export type WorkspaceAssessment = WorktreeKeys & {
   partial: boolean;
   reasons: string[];
   notRun: string[];
+  /** False when the workspace has no dependency files, so there was nothing to audit. */
+  dependencyFilesFound: boolean;
   finishedAtMs: number | null;
   findings: WorkspaceFinding[];
 };
@@ -61,6 +101,8 @@ export type WorkspaceFindingsState = {
   assessments: WorkspaceAssessment[];
   /** Whether the daemon already tracks the folder asked about; null when none was asked about. */
   suggestedRootTracked: boolean | null;
+  /** Set while a busy device holds automatic checks back; checks the user starts still run. */
+  deferredReason: string | null;
 };
 
 const RUN_STATES = new Set<string>(["queued", "running", "completed", "partial", "superseded", "failed", "canceled"]);
@@ -136,6 +178,7 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     decision: text(item.decision) ?? "warn",
     ruleIds: strings(item.rule_ids),
     advisoryIds: strings(item.advisory_ids),
+    carried: text(item.carried_from_run_id) !== null,
   };
   if (item.source_kind === "secret") {
     const path = text(item.path);
@@ -154,6 +197,179 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
         const value = count(entry);
         return value !== null && value >= 1 ? [value] : [];
       }),
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: null,
+      workflow: null,
+      editorTask: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "skill_content_v1") {
+    const path = text(item.path);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "skill",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: {
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
+      mcp: null,
+      hook: null,
+      workflow: null,
+      editorTask: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "mcp_config_v1") {
+    const path = text(item.path);
+    const server = text(item.server);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || server === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "mcp",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: {
+        server,
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
+      hook: null,
+      workflow: null,
+      editorTask: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "hook_config_v1") {
+    const path = text(item.path);
+    const event = text(item.event);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || event === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "hook",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: {
+        event,
+        title,
+        reason,
+        confidence: text(item.confidence) ?? "likely",
+        falsePositiveHint: text(item.false_positive_hint),
+      },
+      workflow: null,
+      editorTask: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && item.detector === "plugin_manifest_v1") {
+    const path = text(item.path);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    const check = { title, reason, confidence: text(item.confidence) ?? "likely", falsePositiveHint: text(item.false_positive_hint) };
+    const event = item.component === "hook" ? text(item.event) : null;
+    const server = item.component === "mcp_server" ? text(item.server) : null;
+    if (event === null && server === null) return null;
+    return {
+      ...common,
+      kind: "plugin",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: server === null ? null : { ...check, server },
+      hook: event === null ? null : { ...check, event },
+      workflow: null,
+      editorTask: null,
+    };
+  }
+  if (item.source_kind === "workspace_source" && (item.detector === "ci_workflow_v1" || item.detector === "editor_task_v1")) {
+    const path = text(item.path);
+    const title = text(item.title);
+    const reason = text(item.reason);
+    if (path === null || title === null || reason === null || common.ruleIds.length === 0) return null;
+    const check = { title, reason, confidence: text(item.confidence) ?? "likely", falsePositiveHint: text(item.false_positive_hint) };
+    const workflow = item.detector === "ci_workflow_v1";
+    return {
+      ...common,
+      kind: workflow ? "workflow" : "editor_task",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: null,
+      skill: null,
+      mcp: null,
+      hook: null,
+      workflow: workflow ? check : null,
+      editorTask: workflow ? null : check,
+    };
+  }
+  if (item.source_kind === "agent_inventory" && item.detector === "runtime_identity_v1") {
+    const family = text(item.runtime_family);
+    const path = text(item.path);
+    if (family === null || path === null || common.advisoryIds.length === 0) return null;
+    return {
+      ...common,
+      kind: "runtime",
+      ecosystem: "unknown",
+      packageName: null,
+      packageVersion: null,
+      fixVersion: null,
+      path,
+      line: null,
+      lines: [],
+      runtime: {
+        family,
+        version: text(item.runtime_version),
+        title: text(item.title),
+        knownExploited: item.known_exploited === true,
+      },
+      skill: null,
+      mcp: null,
+      hook: null,
+      workflow: null,
+      editorTask: null,
     };
   }
   const packageName = text(item.package_name);
@@ -168,6 +384,12 @@ function normalizeFinding(value: unknown): WorkspaceFinding | null {
     path: null,
     line: null,
     lines: [],
+    runtime: null,
+    skill: null,
+    mcp: null,
+    hook: null,
+      workflow: null,
+      editorTask: null,
   };
 }
 
@@ -193,6 +415,7 @@ function normalizeAssessment(value: unknown): WorkspaceAssessment | null {
     partial: reasons.length > 0 || reportedPartial || notRun.length > 0,
     reasons,
     notRun,
+    dependencyFilesFound: detectors.supply_chain !== "no_inputs",
     finishedAtMs: count(item.finished_at_ms),
     findings: list(item.findings)
       .map(normalizeFinding)
@@ -213,6 +436,7 @@ export function normalizeWorkspaceFindingsState(assessmentsPayload: unknown, fin
       .map(normalizeAssessment)
       .filter((entry): entry is WorkspaceAssessment => entry !== null),
     suggestedRootTracked: typeof findings.suggested_root_tracked === "boolean" ? findings.suggested_root_tracked : null,
+    deferredReason: text(history.deferred_reason),
   };
 }
 

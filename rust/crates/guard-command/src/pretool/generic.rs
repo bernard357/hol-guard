@@ -19,6 +19,8 @@ mod extract;
 mod omp;
 #[path = "generic_omp_bash_cwd.rs"]
 mod omp_bash_cwd;
+#[path = "generic_read_decisions.rs"]
+mod read_decisions;
 
 /// Resolve the host's tool-level directory for an execution-owner preview.
 /// This is path observation only; the owner must still judge current policy.
@@ -378,7 +380,7 @@ fn omp_bash_cwd_missing(harness: &str, event: &str) -> PreToolResultV1 {
             false,
         ),
         "block",
-        evaluate::MISSING_PATH,
+        read_decisions::MISSING_PATH,
         "HOL Guard did not run this command because its working directory does not exist. Check the directory, for example by listing its parent, and try again with the correct one.",
     )
 }
@@ -779,8 +781,8 @@ fn evaluate_envelope(
             // The edit cannot apply, so stopping it costs nothing. Saying why
             // lets the agent fix the path instead of waiting on an approval.
             super::omp_hashline_writes::HashlineEdit::MissingTarget(path) => {
-                let mut result = generic_result(action, "block", evaluate::MISSING_PATH, "");
-                result.reason = evaluate::missing_path_reason(
+                let mut result = generic_result(action, "block", read_decisions::MISSING_PATH, "");
+                result.reason = read_decisions::missing_path_reason(
                     "HOL Guard did not run this edit because a file it names does not exist. Check the path, for example by listing its parent directory, and try again with the correct one.",
                     "edit",
                     Some(&path),
@@ -919,6 +921,14 @@ fn evaluate_envelope(
         && matches!(
             result.minimum_action.as_str(),
             "allow" | "warn" | "review"
+        )
+        && !git_read_order_settled_by_allow(
+            controls,
+            command_model,
+            &result,
+            floor_context,
+            deadline,
+            execution_environment,
         )
     {
         result.minimum_action = "require-reapproval".into();
@@ -1109,6 +1119,51 @@ fn extension_rule_matched(result: &PreToolResultV1) -> bool {
             .iter()
             .any(|row| !row.effective_segment_indexes.is_empty())
     })
+}
+
+/// Whether the user's extension permissions settle a Git floor that rests on
+/// the order of the command's steps alone.
+///
+/// That floor has two meanings. A Git read whose own configuration names a
+/// pager, diff driver or textconv helper, or whose configuration could not be
+/// read, has a program Guard cannot see waiting for it, and keeps its review
+/// however much the user allowed. The other meaning is narrower: every Git
+/// read in the command was proven helper-free against the configuration Guard
+/// read for it, and what is unproven is only that an earlier step leaves that
+/// configuration as the read found it. That is a judgment of the command's
+/// shape, which a user who allowed each of its steps has already settled, the
+/// same way an explicit Allow settles the shape judgments the controls
+/// themselves raise.
+///
+/// The floor is raised after the controls run, so it cannot read the Allow off
+/// the result's reason and asks the controls instead. `minimum_action` must
+/// still be plain allow: anything the controls or an earlier Rust proof raised
+/// — unsettled extension uncertainty among it — means the Allow did not carry
+/// the command, and the floor stands.
+fn git_read_order_settled_by_allow(
+    controls: Option<&CompiledNativeCommandControls>,
+    command_model: Option<&crate::CanonicalCommandV1>,
+    result: &PreToolResultV1,
+    context: super::PathContext<'_>,
+    deadline: Option<Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
+    let (Some(controls), Some(model), Some(observations)) =
+        (controls, command_model, result.command_extensions.as_ref())
+    else {
+        return false;
+    };
+    result.minimum_action == "allow"
+        && result.action.bounded
+        && !result.action.sensitive_target
+        && super::git_read_floor::unsettled_steps_before_reads(
+            model,
+            context,
+            deadline,
+            execution_environment,
+        )
+        .is_some()
+        && controls.explicit_allow_covers_command(model, observations, context)
 }
 
 /// The Git floor's reason when every Git read was proven helper-free on its

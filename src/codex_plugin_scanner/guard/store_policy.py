@@ -76,10 +76,6 @@ RUNTIME_SAVED_REUSE_FEATURE = "runtime-saved-reuse-v1"
 # the unexpanded group with it, and the probe-groups contract denies unknown
 # fields, so a runtime that does not advertise this must not be sent one.
 POLICY_LOOKUP_MEMORY_FEATURE = "policy-decision-lookup-memory-v1"
-# The resident derives the trusted-local-tool grant selectors itself and probes
-# them. Same contract rule as above: never send ``probe_groups.local_tool_grant``
-# to a runtime that does not advertise this.
-LOCAL_TOOL_GRANT_LOOKUP_FEATURE = "policy-decision-lookup-local-tool-grant-v1"
 # The resident composes the portable-project lookup with the local one itself,
 # strips portable permission elevation, and claims the effective allow in the
 # same connection. Same contract rule as above: never send
@@ -307,113 +303,75 @@ class StorePolicyMixin:
             now=now,
         )
         _validate_scoped_policy_artifact_target(decision.scope, decision.artifact_id)
-        next_control_state: dict[str, object] | None = None
-        with self._connect() as connection:
-            secret_material = (None, None)
-            if not is_remote_policy_source(decision.source):
-                secret_material = self._policy_integrity_secret_material(create=True)
-            next_control_state = self._upsert_policy_locked(
-                connection,
-                decision=decision,
-                now=now,
-                secret_material=secret_material,
-            )
-        if next_control_state is not None:
-            self._finalize_policy_integrity_control_state(next_control_state)
+        # The refresh the write args run reads the local rows and writes only
+        # the integrity status row, so it commits on its own connection before
+        # the resident takes the write lock for the decision itself. The
+        # generation lock spans both, because the control state no longer rides
+        # that one transaction.
+        with self.hold_policy_integrity_generation_lock():
+            fields, integrity = self._policy_write_args(decision, now)
+            payload = self._native_store_call("upsert_policy", {**fields, "now": now, **integrity})
+            if not isinstance(payload, dict):
+                raise RuntimeError("Guard policy decision was not written.")
+            self._finalize_native_control_state(payload.get("next_control_state"))
 
-    def _upsert_policy_locked(
+    def _policy_write_args(
         self,
-        connection: sqlite3.Connection,
-        *,
         decision: PolicyDecision,
         now: str,
-        secret_material: tuple[bytes | None, str | None],
-    ) -> dict[str, object] | None:
-        expires_at = _canonical_utc_timestamp(decision.expires_at) if decision.expires_at is not None else None
-        artifact_id, artifact_hash, workspace, publisher = self._normalized_policy_keys(decision)
-        state = self._refresh_policy_integrity_state(
-            connection,
-            now=now,
-            create_key=not is_remote_policy_source(decision.source),
-            secret_material=secret_material,
-            allow_cutover_resign=False,
-        )
-        connection.execute(
-            """
-            delete from policy_decisions
-            where harness = ? and scope = ? and coalesce(artifact_id, '') = coalesce(?, '')
-              and coalesce(artifact_hash, '') = coalesce(?, '')
-              and coalesce(workspace, '') = coalesce(?, '')
-              and coalesce(publisher, '') = coalesce(?, '')
-            """,
-            (decision.harness, decision.scope, artifact_id, artifact_hash, workspace, publisher),
-        )
-        cursor = connection.execute(
-            """
-            insert into policy_decisions (
-              harness, scope, artifact_id, artifact_hash, workspace, publisher, action, reason, owner, source,
-              expires_at, updated_at, integrity_version, integrity_generation, payload_hash, payload_mac,
-              integrity_key_id, signed_at
-            )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                decision.harness,
-                decision.scope,
-                artifact_id,
-                artifact_hash,
-                workspace,
-                publisher,
-                decision.action,
-                decision.reason,
-                decision.owner,
-                decision.source,
-                expires_at,
-                now,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-        )
-        if is_remote_policy_source(decision.source) or state.get("mode") != "protected":
-            return None
-        key, key_id = secret_material
-        if key is None or key_id is None:
-            return None
-        trusted_state = self._load_policy_integrity_control_state(create=True)
-        if trusted_state is None:
-            return None
-        lastrowid = cursor.lastrowid
-        if lastrowid is None:
-            raise RuntimeError("Guard policy decision row was not inserted.")
-        return self._advance_policy_integrity_generation(
-            connection,
-            now=now,
-            key=key,
-            key_id=key_id,
-            trusted_state=trusted_state,
-            force_sign_decision_ids={lastrowid},
-        )
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """The row one decision writes, and the material the resident signs it with.
 
-    def replace_remote_policies(
-        self,
-        decisions: list[PolicyDecision],
-        now: str,
-        *,
-        approval_gate_grant: ApprovalGateGrant | None = None,
-        remote_write_authorized: bool = False,
-    ) -> None:
-        now, rows = self._prepared_remote_policy_rows(
-            decisions,
-            now,
-            approval_gate_grant=approval_gate_grant,
-            remote_write_authorized=remote_write_authorized,
-        )
+        The two are kept apart because the resident owns the signing: an
+        operation that writes a decision inside a larger transaction supplies
+        the integrity material itself rather than letting the caller spell it
+        on the decision.
+        """
+
+        remote = is_remote_policy_source(decision.source)
+        secret_material = (None, None) if remote else self._policy_integrity_secret_material(create=True)
         with self._connect() as connection:
-            self._replace_remote_policy_rows_locked(connection, rows)
+            state = self._refresh_policy_integrity_state(
+                connection,
+                now=now,
+                create_key=not remote,
+                secret_material=secret_material,
+                allow_cutover_resign=False,
+            )
+        artifact_id, artifact_hash, workspace, publisher = self._normalized_policy_keys(decision)
+        fields: dict[str, object] = {
+            "harness": decision.harness,
+            "scope": decision.scope,
+            "artifact_id": artifact_id,
+            "artifact_hash": artifact_hash,
+            "workspace": workspace,
+            "publisher": publisher,
+            "action": decision.action,
+            "reason": decision.reason,
+            "owner": decision.owner,
+            "source": decision.source,
+            "expires_at": _canonical_utc_timestamp(decision.expires_at) if decision.expires_at is not None else None,
+        }
+        integrity: dict[str, object] = {}
+        key, key_id = secret_material
+        if not remote and state.get("mode") == "protected" and key is not None and key_id is not None:
+            trusted_state = self._load_policy_integrity_control_state(create=True)
+            if trusted_state is not None:
+                # The resident signs the rows; the control state around them
+                # stays here, where the secret store lives.
+                integrity["current_generation"] = self._begin_policy_integrity_generation(trusted_state)
+                integrity["integrity_key_b64"] = encode_key(key)
+                integrity["integrity_key_id"] = key_id
+        return fields, integrity
+
+    def _finalize_native_control_state(self, next_control_state: object) -> None:
+        """Adopt the integrity generation the resident advanced to."""
+
+        if next_control_state is None:
+            return
+        if not isinstance(next_control_state, dict):
+            raise RuntimeError("Guard policy integrity control state is invalid.")
+        self._finalize_policy_integrity_control_state(next_control_state)
 
     def apply_policy_bundle_authority(self, *args: Any, **kwargs: Any) -> dict[str, object] | None:
         """Activate one authenticated policy bundle atomically.
@@ -937,35 +895,6 @@ class StorePolicyMixin:
             rows,
         )
 
-    def resolve_policy(
-        self,
-        harness: str,
-        artifact_id: str | None,
-        artifact_hash: str | None = None,
-        workspace: str | None = None,
-        publisher: str | None = None,
-        now: str | None = None,
-        *,
-        memory_command: str | None = None,
-        memory_artifact_type: str | None = None,
-        memory_artifact_name: str | None = None,
-        consume_one_shot: bool = True,
-    ) -> str | None:
-        lookup = self.resolve_policy_decision_lookup_with_memory_pattern(
-            harness,
-            artifact_id,
-            artifact_hash=artifact_hash,
-            workspace=workspace,
-            publisher=publisher,
-            now=now,
-            memory_command=memory_command,
-            memory_artifact_type=memory_artifact_type,
-            memory_artifact_name=memory_artifact_name,
-            consume_one_shot=consume_one_shot,
-        )
-        decision = lookup["decision"]
-        return str(decision["action"]) if decision is not None else None
-
     def resolve_policy_decision_lookup_with_memory_pattern(
         self,
         harness: str,
@@ -1125,48 +1054,6 @@ class StorePolicyMixin:
         if local_once_only:
             request["local_once_only"] = True
         return cast("PolicyDecisionLookupResult", self.send_policy_decision_lookup(request))
-
-    def resolve_local_tool_grant(
-        self,
-        harness: str,
-        *,
-        tool_identity_hash: str,
-        capability: str,
-        current_action: str,
-    ) -> dict[str, object] | None:
-        """Resolve the trusted-local-tool grant a reviewable command may reuse.
-
-        The resident derives the grant selector of each target from the shipped
-        eligibility and probes them non-consuming in order, so the capability
-        digest the match turns on is computed where it is compared. Only an
-        ``allow`` row the grant source wrote answers. A degraded store serves no
-        grant, and neither does an action the hook did not recompute as
-        reviewable. Native failure is terminal, as for every other lookup.
-        """
-        evidence = self.policy_lookup_evidence()
-        if evidence.degraded_trust_status is not None:
-            return None
-        request = self.policy_decision_lookup_request(
-            evidence,
-            harness=harness,
-            artifact_id=None,
-            artifact_hash=None,
-            workspace=None,
-            publisher=None,
-            runtime_exact_match_context=None,
-            consume_one_shot=False,
-        )
-        request["probe_groups"] = {
-            "groups": [],
-            "local_tool_grant": {
-                "tool_identity_hash": tool_identity_hash,
-                "capability": capability,
-                "current_action": current_action,
-            },
-        }
-        payload = self.send_policy_decision_lookup(request, required_feature=LOCAL_TOOL_GRANT_LOOKUP_FEATURE)
-        decision = payload.get("decision")
-        return dict(decision) if isinstance(decision, Mapping) else None
 
     def policy_decision_lookup_request(
         self,

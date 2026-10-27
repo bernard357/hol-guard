@@ -14,6 +14,7 @@ from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard import workspace_assessment_worker as worker
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_workspace_assessment_runner import KEYS, SNAPSHOT, T0, digest, snapshots
+from tests.workspace_fix_support import admit_worktree
 
 STAT = replace(SNAPSHOT, mode="stat")
 NOW = "2026-10-25T00:00:00+00:00"
@@ -56,7 +57,7 @@ def test_automatic_admission_never_resumes_a_paused_worktree(tmp_path: Path, mon
     store = GuardStore(tmp_path / "home")
     old_root = tmp_path / "old"
     old_root.mkdir()
-    assessments.admit_worktree(store, KEYS, root=str(old_root), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(old_root), now_ms=T0)
     assert assessments.set_paused(store, KEYS, paused=True)
     # The same worktree, reached through a newly registered root.
     snapshots(monkeypatch, worker, STAT)
@@ -196,7 +197,8 @@ def test_poll_admits_registered_workspaces_before_observing(tmp_path: Path, monk
     store = GuardStore(tmp_path / "home")
     snapshots(monkeypatch, worker, replace(STAT, snapshot_digest=digest("stat-1")))
     monkeypatch.setattr(guard_config, "load_guard_config", lambda home: object())
-    monkeypatch.setattr(worker, "run_next", lambda store, config, owner: False)
+    monkeypatch.setattr(worker, "run_next", lambda store, config, owner, user_only=False: False)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: None)
     register(store, "claude-code", str(tmp_path))
 
     assert worker.poll_once(store, owner="test", stop=threading.Event(), attempted={}) == 0
@@ -212,3 +214,15 @@ def test_manual_admission_still_resumes_a_paused_worktree(tmp_path: Path, monkey
 
     worker.admit_workspace(store, str(tmp_path), clock=lambda: T0)
     assert assessments.list_worktrees(store)[0]["paused"] is False
+
+
+def test_removing_an_install_withdraws_its_admission_while_the_host_is_busy(tmp_path: Path, monkeypatch) -> None:
+    store = GuardStore(tmp_path / "home")
+    snapshots(monkeypatch, worker, STAT)
+    register(store, "claude-code", str(tmp_path))
+    assert worker.admit_registered_workspaces(store, clock=lambda: T0) == 1
+    register(store, "claude-code", str(tmp_path), active=False)
+    monkeypatch.setattr(worker, "host_resource_pressure", lambda: "resource_pressure")
+
+    worker.poll_once(store, owner="test")
+    assert assessments.list_worktrees(store) == []

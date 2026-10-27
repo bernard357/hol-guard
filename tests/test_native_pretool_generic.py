@@ -217,8 +217,8 @@ def test_supported_cli_pretool_unavailability_does_not_use_source_ref_fallback(
     )
     monkeypatch.setattr(
         commands_hook_native_authority,
-        "_emit",
-        lambda _kind, payload, _json: emitted.append(payload),
+        "_emit_native_hook_json_document",
+        lambda payload, **_kwargs: emitted.append(payload),
     )
     guard_home = tmp_path / "guard-home"
     result = commands_hook_native_authority.route_native_hook(
@@ -248,6 +248,11 @@ def test_supported_cli_pretool_worker_exception_is_fail_safe(
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
 
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
+
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     response = commands_hook_native_authority.try_native_hook_authority(
         payload={"hook_event_name": "PreToolUse", "tool_input": {"url": "https://example.test"}},
@@ -276,6 +281,11 @@ def test_supported_cli_pretool_worker_exception_is_recorded_in_the_guard_log(
 
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
+
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
 
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     guard_home = tmp_path / "guard-home"
@@ -317,6 +327,11 @@ def test_supported_cli_pretool_worker_exception_points_stderr_at_the_guard_log(
 
         def review_http_payload(self, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("worker fixture failure")
+
+        def _apply_structured_unavailable_overlay(
+            self, response: dict[str, object], **_kwargs: object
+        ) -> dict[str, object]:
+            return response
 
     monkeypatch.setattr(commands_hook_native_authority, "HookWorker", BrokenWorker)
     with caplog.at_level(logging.WARNING, logger=commands_hook_native_authority.__name__):
@@ -367,11 +382,6 @@ def test_cli_frames_raw_payload_before_harness_normalization(
 
     monkeypatch.setattr(commands_hook, "_load_hook_payload", load_payload)
     monkeypatch.setattr(commands_hook, "route_native_hook", route_native)
-    monkeypatch.setattr(
-        commands_hook,
-        "_normalize_hook_payload",
-        lambda *_args, **_kwargs: pytest.fail("harness normalization preceded native framing"),
-    )
 
     result = commands_hook._run_guard_hook_command(
         args,

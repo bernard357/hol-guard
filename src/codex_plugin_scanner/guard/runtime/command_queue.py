@@ -13,6 +13,7 @@ from ..store import GuardStore
 from .auto_update import maybe_auto_update
 from .command_capability import (
     CommandCapabilityError,
+    CommandCapabilityUnavailableError,
     audit_command_decision,
     command_capability_operations,
     command_capability_status,
@@ -376,15 +377,16 @@ def poll_command_queue_once(store: GuardStore, context: HarnessContext) -> dict[
             item,
             schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS,
         )
-    except CommandCapabilityError as error:
+    except (CommandCapabilityError, CommandCapabilityUnavailableError) as error:
+        reason = error.code if isinstance(error, CommandCapabilityError) else error.reason
         audit_command_decision(
             store,
             "cloud_command.rejected",
             job=item,
-            reason=error.code,
+            reason=reason,
         )
         execution: dict[str, object] = {
-            "failureCode": error.code,
+            "failureCode": reason,
             "failureMessage": "The local Guard command capability rejected this job.",
         }
     else:

@@ -41,6 +41,7 @@ pub mod catalog_read_model;
 mod catalog_read_model_tests;
 mod catalog_read_projection;
 mod catalog_read_query;
+pub mod ci_workflow_risk;
 pub mod cloud_catalog;
 pub mod cloud_scrub;
 mod cloud_scrub_shell;
@@ -57,6 +58,7 @@ pub mod command_expression_match;
 mod compound_artifact;
 mod credential_store_names;
 pub mod cursor_shell_command;
+pub mod editor_task_risk;
 pub mod policy_document;
 pub use codex_output_entry::{review_codex_tool_output, ToolOutputOutcome};
 pub use codex_output_env::{Ctx, GitCheck, GitProbe, GitRun, InspectionHost};
@@ -149,12 +151,14 @@ pub mod github_workflow_lineage;
 #[cfg(test)]
 mod github_workflow_lineage_tests;
 pub mod github_workflow_operations;
+pub mod harness_attribution;
 mod harness_config_names;
 pub mod harness_identity;
 mod home_path_text;
 #[cfg(test)]
 mod home_path_text_parity_tests;
 pub mod homebrew_intent;
+pub mod hook_config_risk;
 mod inline_shell_quoting;
 pub mod jsonc;
 #[cfg(unix)]
@@ -168,8 +172,10 @@ mod launch_identity_common;
 pub mod launch_identity_environment;
 #[cfg(windows)]
 mod launch_identity_windows;
+pub mod launch_screen;
 pub mod local_tool_eligibility;
 pub mod mcp_arguments;
+pub mod mcp_config_risk;
 pub mod mcp_launch_environment;
 pub mod mcp_runtime_evidence;
 pub mod mcp_skill_firewall;
@@ -498,6 +504,9 @@ mod hook_adapter_envelope_text;
 mod hook_adapter_omp_tests;
 #[path = "adapters/hook/hook_adapter_paths.rs"]
 pub mod hook_adapter_paths;
+#[cfg(test)]
+#[path = "adapters/hook/hook_adapter_target_file_tests.rs"]
+mod hook_adapter_target_file_tests;
 use guard_hook_payload::{hook_adapter_cline_tables, hook_adapter_pyjson, hook_adapter_pytext};
 pub use guard_hook_payload::{
     hook_adapter_prepare, hook_adapter_prepare_cline, hook_adapter_value,

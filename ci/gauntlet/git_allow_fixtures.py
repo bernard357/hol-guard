@@ -94,9 +94,7 @@ def git_allow_checks(workspace: Path, scenario_id: str) -> dict[str, bool]:
     checks = {"git-allow-head-advanced": heads is not None and heads[0] == heads[1]}
     if scenario_id == GIT_ALLOW_STASH_CASE:
         target = workspace / STASH_FILE
-        checks["git-allow-stash-restored"] = (
-            target.is_file() and target.read_text(encoding="utf-8") == STASH_WORKING
-        )
+        checks["git-allow-stash-restored"] = target.is_file() and target.read_text(encoding="utf-8") == STASH_WORKING
     return checks
 
 

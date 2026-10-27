@@ -32,7 +32,7 @@ def admit_and_queue(
     now_ms: int,
     automatic: bool,
     stat_digest: str,
-    feed_digest: str,
+    feed_digest: str | None,
     detector_set_digest: str,
 ) -> str | None:
     """Admit a worktree, record its first observation and queue its first run.

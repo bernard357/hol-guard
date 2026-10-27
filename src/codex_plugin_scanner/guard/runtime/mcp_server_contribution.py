@@ -176,25 +176,6 @@ def validate_mcp_contribution(payload: Mapping[str, object], *, filename: str = 
             raise ValueError(f"{filename} direct-command contributions cannot declare allow defaults")
 
 
-def mcp_tool_state(payload: Mapping[str, object], tool_name: str) -> str:
-    tools = payload.get("tools")
-    if not isinstance(tools, list):
-        return "inherit"
-    wanted = _normalized_tool_name(tool_name)
-    fallback = "inherit"
-    for item in tools:
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name")
-        state = item.get("state")
-        normalized = _normalized_tool_name(name) if isinstance(name, str) else ""
-        if normalized == "other" and state in _TOOL_STATES:
-            fallback = cast(str, state)
-        if normalized == wanted and state in _TOOL_STATES:
-            return cast(str, state)
-    return fallback
-
-
 def _load_from_directory(directory: Path) -> tuple[dict[str, object], ...]:
     if not directory.is_dir():
         return ()
