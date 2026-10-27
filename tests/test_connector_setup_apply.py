@@ -400,11 +400,6 @@ _KNOWN_WRITE_SITES = {
     ("daemon/local_cli_api.py", "apply", "record_local_custom_extension_mutation"),
     (
         "runtime/custom_extension_continuity.py",
-        "apply_verified_custom_extension_continuity",
-        "apply_custom_extension_continuity_transaction",
-    ),
-    (
-        "runtime/custom_extension_continuity.py",
         "record_local_custom_extension_mutation",
         "apply_custom_extension_continuity_transaction",
     ),
