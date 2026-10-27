@@ -10,21 +10,42 @@
 //! the catalog to the live [`NativeCommandProgram`] and provides the same
 //! normalized lookup surface (`get`, `get_rule`, `permission`, …).
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
 
 use crate::native_command_program::packaged_command_program;
+use crate::workspace_inventory::python_strip;
 
 #[cfg(not(guard_source_bootstrap))]
-const EMBEDDED_CATALOG: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/command-catalog.v1.json"));
+static EMBEDDED_CATALOG: &[u8] = guard_command_catalog_data::CATALOG_JSON_ZST;
+
+/// The verified-at-build catalog bytes, for read-only projections such as
+/// [`crate::catalog_read_model`] that need fields this module does not type.
 // The bootstrap shadow lib (guard-command-build) produces no packaged output;
 // an empty slice keeps `include_bytes!` valid and `from_embedded` fails closed
 // exactly like the `EMBEDDED_PROGRAM` bootstrap path.
-#[cfg(guard_source_bootstrap)]
-const EMBEDDED_CATALOG: &[u8] = &[];
+pub(crate) fn embedded_catalog_bytes() -> &'static [u8] {
+    #[cfg(not(guard_source_bootstrap))]
+    {
+        static DECODED: OnceLock<Box<[u8]>> = OnceLock::new();
+        DECODED
+            .get_or_init(|| {
+                crate::packaged_blob::decode(
+                    EMBEDDED_CATALOG,
+                    guard_command_catalog_data::CATALOG_JSON_LEN,
+                    guard_command_catalog_data::CATALOG_JSON_SHA256,
+                )
+            })
+            .as_ref()
+    }
+    #[cfg(guard_source_bootstrap)]
+    {
+        &[]
+    }
+}
 
 /// One rule's metadata — the fields `GeneratedCommandRule` exposes that the
 /// compiled `ProgramRule` does not carry.
@@ -78,6 +99,15 @@ pub struct CatalogPermission {
     pub typed_capabilities: Vec<String>,
     pub description: String,
     pub deprecated: bool,
+    /// Display metadata; absent from older pack catalogs.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub risk_tier: String,
+    #[serde(default)]
+    pub example_command: Option<String>,
+    #[serde(default)]
+    pub family: Option<String>,
 }
 
 /// One extension's metadata — `GeneratedCommandExtension`.
@@ -88,11 +118,18 @@ pub struct CatalogExtension {
     pub source: String,
     pub required: bool,
     pub trust_class: String,
+    /// Display name; absent from older pack catalogs.
+    #[serde(default)]
+    pub name: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     /// `dependencies` — resolver extension-closure input.
     #[serde(default)]
     pub dependencies: Vec<String>,
+    /// `GeneratedCommandExtension.action_classes` — action classes the
+    /// extension owns (`for_action_class`).
+    #[serde(default)]
+    pub action_classes: Vec<String>,
     pub rules: Vec<CatalogRule>,
     pub permissions: Vec<CatalogPermission>,
 }
@@ -122,15 +159,35 @@ pub struct CommandCatalog {
 
 impl CommandCatalog {
     fn from_embedded() -> Result<Self, &'static str> {
+        Self::from_bytes(embedded_catalog_bytes())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_authored_test_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
+        Self::from_bytes(bytes)
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, &'static str> {
         #[derive(Deserialize)]
         struct Wrapper {
             catalog: Vec<CatalogExtension>,
             catalog_digest: String,
             program_digest: String,
         }
-        let wrapper: Wrapper = serde_json::from_slice(EMBEDDED_CATALOG)
-            .map_err(|_| "command_catalog_decode_failed")?;
-        let mut extensions = wrapper.catalog;
+        let wrapper: Wrapper =
+            serde_json::from_slice(bytes).map_err(|_| "command_catalog_decode_failed")?;
+        Self::from_extensions(
+            wrapper.catalog,
+            wrapper.program_digest,
+            wrapper.catalog_digest,
+        )
+    }
+
+    pub(crate) fn from_extensions(
+        mut extensions: Vec<CatalogExtension>,
+        program_digest: String,
+        catalog_digest: String,
+    ) -> Result<Self, &'static str> {
         extensions.sort_by(|a, b| a.extension_id.cmp(&b.extension_id));
 
         // Flatten rules in the same order the Python catalog does: extensions
@@ -192,8 +249,8 @@ impl CommandCatalog {
         }
 
         Ok(Self {
-            catalog_digest: wrapper.catalog_digest,
-            program_digest: wrapper.program_digest,
+            catalog_digest,
+            program_digest,
             extensions,
             by_extension_id,
             by_rule_id,
@@ -206,10 +263,20 @@ impl CommandCatalog {
     }
 
     /// Resolve an extension by `extension_id` or any of its `aliases`
-    /// (GeneratedCommandCatalog.get).
+    /// (GeneratedCommandCatalog.get). Like the Python lookup, the query is
+    /// stripped (`str.strip`, which also drops U+001C..U+001F) and lowercased
+    /// first; an already-normalized id skips the allocation.
     pub fn get(&self, extension_id: &str) -> Option<&CatalogExtension> {
+        let stripped = python_strip(extension_id);
+        let normalized = if stripped.len() == extension_id.len()
+            && !extension_id.chars().any(char::is_uppercase)
+        {
+            Cow::Borrowed(extension_id)
+        } else {
+            Cow::Owned(stripped.to_lowercase())
+        };
         self.by_extension_id
-            .get(extension_id)
+            .get(normalized.as_ref())
             .map(|index| &self.extensions[*index])
     }
 
@@ -237,6 +304,17 @@ impl CommandCatalog {
             .permission_by_rule_id
             .get(&rule_id.trim().to_lowercase())?;
         self.permissions_flat().get(index).copied()
+    }
+
+    /// `for_action_class`: whether any extension owns the action class.
+    pub fn has_action_class_owner(&self, action_class: &str) -> bool {
+        let normalized = action_class.trim().to_lowercase();
+        self.extensions.iter().any(|extension| {
+            extension
+                .action_classes
+                .iter()
+                .any(|action| action.trim().to_lowercase() == normalized)
+        })
     }
 
     /// First non-fallback rule for an action_class (rule_for_action_class).

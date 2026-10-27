@@ -7,11 +7,10 @@ import copy
 import json
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.guard import policy_bundle_parser, policy_bundle_v2
+from codex_plugin_scanner.guard import policy_bundle_v2
 from codex_plugin_scanner.guard.daemon import GuardDaemonServer
 from codex_plugin_scanner.guard.managed_controls_policy_bundle import (
     signed_cloud_extension_projection_digest,
@@ -74,6 +73,7 @@ def _fixture(store: GuardStore) -> tuple[dict[str, object], dict[str, object]]:
     wire_digest = build_builtin_extension_catalog_wire(
         guard_version="test",
         generated_at="2026-08-25T12:00:00Z",
+        guard_home=store.guard_home,
     )["catalogDigest"]
     device_id, _ = runner._guard_device_metadata(store)
     store.set_sync_payload(
@@ -113,11 +113,6 @@ def _fixture(store: GuardStore) -> tuple[dict[str, object], dict[str, object]]:
 def _enable(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep the signed fixture byte-for-byte stable while making this test
     # deterministic after its real-world expiry date.
-    monkeypatch.setattr(
-        policy_bundle_parser,
-        "time",
-        SimpleNamespace(time=lambda: _POLICY_BUNDLE_FIXTURE_NOW.timestamp()),
-    )
     monkeypatch.setattr(policy_bundle_v2, "datetime", _PolicyBundleFixtureDatetime)
     for name in (
         "GUARD_EXTENSION_CATALOG_SYNC_V1",

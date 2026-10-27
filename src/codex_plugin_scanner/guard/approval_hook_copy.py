@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .daemon.manager import load_guard_daemon_auth_token
+from .blocked_request_mode import is_unlinked_connector_setup_reason
+from .daemon.auth_token import load_guard_daemon_auth_token
 from .local_dashboard_session import build_approval_browser_url
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -95,7 +96,8 @@ def with_approval_review_url(
 
     review_url = approval_review_url_from_payload(payload)
     stripped = reason.strip()
-    if review_url is None:
+    if review_url is None or is_unlinked_connector_setup_reason(stripped):
+        # A default-mode connector setup reason never carries a link.
         return stripped
     live_url = live_approval_review_url(review_url, guard_home=guard_home)
     if live_url != review_url and review_url in stripped:
@@ -117,8 +119,15 @@ def is_loopback_approval_url(url: str) -> bool:
 
 
 def join_native_hook_reason(*values: object | None) -> str:
-    """Join hook reason parts, keeping the tokenized Open-HOL-Guard copy when both exist."""
+    """Join hook reason parts, keeping the tokenized Open-HOL-Guard copy when both exist.
 
+    Next to a default-mode connector setup reason, parts that offer approval are dropped.
+    """
+
+    if any(is_unlinked_connector_setup_reason(value) for value in values):
+        values = tuple(
+            value for value in values if not (isinstance(value, str) and _OPEN_GUARD_MARKER in value.lower())
+        )
     messages: list[str] = []
     for value in values:
         if isinstance(value, str) and value.strip():
@@ -151,30 +160,3 @@ def join_native_hook_reason(*values: object | None) -> str:
     if messages:
         return " ".join(messages)
     return _DEFAULT_HOOK_REASON
-
-
-def live_hook_approval_context(
-    response_payload: dict[str, object],
-    *,
-    harness: str,
-    guard_home: Path,
-) -> str | None:
-    """Build ephemeral hook copy with a loopback-only scoped dashboard token."""
-
-    from .cli.commands_support_runtime_policy import _native_approval_center_context
-
-    message = _native_approval_center_context(response_payload, harness=harness)
-    if message is None:
-        return message
-    from .cli.commands_support_interaction import _preferred_approval_review_url
-
-    review_url = _preferred_approval_review_url(response_payload, harness=harness)
-    if review_url is None:
-        review_url = approval_review_url_from_payload(response_payload)
-    if review_url is None or not is_loopback_approval_url(review_url):
-        return message
-    tokenized = authenticated_approval_review_url(review_url, guard_home=guard_home)
-    if tokenized is None:
-        without_raw_url = _without_raw_approval_url(message, review_url)
-        return f"{without_raw_url} {_SIGNED_APPROVAL_LINK_UNAVAILABLE}".strip()
-    return message.replace(review_url, tokenized)

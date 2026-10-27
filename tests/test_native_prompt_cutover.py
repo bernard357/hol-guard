@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,8 +12,10 @@ import pytest
 from codex_plugin_scanner.guard import native_execution, native_prompt
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
 from codex_plugin_scanner.guard.config import GuardConfig
-from codex_plugin_scanner.guard.models import HarnessDetection
+from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
+from codex_plugin_scanner.guard.runtime import guard_run_evaluation as guard_run_evaluation
 from codex_plugin_scanner.guard.runtime import runner
+from codex_plugin_scanner.guard.runtime import wrapper_run as wrapper_run
 from codex_plugin_scanner.guard.store import GuardStore
 
 
@@ -44,10 +47,58 @@ def test_real_resident_prompt_artifacts_and_reapproval(prompt_home, tmp_path):
     assert not native_prompt.should_force_reapproval([], None)
     context = HarnessContext(home_dir=tmp_path, guard_home=prompt_home, workspace_dir=tmp_path)
     detection = HarnessDetection(harness="codex", installed=True, command_available=True, config_paths=(), artifacts=())
-    artifacts = runner.prompt_requests_to_artifacts(detection=detection, context=context, requests=requests)
+    artifacts = guard_run_evaluation.prompt_requests_to_artifacts(
+        detection=detection, context=context, requests=requests
+    )
     assert len(artifacts) == 1
     assert artifacts[0].metadata["prompt_request_class"] == "secret_read"
     assert artifacts[0].artifact_id.endswith(requests[0].request_id[:24])
+
+
+def _prompt_part(artifact_id: str, request_class: str, matched: str, display: str) -> GuardArtifact:
+    return GuardArtifact(
+        artifact_id=artifact_id,
+        name=f"prompt {request_class} request",
+        harness="codex",
+        artifact_type="prompt_request",
+        source_scope="project",
+        config_path="/work/project/.codex/config.toml",
+        metadata={
+            "prompt_signals": [request_class],
+            "prompt_request_class": request_class,
+            "prompt_matched_text": matched,
+            "prompt_display_text": display,
+        },
+    )
+
+
+def test_real_resident_merges_prompt_artifacts_into_one_review(prompt_home):
+    parts = [
+        _prompt_part("codex:session:prompt:b", "secret_read", ".env", "Read .env"),
+        _prompt_part("codex:session:prompt:a", "exfiltration", "curl", "Send it out"),
+    ]
+    merged = native_prompt.merge_prompt_artifacts("codex", parts)
+    assert merged.artifact_id.startswith("codex:session:prompt:multi:")
+    assert merged.name == "prompt multi-signal request"
+    assert merged.source_scope == "project"
+    assert merged.config_path == "/work/project/.codex/config.toml"
+    assert merged.metadata["prompt_request_classes"] == ["secret_read", "exfiltration"]
+    assert merged.metadata["prompt_matched_texts"] == [".env", "curl"]
+    assert merged.metadata["request_summary"] == "Prompt matches multiple guarded request classes."
+    assert native_prompt.merge_prompt_artifacts("codex", list(reversed(parts))).artifact_id == merged.artifact_id
+
+
+def test_merged_prompt_review_cannot_fall_back_to_python(monkeypatch, tmp_path):
+    monkeypatch.setattr(native_execution, "_resident_request", lambda **_: {"result": None})
+    with pytest.raises(native_prompt.NativePromptAnalysisError):
+        native_prompt.merge_prompt_artifacts(
+            "codex",
+            [
+                _prompt_part("codex:session:prompt:a", "secret_read", ".env", "Read .env"),
+                _prompt_part("codex:session:prompt:b", "exfiltration", "curl", "Send it out"),
+            ],
+            guard_home=tmp_path,
+        )
 
 
 @pytest.mark.parametrize(
@@ -67,16 +118,16 @@ def test_real_resident_attachment_intent(prompt_home, text, state):
 def test_missing_or_malformed_authority_cannot_start_harness(monkeypatch, tmp_path, reply):
     monkeypatch.setattr(native_execution, "_resident_request", lambda **_: reply)
     monkeypatch.setattr(
-        runner,
+        wrapper_run,
         "detect_harness",
         lambda *_: HarnessDetection(
             harness="codex", installed=True, command_available=True, config_paths=(), artifacts=()
         ),
     )
-    monkeypatch.setattr(runner, "evaluate_detection", lambda *_args, **_kwargs: pytest.fail("evaluation reached"))
+    monkeypatch.setattr(wrapper_run, "evaluate_detection", lambda *_args, **_kwargs: pytest.fail("evaluation reached"))
     context = HarnessContext(home_dir=tmp_path, guard_home=tmp_path / "guard", workspace_dir=tmp_path)
     with pytest.raises(native_prompt.NativePromptAnalysisError):
-        runner.guard_run(
+        wrapper_run.guard_run(
             "codex",
             context,
             GuardStore(context.guard_home),
@@ -87,17 +138,16 @@ def test_missing_or_malformed_authority_cannot_start_harness(monkeypatch, tmp_pa
 
 
 def test_native_prompt_failure_is_not_an_empty_detector_result(monkeypatch):
-    from codex_plugin_scanner.guard.runtime.detectors import DetectorRegistry
+    from codex_plugin_scanner.guard.native_runtime_detectors import NativeRuntimeDetectorError
+    from codex_plugin_scanner.guard.runtime import detectors
 
-    class Unavailable:
-        detector_id = "prompt.native"
-        categories = ("prompt",)
+    def unavailable(*_args, **_kwargs):
+        raise NativeRuntimeDetectorError("native_runtime_detector_run_unavailable")
 
-        def detect(self, *_):
-            raise native_prompt.NativePromptAnalysisError("native_prompt_analysis_unavailable")
-
-    with pytest.raises(native_prompt.NativePromptAnalysisError):
-        DetectorRegistry([Unavailable()]).run(SimpleNamespace(), SimpleNamespace())
+    monkeypatch.setattr(detectors, "native_runtime_detector_entries", unavailable)
+    context = SimpleNamespace(workspace=None, guard_home=None, config=SimpleNamespace(guard_home=None))
+    with pytest.raises(NativeRuntimeDetectorError):
+        detectors.DetectorRegistry([detectors.NativeRuntimeDetectors()]).run(SimpleNamespace(), context)
 
 
 def test_retired_python_prompt_implementations_are_absent():
@@ -113,10 +163,7 @@ def test_retired_python_prompt_implementations_are_absent():
     names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     names.update(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
     assert not retired & names
-    from codex_plugin_scanner.guard.runtime import prompt_injection
-
-    facade = ast.parse(Path(prompt_injection.__file__).read_text())
-    assert not any(isinstance(node, ast.FunctionDef) for node in facade.body)
+    assert importlib.util.find_spec("codex_plugin_scanner.guard.runtime.prompt_injection") is None
 
 
 @pytest.mark.parametrize(
@@ -134,7 +181,7 @@ def test_prompt_transport_rejects_wrong_or_ambiguous_response(monkeypatch, tmp_p
         available=True,
         compatible=True,
         identity=SimpleNamespace(path=tmp_path / "runtime", sha256="a" * 64),
-        capabilities=SimpleNamespace(features=("resident-protocol-v2", "prompt-analyze-v1")),
+        capabilities=SimpleNamespace(features=("resident-protocol-v2", "prompt-analyze-v2")),
     )
     monkeypatch.setattr(native_execution, "native_runtime_status", lambda: status)
     monkeypatch.setattr(native_execution, "native_resident_client_request", lambda **_: json.dumps(payload).encode())
@@ -208,27 +255,3 @@ def test_actual_hook_uses_request_home_instead_of_ambient_default(native_hook_fo
     assert payload["decision"] == "block"
     assert payload.get("reason_code") != "native_prompt_unavailable"
     assert "HOL Guard" in payload["reason"]
-
-
-def test_attachment_stream_keeps_explicit_native_home(monkeypatch, tmp_path):
-    from codex_plugin_scanner.guard.cli import commands_support_codex_prompt_attachments as attachment
-
-    observed = []
-
-    def extract(text, *, guard_home):
-        observed.append(("extract", guard_home))
-        return []
-
-    def trailing(text, *, guard_home):
-        observed.append(("trailing", guard_home))
-        return None
-
-    monkeypatch.setattr(attachment, "extract_prompt_requests", extract)
-    monkeypatch.setattr(attachment, "_trailing_secret_read_state", trailing)
-    result = attachment._classify_stream_window(
-        "Public documentation",
-        inherited_secret_read_state=None,
-        guard_home=tmp_path,
-    )
-    assert result == ((), None)
-    assert observed == [("extract", tmp_path), ("trailing", tmp_path)]

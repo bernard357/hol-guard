@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import replace
@@ -16,13 +17,8 @@ from codex_plugin_scanner.guard.approval_gate import ApprovalGateError, Approval
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution, bulk_allow_read_only_once
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.daemon import GuardDaemonServer
-from codex_plugin_scanner.guard.mcp_fresh_approval import (
-    fresh_claim_allows_reapproval,
-    fresh_local_tool_approval_matches,
-    fresh_lookup_preserves_claim,
-)
 from codex_plugin_scanner.guard.mcp_tool_calls import evaluate_tool_call
-from codex_plugin_scanner.guard.models import GuardArtifact, PolicyDecision
+from codex_plugin_scanner.guard.models import PolicyDecision
 from codex_plugin_scanner.guard.native_resident_client import native_resident_client_failure_code
 from codex_plugin_scanner.guard.proxy import OpenCodeMcpGuardProxy
 from codex_plugin_scanner.guard.proxy import runtime_mcp as runtime
@@ -30,7 +26,13 @@ from codex_plugin_scanner.guard.store import GuardStore
 from tests.test_guard_bulk_allow_once import PASSWORD, _enable_gate
 from tests.test_guard_runtime_mcp_saved_blocks import _child_command, _context, _messages
 
-pytestmark = pytest.mark.usefixtures("bundle_first_cloud")
+
+pytestmark = [pytest.mark.usefixtures("bundle_first_cloud")]
+
+# Windows binds the launch executable by content and file ID but proves no
+# entrypoint, so every launch identity carries a fresh reuse nonce. No
+# approval can then match a later launch, and every retry must stay refused.
+LAUNCH_REUSABLE = sys.platform != "win32"
 
 
 def _save_rule(store, request, action):
@@ -80,6 +82,8 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     install_fake_system_keyring,
+    native_context_digest: Path,
+    native_mcp_probe,
     grant_kind: str,
     mutation: str,
     direct: bool = False,
@@ -96,6 +100,7 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
 
     monkeypatch.setattr(native_context, "native_resident_client_request", observe_resident_request)
     ctx = _context(tmp_path)
+    native_mcp_probe(ctx.guard_home)
     store = GuardStore(ctx.guard_home)
     _enable_gate(store)
     config = GuardConfig(
@@ -135,10 +140,15 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
         "shebang_status": launch_identity.get("shebang_status"),
         "differing_stat_fields": differing_stat_fields,
     }
-    assert entrypoint.get("status") != "unproven", {
+    entrypoint_evidence = {
         "entrypoint_status": entrypoint.get("status"),
         "entrypoint_reason": entrypoint.get("reason"),
     }
+    if LAUNCH_REUSABLE:
+        assert entrypoint.get("status") != "unproven", entrypoint_evidence
+    else:
+        assert entrypoint_evidence == {"entrypoint_status": "unproven", "entrypoint_reason": "unsupported_platform"}
+        assert entrypoint.get("reuse_nonce")
     proxy = OpenCodeMcpGuardProxy(
         server_name="synthetic-no-network",
         command=command,
@@ -259,13 +269,27 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
             elif claimed and mutation == "postclaim-config":
                 proxy._current_config_provider = lambda: replace(config, risk_actions={"mcp_dangerous_tool": "block"})
             elif claimed:
-                assert proxy._child_output_queue is not None
-                proxy._child_output_queue.put(
-                    runtime._ChildOutputFrame(
-                        line=json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed", "params": {}})
+                if proxy._child_output_queue is not None:
+                    proxy._child_output_queue.put(
+                        runtime._ChildOutputFrame(
+                            line=json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed", "params": {}})
+                            + "\n"
+                        )
+                    )
+                else:
+                    # Native MCP session plane owns the child's stdout; there is
+                    # no Python output queue to inject a `tools/list_changed`
+                    # frame into. Queue the notification on the native
+                    # transport's pending seam so the forward drain reads it
+                    # and the catalog differs at `immediately_before_forward`.
+                    native_process = proxy._active_process
+                    assert native_process is not None
+                    native_stdout = native_process.stdout
+                    assert native_stdout is not None
+                    native_stdout._pending.append(
+                        json.dumps({"jsonrpc": "2.0", "method": "notifications/tools/list_changed", "params": {}})
                         + "\n"
                     )
-                )
             if claimed:
                 mutation_applied.append(True)
             return claimed
@@ -288,6 +312,11 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
             arguments=arguments,
             fresh_authority_provider=fresh_authority,
         )
+        if not LAUNCH_REUSABLE:
+            assert artifact_hash != request["artifact_hash"]
+            assert decision.action != "allow", decision.approval_reuse_status
+            assert not marker.exists()
+            return
         assert decision.action == "allow", {
             "action": decision.action,
             "reuse_status": decision.approval_reuse_status,
@@ -308,9 +337,11 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
         assert not marker.exists()
         return
     second = proxy.run_session(messages)
-    if mutation not in {"none", "older-allow"} or grant_kind == "retained":
+    if not LAUNCH_REUSABLE or mutation not in {"none", "older-allow"} or grant_kind == "retained":
         assert not marker.exists(), second["events"][2]
         assert "error" in second["responses"][2]
+        if not LAUNCH_REUSABLE:
+            return
         if mutation in {"deny-after-claim", "final-catalog", "postclaim-config"}:
             assert mutation_applied == [True], {
                 "event": second["events"][2],
@@ -330,9 +361,11 @@ def test_fresh_opencode_reapproval_runs_exactly_once(
     assert len(marker.read_text().splitlines()) == 1
 
 
-def test_retained_rule_cannot_satisfy_fresh_approval(tmp_path, monkeypatch, install_fake_system_keyring):
+def test_retained_rule_cannot_satisfy_fresh_approval(
+    tmp_path, monkeypatch, install_fake_system_keyring, native_context_digest, native_mcp_probe
+):
     test_fresh_opencode_reapproval_runs_exactly_once(
-        tmp_path, monkeypatch, install_fake_system_keyring, "retained", "none"
+        tmp_path, monkeypatch, install_fake_system_keyring, native_context_digest, native_mcp_probe, "retained", "none"
     )
 
 
@@ -340,72 +373,26 @@ def test_retained_rule_cannot_satisfy_fresh_approval(tmp_path, monkeypatch, inst
     "mutation",
     ["expired", "unavailable-review", "malformed-review", "http-malformed", "http-missing-auth", "http-unavailable"],
 )
-def test_invalid_review_never_launches(tmp_path, monkeypatch, install_fake_system_keyring, mutation):
+def test_invalid_review_never_launches(
+    tmp_path, monkeypatch, install_fake_system_keyring, native_context_digest, native_mcp_probe, mutation
+):
     test_fresh_opencode_reapproval_runs_exactly_once(
-        tmp_path, monkeypatch, install_fake_system_keyring, "local-once", mutation
+        tmp_path, monkeypatch, install_fake_system_keyring, native_context_digest, native_mcp_probe, "local-once", mutation
     )
 
 
 @pytest.mark.parametrize("grant_kind", ["single", "local-once", "bulk"])
 @pytest.mark.parametrize("mutation", ["none", "older-allow"])
-def test_direct_postclaim_revalidation(tmp_path, monkeypatch, install_fake_system_keyring, grant_kind, mutation):
+def test_direct_postclaim_revalidation(
+    tmp_path, monkeypatch, install_fake_system_keyring, native_context_digest, native_mcp_probe, grant_kind, mutation
+):
     test_fresh_opencode_reapproval_runs_exactly_once(
-        tmp_path, monkeypatch, install_fake_system_keyring, grant_kind, mutation, direct=True
-    )
-
-
-def test_fresh_approval_helpers_require_exact_proof():
-    artifact = GuardArtifact(
-        artifact_id="artifact-id",
-        name="test-tool",
-        harness="opencode",
-        artifact_type="mcp",
-        source_scope="project",
-        config_path="/workspace/.opencode/opencode.json",
-    )
-    proof = {
-        "source": "approval-gate-once",
-        "approval_id": "approval-id",
-        "action": "allow",
-        "scope": "artifact",
-        "harness": artifact.harness,
-        "artifact_id": artifact.artifact_id,
-        "artifact_hash": "artifact-hash",
-        "expires_at": "2030-01-01T00:00:00+00:00",
-    }
-
-    assert fresh_local_tool_approval_matches(proof, artifact=artifact, artifact_hash="artifact-hash")
-    assert not fresh_local_tool_approval_matches(
-        {**proof, "source": "retained-policy"}, artifact=artifact, artifact_hash="artifact-hash"
-    )
-    assert not fresh_local_tool_approval_matches(
-        {**proof, "source": "approval-gate", "decision_id": True},
-        artifact=artifact,
-        artifact_hash="artifact-hash",
-    )
-    assert not fresh_local_tool_approval_matches(
-        {**proof, "source": "approval-gate", "decision_id": "1"},
-        artifact=artifact,
-        artifact_hash="artifact-hash",
-    )
-    assert fresh_local_tool_approval_matches(
-        {**proof, "source": "approval-gate", "decision_id": 1},
-        artifact=artifact,
-        artifact_hash="artifact-hash",
-    )
-    assert fresh_lookup_preserves_claim(None)
-    assert not fresh_lookup_preserves_claim("unexpected-reason")
-    assert fresh_claim_allows_reapproval(
-        claim_disposition="consumed",
-        reason_code=None,
-        decision=proof,
-        artifact=artifact,
-        artifact_hash="artifact-hash",
-    )
-    assert not fresh_claim_allows_reapproval(
-        claim_disposition="unconsumed",
-        reason_code=None,
-        decision=proof,
-        artifact=artifact,
-        artifact_hash="artifact-hash",
+        tmp_path,
+        monkeypatch,
+        install_fake_system_keyring,
+        native_context_digest,
+        native_mcp_probe,
+        grant_kind,
+        mutation,
+        direct=True,
     )

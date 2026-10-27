@@ -206,12 +206,16 @@ def test_healthz_details_require_compatible_same_release_peer() -> None:
     compatible = {
         "compatibility_version": daemon_manager_module.GUARD_DAEMON_COMPATIBILITY_VERSION,
         "package_version": __version__,
+        "source_root": "/peer-install",
         "runtime_fingerprint": "desktop-sidecar-fingerprint",
     }
     incompatible = dict(compatible)
     incompatible["compatibility_version"] = "not-current"
+    legacy = dict(compatible)
+    del legacy["source_root"]
     assert daemon_manager_module._daemon_healthz_details_match_current_runtime(compatible)
     assert not daemon_manager_module._daemon_healthz_details_match_current_runtime(incompatible)
+    assert not daemon_manager_module._daemon_healthz_details_match_current_runtime(legacy)
 
 
 def test_load_guard_daemon_url_rejects_older_package_version(
@@ -279,12 +283,18 @@ def test_load_guard_daemon_url_accepts_same_release_peer_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     guard_home = tmp_path / "guard-home"
-    daemon_manager_module.write_guard_daemon_state(
-        guard_home,
-        5530,
-        "token-123",
-        pid=12345,
-    )
+    with monkeypatch.context() as peer_install:
+        peer_install.setattr(
+            daemon_manager_module,
+            "_current_guard_daemon_source_root",
+            lambda: str(tmp_path / "peer-install"),
+        )
+        daemon_manager_module.write_guard_daemon_state(
+            guard_home,
+            5530,
+            "token-123",
+            pid=12345,
+        )
     monkeypatch.setattr(
         daemon_manager_module,
         "_current_guard_daemon_runtime_fingerprint",
@@ -313,32 +323,24 @@ def test_availability_without_acknowledged_watch_denies_git_and_network(tmp_path
         encoding="utf-8",
     )
     git_cmd = availability_harness_response(
-        {"hook_event_name": "PreToolUse", "tool_input": {"command": "git status"}},
         harness="grok",
         event_name="PreToolUse",
         reason_code="native_pre_tool_unavailable",
         reason="native unavailable",
-        guard_home=guard_home,
-        workspace=tmp_path,
-        home_dir=tmp_path / "home",
     )
     assert git_cmd["decision"] == "deny"
     gh_cmd = availability_harness_response(
-        {"hook_event_name": "PreToolUse", "tool_input": {"command": "gh pr view 1"}},
         harness="grok",
         event_name="PreToolUse",
         reason_code="native_pre_tool_unavailable",
         reason="native unavailable",
-        guard_home=guard_home,
     )
     assert gh_cmd["decision"] == "deny"
 
 
 def test_cursor_fallback_without_mode_authority_denies_shell() -> None:
     allow, code = cursor_fallback_permission(
-        {"hook_event_name": "beforeShellExecution", "command": "rm -rf /"},
         hook_event_name="beforeShellExecution",
-        recording_only=True,
     )
     assert code == 2
     assert allow["permission"] == "deny"
@@ -355,10 +357,6 @@ def test_watch_unavailable_pretool_records_command_activity(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "codex_plugin_scanner.guard.daemon.hook_worker.native_mode",
-        lambda: "auto",
-    )
-    monkeypatch.setattr(
         "codex_plugin_scanner.guard.daemon.hook_worker.review_raw_hook_native",
         lambda *_args, **_kwargs: None,
     )
@@ -373,8 +371,8 @@ def test_watch_unavailable_pretool_records_command_activity(
         guard_home=guard_home,
         workspace=tmp_path / "workspace",
     )
-    assert result["decision"] == "allow"
+    assert result["decision"] == "deny"
     writer.submit_command_activity.assert_called_once()
     recorded = writer.submit_command_activity.call_args.kwargs
     assert recorded["event"] == "PreToolUse"
-    assert recorded["succeeded"] is True
+    assert recorded["succeeded"] is False

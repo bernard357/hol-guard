@@ -10,6 +10,7 @@ import { QueueConnectionError } from "./queue-connection-error";
 import { ErrorBoundary } from "./error-boundary";
 import { lazyWorkspace } from "./lazy-workspace";
 import type { BulkGateCredentials } from "./approval-gate-utils";
+import type { QueueGroup } from "./queue-state";
 import type {
   GuardApprovalGatePublicConfig,
   GuardApprovalRequest,
@@ -23,7 +24,11 @@ import type {
 } from "./guard-types";
 import { useGuardUpdate } from "./guard-update-panel";
 import { updateSettings } from "./guard-api";
+import { dashboardEmbedsInDesktop } from "./desktop-embed";
+import { GuardUpdateBanner, readDismissedDesktopUpdateVersion } from "./guard-update-banner";
+import { desktopUpdateBannerModel } from "./guard-update-copy";
 import { WatchProtectionBanner } from "./watch-protection-banner";
+import { turnProtectionOnUpdate, watchBannerModel } from "./harness-posture-ui";
 
 const McpPolicyRequestPanel = lazyWorkspace("mcp-policy-request-panel", () =>
   import("./mcp-policy-request-panel").then((m) => ({ default: m.McpPolicyRequestPanel })),
@@ -61,6 +66,7 @@ type RuntimeState =
 export type { BulkGateCredentials } from "./approval-gate-utils";
 
 type LayoutProps = {
+  onRetryDetail?: () => void;
   view: AppView;
   requests: RequestState;
   detail: DetailState;
@@ -79,6 +85,7 @@ type LayoutProps = {
   supplyChainHubContent?: ReactNode;
   policyContent?: ReactNode;
   aboutContent?: ReactNode;
+  releasesContent?: ReactNode;
   protectionRepairContent?: ReactNode;
   onGoHome: () => void;
   onNavigate: (pathname: string) => void;
@@ -97,23 +104,29 @@ type LayoutProps = {
     scope_contract_digest?: string;
   }) => void;
   onBulkApprove?: (ids: string[], gateCredentials?: BulkGateCredentials) => void | Promise<void>;
+  onBulkBlock?: (groups: QueueGroup[]) => Promise<void>;
   onRepair?: () => Promise<void>;
   onClearEvidence?: () => void;
   onRetryResume?: () => void;
   onGuardReconnected?: () => void;
 };
 
-function InboxWatchBanner(props: { onRestored?: () => void; onOpenSettings: () => void }) {
+function InboxWatchBanner(props: {
+  snapshot: GuardRuntimeSnapshot;
+  onRestored?: () => void;
+  onOpenSettings: () => void;
+}) {
+  const { snapshot } = props;
   const handleTurnOn = useCallback(() => {
-    void updateSettings({ protection_posture: "protected" })
+    void updateSettings(turnProtectionOnUpdate(snapshot))
       .then(() => {
         props.onRestored?.();
       })
       .catch(() => {
         props.onOpenSettings();
       });
-  }, [props.onOpenSettings, props.onRestored]);
-  return <WatchProtectionBanner onTurnProtectionOn={handleTurnOn} />;
+  }, [props.onOpenSettings, props.onRestored, snapshot]);
+  return <WatchProtectionBanner model={watchBannerModel(snapshot)} onTurnProtectionOn={handleTurnOn} />;
 }
 
 function renderInboxContent(props: LayoutProps): ReactNode {
@@ -158,6 +171,9 @@ function renderInboxContent(props: LayoutProps): ReactNode {
     <ReviewWorkspace
       requests={props.requests.items}
       activeRequestId={props.activeRequestId}
+      detailError={props.detail.kind === "error" ? props.detail.message : null}
+      detailLoading={props.detail.kind === "loading"}
+      onRetryDetail={props.onRetryDetail}
       detail={
         props.detail.kind === "ready"
           ? {
@@ -177,6 +193,7 @@ function renderInboxContent(props: LayoutProps): ReactNode {
       onGoHome={props.onGoHome}
       onRetryResume={props.onRetryResume}
       onBulkApprove={props.onBulkApprove}
+      onBulkBlock={props.onBulkBlock}
     />
   );
 }
@@ -213,13 +230,17 @@ function renderViewContent(props: LayoutProps): ReactNode {
   if (props.view === "about") {
     return props.aboutContent ?? null;
   }
+  if (props.view === "releases") {
+    return props.releasesContent ?? null;
+  }
   if (props.view === "policy") {
     return props.policyContent ?? null;
   }
   if (
     props.view === "supply-chain" ||
     props.view === "audit" ||
-    props.view === "feed-health"
+    props.view === "feed-health" ||
+    props.view === "workspaces"
   ) {
     return props.supplyChainHubContent ?? null;
   }
@@ -271,6 +292,18 @@ export function ApprovalCenterLayout(props: LayoutProps) {
     onSetUpdateChannel,
   } = useGuardUpdate({ onReconnected: props.onGuardReconnected });
 
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(
+    () => readDismissedDesktopUpdateVersion(),
+  );
+  const handleDismissUpdateBanner = useCallback((version: string) => {
+    setDismissedUpdateVersion(version);
+  }, []);
+  const updateBannerModel = desktopUpdateBannerModel(
+    updateStatus,
+    dashboardEmbedsInDesktop(),
+    dismissedUpdateVersion,
+  );
+
   return (
     <div className="min-h-screen bg-white text-brand-dark">
       <ShellNavigation
@@ -309,11 +342,20 @@ export function ApprovalCenterLayout(props: LayoutProps) {
       >
         <main id="main-content" className="guard-shell-main flex-1" tabIndex={-1}>
           <div className="guard-shell-workspace" data-view={props.view}>
+            {updateBannerModel ? (
+              <div className="mb-4">
+                <GuardUpdateBanner
+                  model={updateBannerModel}
+                  onDismiss={handleDismissUpdateBanner}
+                />
+              </div>
+            ) : null}
             {props.view === "inbox"
               && props.runtime.kind === "ready"
-              && props.runtime.snapshot.protection_posture === "watch" ? (
+              && watchBannerModel(props.runtime.snapshot) !== null ? (
               <div className="mb-4">
                 <InboxWatchBanner
+                  snapshot={props.runtime.snapshot}
                   onRestored={props.onGuardReconnected}
                   onOpenSettings={handleOpenSettings}
                 />

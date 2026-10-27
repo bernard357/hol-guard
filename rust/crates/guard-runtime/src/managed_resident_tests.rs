@@ -1,9 +1,7 @@
-use super::containment::{is_retryable_live_request_error, is_stale_process_identity_error};
 use super::*;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn generation_parser_rejects_zero_and_non_numeric() {
@@ -12,31 +10,13 @@ fn generation_parser_rejects_zero_and_non_numeric() {
     assert_eq!(parse_generation("7").unwrap(), 7);
 }
 
-#[test]
-fn client_deadline_is_bounded() {
-    assert_eq!(
-        client_timeout(br#"{"deadline_budget_ms":999999}"#),
-        Duration::from_secs(9)
-    );
-    assert_eq!(client_timeout(br#"{}"#), Duration::from_millis(750));
-    assert_eq!(
-        client_timeout(br#"{"deadline_budget_ms":250}"#),
-        Duration::from_millis(250)
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn startup_wait_honors_remaining_caller_budget() {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let root = std::env::temp_dir().join(format!(
         "hol-guard-startup-budget-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).unwrap();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
@@ -70,10 +50,7 @@ fn zero_client_timeout_rejects_before_state_mutation() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-zero-timeout-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
 
     assert_eq!(
@@ -88,10 +65,7 @@ fn expired_client_deadline_rejects_before_request_setup() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-expired-deadline-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).expect("test state directory should be created");
     let client_lease = lease::acquire(&root).expect("test lease should be acquired");
@@ -118,10 +92,7 @@ fn client_request_cannot_spawn_while_update_barrier_is_held() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-update-barrier-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).expect("test state directory should be created");
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
@@ -204,10 +175,7 @@ fn client_leases_keep_shared_resident_alive_until_last_client_closes() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-client-lease-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).unwrap();
     let digest = runtime_digest().unwrap();
@@ -252,14 +220,10 @@ fn retire_clients_for_update_terminates_exact_process() {
         std::thread::sleep(Duration::from_secs(120));
         return;
     }
-
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-lease-retire-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).unwrap();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
@@ -316,10 +280,7 @@ fn stale_lease_cleanup_requires_a_dead_process_identity() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-stale-lease-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).unwrap();
     let directory = root.join("resident-client-leases.v1");
@@ -362,10 +323,7 @@ fn lease_directory_overflow_fails_closed_without_unbounded_collection() {
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-lease-overflow-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir_all(root.join("resident-client-leases.v1")).unwrap();
     #[cfg(unix)]
@@ -404,19 +362,17 @@ fn lease_directory_overflow_fails_closed_without_unbounded_collection() {
 #[test]
 fn owner_liveness_expires_after_launcher_and_all_clients_disappear() {
     use std::fs;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     let root = std::env::temp_dir().join(format!(
         "hol-guard-managed-owner-liveness-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fs::create_dir(&root).unwrap();
     let lease = lease::acquire(&root).unwrap();
-    let alive = managed_owner_liveness(&root, 1, "never-matches".to_owned());
+    let digest = runtime_digest().unwrap();
+    let alive = managed_owner_liveness(&root, 1, "never-matches".to_owned(), &digest);
     std::thread::sleep(Duration::from_millis(150));
     assert!(alive.load(Ordering::Acquire));
     drop(lease);
@@ -430,70 +386,11 @@ fn owner_liveness_expires_after_launcher_and_all_clients_disappear() {
     fs::remove_dir_all(root).unwrap();
 }
 
-#[test]
-fn stale_process_identity_errors_are_platform_scoped() {
-    let stale_unavailable =
-        is_stale_process_identity_error("native_resident_process_identity_unavailable");
-    let stale_mismatch =
-        is_stale_process_identity_error("native_resident_process_identity_mismatch");
-    assert!(stale_unavailable);
-    assert!(stale_mismatch);
-    assert!(!is_stale_process_identity_error(
-        "native_resident_state_mac_invalid"
-    ));
-    assert!(!is_stale_process_identity_error(
-        "native_client_auth_rejected"
-    ));
-}
-
-#[test]
-fn stale_transport_retry_allowlist_preserves_auth_and_integrity_failures() {
-    let retryable_codes = [
-        "native_client_connect_failed",
-        "native_client_auth_timeout_failed",
-        "native_resident_process_identity_unavailable",
-        "native_resident_process_identity_mismatch",
-    ];
-    for code in retryable_codes {
-        assert!(is_retryable_live_request_error(
-            &crate::resident_client::ResidentClientError {
-                code: code.to_owned(),
-                retryable_teardown: false,
-            }
-        ));
-    }
-
-    let terminal_codes = [
-        "native_client_frame_read_failed",
-        "native_client_frame_write_failed",
-        "native_client_auth_rejected",
-        "native_client_peer_identity_mismatch",
-        "native_client_response_binding_failed",
-        "native_client_response_digest_mismatch",
-    ];
-    for retryable_teardown in [false, true] {
-        for code in terminal_codes {
-            assert!(!is_retryable_live_request_error(
-                &crate::resident_client::ResidentClientError {
-                    code: code.to_owned(),
-                    retryable_teardown,
-                }
-            ));
-        }
-    }
-    assert!(is_retryable_live_request_error(
-        &crate::resident_client::ResidentClientError {
-            code: "native_client_auth_nonce_failed".to_owned(),
-            retryable_teardown: true,
-        }
-    ));
-    assert!(!is_retryable_live_request_error(
-        &crate::resident_client::ResidentClientError {
-            code: "native_client_auth_nonce_failed".to_owned(),
-            retryable_teardown: false,
-        }
-    ));
-}
+#[path = "managed_resident_supervised_exit_tests.rs"]
+mod supervised_exit_tests;
 
 #[path = "managed_resident_owner_lock_tests.rs"]
 mod owner_lock_tests; // includes managed_owner_lock_rejects_second_process contention proof
+
+#[path = "managed_resident_retry_tests.rs"]
+mod retry_tests;

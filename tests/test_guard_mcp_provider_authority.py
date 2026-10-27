@@ -6,7 +6,6 @@ import pytest
 
 from codex_plugin_scanner.guard.approval_gate import update_settings
 from codex_plugin_scanner.guard.approval_scope_support import request_scope_contract
-from codex_plugin_scanner.guard.cli.commands_support_runtime_resolution import _copilot_runtime_tool_call
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.daemon.local_cli_api import LocalCliApiError, LocalCliApiService
 from codex_plugin_scanner.guard.mcp_tool_calls import build_tool_call_artifact, build_tool_call_hash, evaluate_tool_call
@@ -14,7 +13,6 @@ from codex_plugin_scanner.guard.models import PolicyDecision
 from codex_plugin_scanner.guard.native_policy_snapshot_publisher_inputs import NativePolicySnapshotPublisherInputs
 from codex_plugin_scanner.guard.runtime.composio_discovery import ComposioActionSchema
 from codex_plugin_scanner.guard.runtime.custom_extension_continuity import record_local_custom_extension_mutation
-from codex_plugin_scanner.guard.runtime.mcp_provider_permissions import composio_provider_action_floor
 from codex_plugin_scanner.guard.runtime.observed_mcp_tools import observed_mcp_tool
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -31,28 +29,6 @@ def _setup(tmp_path: Path):
         source, (ComposioActionSchema("slack", "SLACK_SEND_MESSAGE", "Send", {"type": "object"}, True),), seen_at=_TIME
     )
     return store, source, cli_id
-
-
-def test_copilot_composio_artifact_binds_current_provider_authority(tmp_path: Path):
-    store, _, _ = _setup(tmp_path)
-    authority_hash = store.read_mcp_provider_authority_hash()
-    assert authority_hash is not None
-    resolved = _copilot_runtime_tool_call(
-        payload={"tool_name": "composio/COMPOSIO_MULTI_EXECUTE_TOOL", "tool_input": {"tools": []}},
-        home_dir=tmp_path,
-        workspace=None,
-        store=store,
-    )
-    assert resolved is not None
-    assert resolved[0].metadata["mcp_provider_catalog_hash"] == authority_hash
-    unrelated = _copilot_runtime_tool_call(
-        payload={"tool_name": "other/read", "tool_input": {}},
-        home_dir=tmp_path,
-        workspace=None,
-        store=store,
-    )
-    assert unrelated is not None
-    assert "mcp_provider_catalog_hash" not in unrelated[0].metadata
 
 
 def _save(store, source, state="allowed", updates=(("SLACK_SEND_MESSAGE", "block", 1),)):
@@ -79,13 +55,6 @@ def test_protected_transaction_saves_deny_and_native_choice_without_granting_all
     inputs._condition = Condition()
     inputs._workspace_paths = set()
     assert inputs._compiled_effective_policy()["mcp_provider_actions"] == choices
-    floor = composio_provider_action_floor(
-        choices,
-        harness="codex",
-        tool_name=_BATCH,
-        arguments={"tools": [{"tool_slug": "slack_send_message", "arguments": {}, "account": "other"}]},
-    )
-    assert floor is not None and floor.action == "block"
     # Saving unrelated outer choices must preserve the inner restriction.
     _save(store, source, updates=())
     assert store.read_mcp_provider_choices() == choices

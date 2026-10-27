@@ -39,6 +39,25 @@ fn evaluate(request: ContextDigestRequestV1) -> ContextDigestResultV1 {
 }
 
 #[test]
+fn numeric_material_digest_survives_byte_and_resident_decoding() {
+    let raw = br#"{"schema":"guard-context-digest-request.v1","request_id":"numeric-material","kind":"canonical_sha256","material":{"path":"/opt/neutral/data/\u65e5\u672c\u8a9e.txt","limits":[1.0,-0.0,1e-7,1208925819614629174706177],"nested":{"empty":{},"missing":null}},"prefix":null}"#;
+    let direct: ContextDigestResultV1 =
+        serde_json::from_slice(&evaluate_context_digest_bytes(raw).unwrap()).unwrap();
+    assert_eq!(
+        direct.digest.as_deref(),
+        Some("45a81b629ceaf4ac265f6b340e5bb09c9f2f55bf3c6748c9cf9236470e84ff1c")
+    );
+    let request: Value = serde_json::from_slice(raw).unwrap();
+    let envelope =
+        serde_json::to_vec(&json!({"operation": "context_digest", "request": request})).unwrap();
+    let resident: ContextDigestResultV1 = serde_json::from_slice(
+        &crate::resident_ops::evaluate_resident_bytes(&envelope, None).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(resident.digest, direct.digest);
+}
+
+#[test]
 fn component_cases_match_python_tokens() {
     for case in corpus()["component_cases"].as_array().unwrap() {
         let components = components_of(
@@ -51,13 +70,7 @@ fn component_cases_match_python_tokens() {
         assert_eq!(result.status, "ok", "case {}", case["id"]);
         let expected = case["token"].as_str().unwrap();
         let actual = result.token.as_deref().unwrap();
-        if case.get("diverges_from_python").and_then(Value::as_bool) == Some(true) {
-            // Integers beyond u64::MAX cannot round-trip through serde_json;
-            // the adapter's request-digest check prevents shipping these.
-            assert_ne!(actual, expected, "case {}", case["id"]);
-        } else {
-            assert_eq!(actual, expected, "case {}", case["id"]);
-        }
+        assert_eq!(actual, expected, "case {}", case["id"]);
     }
 }
 
@@ -183,6 +196,70 @@ fn opaque_material_cases_match_python_digests() {
 }
 
 #[test]
+fn mcp_arguments_projection_cases_match_python() {
+    for case in corpus()["mcp_arguments_projection_cases"]
+        .as_array()
+        .unwrap()
+    {
+        let arguments = case["arguments"].clone();
+        let arguments = if arguments.is_null() {
+            // `null` in the fixture encodes "no arguments key" — serde maps
+            // absent and `null` to `None`, matching `params.get("arguments")`.
+            None
+        } else {
+            Some(arguments)
+        };
+        let projection =
+            mcp_arguments_projection(case["tool_name"].as_str().unwrap(), arguments.as_ref())
+                .unwrap_or_else(|code| panic!("case {}: {code}", case["id"]));
+        assert_eq!(
+            Some(projection.launch_target.as_str()),
+            case["launch_target"].as_str(),
+            "case {}",
+            case["id"]
+        );
+        // The launch target embeds both the serialized safe arguments and the
+        // raw-arguments digest.
+        let serialized = case["serialized_arguments"].as_str().unwrap();
+        let digest = case["digest"].as_str().unwrap();
+        assert!(
+            projection.launch_target.contains(serialized),
+            "case {}",
+            case["id"]
+        );
+        assert!(
+            projection
+                .launch_target
+                .ends_with(&format!("[arguments-sha256:{digest}]")),
+            "case {}",
+            case["id"]
+        );
+        // `_safe_mcp_arguments(None)` yields `None`, projected as `null`.
+        assert_eq!(
+            projection.safe, case["safe_arguments"],
+            "case {}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
+fn mcp_redact_json_cases_match_python() {
+    for case in corpus()["mcp_redact_json_cases"].as_array().unwrap() {
+        let result = evaluate(request_for(ContextDigestKindV1::McpRedactJson {
+            material: case["material"].clone(),
+        }));
+        assert_eq!(result.status, "ok", "case {}", case["id"]);
+        assert_eq!(
+            result.mcp_redacted_value.as_ref(),
+            Some(&case["redacted"]),
+            "case {}",
+            case["id"]
+        );
+    }
+}
+
+#[test]
 fn token_cases_match_python_parse() {
     for case in corpus()["token_cases"].as_array().unwrap() {
         let parsed = parse_context_token(&case["token"]);
@@ -205,6 +282,42 @@ fn token_cases_match_python_parse() {
     }
 }
 
+/// The predicate the three remaining Python callers of the retired decoder
+/// ask. It has to agree with the recorded Python parse on every token case,
+/// including the malformed ones, because the callers used to read exactly that
+/// verdict out of their own decoder.
+#[test]
+fn well_formed_verdict_matches_python_parse_on_every_token_case() {
+    for case in corpus()["token_cases"].as_array().unwrap() {
+        let result = evaluate(request_for(
+            ContextDigestKindV1::ApprovalContextTokenWellFormed {
+                token: case["token"].clone(),
+            },
+        ));
+        let expected = !matches!(case.get("parsed"), Some(Value::Null) | None);
+        assert_eq!(result.status, "ok", "case {}", case["id"]);
+        assert_eq!(
+            result.approval_context_token_well_formed,
+            Some(expected),
+            "case {}",
+            case["id"]
+        );
+    }
+}
+
+/// A `false` verdict is an answer, not a missing one: the result contract has
+/// to carry it rather than drop it as an empty field.
+#[test]
+fn a_false_well_formed_verdict_survives_the_result_contract() {
+    let result = evaluate(request_for(
+        ContextDigestKindV1::ApprovalContextTokenWellFormed {
+            token: Value::String("legacy-artifact-hash".to_owned()),
+        },
+    ));
+    assert_eq!(result.status, "ok");
+    assert_eq!(result.approval_context_token_well_formed, Some(false));
+}
+
 #[test]
 fn validation_cases_match_python_reasons() {
     for case in corpus()["validation_cases"].as_array().unwrap() {
@@ -222,35 +335,6 @@ fn validation_cases_match_python_reasons() {
             case["id"]
         );
     }
-}
-
-#[test]
-fn validate_context_kind_builds_and_compares() {
-    let corpus = corpus();
-    let case = &corpus["component_cases"].as_array().unwrap()[0];
-    let components = components_of(
-        &case["components"],
-        case["extension_control_digest"].as_str().unwrap(),
-    );
-    let saved = case["token"].clone();
-    let unchanged = evaluate(request_for(ContextDigestKindV1::ValidateApprovalContext {
-        saved_token: saved.clone(),
-        components: components.clone(),
-    }));
-    assert_eq!(unchanged.status, "ok");
-    assert_eq!(unchanged.validation_reason, None);
-
-    let mut drifted = components;
-    drifted.content = Value::String("different-content".to_owned());
-    let changed = evaluate(request_for(ContextDigestKindV1::ValidateApprovalContext {
-        saved_token: saved,
-        components: drifted,
-    }));
-    assert_eq!(changed.status, "ok");
-    assert_eq!(
-        changed.validation_reason.as_deref(),
-        Some("approval_reuse_content_changed")
-    );
 }
 
 #[test]
@@ -353,4 +437,72 @@ fn oversized_component_fails() {
     let result = evaluate(request);
     assert_eq!(result.status, "error");
     assert_eq!(result.code, ERR_COMPONENT);
+}
+
+#[test]
+fn guard_run_launch_plans_dedupe_adapter_commands_and_share_one_environment_digest() {
+    let environment: std::collections::BTreeMap<String, String> =
+        [("PATH".to_string(), "/usr/bin".to_string())]
+            .into_iter()
+            .collect();
+    let result = evaluate(request_for(ContextDigestKindV1::GuardRunLaunchPlans {
+        adapter_commands: vec![
+            vec!["hol-guard-nonexistent".to_string(), "--go".to_string()],
+            vec!["hol-guard-nonexistent".to_string(), "--go".to_string()],
+            vec![],
+        ],
+        environment: environment.clone(),
+        launch_cwd: "/".to_string(),
+    }));
+    let payload = result.guard_run_launch.expect("plans kind must answer");
+    let plans = payload["plans"].as_array().expect("plans array");
+    assert_eq!(plans.len(), 1, "duplicate and empty commands drop out");
+    assert_eq!(
+        plans[0]["environment_sha256"].as_str().expect("digest"),
+        guard_command::guard_run_launch::guard_run_launch_environment_hash(&environment)
+    );
+    assert_eq!(plans[0]["launch_cwd"].as_str(), Some("/"));
+    assert!(
+        plans[0]["identity"].is_object(),
+        "identity is content-bound"
+    );
+}
+
+#[test]
+fn guard_run_authorized_prefixes_answers_null_when_the_set_does_not_bind() {
+    let bound = evaluate(request_for(
+        ContextDigestKindV1::GuardRunAuthorizedPrefixes {
+            plans: vec![guard_contracts::GuardRunLaunchPlanV1 {
+                adapter_command: vec!["cli".to_string()],
+                execution_command: vec!["/usr/bin/cli".to_string(), "cli".to_string()],
+                environment_sha256: "s".to_string(),
+                reusable: true,
+            }],
+        },
+    ));
+    assert_eq!(
+        bound.guard_run_launch,
+        Some(json!({"prefixes": [["/usr/bin/cli", "cli"]]}))
+    );
+
+    // The unbound verdict is an explicit JSON null, which Python reads as
+    // "the authorized set does not bind". Decoding it into `Option<Value>`
+    // collapses it to `None`, so assert on the wire bytes the caller sees.
+    let unbound = evaluate_context_digest_request(&request_for(
+        ContextDigestKindV1::GuardRunAuthorizedPrefixes {
+            plans: vec![guard_contracts::GuardRunLaunchPlanV1 {
+                adapter_command: vec!["cli".to_string()],
+                execution_command: vec!["/usr/bin/cli".to_string(), "cli".to_string()],
+                environment_sha256: "s".to_string(),
+                reusable: false,
+            }],
+        },
+    ))
+    .expect("request must encode a result");
+    let unbound: Value = serde_json::from_slice(&unbound).expect("result must decode");
+    assert_eq!(
+        unbound.get("guard_run_launch"),
+        Some(&Value::Null),
+        "Python requires the key to be present before reading the verdict"
+    );
 }

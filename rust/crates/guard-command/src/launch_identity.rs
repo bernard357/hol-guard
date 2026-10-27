@@ -4,9 +4,8 @@
 //! Every public function returns a `serde_json::Value` object whose keys are
 //! the exact Python dict keys. Digests use the canonical-JSON contract from
 //! `guard-contracts` (`json.dumps(v, sort_keys=True, separators=(",",":"),
-//! ensure_ascii=True)`); opaque digests are `sha256(material.encode("utf-8"))`
-//! or the `guard-context-unbound:<label>:<sha256>` sentinel for strict digests
-//! — the native-resident fallback in Python `native_context.py`.
+//! ensure_ascii=True)`); opaque digests hash raw UTF-8 bytes. Launch verification
+//! hashes canonical JSON bytes and emits no unbound fallback sentinel.
 //!
 //! All host-OS and filesystem semantics are POSIX-only (`shutil.which`
 //! directory search + execute bit, `lstat` chains, shebang extraction).
@@ -14,18 +13,25 @@
 //! exactly like the Python original.
 
 use std::collections::HashSet;
-use std::fs::{self, File, Metadata};
-use std::io::Read;
+use std::fs::{self, Metadata};
+use std::io::{Cursor, Read, Write};
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 use guard_contracts::write_canonical_json;
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 
 use crate::command_tokens::executable_name;
 use crate::env_wrapper::parse_env_wrapper;
+pub use crate::launch_identity_common::package_request_launch_identity_material;
+use crate::launch_identity_common::{
+    context_opaque_digest_strict, expand_user, launch_argv_digest, normalized_launch_cwd,
+    runtime_launch_argv, sha256_hex, RuntimeLaunchArgv,
+};
 use crate::shell_tokens;
 
 // Python constants (approval_context.py :47-51, file_identity.py :23-31,
@@ -33,7 +39,6 @@ use crate::shell_tokens;
 const MAX_EXECUTABLE_HASH_BYTES: u64 = 256 * 1024 * 1024;
 const EXECUTABLE_HASH_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_SHEBANG_BYTES: usize = 4096;
-const UNBOUND_PREFIX: &str = "guard-context-unbound:";
 
 // `content_stat_identity` (file_identity.py :23-31) — the compact stat tuple
 // used to detect content/path replacement. Order is
@@ -68,10 +73,6 @@ fn is_regular(mode: u32) -> bool {
     mode & S_IFMT == S_IFREG
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
 fn token_hex(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
     if getrandom::fill(&mut buffer).is_ok() {
@@ -80,63 +81,9 @@ fn token_hex(bytes: usize) -> String {
         "0".repeat(bytes * 2)
     }
 }
-
-// `_canonical_material_bytes` (native_context.py :383-388) → canonical JSON
-// UTF-8 bytes. `ensure_ascii=True` semantics are enforced inside
-// `write_canonical_json` (the contract is byte-identical).
-fn canonical_material_bytes(material: &Value) -> Vec<u8> {
-    let mut out = Vec::with_capacity(256);
-    // JSON encode failure is unreachable for identity material (only strings,
-    // numbers, arrays, maps); fail closed to an empty-payload digest rather
-    // than panic, matching the unbound degrade semantics.
-    if write_canonical_json(material, &mut out).is_err() {
-        return Vec::new();
-    }
-    out
-}
-
-// `context_opaque_digest(material, unbound_label=<label>, strict=True)` —
-// when the native resident is absent (always true for in-process Rust) the
-// strict degrade is `guard-context-unbound:<label>:<sha256(canonical_json)>`
-// (native_context.py :441-453 + :377-388).
-fn context_opaque_digest_strict(material: &str, unbound_label: &str) -> String {
-    let material_bytes = canonical_material_bytes(&Value::String(material.to_string()));
-    format!(
-        "{}{}:{}",
-        UNBOUND_PREFIX,
-        unbound_label,
-        sha256_hex(&material_bytes)
-    )
-}
-
-// `context_sha256_digest(material, unbound_label=<label>, strict=True)` — same
-// degrade over structured material.
-fn context_sha256_digest_strict(material: &Value, unbound_label: &str) -> String {
-    let material_bytes = canonical_material_bytes(material);
-    format!(
-        "{}{}:{}",
-        UNBOUND_PREFIX,
-        unbound_label,
-        sha256_hex(&material_bytes)
-    )
-}
-
-// `_opaque_identity_digest` (:883-889) — `context_opaque_digest(material,
-// unbound_label="opaque-identity")` (strict).
+// Hash raw UTF-8 identity material.
 fn opaque_identity_digest(material: &str) -> String {
-    context_opaque_digest_strict(material, "opaque-identity")
-}
-
-// `_launch_argv_digest` (:891-897) — `opaque_material_digest` over
-// `json.dumps(list(argv), ensure_ascii=True, separators=(",",":"))`.
-fn launch_argv_digest(argv: &[String]) -> String {
-    let material = Value::Array(argv.iter().map(|s| Value::String(s.clone())).collect());
-    let mut bytes = Vec::with_capacity(64);
-    if write_canonical_json(&material, &mut bytes).is_err() {
-        bytes.clear();
-    }
-    let text = String::from_utf8_lossy(&bytes);
-    context_opaque_digest_strict(&text, "launch-argv")
+    context_opaque_digest_strict(material)
 }
 
 fn is_sha256_hex(value: &Value) -> bool {
@@ -179,39 +126,6 @@ fn with_launch_cwd(mut identity: Value, effective_cwd: Option<&Path>) -> Value {
         );
     }
     identity
-}
-
-// `_normalized_launch_cwd` (:872-878) — expanduser + resolve(strict=False)
-// with absolute() fallback. POSIX: `Path::expanduser` is `~` → `$HOME`.
-fn normalized_launch_cwd(cwd: Option<&Path>) -> PathBuf {
-    let candidate = cwd
-        .map(expand_user)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    candidate.canonicalize().unwrap_or_else(|_| {
-        if candidate.is_absolute() {
-            candidate
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join(candidate)
-        }
-    })
-}
-
-fn expand_user(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if text == "~" {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home);
-        }
-        return path.to_path_buf();
-    }
-    if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return Path::new(&home).join(rest);
-        }
-    }
-    path.to_path_buf()
 }
 
 // `_runtime_path_with_trusted_home` (:315-330).
@@ -298,7 +212,7 @@ fn executable_path_chain_snapshot(path: &Path) -> Option<Vec<Value>> {
             snapshot.insert(
                 "target_sha256".to_string(),
                 match &target {
-                    Some(t) => Value::String(context_opaque_digest_strict(t, "path-target")),
+                    Some(t) => Value::String(context_opaque_digest_strict(t)),
                     None => Value::Null,
                 },
             );
@@ -312,6 +226,30 @@ fn executable_path_chain_snapshot(path: &Path) -> Option<Vec<Value>> {
     }
 }
 
+// Match the runtime's opt-in sanitized stderr protocol without exposing any
+// executable path, digest, launch environment, or file content.
+static EXECUTABLE_DIGEST_DIAGNOSTIC: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("HOL_GUARD_NATIVE_DIAGNOSTIC").is_ok_and(|value| {
+        let value = value.trim();
+        value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes")
+    })
+});
+
+fn emit_executable_digest_phase(status: &'static str, elapsed: Duration) {
+    let mut line = [0u8; 192];
+    let mut output = Cursor::new(line.as_mut_slice());
+    if writeln!(
+        output,
+        "native_resident_phase phase=executable_digest status={status} elapsed_ms={}",
+        elapsed.as_millis()
+    )
+    .is_ok()
+    {
+        let length = output.position() as usize;
+        let _ = std::io::stderr().lock().write_all(&line[..length]);
+    }
+}
+
 // `_cached_executable_hash` (:1743-1782) — ported uncached; the Python
 // `lru_cache` is a pure optimization (output identical for same stat key).
 // Returns (digest, hash_status, shebang, shebang_status).
@@ -319,7 +257,35 @@ fn cached_executable_hash(
     path: &Path,
     expected_stat: StatKey,
 ) -> (Option<String>, &'static str, Option<String>, &'static str) {
-    let file = match File::open(path) {
+    if !*EXECUTABLE_DIGEST_DIAGNOSTIC {
+        return executable_hash_inner(path, expected_stat);
+    }
+    let started = Instant::now();
+    emit_executable_digest_phase("start", Duration::ZERO);
+    let result = executable_hash_inner(path, expected_stat);
+    emit_executable_digest_phase(
+        if result.1 == "verified" {
+            "ok"
+        } else {
+            "error"
+        },
+        started.elapsed(),
+    );
+    result
+}
+
+fn executable_hash_inner(
+    path: &Path,
+    expected_stat: StatKey,
+) -> (Option<String>, &'static str, Option<String>, &'static str) {
+    // Python: os.open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW). Rust File::open
+    // would follow a symlink hop; O_NOFOLLOW makes the final-component symlink
+    // fail with "open_failed" exactly like the source.
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+    {
         Ok(f) => f,
         Err(_) => return (None, "open_failed", None, "unverified"),
     };
@@ -334,7 +300,7 @@ fn cached_executable_hash(
     if opened_stat.size() > MAX_EXECUTABLE_HASH_BYTES {
         return (None, "too_large", None, "unverified");
     }
-    let mut digest = Sha256::new();
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
     let mut prefix: Vec<u8> = Vec::new();
     let mut total: u64 = 0;
     let mut reader = file;
@@ -367,7 +333,7 @@ fn cached_executable_hash(
     }
     let (shebang, shebang_status) = parse_executable_shebang(&prefix);
     (
-        Some(hex::encode(digest.finalize())),
+        Some(hex::encode(digest.finish().as_ref())),
         "verified",
         shebang,
         shebang_status,
@@ -379,8 +345,12 @@ fn parse_executable_shebang(prefix: &[u8]) -> (Option<String>, &'static str) {
     if !prefix.starts_with(b"#!") {
         return (None, "not_script");
     }
-    // bytes.splitlines() splits on \n and \r\n; first_line covers both.
-    let first_line: &[u8] = match prefix.iter().position(|&b| b == b'\n' || b == b'\r') {
+    // Python bytes.splitlines() boundaries: \n, \r, \r\n, \v, \f,
+    // \x1c, \x1d, \x1e, \x85. first_line is up to the first boundary.
+    let first_line: &[u8] = match prefix
+        .iter()
+        .position(|&b| matches!(b, b'\n' | b'\r' | 0x0b | 0x0c | 0x1c | 0x1d | 0x1e | 0x85))
+    {
         Some(i) => &prefix[..i],
         None => prefix,
     };
@@ -388,7 +358,7 @@ fn parse_executable_shebang(prefix: &[u8]) -> (Option<String>, &'static str) {
         return (None, "too_long");
     }
     let decoded = match std::str::from_utf8(&first_line[2..]) {
-        Ok(s) => s.trim(),
+        Ok(s) => python_str_strip(s),
         Err(_) => return (None, "invalid_encoding"),
     };
     if decoded.is_empty() {
@@ -622,7 +592,7 @@ pub fn build_runtime_executable_identity(
         }
     }
     if let Some(s) = &shebang {
-        identity["shebang_sha256"] = Value::String(context_opaque_digest_strict(s, "shebang"));
+        identity["shebang_sha256"] = Value::String(context_opaque_digest_strict(s));
     }
     with_launch_cwd(identity, eff_cwd_ref)
 }
@@ -680,20 +650,20 @@ fn identity_shebang_status(identity: &Value) -> &'static str {
 }
 
 // `_raw_shebang_for_identity` (:1226-1253).
-fn raw_shebang_for_identity(identity: &Value) -> (Option<String>, &'static str) {
+fn raw_shebang_for_identity(identity: &Value) -> (Option<String>, String) {
     let initial_status = identity.get("shebang_status").and_then(|v| v.as_str());
     if initial_status != Some("verified") {
-        return (None, "unverified");
+        return (None, initial_status.unwrap_or("unverified").to_string());
     }
     let path = identity.get("path").and_then(|v| v.as_str());
     let expected_digest = identity.get("sha256").and_then(|v| v.as_str());
     let (path, expected_digest) = match (path, expected_digest) {
         (Some(p), Some(d)) => (p, d),
-        _ => return (None, "unverified"),
+        _ => return (None, "unverified".to_string()),
     };
     let metadata = match fs::metadata(path) {
         Ok(m) => m,
-        Err(_) => return (None, "identity_changed"),
+        Err(_) => return (None, "identity_changed".to_string()),
     };
     let (digest, hash_status, shebang, shebang_status) =
         cached_executable_hash(Path::new(path), stat_key(&metadata));
@@ -702,9 +672,9 @@ fn raw_shebang_for_identity(identity: &Value) -> (Option<String>, &'static str) 
         || shebang_status != "verified"
         || shebang.is_none()
     {
-        return (None, "identity_changed");
+        return (None, "identity_changed".to_string());
     }
-    (shebang, "verified")
+    (shebang, "verified".to_string())
 }
 
 // `_runtime_identity_contains_reuse_nonce` (:1710-1717).
@@ -856,10 +826,7 @@ fn runtime_launch_verification_digest(identity: &Value) -> Option<String> {
     if write_canonical_json(&material, &mut bytes).is_err() {
         return None;
     }
-    Some(context_sha256_digest_strict(
-        &material,
-        "launch-verification",
-    ))
+    Some(sha256_hex(&bytes))
 }
 
 // `_verified_identity_path` (:1720-1727).
@@ -937,7 +904,11 @@ pub fn build_runtime_launch_identity(
                     .collect(),
             ))
         });
-    let _ = environment; // kept for parity with the Python signature
+    // Python: `environment = launch_env if launch_env is not None else os.environ`
+    // and `effective_search_path = search_path or environment.get("PATH")` —
+    // the None-search_path fallback sources PATH from the launch env.
+    let effective_search_path: Option<&str> =
+        search_path.or_else(|| environment.get("PATH").and_then(|v| v.as_str()));
 
     if command.is_null() || command.as_str() == Some("") {
         return json!({
@@ -963,38 +934,21 @@ pub fn build_runtime_launch_identity(
         }
     };
 
-    let command_tokens: Vec<String>;
-    if structured_command {
-        command_tokens = vec![command_str.clone()];
-    } else {
-        match shell_tokens(&command_str, false) {
-            Ok(t) => command_tokens = t,
-            Err(_) => command_tokens = Vec::new(),
+    let full_argv: Vec<String> = match runtime_launch_argv(command, args, structured_command) {
+        RuntimeLaunchArgv::Valid(argv) => argv,
+        RuntimeLaunchArgv::Invalid(executable_cmd) => {
+            return json!({
+                "argv_sha256": launch_argv_digest(&[]),
+                "entrypoint": unproven_runtime_entrypoint("unknown-launch", "unparseable_launch_vector", None),
+                "executable": build_runtime_executable_identity(
+                    &executable_cmd, search_path, Some(&effective_cwd), home_dir, true,
+                ),
+                "launch_cwd": effective_cwd.to_string_lossy(),
+            });
         }
-    }
-    let args_all_strings = args.iter().all(|a| a.is_string());
-    if command_tokens.is_empty() || !args_all_strings {
-        let executable_cmd = command_tokens
-            .first()
-            .map(|s| Value::String(s.clone()))
-            .unwrap_or_else(|| command.clone());
-        return json!({
-            "argv_sha256": launch_argv_digest(&[]),
-            "entrypoint": unproven_runtime_entrypoint("unknown-launch", "unparseable_launch_vector", None),
-            "executable": build_runtime_executable_identity(
-                &executable_cmd, search_path, Some(&effective_cwd), home_dir, true,
-            ),
-            "launch_cwd": effective_cwd.to_string_lossy(),
-        });
-    }
-
-    let executable = command_tokens[0].clone();
-    let mut launch_args: Vec<String> = command_tokens[1..].to_vec();
-    for a in args {
-        if let Some(s) = a.as_str() {
-            launch_args.push(s.to_string());
-        }
-    }
+    };
+    let executable = full_argv[0].clone();
+    let launch_args: &[String] = &full_argv[1..];
     let raw_command = command_str.trim_start();
     let raw_current_user_tilde = raw_command.starts_with("~/");
     let executable_identity: Value =
@@ -1007,7 +961,7 @@ pub fn build_runtime_launch_identity(
         } else {
             build_runtime_executable_identity(
                 &Value::String(executable.clone()),
-                search_path,
+                effective_search_path,
                 Some(&effective_cwd),
                 home_dir,
                 true,
@@ -1018,14 +972,12 @@ pub fn build_runtime_launch_identity(
     let entrypoint = runtime_entrypoint_identity(
         &executable_identity,
         executable_shebang.as_deref(),
-        executable_shebang_status,
+        executable_shebang_status.as_str(),
         direct_executable,
-        &launch_args,
+        launch_args,
         &effective_cwd,
         launch_env,
     );
-    let mut full_argv = vec![executable.clone()];
-    full_argv.extend(launch_args.iter().cloned());
     json!({
         "argv_sha256": launch_argv_digest(&full_argv),
         "entrypoint": entrypoint,
@@ -1244,7 +1196,7 @@ fn direct_executable_runtime_entrypoint_identity(
         "launcher": launcher_identity,
         "script_args_sha256": launch_argv_digest(launch_args),
         "shebang_args_sha256": launch_argv_digest(&shebang_args),
-        "shebang_sha256": context_opaque_digest_strict(shebang, "shebang"),
+        "shebang_sha256": context_opaque_digest_strict(shebang),
         "status": "verified",
     });
 
@@ -1325,8 +1277,7 @@ fn direct_executable_runtime_entrypoint_identity(
         .and_then(|v| v.get("PATH"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    result["search_path_sha256"] =
-        Value::String(context_opaque_digest_strict(search_path, "search-path"));
+    result["search_path_sha256"] = Value::String(context_opaque_digest_strict(search_path));
     let (interpreter, interpreter_args) = match env_command {
         None => {
             result.as_object_mut().unwrap().extend(
@@ -1344,34 +1295,37 @@ fn direct_executable_runtime_entrypoint_identity(
         }
         Some((i, a)) => (i, a),
     };
+    // `search_path` comes from the launch env (PATH) so `env` shebangs resolve
+    // interpreters against the same path the spawned process will see.
+    let search_path_opt = launch_env
+        .and_then(|v| v.get("PATH"))
+        .and_then(|v| v.as_str());
     let interpreter_identity = build_runtime_executable_identity(
         &Value::String(interpreter.clone()),
-        None,
+        search_path_opt,
         Some(launch_cwd),
         None,
         true,
     );
     let interpreter_name = executable_name(Some(&interpreter)).unwrap_or_default();
     result["interpreter"] = interpreter_identity.clone();
+    result["interpreter_args_sha256"] = Value::String(launch_argv_digest(&interpreter_args));
     if UNRESOLVED_CODE_LAUNCHER_NAMES.contains(&interpreter_name.as_str())
         || interpreter_identity.get("status").and_then(|v| v.as_str()) != Some("verified")
+        || identity_shebang_status(&interpreter_identity) != "native"
     {
+        let env_selector: Vec<String> = std::iter::once(interpreter.clone())
+            .chain(interpreter_args.iter().cloned())
+            .collect();
         result.as_object_mut().unwrap().extend(
-            unproven_runtime_entrypoint("direct-env-script", "env_interpreter_unresolved", None)
-                .as_object()
-                .unwrap()
-                .clone(),
-        );
-        result["interpreter"] = interpreter_identity;
-        result["launcher"] = launcher_identity;
-        return result;
-    }
-    if identity_shebang_status(&interpreter_identity) != "native" {
-        result.as_object_mut().unwrap().extend(
-            unproven_runtime_entrypoint("direct-env-script", "env_interpreter_nested_script", None)
-                .as_object()
-                .unwrap()
-                .clone(),
+            unproven_runtime_entrypoint(
+                "direct-env-script",
+                "env_interpreter_unresolved",
+                Some(&env_selector),
+            )
+            .as_object()
+            .unwrap()
+            .clone(),
         );
         result["interpreter"] = interpreter_identity;
         result["launcher"] = launcher_identity;
@@ -1738,31 +1692,37 @@ fn python_package_initializer_identities(
 fn node_runtime_entrypoint_identity(
     args: &[String],
     launch_cwd: &Path,
-    _launch_env: Option<&Value>,
+    launch_env: Option<&Value>,
 ) -> Value {
-    #[allow(clippy::all)]
-    const HARMLESS_FLAGS: &[&str] = &[
-        "--no-deprecation",
-        "--pending-deprecation",
-        "--throw-deprecation",
-        "--trace-deprecation",
-        "--trace-warnings",
-        "--no-warnings",
-        "--abort-on-uncaught-exception",
-        "--max-old-space-size",
-        "--max-semi-space-size",
-        "--max-http-header-size",
-        "--enable-source-maps",
-        "--experimental-vm-modules",
-        "--experimental-json-modules",
-        "--experimental-modules",
-        "--experimental-specifier-resolution",
-        "--preserve-symlinks",
-        "--preserve-symlinks-main",
-    ];
+    // NODE_OPTIONS injects a caller-controlled `-r`/`-e` preamble ahead of
+    // the script argv, so any visible value makes the entrypoint unproven.
+    let node_options_nonempty = launch_env
+        .and_then(|v| v.get("NODE_OPTIONS"))
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    if node_options_nonempty {
+        return unproven_runtime_entrypoint("node-launch", "environment_options_unresolved", None);
+    }
     let mut index = 0usize;
+    const HARMLESS_FLAGS: &[&str] = &[
+        "--abort-on-uncaught-exception",
+        "--enable-source-maps",
+        "--no-addons",
+        "--no-deprecation",
+        "--no-warnings",
+        "--trace-deprecation",
+        "--trace-uncaught",
+        "--trace-warnings",
+        "--use-bundled-ca",
+        "--use-openssl-ca",
+    ];
     while index < args.len() {
         let argument = args[index].as_str();
+        if argument == "--" {
+            index += 1;
+            break;
+        }
         if argument == "-e" || argument == "--eval" || argument == "-p" || argument == "--print" {
             if index + 1 >= args.len() {
                 return unproven_runtime_entrypoint("node-inline", "missing_inline_code", None);
@@ -1775,10 +1735,7 @@ fn node_runtime_entrypoint_identity(
                 argument.split_once('=').map(|(_, v)| v).unwrap_or(""),
             );
         }
-        if HARMLESS_FLAGS
-            .iter()
-            .any(|f| argument == *f || argument.starts_with(&format!("{f}=")))
-        {
+        if HARMLESS_FLAGS.contains(&argument) {
             index += 1;
             continue;
         }
@@ -1821,14 +1778,28 @@ fn shell_runtime_entrypoint_identity(
     if has_startup_env {
         return unproven_runtime_entrypoint(
             &format!("{shell}-launch"),
-            "shell_startup_unresolved",
+            "shell_startup_environment_unresolved",
             None,
         );
     }
-    let index = 0usize;
-    if index < args.len() {
+    let mut index = 0usize;
+    const HARMLESS_LONG: &[&str] = &[
+        "--noprofile",
+        "--norc",
+        "--posix",
+        "--restricted",
+        "--verbose",
+    ];
+    const HARMLESS_SHORT: &str = "abefhkmnptuvxBCEHPT"; // "-i" is already excluded
+    while index < args.len() {
         let argument = args[index].as_str();
-        if argument == "-c" {
+        if argument == "--" {
+            index += 1;
+            break;
+        }
+        let clustered_inline =
+            argument.starts_with('-') && !argument.starts_with("--") && argument[1..].contains('c');
+        if argument == "-c" || argument == "--command" || clustered_inline {
             if index + 1 >= args.len() {
                 return unproven_runtime_entrypoint(
                     &format!("{shell}-inline"),
@@ -1838,6 +1809,19 @@ fn shell_runtime_entrypoint_identity(
             }
             return inline_runtime_entrypoint(&format!("{shell}-inline"), &args[index + 1]);
         }
+        if HARMLESS_LONG.contains(&argument) {
+            index += 1;
+            continue;
+        }
+        // Bare "-" has an empty suffix set, which Python treats as a subset
+        // of the harmless options and therefore skips.
+        let harmless_short = argument.starts_with('-')
+            && !argument.starts_with("--")
+            && argument[1..].chars().all(|c| HARMLESS_SHORT.contains(c));
+        if harmless_short {
+            index += 1;
+            continue;
+        }
         if argument.starts_with('-') {
             return unproven_runtime_entrypoint(
                 &format!("{shell}-script"),
@@ -1845,6 +1829,7 @@ fn shell_runtime_entrypoint_identity(
                 Some(std::slice::from_ref(&args[index])),
             );
         }
+        break;
     }
     if index >= args.len() {
         return unproven_runtime_entrypoint(
@@ -1996,12 +1981,10 @@ fn unproven_runtime_entrypoint(kind: &str, reason: &str, selector: Option<&[Stri
     let mut map = Map::new();
     map.insert("kind".to_string(), Value::String(kind.to_string()));
     map.insert("reason".to_string(), Value::String(reason.to_string()));
-    if let Some(sel) = selector {
-        map.insert(
-            "selector".to_string(),
-            Value::Array(sel.iter().map(|s| Value::String(s.clone())).collect()),
-        );
-    }
+    map.insert(
+        "selector_sha256".to_string(),
+        Value::String(launch_argv_digest(selector.unwrap_or(&[]))),
+    );
     map.insert("status".to_string(), Value::String("unproven".to_string()));
     map.insert("reuse_nonce".to_string(), Value::String(token_hex(16)));
     Value::Object(map)
@@ -2057,40 +2040,6 @@ const UNRESOLVED_CODE_LAUNCHER_NAMES: &[&str] = &[
 // Package-supply-chain launch/advisory material
 // (`local_supply_chain.py` RTM-019).
 // ---------------------------------------------------------------------------
-
-// `_package_launch_approval_identity` (local_supply_chain.py :3109-3124) —
-// ticket name `_package_request_launch_identity_material` (surface-map alias;
-// same argv_sha256 + wrapper_resolution material compose). Pure projection:
-// `None` -> `{"available": False}`; otherwise binds `argv_sha256` verbatim and
-// passes through a Mapping `wrapper_resolution`, degrading any other/missing
-// value to `{"status": "direct"}`.
-pub fn package_request_launch_identity_material(
-    launch_identity: Option<&Map<String, Value>>,
-) -> Map<String, Value> {
-    let mut out = Map::new();
-    let Some(launch_identity) = launch_identity else {
-        out.insert("available".into(), json!(false));
-        return out;
-    };
-    let wrapper_resolution = launch_identity
-        .get("wrapper_resolution")
-        .filter(|v| v.is_object())
-        .cloned()
-        .unwrap_or_else(|| {
-            let mut direct = Map::new();
-            direct.insert("status".into(), json!("direct"));
-            Value::Object(direct)
-        });
-    out.insert(
-        "argv_sha256".into(),
-        launch_identity
-            .get("argv_sha256")
-            .cloned()
-            .unwrap_or(Value::Null),
-    );
-    out.insert("wrapper_resolution".into(), wrapper_resolution);
-    out
-}
 
 // Python `str.strip()` whitespace set (:811 body relies on it via `add_id`).
 // `char::is_whitespace` omits the C0 information separators \x1c-\x1f that
@@ -2156,10 +2105,7 @@ mod tests {
             let dir = std::env::temp_dir().join(format!(
                 "hg-rtm008-{}-{}",
                 std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
+                crate::unique_nanos::unique_nanos()
             ));
             fs::create_dir_all(&dir).unwrap();
             TempDir(dir)
@@ -2177,7 +2123,7 @@ mod tests {
     fn temp_script(body: &str) -> (TempDir, PathBuf) {
         let dir = TempDir::new();
         let path = dir.path().join("run.sh");
-        let mut f = File::create(&path).unwrap();
+        let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(body.as_bytes()).unwrap();
         drop(f);
         let mut perms = fs::metadata(&path).unwrap().permissions();
@@ -2228,63 +2174,53 @@ mod tests {
     }
 
     #[test]
-    fn launch_argv_digest_matches_python_oracle() {
-        // Oracle:
-        //   python3 -c "import json,hashlib;
-        //   print(hashlib.sha256(json.dumps({'label':'launch-argv','material':
-        //   json.dumps(['git','status'],separators=(',',':'),ensure_ascii=True)},
-        //   separators=(',',':'),sort_keys=True,ensure_ascii=True).encode()).hexdigest())"
-        //
-        // The Python digest is
-        //   context_opaque_digest(json.dumps(['git','status']), unbound_label='launch-argv')
-        // whose strict degrade is
-        //   'guard-context-unbound:launch-argv:' +
-        //   sha256(json.dumps({'label':'launch-argv','material':'["git","status"]'},
-        //                    separators=(',',':'),sort_keys=True,ensure_ascii=True))
-        let expected = concat!(
-            "guard-context-unbound:launch-argv:",
-            "PLACEHOLDER" // replaced by oracle below
+    fn verified_launch_projects_but_rejects_mutated_content_and_arguments() {
+        let (dir, path) = temp_script("#!/bin/sh\necho original\n");
+        let command = Value::String(path.to_string_lossy().into_owned());
+        let args = vec![Value::String("safe".to_string())];
+        let env = json!({"PATH": "/bin:/usr/bin"});
+        let identity = build_runtime_launch_identity(
+            &command,
+            &args,
+            true,
+            true,
+            None,
+            Some(dir.path()),
+            None,
+            Some(&env),
         );
-        let _ = expected;
-        // Compute oracle inline to keep the test self-contained.
-        // Python oracle (verified): canonical_material_bytes('["git","status"]')
-        // = b'"[\\"git\\",\\"status\\"]"' — the argv JSON is itself a
-        // JSON string, so the outer canonical encoding escapes it.
-        let inner = "[\"git\",\"status\"]";
-        let mut canonical = Vec::new();
-        write_canonical_json(&Value::String(inner.to_string()), &mut canonical).unwrap();
-        let oracle = format!(
-            "guard-context-unbound:launch-argv:{}",
-            hex::encode(Sha256::digest(&canonical))
-        );
-        assert_eq!(
-            launch_argv_digest(&["git".to_string(), "status".to_string()]),
-            oracle
-        );
-    }
-
-    #[test]
-    fn deterministic_digests_match_python_oracles() {
-        // Oracle 1 (python3, verified): _launch_argv_digest(("git","status"))
-        // strict degrade = guard-context-unbound:launch-argv:<sha256>.
-        assert_eq!(
-            launch_argv_digest(&["git".to_string(), "status".to_string()]),
-            "guard-context-unbound:launch-argv:8731c2300a49f227285b1c5d205ce9232d4438adafb38cfbb1676b6ca8043c5d"
-        );
-        // Oracle 2: opaque_identity_digest("/bin/sh").
-        assert_eq!(
-            opaque_identity_digest("/bin/sh"),
-            "guard-context-unbound:opaque-identity:ea0135d2021a123a116e4bc76993e130aa037cc0ada7a86924ed9e6037f462ab"
-        );
-        // Oracle 3: context_sha256_digest({"kind":"x","status":"verified"},
-        // unbound_label="launch-verification") strict degrade.
-        assert_eq!(
-            context_sha256_digest_strict(
-                &json!({"kind": "x", "status": "verified"}),
-                "launch-verification"
-            ),
-            "guard-context-unbound:launch-verification:33f54a528b020a160461134ec8cf256d36536c821bd5a3e2538b160f9212a030"
-        );
+        assert!(resolved_runtime_launch_argv(&identity, &["safe".to_string()]).is_some());
+        assert!(runtime_launch_identity_matches(
+            &identity,
+            &command,
+            &args,
+            true,
+            true,
+            None,
+            Some(dir.path()),
+            Some(&env),
+        ));
+        assert!(!runtime_launch_identity_matches(
+            &identity,
+            &command,
+            &[Value::String("changed".to_string())],
+            true,
+            true,
+            None,
+            Some(dir.path()),
+            Some(&env),
+        ));
+        fs::write(&path, "#!/bin/sh\necho changed-content\n").unwrap();
+        assert!(!runtime_launch_identity_matches(
+            &identity,
+            &command,
+            &args,
+            true,
+            true,
+            None,
+            Some(dir.path()),
+            Some(&env),
+        ));
     }
 
     // --- Package launch/advisory material (local_supply_chain.py) ------------
@@ -2445,5 +2381,88 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(package_advisory_ids(&package), vec!["GHSA-X"]);
+    }
+
+    /// `env -S` option clusters must terminate after an operand-consuming flag
+    /// (`short_index = len(token)` in `env_wrapper.parse_env_wrapper`). The port
+    /// omitted that advance, so the cluster loop re-read the same flag until
+    /// `ENV_SPLIT_MAX_EXPANSIONS` tripped and every `#!/usr/bin/env -S ...`
+    /// shebang resolved as `env_shebang_command_unresolved`.
+    #[test]
+    fn env_split_string_cluster_consumes_operand_once() {
+        for (args, expected) in [
+            (
+                vec!["-S", "python", "-m", "bootstrap"],
+                vec!["python", "-m", "bootstrap"],
+            ),
+            (
+                vec!["-S python -m bootstrap"],
+                vec!["python", "-m", "bootstrap"],
+            ),
+            (vec!["-Spython"], vec!["python"]),
+            (vec!["-u", "FOO", "cmd"], vec!["cmd"]),
+            (vec!["-C", "/tmp", "cmd"], vec!["cmd"]),
+            (vec!["cmd"], vec!["cmd"]),
+        ] {
+            let tokens: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
+            let parsed = crate::env_wrapper::parse_env_wrapper(&tokens, None, None);
+            assert_eq!(parsed.error, None, "{args:?}");
+            assert!(parsed.complete, "{args:?}");
+            assert_eq!(parsed.executable_argv, expected, "{args:?}");
+        }
+    }
+
+    /// Descriptor-race parity for the ported executable hasher. The Python
+    /// `test_windows_executable_hash_keeps_descriptor_race_checks` matrix was
+    /// retired with the approval_context helper cluster; this keeps the same
+    /// decision contract on the Rust side: any stat field that moves between
+    /// the pre-open probe and the opened descriptor yields `identity_raced`
+    /// with no digest, while an unmoved stat verifies.
+    #[test]
+    fn executable_hash_reports_identity_races() {
+        let (_dir, path) = temp_script("#!/bin/sh\necho hi\n");
+        let expected = stat_key(&fs::metadata(&path).unwrap());
+        let (digest, status, _shebang, _shebang_status) = cached_executable_hash(&path, expected);
+        assert_eq!(status, "verified");
+        assert!(digest.is_some());
+
+        fn assert_identity_raced(path: &Path, expected: StatKey) {
+            let (digest, status, _shebang, _shebang_status) =
+                cached_executable_hash(path, expected);
+            assert_eq!(status, "identity_raced");
+            assert!(digest.is_none());
+        }
+
+        let mut raced = expected;
+        raced.ino += 1;
+        assert_identity_raced(&path, raced);
+
+        let mut raced = expected;
+        raced.mode &= !0o111;
+        assert_identity_raced(&path, raced);
+
+        let mut raced = expected;
+        raced.mtime_ns += 1;
+        assert_identity_raced(&path, raced);
+
+        let mut raced = expected;
+        raced.ctime_ns += 1;
+        assert_identity_raced(&path, raced);
+
+        let mut raced = expected;
+        raced.size += 1;
+        assert_identity_raced(&path, raced);
+    }
+
+    /// `O_NOFOLLOW` must reject a final-component symlink exactly like the
+    /// Python `os.open(..., O_NOFOLLOW)` it replaced: nothing is hashed.
+    #[cfg(unix)]
+    #[test]
+    fn executable_hash_refuses_final_symlink() {
+        let (dir, path) = temp_script("#!/bin/sh\necho hi\n");
+        let link = dir.path().join("link.sh");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        let expected = stat_key(&fs::metadata(&link).unwrap());
+        assert_eq!(cached_executable_hash(&link, expected).1, "open_failed");
     }
 }

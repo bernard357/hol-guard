@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::native_command_controls::CompiledNativeCommandControls;
+use crate::native_command_program::NativeCommandProgram;
 use guard_contracts::{NativeCommandControlBindingV1, NativeExtensionControlV1};
 
 const MAX_CASES: usize = 256;
@@ -26,6 +27,17 @@ struct Request {
     global_lockdown: bool,
     #[serde(default)]
     managed_global_lockdown: bool,
+    /// Binds the synthetic snapshot to a non-default authority health so
+    /// offline fixtures can exercise the host health floor with evidence that
+    /// matches the unhealthy binding. Admission still validates the value.
+    #[serde(default)]
+    health: Option<String>,
+    /// Bind the snapshot a device has before it ever enrolls: unenrolled, no
+    /// layers, revision zero and the all-zero first-install authority. Packaged
+    /// first-party protection applies to it, unlike `health: "unenrolled"`
+    /// alone, which models a lost authority and blocks every command.
+    #[serde(default)]
+    never_enrolled: bool,
 }
 
 #[derive(Deserialize)]
@@ -78,23 +90,11 @@ pub fn evaluate_batch(bytes: &[u8]) -> Result<Value, &'static str> {
     }
 
     let program = packaged_command_program()?;
-    let mut layers = vec![
-        serde_json::json!({"schema_version":"1.0.0","kind":"local-admin",
-        "catalog_digest":program.catalog_digest,"global_lockdown":request.global_lockdown,"controls":request.controls}),
-    ];
-    let managed_layer = !request.managed_controls.is_empty() || request.managed_global_lockdown;
-    if managed_layer {
-        layers.push(serde_json::json!({"schema_version":"1.0.0","kind":"signed-cloud",
-            "catalog_digest":program.catalog_digest,"global_lockdown":request.managed_global_lockdown,"controls":request.managed_controls}));
-    }
-    let mut binding: NativeCommandControlBindingV1 = serde_json::from_value(serde_json::json!({
-        "schema":"guard.native-command-control-binding.v1",
-        "program_digest":program.program_digest,"catalog_digest":program.catalog_digest,
-        "trust_digest":program.trust_digest,"health":"protected","revision":1,
-        "managed_revision":if managed_layer {1} else {0},
-        "effective_digest":"","layers":layers,
-    }))
-    .map_err(|_| "command_source_evaluation_batch_binding_invalid")?;
+    let mut binding = if request.never_enrolled {
+        never_enrolled_binding(&program, &request)?
+    } else {
+        synthetic_binding(&program, &request)?
+    };
     binding.effective_digest = binding.compute_effective_digest()?;
     let controls = CompiledNativeCommandControls::new(&binding)?;
 
@@ -109,6 +109,14 @@ pub fn evaluate_batch(bytes: &[u8]) -> Result<Value, &'static str> {
             crate::pretool::PathContext {
                 home_dir: request.home_dir.as_deref(),
                 cwd: request.cwd.as_deref(),
+                cdpath_unset: false,
+                rustup_override_absent: false,
+                npm_config_inert: false,
+                pip_config_inert: false,
+                shell_home_matches: false,
+                ripgrep_config_absent: false,
+                psql_environment: Default::default(),
+                creates_nothing: false,
             },
             request.execution_environment.as_ref(),
         );
@@ -133,6 +141,56 @@ pub fn evaluate_batch(bytes: &[u8]) -> Result<Value, &'static str> {
         "program_digest":program.program_digest,"catalog_digest":program.catalog_digest,
         "control_binding":binding,"cases":results,"target_commands_executed":0,
     }))
+}
+
+fn synthetic_binding(
+    program: &NativeCommandProgram,
+    request: &Request,
+) -> Result<NativeCommandControlBindingV1, &'static str> {
+    let mut layers = vec![
+        serde_json::json!({"schema_version":"1.0.0","kind":"local-admin",
+        "catalog_digest":program.catalog_digest,"global_lockdown":request.global_lockdown,"controls":request.controls}),
+    ];
+    let managed_layer = !request.managed_controls.is_empty() || request.managed_global_lockdown;
+    if managed_layer {
+        layers.push(serde_json::json!({"schema_version":"1.0.0","kind":"signed-cloud",
+            "catalog_digest":program.catalog_digest,"global_lockdown":request.managed_global_lockdown,"controls":request.managed_controls}));
+    }
+    serde_json::from_value(serde_json::json!({
+        "schema":"guard.native-command-control-binding.v1",
+        "program_digest":program.program_digest,"catalog_digest":program.catalog_digest,
+        "trust_digest":program.trust_digest,"health":request.health.as_deref().unwrap_or("protected"),"revision":1,
+        "managed_revision":if managed_layer {1} else {0},
+        "effective_digest":"","layers":layers,
+    }))
+    .map_err(|_| "command_source_evaluation_batch_binding_invalid")
+}
+
+/// The first-install binding: it carries no controls, so any requested control,
+/// lockdown or other health contradicts it.
+fn never_enrolled_binding(
+    program: &NativeCommandProgram,
+    request: &Request,
+) -> Result<NativeCommandControlBindingV1, &'static str> {
+    if !request.controls.is_empty()
+        || !request.managed_controls.is_empty()
+        || request.global_lockdown
+        || request.managed_global_lockdown
+        || request
+            .health
+            .as_deref()
+            .is_some_and(|health| health != "unenrolled")
+    {
+        return Err("command_source_evaluation_batch_contract_invalid");
+    }
+    serde_json::from_value(serde_json::json!({
+        "schema":"guard.native-command-control-binding.v1",
+        "program_digest":program.program_digest,"catalog_digest":program.catalog_digest,
+        "trust_digest":program.trust_digest,"health":"unenrolled","revision":0,
+        "managed_revision":0,"effective_digest":"","layers":[],
+        "authority":{"epoch":1,"mutation_revision":1,"authority_key_id":"0".repeat(64),"recovery":null},
+    }))
+    .map_err(|_| "command_source_evaluation_batch_binding_invalid")
 }
 
 #[cfg(test)]
@@ -206,6 +264,64 @@ mod tests {
     }
 
     #[test]
+    fn health_is_bound_into_the_synthetic_snapshot_and_validated() {
+        let mut input: Value =
+            serde_json::from_slice(&request(serde_json::json!([{"id":"a","command":"pwd"}])))
+                .unwrap();
+        let protected = evaluate_batch(&serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(protected["control_binding"]["health"], "protected");
+        input["health"] = serde_json::json!("tampered");
+        let tampered = evaluate_batch(&serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(tampered["control_binding"]["health"], "tampered");
+        assert_ne!(
+            protected["control_binding"]["effective_digest"],
+            tampered["control_binding"]["effective_digest"]
+        );
+        input["health"] = serde_json::json!("healthy");
+        assert!(evaluate_batch(&serde_json::to_vec(&input).unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_never_enrolled_device_keeps_packaged_protection_instead_of_a_global_block() {
+        let mut input: Value = serde_json::from_slice(&request(serde_json::json!([
+            {"id":"context","command":"docker context use staging"}
+        ])))
+        .unwrap();
+        input["health"] = serde_json::json!("unenrolled");
+        let lost = evaluate_batch(&serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(
+            lost["cases"][0]["payload"]["reason_code"],
+            "native_command_control_authority_block"
+        );
+        input["never_enrolled"] = serde_json::json!(true);
+        let fresh = evaluate_batch(&serde_json::to_vec(&input).unwrap()).unwrap();
+        let binding = &fresh["control_binding"];
+        assert_eq!(binding["health"], "unenrolled");
+        assert_eq!(binding["revision"], 0);
+        assert_eq!(binding["layers"], serde_json::json!([]));
+        assert_eq!(
+            fresh["cases"][0]["payload"]["reason_code"],
+            "native_command_review_required"
+        );
+        for (field, value) in [
+            ("health", serde_json::json!("protected")),
+            ("global_lockdown", serde_json::json!(true)),
+            (
+                "controls",
+                serde_json::json!([{"target_kind":"permission",
+                    "target_id":"command.git.permission.hard-reset","state":"enabled"}]),
+            ),
+        ] {
+            let mut contradicted = input.clone();
+            contradicted[field] = value;
+            assert_eq!(
+                evaluate_batch(&serde_json::to_vec(&contradicted).unwrap()).unwrap_err(),
+                "command_source_evaluation_batch_contract_invalid"
+            );
+        }
+    }
+
+    #[test]
     fn global_lockdown_is_bound_even_without_individual_controls() {
         let baseline: Value = serde_json::from_slice(&request(serde_json::json!([
             {"id":"safe","command":"pwd"}
@@ -222,6 +338,10 @@ mod tests {
                 payload["reason_code"],
                 "native_command_control_authority_block"
             );
+            assert!(!payload["reason"]
+                .as_str()
+                .unwrap()
+                .contains("hol-guard command controls"));
             assert_ne!(
                 blocked["control_binding"]["effective_digest"],
                 allowed["control_binding"]["effective_digest"]
@@ -239,7 +359,7 @@ mod tests {
             "pwd".to_owned(),
             "git reset --hard".to_owned(),
             "cat ~/.ssh/id_ed25519".to_owned(),
-            "env FOO=bar curl https://example.com".to_owned(),
+            "env -i curl https://example.com".to_owned(),
             "x".repeat(crate::MAX_COMMAND_BYTES + 1),
         ];
         let cases: Vec<_> = commands

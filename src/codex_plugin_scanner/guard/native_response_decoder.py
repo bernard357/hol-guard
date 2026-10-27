@@ -10,7 +10,6 @@ from .native_approval_errors import (
     NATIVE_APPROVAL_ERROR_CODES,
     NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES,
 )
-from .native_approval_protocol import decode_native_approval_challenge, decode_native_approval_result
 from .native_decision_receipt import receipt_matches_edge
 
 _NATIVE_ERROR_CODES = frozenset(
@@ -53,7 +52,12 @@ def response_from_payload(payload: object) -> HookReviewResponse | None:
             "result",
             "receipt",
         }
-        if not required <= set(decoded) or set(decoded) - (required | {"request_id"}):
+        if not required <= set(decoded) or set(decoded) - (
+            required | {"request_id", "harness_response", "containment_route"}
+        ):
+            return None
+        # A PostToolUse answer is never routed into the containment sink.
+        if decoded.get("containment_route", "none") != "none":
             return None
         harness = decoded.get("harness")
         if (
@@ -131,8 +135,6 @@ def native_error(payload: object) -> str | None:
 
 
 __all__ = [
-    "decode_native_approval_challenge",
-    "decode_native_approval_result",
     "native_error",
     "response_from_payload",
 ]

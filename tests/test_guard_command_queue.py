@@ -31,7 +31,6 @@ from codex_plugin_scanner.guard.runtime import (
     command_executors,
     command_queue,
     command_queue_authority,
-    local_request_snapshots,
 )
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.store import GuardStore
@@ -42,6 +41,7 @@ from tests.guard_review_signing_helpers import (
     review_verification_keys,
     sign_review_payload,
 )
+from tests.local_request_snapshots_client import cloud_safe_local_request_payload
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +94,12 @@ class FakeStore:
             "policy_bundle_keyring": review_trusted_keyring_payload(),
         }
 
+    def _policy_integrity_secret_material(self, *, create: bool) -> tuple[bytes | None, str | None]:
+        # The real store answers with no key until one is created; the resident
+        # reads that as ``local_signing_key_unavailable`` rather than an error.
+        del create
+        return None, None
+
     def get_sync_payload(self, key: str) -> dict[str, object] | list[object] | None:
         return self.payloads.get(key)
 
@@ -118,6 +124,9 @@ class FakeStore:
 
     def get_or_create_installation_id(self) -> str:
         return "22222222-2222-4222-8222-222222222222"
+
+    def get_device_metadata(self) -> dict[str, object]:
+        return {"installation_id": self.get_or_create_installation_id()}
 
     def get_guard_operation_for_approval_request(self, request_id: str) -> dict[str, object]:
         return {
@@ -406,6 +415,7 @@ def test_remote_approval_rejects_signing_key_outside_its_authority(
         validated_remote_approval_envelope(envelope, store=store)
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 @pytest.mark.parametrize(
     ("name", "envelope", "expected"),
     [
@@ -474,7 +484,7 @@ def test_cloud_review_payload_action_envelope_aliases(
         "action_envelope_json": envelope,
     }
 
-    payload = local_request_snapshots._cloud_safe_local_request_payload(row, redaction_level="none")
+    payload = cloud_safe_local_request_payload(row, redaction_level="none")
 
     action_envelope = payload["action_envelope_json"]
     assert isinstance(action_envelope, dict)
@@ -487,13 +497,14 @@ def test_cloud_review_payload_action_envelope_aliases(
         assert action_envelope[key] == value
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 def test_cloud_review_payload_malformed_envelope_gets_safe_display_contract() -> None:
     row = {
         **_approval_request_row("req-malformed-envelope"),
         "action_envelope_json": "{not json",
     }
 
-    payload = local_request_snapshots._cloud_safe_local_request_payload(row, redaction_level="full")
+    payload = cloud_safe_local_request_payload(row, redaction_level="full")
 
     envelope = payload["action_envelope_json"]
     assert isinstance(envelope, dict)
@@ -506,6 +517,7 @@ def test_cloud_review_payload_malformed_envelope_gets_safe_display_contract() ->
     assert envelope["operation"] == "parse_action_envelope"
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 @pytest.mark.parametrize("redaction_level", ["full", "none"])
 def test_cloud_review_payload_preserves_exact_action_across_redaction_levels(
     redaction_level: str,
@@ -520,7 +532,7 @@ def test_cloud_review_payload_preserves_exact_action_across_redaction_levels(
         },
     }
 
-    payload = local_request_snapshots._cloud_safe_local_request_payload(
+    payload = cloud_safe_local_request_payload(
         row,
         redaction_level=redaction_level,
     )
@@ -535,11 +547,12 @@ def test_cloud_review_payload_preserves_exact_action_across_redaction_levels(
     assert envelope["preExecutionResult"] == "sandbox-required"
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 def test_cloud_review_payload_projects_missing_legacy_action_fail_closed() -> None:
     row = _approval_request_row("req-legacy-missing-action")
     row.pop("policy_action")
 
-    payload = local_request_snapshots._cloud_safe_local_request_payload(
+    payload = cloud_safe_local_request_payload(
         row,
         redaction_level="full",
     )
@@ -548,6 +561,7 @@ def test_cloud_review_payload_projects_missing_legacy_action_fail_closed() -> No
     assert payload["policyAction"] == "require-reapproval"
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 def test_cloud_review_payload_rejects_explicit_unknown_action() -> None:
     row = {
         **_approval_request_row("req-explicit-unknown-action"),
@@ -555,34 +569,38 @@ def test_cloud_review_payload_rejects_explicit_unknown_action() -> None:
     }
 
     with pytest.raises(ValueError, match="authoritative_decision_inconsistent"):
-        local_request_snapshots._cloud_safe_local_request_payload(
+        cloud_safe_local_request_payload(
             row,
             redaction_level="full",
         )
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 def test_cloud_action_envelope_matches_the_dashboard_round_trip_fixture() -> None:
     fixture_path = (
         Path(__file__).resolve().parents[1] / "dashboard" / "src" / "test-fixtures" / "cloud-action-envelope.json"
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
 
-    actual = local_request_snapshots._cloud_safe_action_envelope(
+    payload = cloud_safe_local_request_payload(
         {
-            "action_type": "shell_command",
-            "command": "python build.py",
-            "pre_execution_result": "sandbox-required",
+            "request_id": "req-cloud-round-trip",
+            "harness": "codex",
+            "risk_summary": "Sandbox execution is required.",
+            "policy_action": "sandbox-required",
+            "action_envelope_json": {
+                "action_type": "shell_command",
+                "command": "python build.py",
+                "pre_execution_result": "sandbox-required",
+            },
         },
         redaction_level="full",
-        reason="Sandbox execution is required.",
-        policy_action="sandbox-required",
-        fallback_action_id="req-cloud-round-trip",
-        fallback_harness="codex",
     )
 
-    assert actual == fixture
+    assert payload["action_envelope_json"] == fixture
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 @pytest.mark.parametrize(
     ("snake_key", "camel_key"),
     [
@@ -609,13 +627,17 @@ def test_cloud_action_envelope_rejects_conflicting_documented_aliases(
     envelope[camel_key] = "block" if "policy" in snake_key or "execution" in snake_key else "different"
 
     with pytest.raises(ValueError, match="authoritative_decision_inconsistent"):
-        local_request_snapshots._cloud_safe_action_envelope(
-            envelope,
+        cloud_safe_local_request_payload(
+            {
+                **_approval_request_row("req-conflicting-alias"),
+                "policy_action": "allow",
+                "action_envelope_json": envelope,
+            },
             redaction_level="full",
-            policy_action="allow",
         )
 
 
+@pytest.mark.usefixtures("native_approval_reuse_runtime")
 def test_cloud_review_payload_rejects_an_envelope_action_that_differs_from_outer_authority() -> None:
     row = {
         **_approval_request_row("req-contradictory-cloud-action"),
@@ -627,7 +649,7 @@ def test_cloud_review_payload_rejects_an_envelope_action_that_differs_from_outer
     }
 
     with pytest.raises(ValueError, match="authoritative_decision_inconsistent"):
-        local_request_snapshots._cloud_safe_local_request_payload(row, redaction_level="full")
+        cloud_safe_local_request_payload(row, redaction_level="full")
 
 
 def test_command_queue_enabled_defaults_off_without_local_capability(monkeypatch) -> None:
@@ -969,6 +991,52 @@ def test_poll_once_clears_active_job_when_heartbeat_fails(tmp_path: Path, monkey
     assert isinstance(state, dict)
     assert state["state"] == "error"
     assert "active_job" not in state
+
+
+def test_poll_once_posts_rejection_when_capability_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.native_command_capability import CommandCapabilityUnavailableError
+
+    store = FakeStore(tmp_path / "guard-home")
+    result_payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        command_queue,
+        "_resolve_guard_sync_auth_context",
+        lambda current_store: {"sync_url": "https://hol.test/api/guard/receipts/sync", "access_token": "token"},
+    )
+
+    def fake_json_request(
+        auth_context: dict[str, object],
+        *,
+        method: str,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        if path == "/lease":
+            return {
+                "item": {
+                    "id": "job-unavailable",
+                    "leaseId": "lease-unavailable",
+                    "operation": "guard.packageShims.status",
+                }
+            }
+        if path.endswith("/result"):
+            result_payloads.append(payload)
+        return {"ok": True}
+
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise CommandCapabilityUnavailableError
+
+    monkeypatch.setattr(command_queue, "_json_request", fake_json_request)
+    monkeypatch.setattr(command_queue, "authorize_command_queue_job", unavailable)
+
+    status = command_queue.poll_command_queue_once(store, _context(tmp_path))
+
+    assert status["state"] == "idle"
+    assert status["active_job"] is None
+    assert result_payloads[0]["status"] == "failed"
+    assert result_payloads[0]["failureCode"] == "native_command_capability_unavailable"
 
 
 def test_poll_once_posts_failed_result_when_execution_raises(tmp_path: Path, monkeypatch) -> None:

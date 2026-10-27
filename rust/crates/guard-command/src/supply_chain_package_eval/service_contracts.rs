@@ -26,6 +26,10 @@ pub enum EvalError {
     /// so `_evaluate_with_cloud` can branch on 401/403/400/404/other. The
     /// transport surface that produces this is `guard_sync.urlopen_json_with_timeout_retry`.
     HttpStatus(u16, String),
+    /// A cached `cloud_validation_error` evaluation is waiting on a saved-policy
+    /// lookup only the caller can hydrate (it owns the integrity keyring and the
+    /// approval-identity hash). Carries the cached evaluation the lookup keys on.
+    SavedPolicyProbeRequired(Box<Map<String, Value>>),
 }
 
 impl EvalError {
@@ -44,6 +48,7 @@ impl std::fmt::Display for EvalError {
         match self {
             Self::Validation(m) | Self::NotFound(m) | Self::Internal(m) => f.write_str(m),
             Self::HttpStatus(code, m) => write!(f, "HTTP {code}: {m}"),
+            Self::SavedPolicyProbeRequired(_) => f.write_str("saved_policy_probe_required"),
         }
     }
 }
@@ -56,6 +61,13 @@ pub type EvalResult<T> = Result<T, EvalError>;
 /// object handed to the transport (`urllib.request.Request` in Python).
 /// `body` is `None` for bodiless methods; `dpop_nonce` is echoed for retry
 /// bookkeeping by `_urlopen_json_with_timeout_retry`.
+///
+/// `retry_context` mirrors Python's `_resolve_guard_dpop_retry_context`
+/// side-channel (`_GUARD_DPOP_REQUEST_CONTEXTS` + the
+/// `_guard_dpop_retry_context` attribute). The prepared request carries the
+/// auth context + request metadata so a DPoP nonce challenge (`use_dpop_nonce`)
+/// or a timeout retry can re-sign the proof with a fresh nonce without the
+/// caller re-deriving the credential material.
 #[derive(Debug, Clone, Default)]
 pub struct GuardSyncRequest {
     pub url: String,
@@ -63,6 +75,10 @@ pub struct GuardSyncRequest {
     pub headers: BTreeMap<String, String>,
     pub body: Option<Vec<u8>>,
     pub dpop_nonce: Option<String>,
+    /// Python `_guard_dpop_retry_context` — `{auth_context, request_url,
+    /// method, extra_headers}` for nonce/timeout re-signing. `None` when the
+    /// request has no DPoP material.
+    pub retry_context: Option<Map<String, Value>>,
 }
 
 /// `.runtime.runner` seam — the private Guard-Cloud-sync helpers this module

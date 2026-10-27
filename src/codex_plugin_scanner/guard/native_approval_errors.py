@@ -7,6 +7,8 @@ boundary.
 
 from __future__ import annotations
 
+from .native_command_control_errors import NATIVE_COMMAND_CONTROL_ERROR_CODES
+
 # Keep this allowlist finite.  In particular, do not replace it with a prefix
 # or regular expression that could carry arbitrary runtime data as an error.
 NATIVE_APPROVAL_ERROR_CODES = frozenset(
@@ -131,6 +133,13 @@ NATIVE_APPROVAL_ERROR_CODES = frozenset(
         "native_approval_secure_state_unavailable",
         "native_approval_signing_authority_replaced",
         "native_approval_signing_authority_unavailable",
+        "native_business_policy_floor_invalid",
+        "native_business_policy_removal_requires_authority",
+        "native_business_source_authority_invalid",
+        "native_business_source_authority_missing",
+        "native_business_source_authority_not_current",
+        "native_business_source_enforce_required",
+        "native_business_source_mutation_in_progress",
         "native_resident_request_invalid_json",
         "native_resident_clock_invalid",
         "native_request_invalid_json",
@@ -219,6 +228,8 @@ NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES = frozenset(
         "native_frame_timeout_failed",
         "native_frame_version_mismatch",
         "native_frame_write_failed",
+        "native_guard_home_mismatch",
+        "native_hook_event_unsupported",
         "native_json_array_too_wide",
         "native_json_depth_exceeded",
         "native_json_duplicate_key",
@@ -249,6 +260,7 @@ NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES = frozenset(
         "native_resident_auth_timeout_failed",
         "native_resident_clock_invalid",
         "native_resident_generation_invalid",
+        "native_resident_in_use",
         "native_resident_lease_busy",
         "native_resident_lease_lock_failed",
         "native_resident_lease_write_failed",
@@ -303,6 +315,7 @@ NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES = frozenset(
         "native_resident_spawn_failed",
         "native_resident_spawn_stdin_failed",
         "native_resident_start_in_progress",
+        "native_request_schema_unsupported",
         "native_resident_start_timeout",
         "native_resident_client_retirement_failed",
         "native_resident_state_dir_create_failed",
@@ -387,49 +400,6 @@ GENERIC_FAILURE_CODES = frozenset(
     ]
 )
 
-# Rust also emits these exact command-control fence failures from
-# resident_protocol::safe_error_response. Keep them diagnostic-only: the
-# hook bridge still rejects their error envelopes as authoritative decisions.
-NATIVE_COMMAND_CONTROL_ERROR_CODES = frozenset(
-    [
-        "native_command_control_authority_downgrade",
-        "native_command_control_authority_epoch_reused",
-        "native_command_control_authority_invalid",
-        "native_command_control_authority_mac_invalid",
-        "native_command_control_authority_missing",
-        "native_command_control_authority_noncanonical",
-        "native_command_control_authority_not_current",
-        "native_command_control_authority_path_invalid",
-        "native_command_control_authority_removed",
-        "native_command_control_binding_invalid",
-        "native_command_control_binding_removed",
-        "native_command_control_digest_mismatch",
-        "native_command_control_encoding_failed",
-        "native_command_control_floor_invalid",
-        "native_command_control_layer_invalid",
-        "native_command_control_mutation_in_progress",
-        "native_command_control_mutation_lock_invalid",
-        "native_command_control_mutation_lock_missing",
-        "native_command_control_mutation_lock_unsupported",
-        "native_command_control_mutation_reused",
-        "native_command_control_recovery_context_mismatch",
-        "native_command_control_recovery_invalid",
-        "native_command_control_recovery_missing",
-        "native_command_control_revision_downgrade",
-        "native_command_control_revision_reused",
-        "native_command_control_target_invalid",
-        "native_command_control_target_unknown",
-        "native_command_program_binding_mismatch",
-        "native_policy_snapshot_command_authority_invalid",
-        "native_policy_snapshot_command_authority_not_private",
-        "native_policy_snapshot_command_authority_parent_missing",
-        "native_policy_snapshot_command_authority_read_failed",
-        "native_policy_snapshot_command_authority_stat_failed",
-        "native_policy_snapshot_command_authority_too_large",
-        "native_resident_command_mutation_lock_invalid",
-        "native_resident_command_mutation_lock_read_failed",
-    ]
-)
 
 FINITE_FAILURE_CODES = (
     NATIVE_APPROVAL_ERROR_CODES
@@ -439,10 +409,25 @@ FINITE_FAILURE_CODES = (
 )
 
 
+def resident_refusal_code(payload: object) -> str | None:
+    """Return the code of an exact ``{"error", "retryable"}`` resident refusal frame.
+
+    Anything else, including codes outside the finite vocabulary, is not a
+    refusal and returns ``None``.
+    """
+    if not isinstance(payload, dict) or set(payload) != {"error", "retryable"}:
+        return None
+    code = payload["error"]
+    if type(payload["retryable"]) is not bool or not isinstance(code, str):
+        return None
+    return code if code in FINITE_FAILURE_CODES else None
+
+
 __all__ = [
     "FINITE_FAILURE_CODES",
     "GENERIC_FAILURE_CODES",
     "NATIVE_APPROVAL_ERROR_CODES",
     "NATIVE_COMMAND_CONTROL_ERROR_CODES",
     "NATIVE_RESIDENT_LIFECYCLE_ERROR_CODES",
+    "resident_refusal_code",
 ]

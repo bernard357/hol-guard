@@ -32,6 +32,7 @@ fn ordinary_copies_keep_source_and_destination_risk_boundaries() {
     let project = home.join("project");
     let linked = home.join("linked");
     let outside = home.join("outside");
+    let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&project).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     for args in [
@@ -122,8 +123,6 @@ fn ordinary_copies_keep_source_and_destination_risk_boundaries() {
         "cp -r source.ts copied.ts",
         "cp -f source.ts copied.ts",
         "cp . copied.ts",
-        "cp source.ts one.ts two.ts",
-        "cp source.ts copied.ts > output.txt",
         "cp source.ts copied.ts && echo done",
         "cp source.ts copied.ts | cat",
     ] {

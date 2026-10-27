@@ -19,12 +19,16 @@ import pytest
 
 from ci.native_runtime.native_process_test_support import process_is_alive
 from codex_plugin_scanner.guard.live_process_identity import process_start_token
+from codex_plugin_scanner.guard.native_command_control_binding import read_native_command_control_binding
 from codex_plugin_scanner.guard.native_policy_snapshot import (
     _policy_snapshot_push_bytes_v3,
     build_policy_snapshot_v3,
     derive_native_policy_verifier_key,
     provision_native_policy_verifier_key,
 )
+from codex_plugin_scanner.guard.native_resident_client import close_native_residents
+from codex_plugin_scanner.guard.store import GuardStore
+from scripts.native_resident_stop_bound import RESIDENT_STOP_TIMEOUT_SECONDS
 
 _NATIVE_BINARY = os.environ.get("HOL_GUARD_NATIVE_BINARY")
 _NATIVE_DIAGNOSTIC_RE = re.compile(rb"\bnative_[a-z0-9_]+\b")
@@ -49,7 +53,7 @@ def native_runtime(tmp_path: Path) -> Iterator[tuple[Path, Path]]:
                 (str(runtime), "resident-stop", "--state-dir", str(state_dir)),
                 check=False,
                 capture_output=True,
-                timeout=2,
+                timeout=10,
             )
         finally:
             if state_root is not None:
@@ -69,6 +73,22 @@ def _rule_digest(runtime: Path) -> str:
     return digest
 
 
+def _command_controls(root: Path) -> tuple[dict[str, object], bytes]:
+    """Bind the packaged command program the way a real snapshot push does.
+
+    Without a binding the runtime compiles no command controls, so extension
+    observations, permission observations and workspace containment proofs all
+    stay inert and this end-to-end path silently covers less than it appears
+    to. The binding authenticates its authority with the store's own policy
+    integrity key, so the snapshot has to be verified by that same key.
+    """
+    store = GuardStore(root)
+    binding, _ = read_native_command_control_binding(store)
+    master_key, _key_id = store._policy_integrity_secret_material(create=True)
+    assert isinstance(master_key, bytes) and len(master_key) == 32
+    return binding, master_key
+
+
 def _request(
     runtime: Path,
     root: Path,
@@ -77,11 +97,25 @@ def _request(
     default_action: str = "allow",
     deadline_budget_ms: int = 1_000,
     risk_actions: dict[str, str] | None = None,
+    generation: int = 1,
 ) -> bytes:
     runtime_identity = hashlib.sha256(runtime.read_bytes()).hexdigest()
     rule_digest = _rule_digest(runtime)
-    policy_master = b"\x07" * 32
+    # Reading the store answers through a resident that this process starts in
+    # root/native-runtime, the state directory the tests drive. When the test
+    # has not started a resident there yet, stop that one so the test begins
+    # from an empty state directory with no resident owned by pytest. A test
+    # that already keeps residents there (a handoff) is left as it arranged.
+    state_dir = root / "native-runtime"
+    fresh = not _state_files(state_dir)
+    # The store mints its policy integrity key here, and refuses to mint one
+    # once a native verifier key is already on disk. Bind before provisioning.
+    command_extensions, policy_master = _command_controls(root)
     provision_native_policy_verifier_key(root, policy_master)
+    if fresh:
+        closed = close_native_residents(root)
+        assert closed
+        assert not _state_files(state_dir)
     policy_snapshot = build_policy_snapshot_v3(
         config={
             "mode": "enforce",
@@ -104,7 +138,8 @@ def _request(
         runtime_identity=runtime_identity,
         rule_digest=rule_digest,
         verifier_key=derive_native_policy_verifier_key(policy_master),
-        generation=1,
+        generation=generation,
+        command_extensions=command_extensions,
     )
     return json.dumps(
         {
@@ -117,7 +152,7 @@ def _request(
                 "tool_input": {"command": command},
             },
             "deadline_budget_ms": deadline_budget_ms,
-            "policy_generation": 1,
+            "policy_generation": generation,
             "policy_snapshot": policy_snapshot,
             "source": {
                 "cwd": str(root),
@@ -184,6 +219,8 @@ def _push_snapshot(runtime: Path, state_dir: Path, request: bytes) -> None:
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
         raise AssertionError("native policy push failed: native_policy_snapshot_ack_invalid") from None
     assert isinstance(acknowledgement, dict)
+    # Surface a typed refusal (exit 0 with an error body) instead of a KeyError.
+    assert "error" not in acknowledgement, f"native policy push refused: {acknowledgement}"
     assert acknowledgement["status"] == "accepted"
 
 
@@ -273,7 +310,7 @@ def _initialize_protected_scope(runtime: Path, state_dir: Path) -> Path:
             (str(runtime), "resident-stop", "--state-dir", str(state_dir)),
             check=False,
             capture_output=True,
-            timeout=3,
+            timeout=RESIDENT_STOP_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
         raise AssertionError("native scope initialization failed: native_resident_stop_timeout") from None

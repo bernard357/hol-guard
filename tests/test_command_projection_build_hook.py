@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import types
@@ -27,19 +28,47 @@ def hook(monkeypatch, tmp_path):
     spec.loader.exec_module(module)
     archive = types.ModuleType("archive_test_support")
     archive.MANIFEST = "contracts/extensions/command-projection-build.v1.json"
-    archive.write_projection_manifest = lambda root: None
+    archive.NAMES = ("command-catalog.v1.json", "native-command-program.v1.json", "trust-class-map.v1.json")
+    archive.write_projection_manifest = lambda root, **kwargs: None
     archive.verify_projection_manifest = lambda root: None
     monkeypatch.setattr(module, "_archive_support", lambda: archive)
+    bundle = types.SimpleNamespace(
+        DIRECTORY="contracts/extensions/command-pack-bundle",
+        MANIFEST="contracts/extensions/command-pack-bundle-build.v1.json",
+        prepare=lambda root, **kwargs: (root / "bundle", root / "bundle-manifest", None),
+    )
+    monkeypatch.setattr(module, "_bundle_support", lambda: bundle)
     instance = module.CommandProjectionBuildHook()
     instance.archive_test_support = archive
     instance.root = str(tmp_path)
     instance.target_name = "wheel"
+    extensions = tmp_path / "contracts/extensions"
+    extensions.mkdir(parents=True)
+    (extensions / "core-defaults.v1.json").write_text(
+        json.dumps(
+            {
+                "schema": "guard.core-defaults.v1",
+                "entries": [
+                    {
+                        "extension_id": "command.example",
+                        "source": "contributions/command-sources/command.example.json",
+                        "trust": "contracts/extensions/trust/command.example.v1.json",
+                    }
+                ],
+            }
+        )
+    )
+    (extensions / "native-command-program.v1.json").write_text(
+        json.dumps({"extensions": [{"extension_id": "command.example"}]})
+    )
     monkeypatch.delenv("HOL_GUARD_BUILD_SOURCE_COMPILER", raising=False)
     return instance
 
 
 def test_editable_setup_does_not_require_outputs_or_rust(hook, monkeypatch):
     """Editable dependency setup must neither invoke Rust nor require generated files."""
+    for name in ("core-defaults.v1.json", "native-command-program.v1.json"):
+        (Path(hook.root) / "contracts/extensions" / name).unlink()
 
     def unexpected(*args, **kwargs):
         """Fail immediately if this compiler-free path attempts a subprocess."""
@@ -52,7 +81,7 @@ def test_editable_setup_does_not_require_outputs_or_rust(hook, monkeypatch):
 
 
 @pytest.mark.parametrize("target", ["wheel", "sdist"])
-def test_package_build_stages_and_verifies_before_registering_absent_outputs(hook, monkeypatch, target):
+def test_package_build_stages_and_verifies_before_registering_outputs(hook, monkeypatch, target):
     """Package resources become eligible for inclusion only after generation and verification."""
     hook.target_name = target
     data = {"force_include": {}}
@@ -68,14 +97,23 @@ def test_package_build_stages_and_verifies_before_registering_absent_outputs(hoo
     hook.initialize("standard", data)
     assert len(calls) == 2
     assert calls[1] == [*calls[0], "--check"]
-    assert "--projections-only" in calls[0]
+    assert "--descriptor-dir" in calls[0]
+    assert str(Path(hook.root) / "contracts/extensions/build-descriptors") in calls[0]
     prefix = "contracts/extensions" if target == "sdist" else "codex_plugin_scanner/guard/contracts/data/extensions"
     expected = {
         f"{prefix}/command-catalog.v1.json",
         f"{prefix}/native-command-program.v1.json",
+        f"{prefix}/trust-class-map.v1.json",
     }
     if target == "sdist":
         expected.add(hook.archive_test_support.MANIFEST)
+        expected.add("contracts/extensions/command-pack-bundle-build.v1.json")
+        expected.add("tests/fixtures")
+    expected.add(
+        "contracts/extensions/command-pack-bundle"
+        if target == "sdist"
+        else "codex_plugin_scanner/guard/contracts/data/extensions/command-pack-bundle"
+    )
     assert set(data["force_include"].values()) == expected
 
 
@@ -105,6 +143,25 @@ def test_pinned_compiler_is_used_for_generation_and_strict_check(hook, monkeypat
     monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: calls.append(command))
     hook.initialize("standard", {"force_include": {}})
     assert all(command[command.index("--compiler") + 1] == compiler for command in calls)
+
+
+def test_core_manifest_selects_bounded_projections(hook, monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: calls.append(command))
+    hook.initialize("standard", {"force_include": {}})
+    assert all("--projections-only" in command for command in calls)
+
+
+@pytest.mark.parametrize("identities", [[], ["command.example", "command.optional"]])
+def test_core_program_mismatch_aborts_before_registering_outputs(hook, monkeypatch, identities):
+    """A missing core member or an embedded optional pack must abort packaging."""
+    program = Path(hook.root) / "contracts/extensions/native-command-program.v1.json"
+    program.write_text(json.dumps({"extensions": [{"extension_id": identity} for identity in identities]}))
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    data = {"force_include": {}}
+    with pytest.raises(ValueError, match="contain optional policy or omit core policy"):
+        hook.initialize("standard", data)
+    assert not data["force_include"]
 
 
 def test_frozen_source_archive_uses_verified_projections_without_rust(hook, monkeypatch):
@@ -146,10 +203,26 @@ def test_generated_path_gate_permits_removal_but_rejects_reintroduction():
     paths = [
         f"{prefix}/{name}.v1.json"
         for prefix in ("contracts/extensions", "src/codex_plugin_scanner/guard/contracts/data/extensions")
-        for name in ("command-catalog", "native-command-program")
+        for name in ("command-catalog", "native-command-program", "trust-class-map")
     ]
     files = [{"filename": path, "status": status} for path in paths for status in ("removed", "added", "modified")]
-    other = "src/codex_plugin_scanner/guard/contracts/data/extensions/trust-class-map.v1.json"
-    files.append({"filename": other, "status": "removed"})
     result = subprocess.run(["jq", "-r", query], input=json.dumps(files), text=True, capture_output=True, check=True)
-    assert result.stdout.splitlines() == [path for path in paths for _ in range(2)] + [other]
+    owned = "".join(re.findall(r"owned\+?='([^']+)'", run))
+    protected = subprocess.run(["grep", "-E", owned], input=result.stdout, text=True, capture_output=True, check=True)
+    assert protected.stdout.splitlines() == [path for path in paths for _ in range(2)]
+
+
+def test_regeneration_prs_cannot_track_ignored_package_projections():
+    """Automation receives no exemption for outputs removed from version control."""
+    root = Path(__file__).parents[1]
+    workflow = yaml.safe_load((root / ".github/workflows/generated-artifacts-guard.yml").read_text())
+    job = workflow["jobs"]["regen-owned-paths"]
+    assert "if" not in job
+    step = job["steps"][1]
+    assert "if" not in step
+    query = step["run"].split("--jq '", 1)[1].split("'", 1)[0]
+    path = "contracts/extensions/native-command-program.v1.json"
+    files = [{"filename": path, "status": status} for status in ("removed", "added", "modified")]
+    files.append({"filename": "contracts/extensions/trust-class-map.v1.json", "status": "modified"})
+    result = subprocess.run(["jq", "-r", query], input=json.dumps(files), text=True, capture_output=True, check=True)
+    assert result.stdout.splitlines() == [path, path, "contracts/extensions/trust-class-map.v1.json"]

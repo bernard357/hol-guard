@@ -15,6 +15,7 @@ from .approval_scope_support import (
 )
 from .continuation_snapshot import canonical_continuation_correlation_id
 from .models import DECISION_SCOPE_VALUES
+from .native_approval_scope import ApprovalScopeUnavailableError
 from .project_identity import resolve_portable_project_identity
 from .review_claim_hashing import (
     compute_legacy_local_review_request_claim_hash,
@@ -23,7 +24,6 @@ from .review_claim_hashing import (
 )
 from .review_exact_capability_advertisement import attach_exact_review_capability
 from .review_native_claim_bindings import (
-    NATIVE_BINDING_FIELDS,
     NATIVE_BINDING_VERSION,
     native_binding_commitment_matches,
 )
@@ -237,23 +237,6 @@ def build_local_review_request_claim(
     return attach_exact_review_capability(claim, oauth, store)
 
 
-def validate_local_review_request_claim(claim: dict[str, object]) -> dict[str, object]:
-    if claim.get("contractVersion") != _LOCAL_REVIEW_REQUEST_CONTRACT_VERSION:
-        raise GuardReviewContractError("unsupported_claim_contract_version")
-    has_native_bindings = any(isinstance(claim.get(key), str) for key in NATIVE_BINDING_FIELDS) or any(
-        key in claim for key in ("nativeBindingVersion", "nativeBindingDigest")
-    )
-    if has_native_bindings and not native_binding_commitment_matches(claim):
-        raise GuardReviewContractError("native_binding_digest_mismatch")
-    expected_hash = compute_local_review_request_claim_hash(claim)
-    claim_hash = _non_empty_string(claim.get("claimHash"))
-    if claim_hash != expected_hash and (
-        has_native_bindings or claim_hash != compute_legacy_local_review_request_claim_hash(claim)
-    ):
-        raise GuardReviewContractError("claim_hash_mismatch")
-    return claim
-
-
 def payload_hash_for_remote_approval_envelope(envelope: dict[str, object]) -> str:
     return _sha256_hex(_canonical_signed_payload(envelope))
 
@@ -379,7 +362,7 @@ def validate_remote_approval_request_binding(
     action = normalize_remote_approval_decision(envelope.get("decision"))
     if action is None:
         raise GuardReviewContractError("invalid_remote_approval_decision")
-    contract = request_scope_contract(claim_row)
+    contract = request_scope_contract(claim_row, guard_home=store.guard_home)
     if envelope_scope is None:
         raise GuardReviewContractError("remote_approval_scope_mismatch")
     try:
@@ -389,7 +372,11 @@ def validate_remote_approval_request_binding(
             requested_scope=envelope_scope,
             contract_version=APPROVAL_SCOPE_CONTRACT_VERSION,
             contract_digest=contract.digest,
+            guard_home=store.guard_home,
         )
+    except ApprovalScopeUnavailableError:
+        # A resident outage is not a scope mismatch; let callers report it as availability.
+        raise
     except (IneligibleApprovalScopeError, ValueError) as error:
         raise GuardReviewContractError("remote_approval_scope_mismatch") from error
 

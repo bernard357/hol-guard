@@ -8,18 +8,6 @@ nested under ``hooks.events`` (current ZCode rejects the legacy flat
 migrates legacy groups on install). Plugins are cached under
 ``~/.zcode/cli/plugins/cache/<marketplace>/<plugin>/<version>/``.
 
-Two ZCode behaviors shape hook installs:
-
-* Each surface only registers hooks when its own config sets
-  ``hooks.enabled: true`` at the root; without that opt-in flag parsed hook
-  entries are listed in settings but never execute. Guard sets the flag on
-  install and restores the prior value on uninstall.
-* Current ZCode splits hook loading per surface: the Desktop app reads user
-  hooks from ``~/.zcode/cli/config.json`` while the npm CLI reads them from
-  its ``~/.zcode/cli/setting.json`` file-config (the CLI migrates
-  config.json content there once). No runtime loads both files, so Guard
-  maintains managed hooks in both.
-
 This adapter discovers MCP servers, enabled plugins, plugin manifests and
 provenance, plugin hooks, skills, commands, and marketplaces; installs
 Guard-managed ``PreToolUse`` and ``UserPromptSubmit`` hooks into the CLI
@@ -35,8 +23,9 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeGuard
 
-from ..aibom_detection import extend_detection_with_workspace_aibom
-from ..models import GuardArtifact, HarnessDetection
+from ..aibom_detection import extend_detection_with_workspace_aibom, native_adapter_detection
+from ..models import HarnessDetection
+from ..native_path_anchor import anchor_to_process_directory
 from ..shims import prepare_guard_shim, remove_guard_shim
 from .adapter_safe_output import write_text_at_authorized_path
 from .base import (
@@ -61,18 +50,11 @@ from .zcode_config import (
     ZCODE_ENV_HINTS,
     ZCODE_HOOK_EVENT_NAMES,
     ZCODE_HOOKS_EVENTS_KEY,
-    ZCODE_MARKETPLACE_FILE,
     ZCODE_PLUGIN_CACHE_DIR,
-    ZCODE_PLUGIN_MANIFEST_DIR,
-    ZCODE_PLUGIN_MANIFEST_FILE,
     ZCODE_PLUGIN_MARKETPLACES_DIR,
     ZCODE_PRETOOL_MATCHERS,
     ZCODE_V2_CONFIG_FILE,
     ZCODE_V2_DIR,
-    append_cli_config_artifacts,
-    append_found_path,
-    append_marketplace_artifacts,
-    append_plugin_manifest_artifacts,
     dedupe_hook_entries,
     hook_event_groups,
     is_guard_managed_hook_command,
@@ -82,9 +64,7 @@ _ZCODE_HOME_ENV_VAR = "ZCODE_HOME"
 # Current ZCode renders this label beside the hook in its Hooks settings UI
 # instead of the full managed command string.
 _GUARD_HOOK_STATUS_MESSAGE = "HOL Guard runtime policy enforcement"
-# The npm CLI's file-config (plugins, locale, related settings) and its
-# hook surface: the CLI loads user hooks from here while the Desktop app
-# loads them from config.json, so Guard maintains managed hooks in both.
+# The npm CLI's file-config and hook surface; the Desktop app reads config.json.
 _ZCODE_CLI_FILE_CONFIG = "setting.json"
 _ZCODE_PRETOOL_TIMEOUT_SECONDS = 30
 _ZCODE_PROMPT_TIMEOUT_SECONDS = 30
@@ -171,63 +151,32 @@ class ZCodeHarnessAdapter(HarnessAdapter):
         return any(os.environ.get(name) for name in ZCODE_ENV_HINTS)
 
     def detect(self, context: HarnessContext) -> HarnessDetection:
-        artifacts: list[GuardArtifact] = []
-        found_paths: list[str] = []
-
-        for config_path in self._config_candidates(context):
-            if not config_path.is_file():
-                continue
-            append_found_path(found_paths, config_path)
-            payload = _json_payload(config_path)
-            if payload:
-                scope = self._scope_for(context, config_path)
-                append_cli_config_artifacts(
-                    harness=self.harness,
-                    artifacts=artifacts,
-                    payload=payload,
-                    config_path=config_path,
-                    scope=scope,
-                )
-
-        # Current ZCode desktop builds keep provider/app state under ~/.zcode/v2;
-        # its presence marks an install even before the CLI config exists.
-        v2_config = self._zcode_home_dir(context) / ZCODE_V2_DIR / ZCODE_V2_CONFIG_FILE
-        if v2_config.is_file():
-            append_found_path(found_paths, v2_config)
-
-        for plugins_root, scope in self._plugins_candidates(context):
-            if not plugins_root.is_dir():
-                continue
-            for marketplace_dir in sorted(entry for entry in plugins_root.iterdir() if entry.is_dir()):
-                for plugin_dir in sorted(entry for entry in marketplace_dir.iterdir() if entry.is_dir()):
-                    for version_dir in sorted(entry for entry in plugin_dir.iterdir() if entry.is_dir()):
-                        manifest_path = version_dir / ZCODE_PLUGIN_MANIFEST_DIR / ZCODE_PLUGIN_MANIFEST_FILE
-                        if not manifest_path.is_file():
-                            continue
-                        append_plugin_manifest_artifacts(
-                            harness=self.harness,
-                            artifacts=artifacts,
-                            found_paths=found_paths,
-                            plugin_root=version_dir,
-                            scope=scope,
-                        )
-
-        for marketplaces_root, scope in self._marketplaces_candidates(context):
-            if not marketplaces_root.is_dir():
-                continue
-            for marketplace_dir in sorted(entry for entry in marketplaces_root.iterdir() if entry.is_dir()):
-                marketplace_file = marketplace_dir / ZCODE_MARKETPLACE_FILE
-                if marketplace_file.is_file():
-                    append_marketplace_artifacts(
-                        harness=self.harness,
-                        artifacts=artifacts,
-                        found_paths=found_paths,
-                        marketplace_file=marketplace_file,
-                        scope=scope,
-                    )
+        # The native resident reads the configs, plugin cache and marketplaces;
+        # Python anchors the paths and scopes and fails closed without it.
+        artifacts, found_paths = native_adapter_detection(
+            "zcode_detect",
+            {
+                "harness": self.harness,
+                "configs": [
+                    {"path": anchor_to_process_directory(path), "scope": self._scope_for(context, path)}
+                    for path in self._config_candidates(context)
+                ],
+                "v2_config": anchor_to_process_directory(
+                    self._zcode_home_dir(context) / ZCODE_V2_DIR / ZCODE_V2_CONFIG_FILE
+                ),
+                "plugin_roots": [
+                    {"path": anchor_to_process_directory(path), "scope": scope}
+                    for path, scope in self._plugins_candidates(context)
+                ],
+                "marketplace_roots": [
+                    {"path": anchor_to_process_directory(path), "scope": scope}
+                    for path, scope in self._marketplaces_candidates(context)
+                ],
+            },
+        )
 
         runtime_signal = self._detect_runtime_signal()
-        command_available = _command_available(self.executable)
+        command_available = _command_available(self.executable, context.home_dir)
         installed = bool(found_paths) or runtime_signal or command_available
         warnings: list[str] = []
         if runtime_signal and not found_paths:
@@ -241,8 +190,8 @@ class ZCodeHarnessAdapter(HarnessAdapter):
             harness=self.harness,
             installed=installed,
             command_available=command_available,
-            config_paths=tuple(found_paths),
-            artifacts=tuple(artifacts),
+            config_paths=found_paths,
+            artifacts=artifacts,
             warnings=tuple(dict.fromkeys(warnings)),
         )
         return extend_detection_with_workspace_aibom(
@@ -366,6 +315,12 @@ class ZCodeHarnessAdapter(HarnessAdapter):
                 (path, payload, _snapshot(path), (path.stat().st_mode & 0o777) if path.is_file() else 0o644)
             )
 
+        file_config = self._file_config_path(context)
+        if str(file_config) not in enabled_history and str(config_path) in enabled_history:
+            # The CLI migration will copy config.json (including Guard's opt-in)
+            # into setting.json; remember the pre-install value for it too.
+            enabled_history[str(file_config)] = enabled_history[str(config_path)]
+
         config_before = _snapshot(config_path)
         state_mode = state_path.stat().st_mode & 0o777 if state_before is not None else 0o644
         backup_mode = backup_path.stat().st_mode & 0o777 if backup_before is not None else 0o644
@@ -462,6 +417,7 @@ class ZCodeHarnessAdapter(HarnessAdapter):
 
         surfaces: list[tuple[Path, dict[str, object]]] = []
         for path in (self._config_path(context), self._file_config_path(context)):
+            _ensure_path_within_root(self._zcode_home_dir(context), path, label="ZCode")
             if not path.is_file():
                 if path == self._config_path(context):
                     surfaces.append((path, {}))
@@ -470,7 +426,6 @@ class ZCodeHarnessAdapter(HarnessAdapter):
                 # strand the user's config.json settings. The CLI's own
                 # migration copies Guard's config.json hooks over instead.
                 continue
-            _ensure_path_within_root(self._zcode_home_dir(context), path, label="ZCode")
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as error:
@@ -509,14 +464,13 @@ class ZCodeHarnessAdapter(HarnessAdapter):
     def _recorded_enabled_for(
         self, state: dict[str, object], path: Path, hooks: dict[str, object]
     ) -> dict[str, object]:
-        """Guard's recorded pre-install value wins over the live file, which a
-        previous install force-enabled. New state records per file; legacy
-        single-file state maps onto the one file it managed.
+        """Return the pre-install enabled preference for one hook surface.
 
         A record only applies while Guard-managed entries are still present in
         the file: once the user removes Guard's hooks, their own live value is
-        the freshest choice and wins. Uninstall therefore captures the record
-        before pruning managed entries."""
+        the freshest choice and wins. Legacy single-file state maps only onto
+        the file it managed.
+        """
 
         if not self._hooks_have_managed_entries(hooks):
             return {"present": "enabled" in hooks, "value": hooks.get("enabled")}
@@ -524,13 +478,6 @@ class ZCodeHarnessAdapter(HarnessAdapter):
         if isinstance(history, dict) and self._valid_enabled_record(history.get(str(path))):
             recorded = history[str(path)]
             return {"present": recorded["present"], "value": recorded["value"]}
-        # Deliberately no cross-file mapping of managed_config_path's record
-        # onto the CLI file-config: an install made before setting.json
-        # existed leaves no record for it, and applying config.json's record
-        # there later strips an enabled flag the user set after the CLI's own
-        # migration created the file. Only values recorded for this exact
-        # path (branch above) or the legacy single-file state (branch below)
-        # are restored.
         legacy = state.get("hooks_enabled_before")
         if state.get("managed_config_path") == str(path) and self._valid_enabled_record(legacy):
             return {"present": legacy["present"], "value": legacy["value"]}
@@ -538,11 +485,7 @@ class ZCodeHarnessAdapter(HarnessAdapter):
 
     @staticmethod
     def _hooks_have_handlers(hooks: dict[str, object]) -> bool:
-        """Return True when the ``hooks`` object still carries event handlers.
-
-        Root-only leftovers (a lone ``enabled`` flag) carry no runnable
-        configuration, so callers drop the whole object when this is False.
-        """
+        """Return True when ``hooks`` still carries event handlers."""
 
         return any(isinstance(entries, list) and entries for entries in hook_event_groups(hooks).values())
 
@@ -576,9 +519,6 @@ class ZCodeHarnessAdapter(HarnessAdapter):
                 elif not original["present"] and hooks.get("enabled") is True:
                     hooks.pop("enabled", None)
                 if not original["present"]:
-                    # Guard introduced the enabled flag here; keep the user's
-                    # own root settings (timeoutMs, maxOutputBytes, the CLI
-                    # skeleton's empty events) and drop only Guard's litter.
                     events = hooks.get(ZCODE_HOOKS_EVENTS_KEY)
                     if isinstance(events, dict) and not events:
                         hooks.pop(ZCODE_HOOKS_EVENTS_KEY, None)
@@ -695,10 +635,6 @@ class ZCodeHarnessAdapter(HarnessAdapter):
     @staticmethod
     def _prune_managed_entries(entries: list[object]) -> list[object]:
         return _shared_prune_managed_hook_entries(entries, is_managed=is_guard_managed_hook_command)
-
-
-def _is_managed_handler(handler: object) -> bool:
-    return _shared_is_managed_handler(handler, is_guard_managed_hook_command)
 
 
 def _merge_hook_entry(entries: list[object], matcher: str | None, handler: dict[str, object]) -> list[object]:

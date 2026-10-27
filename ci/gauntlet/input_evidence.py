@@ -13,6 +13,10 @@ def fixture_path_aliases(replacements: dict[str, str]) -> dict[str, str]:
     """Redact macOS display aliases only when they resolve to the same fixture path."""
     result = dict(replacements)
     for original, placeholder in replacements.items():
+        if re.fullmatch(r"[A-Za-z]:\\.+", original):
+            # Git for Windows prints the same drive path with forward slashes.
+            result[original.replace("\\", "/")] = placeholder
+            continue
         path = Path(original)
         if path.parts[:2] != ("/", "private") or len(path.parts) < 3 or path.parts[2] not in {"tmp", "var"}:
             continue
@@ -25,16 +29,40 @@ def fixture_path_aliases(replacements: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def redact_value(value: Any, replacements: dict[str, str]) -> Any:
-    """Apply the same redactions to host and Guard evidence."""
+Redaction = str | re.Pattern[str]
+
+
+def _redaction_order(item: tuple[Redaction, str]) -> tuple[int, int]:
+    """Hide credentials before paths, and the longest spelling of each before its prefixes."""
+    matcher = item[0]
+    if isinstance(matcher, re.Pattern):
+        return (0, -len(matcher.pattern))
+    return (1, -len(matcher))
+
+
+def redact_value(value: Any, replacements: dict[Redaction, str]) -> Any:
+    """Apply the same redactions to host and Guard evidence.
+
+    A plain key is replaced literally. A compiled one stands for a secret the
+    transcript may have folded or re-encoded, and is substituted through a
+    function so its placeholder is never read as a backreference.
+
+    A mapping is rewritten on both sides. A tool that reports per-path or
+    per-token results names them in its property names, so a secret reaches the
+    export as readably from a key as from a value, and a path alias belongs on
+    a key for the same reason.
+    """
     if isinstance(value, str):
-        for old, new in sorted(replacements.items(), key=lambda item: -len(item[0])):
-            value = value.replace(old, new)
+        for old, new in sorted(replacements.items(), key=_redaction_order):
+            if isinstance(old, re.Pattern):
+                value = old.sub(lambda _match, text=new: text, value)
+            else:
+                value = value.replace(old, new)
         return value
     if isinstance(value, list):
         return [redact_value(item, replacements) for item in value]
     if isinstance(value, dict):
-        return {key: redact_value(item, replacements) for key, item in value.items()}
+        return {redact_value(key, replacements): redact_value(item, replacements) for key, item in value.items()}
     return value
 
 
@@ -44,22 +72,43 @@ def input_digest(value: dict) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def public_observations(rows: list[dict], replacements: dict[str, str]) -> list[dict]:
-    """Check original observer bytes before exporting comparable public inputs."""
+def _unverified_row(row: dict, code: str) -> dict:
+    """Keep an unverifiable observation as a failed attempt with its cause."""
+    kept = {key: row[key] for key in ("event", "tool", "tool_call_id", "elapsed_ms", "http_status") if key in row}
+    return {**kept, "observer_error": True, "observer_error_code": code}
+
+
+def public_observations(rows: list[dict], replacements: dict[Redaction, str]) -> list[dict]:
+    """Check original observer bytes before exporting comparable public inputs.
+
+    A row whose input cannot be verified becomes an observer error naming the
+    check it failed. The judge counts it as a failed attempt, and the other
+    rows of the case stay available.
+    """
     result = []
     for row in rows:
+        # A discarded bridge reply is retried by the extension. It is not a
+        # Guard answer, and leaving it in the case fails the retry that recovered.
+        if row.get("observer_error_code") == "bridge_no_reply":
+            continue
         if row.get("observer_error") or row.get("transport_error"):
             result.append(row)
             continue
         raw = row.get("input_json")
         if not isinstance(raw, str) or len(raw.encode("utf-8")) > 256_000:
-            raise ValueError("missing or oversized original Guard input")
+            result.append(_unverified_row(row, "input_missing_or_oversized"))
+            continue
         observed_digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         if observed_digest != row.get("input_sha256"):
-            raise ValueError("original Guard input does not match its observed digest")
-        value = json.loads(raw)
+            result.append(_unverified_row(row, "input_digest_mismatch"))
+            continue
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            value = None
         if not isinstance(value, dict):
-            raise ValueError("Guard input must be a complete object")
+            result.append(_unverified_row(row, "input_not_object"))
+            continue
         public_input = redact_value(value, replacements)
         public_row = {key: item for key, item in row.items() if key not in {"input_json", "input_sha256"}}
         public_row.update(
@@ -82,7 +131,7 @@ def input_matches(tool: str, executed: dict, reviewed: dict) -> bool:
     target = expected.get("path", expected.get("file_path"))
     patch = expected.get("input")
     if isinstance(patch, str):
-        headers = re.findall(r"^\[([^\n]+)#[0-9A-Fa-f]{4}\]$", patch, re.MULTILINE)
+        headers = [header.strip(" \t") for header in re.findall(r"^\[([^\n]+)#[0-9A-Fa-f]{4}\]$", patch, re.MULTILINE)]
         if len(headers) != 1 or (target is not None and target != headers[0]):
             return False
         target = headers[0]
@@ -94,7 +143,7 @@ def input_matches(tool: str, executed: dict, reviewed: dict) -> bool:
     return actual == enriched
 
 
-def post_input_matches(tool: str, reviewed: dict[str, Any], completed: dict[str, Any]) -> bool:
+def post_input_matches(tool: str, reviewed: dict[str, Any], completed: dict[str, Any], result: Any = None) -> bool:
     """Bind resolved read paths without accepting a different target or read options."""
     if reviewed == completed:
         return True
@@ -107,6 +156,36 @@ def post_input_matches(tool: str, reviewed: dict[str, Any], completed: dict[str,
     original, resolved = reviewed[key], completed[key]
     if not isinstance(original, str) or not isinstance(resolved, str):
         return False
+    # A bare `:raw` returns the whole file without line formatting, so its
+    # result must still prove the same resolved source from the first line.
+    selector = re.fullmatch(r"(.+):(?:([1-9][0-9]*)(?:-([1-9][0-9]*))?|raw)", original)
+    if selector:
+        base, first, last = selector.groups()
+        first = first or "1"
+        if last is not None and int(last) < int(first):
+            return False
+        details = result.get("details") if isinstance(result, dict) else None
+        if not isinstance(details, dict):
+            return False
+        meta, display = details.get("meta"), details.get("displayContent")
+        source = meta.get("source") if isinstance(meta, dict) else None
+        if (
+            not isinstance(source, dict)
+            or source != {"type": "path", "value": resolved}
+            or not isinstance(display, dict)
+            or display.get("startLine") != int(first)
+        ):
+            return False
+        # The actual SDK result proves it resolved a selector rather than read
+        # a literal colon-named file. Guard alone cannot supply that proof.
+        original = base
+    # Windows agents resolve with backslash separators. Accept them only when
+    # the whole resolved path is in that form and the reviewed path has no
+    # backslash, so a POSIX name containing one never matches a different file.
+    if resolved.startswith(("{{workspace}}\\", "{{home}}\\")) and "/" not in resolved:
+        if "\\" in original:
+            return False
+        resolved = resolved.replace("\\", "/")
     if original.startswith("~/"):
         expected = "{{home}}/" + original[2:]
     elif original.startswith(("/", "{{")):
@@ -115,4 +194,40 @@ def post_input_matches(tool: str, reviewed: dict[str, Any], completed: dict[str,
         expected = "{{workspace}}/" + original.removeprefix("./")
     if any(part in {".", "..", ""} for part in expected.split("/")[1:]):
         return False
-    return completed == {**reviewed, key: expected}
+    return resolved == expected and all(completed[other] == reviewed[other] for other in reviewed if other != key)
+
+
+def public_native_receipt(receipt: object, replacements: dict[Redaction, str]) -> dict[str, Any] | None:
+    """Keep only safe native denial metadata and structured extension binding."""
+    if not isinstance(receipt, dict):
+        return None
+    selected = {
+        key: receipt[key]
+        for key in (
+            "schema",
+            "version",
+            "authority",
+            "decision_id",
+            "request_id",
+            "harness",
+            "event_name",
+            "payload_kind",
+            "decision",
+            "policy_action",
+            "observed_policy_action",
+            "reason_code",
+            "command_extensions",
+        )
+        if key in receipt
+    }
+    return redact_value(selected, replacements)
+
+
+def public_native_extension_evidence(edge: object, replacements: dict[Redaction, str]) -> dict[str, Any] | None:
+    """Export bounded full observations from an independent native expectation probe."""
+    if not isinstance(edge, dict):
+        return None
+    result = edge.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get("command_extensions"), dict):
+        return None
+    return redact_value(result["command_extensions"], replacements)

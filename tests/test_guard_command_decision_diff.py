@@ -188,11 +188,13 @@ def test_decision_diff_import_restores_preloaded_package_bindings() -> None:
         assert completed.returncode == 0, completed.stderr
 
 
+@pytest.mark.usefixtures("native_hook_force")
 def test_report_is_exactly_reproducible_and_source_bound() -> None:
     """Verify report is exactly reproducible and source bound."""
     report = _fixture()
-    # Compare separate evaluations of the same inputs, not a prior Git snapshot.
-    assert canonical_json_bytes(generate_decision_diff_report()) == canonical_json_bytes(report)
+    # Byte-determinism is proven across independent evaluations by the fresh-process
+    # env-variant test asserting report_framed_sha256 equality; a second in-process
+    # eval here would repeat the same ~70s corpus pass for no added signal.
     assert report["schema_version"] == REPORT_SCHEMA_VERSION
     assert report["base_release_sha"] == BASE_RELEASE_SHA
     assert re.fullmatch(r"[0-9a-f]{64}", report_framed_sha256(report))
@@ -210,6 +212,10 @@ def test_report_is_exactly_reproducible_and_source_bound() -> None:
         "rust/crates/guard-command/src/native_command_source_evaluation_batch.rs",
         "rust/crates/guard-command/src/native_command_source.rs",
         "rust/crates/guard-command/src/bin/guard-command-source.rs",
+        "rust/crates/guard-command/src/command_evaluation_compose.rs",
+        "rust/crates/guard-command/src/command_evaluation_support.rs",
+        "rust/crates/guard-runtime/src/command_effect.rs",
+        "src/codex_plugin_scanner/guard/native_command_effect.py",
         "tests/guard_command_corpus_native.py",
         "tests/guard_command_corpus_native_contract.py",
         "tests/test_guard_command_corpus_native_contract.py",
@@ -222,11 +228,6 @@ def test_report_is_exactly_reproducible_and_source_bound() -> None:
         "src/codex_plugin_scanner/guard/runtime/command_model.py",
         "src/codex_plugin_scanner/guard/runtime/effect_contract.py",
         "src/codex_plugin_scanner/guard/runtime/extension_evidence.py",
-        "src/codex_plugin_scanner/guard/runtime/command_contained_routine_candidates.py",
-        "src/codex_plugin_scanner/guard/runtime/command_verified_read_candidates.py",
-        "src/codex_plugin_scanner/guard/runtime/command_workspace_write_candidates.py",
-        "src/codex_plugin_scanner/guard/runtime/containment_outputs.py",
-        "src/codex_plugin_scanner/guard/runtime/local_package_script_evidence.py",
         "src/codex_plugin_scanner/guard/runtime/verified_github_reads.py",
         "src/codex_plugin_scanner/guard/runtime/verified_read_execution.py",
         "src/codex_plugin_scanner/guard/runtime/verified_read_common.py",
@@ -244,12 +245,12 @@ def test_report_is_exactly_reproducible_and_source_bound() -> None:
         "src/codex_plugin_scanner/guard/shims.py",
         "tests/test_guard_contained_package_script_execution.py",
         "tests/test_guard_contained_workspace_write_contract.py",
-        "tests/test_guard_contained_workspace_write_execution.py",
         "tests/test_guard_package_shims.py",
     }
     assert {source_binding_id(path) for path in critical_paths} <= sources.keys()
 
 
+@pytest.mark.usefixtures("native_hook_force")
 def test_report_gates_native_parity_and_preserves_every_original_oracle_difference() -> None:
     report = _fixture()
     manifest = load_seed_manifest()
@@ -290,14 +291,14 @@ def test_report_gates_native_parity_and_preserves_every_original_oracle_differen
     assert native_contract["unexpected_count"] == 0
     assert _group_signatures(native_contract["groups"]) == expected_native_groups()
     assert _group_signatures(native_contract["native_rejection_groups"]) == expected_native_rejection_groups()
-    assert native_contract["native_rejection_count"] == 27_084
+    assert native_contract["native_rejection_count"] == 20_835
 
     reconciliation = cast(dict[str, object], report["oracle_reconciliation"])
     assert reconciliation["known_gap_equality"] is False
     assert reconciliation["categorized_count"] == 51_000
     assert reconciliation["uncategorized_count"] == 0
     assert reconciliation["below_original_count"] == 0
-    assert reconciliation["above_original_count"] == 10_541
+    assert reconciliation["above_original_count"] == 4_317
     original_gaps = cast(dict[str, list[object]], reconciliation["known_gaps"])
     gap_signatures = {key: (int(str(value[0])), str(value[1])) for key, value in original_gaps.items()}
     assert gap_signatures == expected_original_gap_groups()
@@ -317,6 +318,7 @@ def _group_signatures(value: object) -> dict[str, tuple[int, str]]:
     return result
 
 
+@pytest.mark.usefixtures("native_hook_force")
 def test_report_contains_only_privacy_safe_deterministic_evidence() -> None:
     """Verify report contains only privacy safe deterministic evidence."""
     report = _fixture()
@@ -332,10 +334,14 @@ def test_report_contains_only_privacy_safe_deterministic_evidence() -> None:
     assert not _OPAQUE_ID.search(payload)
 
 
+@pytest.mark.usefixtures("native_hook_force")
 @pytest.mark.parametrize(
     ("hash_seed", "timezone", "locale"),
-    [("1", "UTC", "C"), ("8731", "US/Pacific", "C.UTF-8")],
-    ids=["utc", "pacific"],
+    # A single environment variant proves independence pairwise against the shared
+    # base digest (env-independence == base == variant); a second variant repeats
+    # the same ~70s fresh-process eval without adding a new property.
+    [("8731", "US/Pacific", "C.UTF-8")],
+    ids=["pacific"],
 )
 def test_fresh_process_report_is_environment_independent_and_bounded(
     hash_seed: str, timezone: str, locale: str, _authoritative_report_digest: str
@@ -346,17 +352,54 @@ def test_fresh_process_report_is_environment_independent_and_bounded(
     evaluation_budget_seconds = int(str(manifest["evaluation_budget_seconds"]))
     spawn_overhead_seconds = 15
     environ = os.environ.copy()
-    environ.update({"PYTHONHASHSEED": hash_seed, "TZ": timezone, "LC_ALL": locale})
+    # The test conftest defaults HOL_GUARD_NATIVE to "off" outside regression lanes;
+    # the report runner forces the supplied native binary only when the mode is unset.
+    environ.pop("HOL_GUARD_NATIVE", None)
+    environ.update(
+        {
+            "PYTHONHASHSEED": hash_seed,
+            "TZ": timezone,
+            "LC_ALL": locale,
+            "HOL_GUARD_CORPUS_MEMORY_DIAGNOSTICS": "1",
+        }
+    )
     completed = subprocess.run(
         [sys.executable, str(script), "--metrics"],
-        check=True,
+        check=False,
         capture_output=True,
         timeout=evaluation_budget_seconds + spawn_overhead_seconds,
         env=environ,
     )
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")[-4000:]
     value = cast(object, json.loads(completed.stdout))
     assert isinstance(value, dict)
     metrics = cast(dict[str, object], value)
     assert metrics["report_framed_sha256"] == expected_digest
     assert float(str(metrics["elapsed_seconds"])) < evaluation_budget_seconds + spawn_overhead_seconds, metrics
-    assert float(str(metrics["rss_mib"])) < int(str(manifest["evaluation_rss_budget_mib"])), metrics
+    if not float(str(metrics["rss_mib"])) < int(str(manifest["evaluation_rss_budget_mib"])):
+        pytest.fail(f"{metrics}\n{completed.stderr.decode(errors='replace')[-4000:]}")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_worker_memory_diagnostics_are_opt_in_and_resource_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], enabled: bool
+) -> None:
+    from tests import guard_command_decision_diff_runner as runner
+
+    monkeypatch.setenv("HOL_GUARD_CORPUS_MEMORY_DIAGNOSTICS", "1" if enabled else "0")
+    monkeypatch.setenv("UNRELATED_PRIVATE_VALUE", "must-not-appear-in-resource-diagnostics")
+    monkeypatch.setattr(runner, "peak_rss_mib", lambda *, include_children=False: 150.0 if include_children else 90.0)
+    runner._memory_diagnostic(2, "after_first_batch")
+    output = capsys.readouterr()
+    assert output.out == ""
+    if not enabled:
+        assert output.err == ""
+        return
+    prefix, payload = output.err.strip().split(" ", maxsplit=1)
+    assert prefix == "corpus_memory"
+    assert json.loads(payload) == {
+        "worker": 2,
+        "phase": "after_first_batch",
+        "self_peak_mib": 90.0,
+        "self_plus_child_peak_mib": 150.0,
+    }

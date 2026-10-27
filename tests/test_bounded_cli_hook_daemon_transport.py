@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters import bounded_cli_hook_bridge as bridge
+from codex_plugin_scanner.guard import native_hook_render
 from codex_plugin_scanner.guard.adapters import bounded_cli_hook_daemon as daemon
+from codex_plugin_scanner.guard.daemon import auth_token as auth_token_module
 
 
 @pytest.mark.parametrize("url", ["https://127.0.0.1:4781/hook", "http://example.com/hook"])
@@ -23,7 +25,7 @@ def test_loopback_opener_disables_proxies_and_installs_redirect_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     handlers: list[object] = []
-    sentinel = cast(urllib.request.OpenerDirector, object())
+    sentinel = cast(Any, object())
 
     def build(*items: object) -> urllib.request.OpenerDirector:
         handlers.extend(items)
@@ -33,12 +35,12 @@ def test_loopback_opener_disables_proxies_and_installs_redirect_guard(
 
     assert daemon._build_loopback_opener() is sentinel
     proxy = next(item for item in handlers if isinstance(item, urllib.request.ProxyHandler))
-    assert proxy.proxies == {}
+    assert cast(Any, proxy).proxies == {}
     assert any(isinstance(item, daemon._LoopbackOnlyRedirectHandler) for item in handlers)
 
 
 def test_redirect_guard_rejects_remote_target_before_following() -> None:
-    handler = daemon._LoopbackOnlyRedirectHandler()
+    handler: Any = daemon._LoopbackOnlyRedirectHandler()
     request = urllib.request.Request("http://127.0.0.1:4781/start")
 
     with pytest.raises(ValueError, match="loopback"):
@@ -62,7 +64,7 @@ def test_daemon_auth_token_preserves_only_nonempty_private_text(
         seen.update(path=path, **kwargs)
         return stored
 
-    monkeypatch.setattr(daemon, "read_private_regular_text", read)
+    monkeypatch.setattr(auth_token_module, "read_private_regular_text", read)
     guard_home = tmp_path / "guard-home"
 
     assert daemon._read_daemon_auth_token(guard_home) == expected
@@ -100,7 +102,12 @@ def test_daemon_endpoint_accepts_only_valid_loopback_state(
     assert daemon._daemon_hook_endpoint(tmp_path, "grok") == expected
 
 
-def test_ipv6_daemon_endpoint_is_parseable_and_accepted_by_transport() -> None:
+def test_ipv6_daemon_endpoint_is_parseable_and_accepted_by_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        native_hook_render,
+        "native_cli_hook_emit",
+        lambda *_args, **_kwargs: {"stdout": '{"decision":"allow"}', "stderr": "", "exit_code": 0},
+    )
     endpoint = "http://[::1]:4781/v1/hooks/grok"
     parsed = urlparse(endpoint)
     assert (parsed.hostname, parsed.port) == ("::1", 4781)
@@ -114,7 +121,7 @@ def test_ipv6_daemon_endpoint_is_parseable_and_accepted_by_transport() -> None:
         timeout_seconds=2,
         _endpoint_loader=lambda *_args: endpoint,
         _token_loader=lambda _path: "token",
-        _opener_builder=lambda: cast(urllib.request.OpenerDirector, _Opener(response)),
+        _opener_builder=lambda: cast(Any, _Opener(response)),
     )
 
     assert result is not None
@@ -161,7 +168,7 @@ def _try_with(outcome: _Response | Exception) -> tuple[str, str, int] | None:
         timeout_seconds=20,
         _endpoint_loader=lambda *_args: "http://127.0.0.1:4781/v1/hooks/grok",
         _token_loader=lambda _path: "token",
-        _opener_builder=lambda: cast(urllib.request.OpenerDirector, _Opener(outcome)),
+        _opener_builder=lambda: cast(Any, _Opener(outcome)),
     )
 
 
@@ -184,7 +191,7 @@ def test_daemon_transport_rejects_invalid_or_untrusted_responses(outcome: _Respo
 
 
 def test_daemon_transport_requires_endpoint_and_token() -> None:
-    common = {
+    common: dict[str, Any] = {
         "guard_home": Path("/private/unused"),
         "harness": "grok",
         "input_text": "{}",
@@ -213,7 +220,14 @@ def test_hermes_daemon_response_uses_harness_native_translation(monkeypatch: pyt
     from codex_plugin_scanner.guard.adapters import hermes_runtime_hooks
 
     expected = ('{"decision":"allow"}', "", 0)
-    monkeypatch.setattr(hermes_runtime_hooks, "hermes_bridge_response", lambda *_args, **_kwargs: expected)
+    deadlines: list[object] = []
+
+    def bridge(*_args: object, **kwargs: object) -> tuple[str, str, int]:
+        deadlines.append(kwargs.get("deadline"))
+        return expected
+
+    monkeypatch.setattr(hermes_runtime_hooks, "hermes_bridge_response", bridge)
+    started = time.monotonic()
     result = daemon.try_daemon_hook(
         guard_home=Path("/private/unused"),
         harness="hermes",
@@ -221,16 +235,91 @@ def test_hermes_daemon_response_uses_harness_native_translation(monkeypatch: pyt
         timeout_seconds=2,
         _endpoint_loader=lambda *_args: "http://127.0.0.1:4781/v1/hooks/hermes",
         _token_loader=lambda _path: "token",
-        _opener_builder=lambda: cast(urllib.request.OpenerDirector, _Opener(_Response(body=b'{"x":1}'))),
+        _opener_builder=lambda: cast(Any, _Opener(_Response(body=b'{"x":1}'))),
     )
     assert result == expected
+    # The render inherits the hook's absolute deadline rather than a fresh timeout.
+    assert len(deadlines) == 1
+    assert isinstance(deadlines[0], float)
+    assert started < deadlines[0] <= time.monotonic() + 2
 
 
-def test_native_response_edge_contracts() -> None:
-    assert daemon._native_hook_permission_decision("unknown") is None
-    assert daemon._should_exit_block("copilot", "PreToolUse", "block") is False
+def test_daemon_answer_is_printed_as_the_resident_renders_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, object], dict[str, object]]] = []
 
-    stdout, stderr, code = daemon._daemon_response_to_native(
+    def rendered(harness: str, response: dict[str, object], **kwargs: object) -> dict[str, object]:
+        calls.append((harness, dict(response), kwargs))
+        return {"stdout": '{"decision":"deny"}', "stderr": "blocked", "exit_code": 2}
+
+    monkeypatch.setattr(native_hook_render, "native_cli_hook_emit", rendered)
+    started = time.monotonic()
+    result = daemon.try_daemon_hook(
+        guard_home=Path("/private/unused"),
+        harness="OMP",
+        input_text='{"hook_event_name":"PreToolUse"}',
+        timeout_seconds=2,
+        _endpoint_loader=lambda *_args: "http://127.0.0.1:4781/v1/hooks/omp",
+        _token_loader=lambda _path: "token",
+        _opener_builder=lambda: cast(Any, _Opener(_Response(body=b'{"policy_action":"block"}'))),
+    )
+    assert result == ('{"decision":"deny"}', "blocked", 2)
+    assert len(calls) == 1
+    harness, response, kwargs = calls[0]
+    assert (harness, response) == ("omp", {"policy_action": "block"})
+    assert kwargs["event_name"] == "PreToolUse"
+    assert kwargs["guard_home"] == Path("/private/unused")
+    assert kwargs["bridge"] is True
+    deadline = kwargs["deadline"]
+    assert isinstance(deadline, float)
+    assert started < deadline <= time.monotonic() + 2
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        None,
+        {"stdout": 1, "stderr": "", "exit_code": 0},
+        {"stdout": "{}", "stderr": None, "exit_code": 0},
+        {"stdout": "{}", "stderr": "", "exit_code": True},
+        {"stdout": "{}", "stderr": ""},
+    ],
+)
+@pytest.mark.parametrize("harness", ["grok", "pi", "codex"])
+def test_unrendered_daemon_answer_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, answer: dict[str, object] | None, harness: str
+) -> None:
+    from codex_plugin_scanner.guard.adapters.bounded_cli_hook_failure import failure_payload
+
+    monkeypatch.setattr(native_hook_render, "native_cli_hook_emit", lambda *_args, **_kwargs: answer)
+    result = daemon.try_daemon_hook(
+        guard_home=Path("/private/unused"),
+        harness=harness,
+        input_text='{"hook_event_name":"PreToolUse"}',
+        timeout_seconds=2,
+        _endpoint_loader=lambda *_args: f"http://127.0.0.1:4781/v1/hooks/{harness}",
+        _token_loader=lambda _path: "token",
+        _opener_builder=lambda: cast(Any, _Opener(_Response(body=b'{"policy_action":"allow"}'))),
+    )
+    assert result is not None
+    stdout, stderr, code = result
+    expected, expected_code = failure_payload(
+        harness=harness,
+        event_name="PreToolUse",
+        reason="HOL Guard could not read the daemon's answer to this hook.",
+        recording_only=False,
+    )
+    assert json.loads(stdout) == expected
+    assert (stderr, code) == ("", expected_code)
+    assert "deny" in stdout
+
+
+def test_native_response_edge_contracts(native_bridge_render) -> None:
+    _stdout, _stderr, code = native_bridge_render(
+        {"policy_action": "block"}, harness="copilot", event_name="PreToolUse"
+    )
+    assert code == 0
+
+    stdout, stderr, code = native_bridge_render(
         {
             "hookSpecificOutput": {
                 "permissionDecision": "deny",
@@ -243,7 +332,7 @@ def test_native_response_edge_contracts() -> None:
     assert json.loads(stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert (stderr, code) == ("blocked", 2)
 
-    stdout, _stderr, code = daemon._daemon_response_to_native(
+    stdout, _stderr, code = native_bridge_render(
         {"policy_action": "allow"},
         harness="codex",
         event_name="UserPromptSubmit",
@@ -251,7 +340,7 @@ def test_native_response_edge_contracts() -> None:
     assert json.loads(stdout) == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit"}}
     assert code == 0
 
-    stdout, _stderr, code = daemon._daemon_response_to_native(
+    stdout, _stderr, code = native_bridge_render(
         {"policy_action": "block", "reason": "blocked"},
         harness="codex",
         event_name="UserPromptSubmit",
@@ -275,33 +364,32 @@ def test_grok_wait_ignores_malformed_native_output(tmp_path: Path) -> None:
     )
 
 
-def test_bridge_compatibility_wrappers_delegate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    opener = cast(urllib.request.OpenerDirector, object())
-    monkeypatch.setattr(daemon, "_daemon_hook_endpoint", lambda home, harness: f"{home}/{harness}")
-    monkeypatch.setattr(daemon, "_read_daemon_auth_token", lambda home: home.name)
-    monkeypatch.setattr(daemon, "_build_loopback_opener", lambda: opener)
-    monkeypatch.setattr(
-        daemon,
-        "_daemon_response_to_native",
-        lambda response, **kwargs: (json.dumps(response), str(kwargs["harness"]), 7),
+@pytest.mark.parametrize(
+    ("harness", "event_name", "minimum", "maximum"),
+    [
+        ("zcode", "UserPromptSubmit", 9.0, 10.0),
+        ("hermes", "UserPromptSubmit", 9.0, 10.0),
+        ("zcode", "PreToolUse", 0.0, daemon._DAEMON_TIMEOUT_BUDGET_SECONDS),
+    ],
+)
+def test_prompt_transport_waits_for_cold_workspace_publication(
+    harness: str, event_name: str, minimum: float, maximum: float
+) -> None:
+    timeouts: list[float] = []
+
+    class _RecordingOpener:
+        def open(self, _request: object, *, timeout: float) -> _Response:
+            timeouts.append(timeout)
+            return _Response(body=b'{"policy_action":"allow"}')
+
+    daemon.try_daemon_hook(
+        guard_home=Path("/private/unused"),
+        harness=harness,
+        input_text=json.dumps({"hook_event_name": event_name, "cwd": "/private/unused"}),
+        timeout_seconds=25,
+        _endpoint_loader=lambda *_args: f"http://127.0.0.1:4781/v1/hooks/{harness}",
+        _token_loader=lambda _path: "token",
+        _opener_builder=lambda: cast(Any, _RecordingOpener()),
     )
-
-    assert bridge._daemon_hook_endpoint(tmp_path, "grok") == f"{tmp_path}/grok"
-    assert bridge._read_daemon_auth_token(tmp_path) == tmp_path.name
-    assert bridge._build_loopback_opener() is opener
-    assert bridge._daemon_response_to_native({"x": 1}, harness="grok", event_name="PreToolUse") == (
-        '{"x": 1}',
-        "grok",
-        7,
-    )
-
-    captured: dict[str, object] = {}
-
-    def try_hook(**kwargs: object) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr(daemon, "try_daemon_hook", try_hook)
-    assert bridge._try_daemon_hook(guard_home=tmp_path, harness="grok", input_text="{}", timeout_seconds=3) is None
-    assert captured["_endpoint_loader"] is bridge._daemon_hook_endpoint
-    assert captured["_token_loader"] is bridge._read_daemon_auth_token
-    assert captured["_opener_builder"] is bridge._build_loopback_opener
+    assert len(timeouts) == 1
+    assert minimum < timeouts[0] <= maximum

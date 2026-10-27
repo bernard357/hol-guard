@@ -1,4 +1,5 @@
 use super::*;
+use crate::pep440::{SpecifierSet, Version};
 
 /// `supply_chain_bundle_models.SupplyChainBundleResponse` (:460) mirror —
 /// the signed Guard Cloud bundle response. `signed_bundle` preserves the exact
@@ -14,6 +15,10 @@ pub struct SupplyChainBundleResponse {
     pub signature_algorithm: String,
     /// `SupplyChainVerificationKey.to_dict()` payloads.
     pub verification_keys: Vec<Map<String, Value>>,
+    /// The typed response the seam already decoded. Offline decisions reuse
+    /// it instead of re-serialising and re-parsing the whole bundle per call;
+    /// `None` means a caller must parse from `to_dict()`.
+    pub parsed: Option<std::sync::Arc<crate::supply_chain_bundle::SupplyChainBundleResponse>>,
 }
 
 impl SupplyChainBundleResponse {
@@ -45,6 +50,38 @@ pub trait SupplyChainBundleApi {
         &self,
         raw_json: &Value,
     ) -> EvalResult<SupplyChainBundleResponse>;
+    /// Parsing a stored response is not proof that its cached verdict is current.
+    /// Use the native signature/key-state/freshness verifier and paired scope.
+    /// The boolean reports a matching recorded sync keyring, not a new trust
+    /// root. Missing sync context cannot establish a permissive cache hit.
+    fn validate_cached_supply_chain_bundle(
+        &self,
+        response: &SupplyChainBundleResponse,
+        workspace_id: &str,
+        now: Option<f64>,
+        sync_keyring: Option<&Value>,
+        synced_bundle_version: Option<&str>,
+    ) -> EvalResult<bool> {
+        let decoded;
+        let typed = match response.parsed.as_deref() {
+            Some(typed) => typed,
+            None => {
+                decoded = crate::supply_chain_bundle::load_supply_chain_bundle_response(
+                    &response.to_dict(),
+                )
+                .map_err(|error| EvalError::Validation(error.to_string()))?;
+                &decoded
+            }
+        };
+        crate::supply_chain_bundle_cache_trust::validate_cached_supply_chain_bundle(
+            typed,
+            workspace_id,
+            now,
+            sync_keyring,
+            synced_bundle_version,
+        )
+        .map_err(|error| EvalError::Validation(error.to_string()))
+    }
     /// `check_supply_chain_bundle_freshness(bundle, now=)` (:114). `now` is
     /// epoch seconds (`None` = wall clock). `EvalError::Validation` maps
     /// `SupplyChainBundleExpiredError`.
@@ -71,24 +108,6 @@ pub trait SupplyChainBundleApi {
         &self,
         bundle_payload: &Map<String, Value>,
     ) -> EvalResult<BTreeMap<String, String>>;
-}
-
-/// `packaging.specifiers.SpecifierSet` mirror (opaque to this module —
-/// constructed only through `JsSemverApi`).
-#[derive(Debug, Clone)]
-pub struct SpecifierSet {
-    /// Normalized specifier string, preserved for byte-parity reparsing.
-    pub normalized: String,
-}
-
-/// `packaging.version.Version` mirror.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Version {
-    /// Canonical normalized rendering (`str(Version(v))`).
-    pub normalized: String,
-    /// `Version.release` — the dotted release-segment tuple used by the
-    /// caret/tilde specifier ports (:4550, :4572).
-    pub release: Vec<u64>,
 }
 
 /// `packaging` + `.runtime.js_semver` seam — per-package policy version
@@ -139,15 +158,10 @@ pub trait RiskDetectApi {
 /// `EvalError::Validation("deadline_exceeded ...")` — callers treat it the
 /// same as the Python `except _DeadlineExceededError` arms.
 pub trait ManifestDepsApi {
-    /// `manifest_dependency_targets.evaluation_targets(artifact,
-    /// workspace_dir, explicit_targets=, include_locked=)` (:33).
-    fn evaluation_targets(
-        &self,
-        artifact: &GuardArtifact,
-        workspace_dir: Option<&Path>,
-        explicit_targets: &[Map<String, Value>],
-        include_locked: bool,
-    ) -> Vec<Map<String, Value>>;
+    // `manifest_dependency_targets.evaluation_targets` is implemented inline in
+    // `targets::manifest_dependency_targets` — the resident trait seam was a
+    // stub that never produced `manifest_unsynced`, degrading the eval to
+    // `monitor` for unrecognized lockfile deps.
     /// `_dependency_map_for_path(path, text, deadline=)` (:81) — dispatches on
     /// the manifest/lockfile filename to the per-format parser. `deadline` is
     /// a monotonic deadline in seconds; expiry raises

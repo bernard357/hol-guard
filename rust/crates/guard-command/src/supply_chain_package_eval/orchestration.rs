@@ -1,3 +1,5 @@
+use super::cache_reuse::CacheContext;
+use super::evaluation::cached_supply_chain_eval_is_reusable;
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -9,9 +11,8 @@ use super::*;
 /// `_evaluate_package_request_artifact_uncached` (:337-795).
 ///
 /// Faithful port of the Python orchestration function. Returns
-/// `(Option<PackageEvalResult>, Option<String>)` where the second element is a
-/// human-readable note when the result was served from the early-exit paths
-/// (parity with the Python early-return tuple shape).
+/// `(Option<PackageEvalResult>, Option<EvalError>)`: the second element is set
+/// only when the evaluation cannot finish without caller-hydrated input.
 #[allow(clippy::too_many_arguments)]
 #[allow(dead_code)]
 pub(super) fn evaluate_package_request_artifact_uncached(
@@ -22,7 +23,7 @@ pub(super) fn evaluate_package_request_artifact_uncached(
     now: Option<&str>,
     external_archive_network_authorized: bool,
     retain_external_archive_blob: bool,
-) -> (Option<PackageEvalResult>, Option<String>) {
+) -> (Option<PackageEvalResult>, Option<EvalError>) {
     let now_value = now
         .map(str::to_string)
         .unwrap_or_else(|| crate::local_supply_chain::Timestamp::now_utc().isoformat());
@@ -39,22 +40,19 @@ pub(super) fn evaluate_package_request_artifact_uncached(
     if let Some(workspace_dir) = workspace_dir {
         let parse_results = lockfile_parse_results(deps, workspace_dir, artifact);
         if let Some(incomplete) = first_incomplete_lockfile_result(&parse_results) {
-            let workspace_id = store.get_cloud_workspace_id();
-            let workspace_fingerprint = workspace_fingerprint(
-                deps,
-                workspace_id.as_deref().unwrap_or(""),
-                Some(workspace_dir),
-                artifact,
-                None,
-            );
+            let target = targets
+                .first()
+                .cloned()
+                .unwrap_or_else(|| incomplete_lockfile_fallback_target(incomplete));
             return (
                 Some(finalize_incomplete_lockfile_evaluation(
                     deps,
                     artifact,
                     store,
+                    &target,
+                    Some(workspace_dir),
                     incomplete,
-                    workspace_id.as_deref(),
-                    &workspace_fingerprint,
+                    &package_intent_hash,
                     &now_value,
                 )),
                 None,
@@ -88,6 +86,10 @@ pub(super) fn evaluate_package_request_artifact_uncached(
         deps.bundle
             .load_supply_chain_bundle_response(&bundle_payload)
             .ok()
+            .filter(|response| {
+                response.bundle.get("workspaceId").and_then(Value::as_str)
+                    == workspace_id.as_deref()
+            })
     };
     let bundle_meta_map = bundle_response
         .as_ref()
@@ -97,6 +99,52 @@ pub(super) fn evaluate_package_request_artifact_uncached(
         .as_deref()
         .map(|id| workspace_fingerprint(deps, id, workspace_dir, artifact, bundle_meta.as_ref()));
     let workspace_fingerprint = workspace_fingerprint.as_deref();
+
+    // The cache only identifies reusable material. Current native bundle or
+    // saved-block authority must reconstruct the decision before returning it.
+    if let (Some(id), Some(meta), Some(response)) = (
+        workspace_id.as_deref(),
+        bundle_meta.as_ref(),
+        bundle_response.as_ref(),
+    ) {
+        let meta_value = |key: &str| meta.get(key).map(String::as_str).unwrap_or_default();
+        let cached = deps.store_extras.get_cached_supply_chain_evaluation(
+            id,
+            &package_intent_hash,
+            meta_value("feed_snapshot_hash"),
+            meta_value("policy_hash"),
+            meta_value("scoring_version"),
+            meta_value("bundle_version"),
+        );
+        if let Some(cached) = cached {
+            let cached_fingerprint = optional_string(cached.get("workspace_fingerprint"));
+            if cached_fingerprint.as_deref() == workspace_fingerprint
+                && cached_supply_chain_eval_is_reusable(&cached, now_timestamp)
+            {
+                let context = CacheContext {
+                    deps,
+                    artifact,
+                    store,
+                    workspace_dir,
+                    workspace_id: id,
+                    fingerprint: workspace_fingerprint,
+                    intent_hash: &package_intent_hash,
+                    bundle: response,
+                    meta,
+                    targets: &targets,
+                    now: now_timestamp,
+                };
+                match context.reuse(&cached) {
+                    Ok(Some(result)) => {
+                        persist_evidence(deps, store, artifact, &result, &now_value);
+                        return (Some(result), None);
+                    }
+                    Ok(None) => {}
+                    Err(error) => return (None, Some(error)),
+                }
+            }
+        }
+    }
 
     // Bundle evaluation (:526-536).
     let bundle_evaluation = bundle_response.as_ref().and_then(|response| {
@@ -152,11 +200,12 @@ pub(super) fn evaluate_package_request_artifact_uncached(
         bundle_meta.as_ref(),
         bundle_defer_eligible,
         bundle_decision,
-        bundle_evaluation.as_ref(),
     );
     if let Some(ref cloud) = cloud_result {
         if let Some(ref bundle_draft) = bundle_evaluation {
-            if cloud_result_should_defer_to_bundle(&evaluation_to_draft(cloud), bundle_draft) {
+            if bundle_defer_eligible
+                && cloud_result_should_defer_to_bundle(&evaluation_to_draft(cloud), bundle_draft)
+            {
                 if cloud_fallback_reason.is_none() {
                     cloud_fallback_reason = cloud.reasons.first().cloned();
                 }
@@ -206,6 +255,7 @@ pub(super) fn evaluate_package_request_artifact_uncached(
                 }
             }
         }
+        cloud_result = hold_unresolved_package_cwd(deps.identity, artifact, cloud_result);
         cache_reusable_cloud_validation_error(
             deps,
             workspace_id.as_deref(),
@@ -278,6 +328,7 @@ pub(super) fn evaluate_package_request_artifact_uncached(
                 fallback = with_cloud_auth_reconnect_copy_result(fallback);
             }
         }
+        fallback = hold_unresolved_package_cwd(deps.identity, artifact, fallback);
         if let Some(bundle_meta) = bundle_meta.as_ref() {
             if bundle_draft.decision != "monitor" && fallback.cache_status != "cloud-error" {
                 let mut cache_workspace_id = workspace_id.clone();

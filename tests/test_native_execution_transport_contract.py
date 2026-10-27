@@ -17,7 +17,14 @@ def transport(monkeypatch, tmp_path):
         available=True,
         compatible=True,
         identity=SimpleNamespace(path=tmp_path / "native-runtime", sha256="a" * 64),
-        capabilities=SimpleNamespace(features=("resident-protocol-v2", "contained-execution-v1", "prompt-analyze-v1")),
+        capabilities=SimpleNamespace(
+            features=(
+                "resident-protocol-v2",
+                "contained-execution-v1",
+                "prompt-analyze-v2",
+                "shim-admin-v4",
+            )
+        ),
     )
     client = Mock(return_value=b'{"status":"ok","result":{"decision":"block"}}')
     failed = Mock()
@@ -31,7 +38,7 @@ def transport(monkeypatch, tmp_path):
     return SimpleNamespace(status=status, client=client, failed=failed, succeeded=succeeded, environment=environment)
 
 
-def _request(home, request=None, operation="contained_execute", feature="contained-execution-v1"):
+def _request(home, request=None, operation="shim_admin", feature="shim-admin-v4"):
     return bridge._resident_request(
         operation=operation,
         request={} if request is None else request,
@@ -51,7 +58,7 @@ def test_unavailable_native_runtime_never_sends_a_request(transport, tmp_path, f
     transport.succeeded.assert_not_called()
 
 
-@pytest.mark.parametrize("features", [(), ("resident-protocol-v2",), ("contained-execution-v1",)])
+@pytest.mark.parametrize("features", [(), ("resident-protocol-v2",), ("shim-admin-v4",)])
 def test_both_protocol_and_operation_capabilities_are_required(transport, tmp_path, features):
     transport.status.capabilities.features = features
     assert _request(tmp_path) is None
@@ -77,7 +84,7 @@ def test_unserializable_or_oversized_requests_never_reach_native_transport(trans
 def test_missing_or_malformed_native_reply_records_failure_not_success(transport, tmp_path, response, reason):
     transport.client.return_value = response
     assert _request(tmp_path) is None
-    transport.failed.assert_called_once_with("a" * 64, tmp_path, reason=f"native_contained_execute_{reason}")
+    transport.failed.assert_called_once_with("a" * 64, tmp_path, reason=f"native_shim_admin_{reason}")
     transport.succeeded.assert_not_called()
 
 
@@ -96,7 +103,11 @@ def test_native_transport_keeps_executable_home_environment_and_payload_bound(tr
     assert arguments["guard_home"] == tmp_path
     assert arguments["environment"] is transport.environment
     assert arguments["timeout_seconds"] == 4.5
-    assert json.loads(arguments["payload"]) == {"operation": "contained_execute", "request": request}
+    assert json.loads(arguments["payload"]) == {
+        "operation": "shim_admin",
+        "request": request,
+        "deadline_budget_ms": 4500,
+    }
     transport.failed.assert_not_called()
     transport.succeeded.assert_called_once_with("a" * 64, tmp_path)
 
@@ -105,7 +116,7 @@ def test_native_transport_keeps_executable_home_environment_and_payload_bound(tr
 def test_prompt_versioned_reply_preserves_native_false_and_empty_results(transport, tmp_path, result):
     reply = {"schema": "guard-prompt-analyze-result.v1", "result": result}
     transport.client.return_value = json.dumps(reply).encode()
-    assert _request(tmp_path, operation="prompt_analyze", feature="prompt-analyze-v1") == reply
+    assert _request(tmp_path, operation="prompt_analyze", feature="prompt-analyze-v2") == reply
     transport.succeeded.assert_called_once_with("a" * 64, tmp_path)
 
 
@@ -119,56 +130,244 @@ def test_prompt_versioned_reply_preserves_native_false_and_empty_results(transpo
 )
 def test_prompt_reply_requires_the_exact_versioned_envelope(transport, tmp_path, reply):
     transport.client.return_value = json.dumps(reply).encode()
-    assert _request(tmp_path, operation="prompt_analyze", feature="prompt-analyze-v1") is None
+    assert _request(tmp_path, operation="prompt_analyze", feature="prompt-analyze-v2") is None
     transport.succeeded.assert_not_called()
 
 
-@pytest.mark.parametrize("result", [{"decision": "block"}, {}, [], False, None])
-def test_generic_contained_execution_delegates_request_and_policy_to_rust(transport, tmp_path, result):
-    transport.client.return_value = json.dumps({"status": "ok", "result": result}).encode()
-    request = {"argv": ["node", "--version"]}
-    policy = {"network": "denied"}
-    actual = bridge.contained_execute_native(
-        request, policy, guard_home=tmp_path, run_id="test-run", timeout_seconds=9.5
+@pytest.mark.parametrize(
+    "operation,feature,schema,status",
+    [
+        ("mcp_stdio_session_open", "mcp-stdio-session-v1", "guard-mcp-stdio-session-result.v1", "opened"),
+        ("mcp_stdio_session_recv", "mcp-stdio-session-v1", "guard-mcp-stdio-session-result.v1", "timeout"),
+        ("policy_decision_lookup", "policy-decision-lookup-v1", "guard-policy-decision-lookup-result.v1", "error"),
+    ],
+)
+@pytest.mark.parametrize("schema_kind", ["matching", "wrong", "missing"])
+def test_versioned_operation_replies_validate_schema_before_status(
+    transport,
+    tmp_path,
+    operation,
+    feature,
+    schema,
+    status,
+    schema_kind,
+):
+    transport.status.capabilities.features = ("resident-protocol-v2", feature)
+    reply = {"status": status, "code": "native_policy_decision_lookup_write_failed"}
+    if schema_kind != "missing":
+        reply["schema"] = schema if schema_kind == "matching" else "unrelated-result.v1"
+    transport.client.return_value = json.dumps(reply).encode()
+    actual = bridge._resident_request(
+        operation=operation,
+        request={},
+        guard_home=tmp_path,
+        timeout_seconds=1.0,
+        required_feature=feature,
+        response_schema=schema,
     )
-    assert actual == (result if isinstance(result, dict) else None)
-    envelope = json.loads(transport.client.call_args.kwargs["payload"])
-    native_request = envelope["request"]
-    assert envelope["operation"] == "contained_execute"
-    assert native_request["schema"] == "guard-contained-execute-request.v1"
-    assert native_request["request_id"].startswith("contained_execute-")
-    assert native_request["request"] == request
-    assert native_request["policy"] == policy
-    assert native_request["guard_home"] == str(tmp_path)
-    assert native_request["run_id"] == "test-run"
-    assert transport.client.call_args.kwargs["timeout_seconds"] == 9.5
-
-
-@pytest.mark.parametrize("result", [{"decision": "block"}, {}, [], False, None])
-def test_contained_test_hook_delegates_workspace_and_command_to_rust(transport, tmp_path, result):
-    transport.client.return_value = json.dumps({"status": "ok", "result": result}).encode()
-    workspace = tmp_path / "workspace"
-    actual = bridge.contained_test_hook_native(workspace, "node --version", guard_home=tmp_path, timeout_seconds=8.5)
-    assert actual == (result if isinstance(result, dict) else None)
-    envelope = json.loads(transport.client.call_args.kwargs["payload"])
-    native_request = envelope["request"]
-    assert envelope["operation"] == "contained_test_hook"
-    assert native_request["schema"] == "guard-contained-test-hook-request.v1"
-    assert native_request["request_id"].startswith("contained_test_hook-")
-    assert native_request["workspace"] == str(workspace)
-    assert native_request["command_text"] == "node --version"
-    assert native_request["guard_home"] == str(tmp_path)
-    assert transport.client.call_args.kwargs["timeout_seconds"] == 8.5
-
-
-@pytest.mark.parametrize("operation", ["execute", "test-hook"])
-def test_contained_adapters_report_missing_authority_without_fabricating_results(transport, tmp_path, operation):
-    transport.client.return_value = None
-    if operation == "execute":
-        result = bridge.contained_execute_native({}, {}, guard_home=tmp_path, run_id="test-run")
+    if schema_kind == "matching":
+        assert actual == reply
+        transport.succeeded.assert_called_once()
     else:
-        result = bridge.contained_test_hook_native(tmp_path, "node --version", guard_home=tmp_path)
-    assert result is None
-    transport.client.assert_called_once()
-    transport.failed.assert_called_once()
+        assert actual is None
+        transport.succeeded.assert_not_called()
+        transport.failed.assert_called_once()
+
+
+def test_hook_render_bound_error_is_not_a_resident_outage(transport, tmp_path):
+    transport.status.capabilities.features = ("resident-protocol-v2", "hook-render-v2")
+    reply = {
+        "schema": "guard-hook-render-result.v1",
+        "status": "error",
+        "code": "native_hook_render_invalid",
+        "request_id": "hook-render-1",
+        "request_sha256": "sha256:" + "ab" * 32,
+    }
+    transport.client.return_value = json.dumps(reply).encode()
+    actual = bridge._resident_request(
+        operation="hook_render",
+        request={"schema": "guard-hook-render-request.v1"},
+        guard_home=tmp_path,
+        timeout_seconds=1.0,
+        required_feature="hook-render-v2",
+        response_schema="guard-hook-render-result.v1",
+        record_success=False,
+    )
+    assert actual == reply
+    transport.failed.assert_not_called()
     transport.succeeded.assert_not_called()
+
+
+def test_hook_render_unknown_status_still_records_a_failure(transport, tmp_path):
+    transport.status.capabilities.features = ("resident-protocol-v2", "hook-render-v2")
+    reply = {"schema": "guard-hook-render-result.v1", "status": "boom", "code": "native_hook_render_invalid"}
+    transport.client.return_value = json.dumps(reply).encode()
+    assert (
+        bridge._resident_request(
+            operation="hook_render",
+            request={},
+            guard_home=tmp_path,
+            timeout_seconds=1.0,
+            required_feature="hook-render-v2",
+            response_schema="guard-hook-render-result.v1",
+            record_success=False,
+        )
+        is None
+    )
+    transport.failed.assert_called_once_with("a" * 64, tmp_path, reason="native_hook_render_status")
+    transport.succeeded.assert_not_called()
+
+
+@pytest.mark.parametrize("result", [{"status": "ok", "tools": []}, {"status": "failed", "reason": "timeout"}])
+def test_mcp_probe_accepts_native_result_without_outer_status(transport, tmp_path, result):
+    transport.status.capabilities.features = ("resident-protocol-v2", "mcp-stdio-probe-v1")
+    reply = {"schema": "guard-mcp-stdio-probe-result.v1", "result": result}
+    transport.client.return_value = json.dumps(reply).encode()
+    assert (
+        bridge._resident_request(
+            operation="mcp_stdio_probe",
+            request={},
+            guard_home=tmp_path,
+            timeout_seconds=1.0,
+            required_feature="mcp-stdio-probe-v1",
+            response_schema="guard-mcp-stdio-probe-result.v1",
+        )
+        == reply
+    )
+
+
+def test_hook_authority_state_bound_error_is_not_a_resident_failure(transport, tmp_path):
+    transport.status.capabilities.features = (
+        "resident-protocol-v2",
+        "hook-authority-state-v1",
+    )
+    reply = {
+        "schema": "guard-hook-authority-state-result.v1",
+        "status": "error",
+        "code": "native_hook_authority_state_store_unavailable",
+    }
+    transport.client.return_value = json.dumps(reply).encode()
+    actual = bridge._resident_request(
+        operation="hook_authority_state",
+        request={"request_id": "hook-authority-state-error"},
+        guard_home=tmp_path,
+        timeout_seconds=5.0,
+        required_feature="hook-authority-state-v1",
+        response_schema="guard-hook-authority-state-result.v1",
+        record_success=False,
+    )
+    assert actual == reply
+    transport.failed.assert_not_called()
+    transport.succeeded.assert_not_called()
+
+
+@pytest.mark.parametrize("runner", ["node", "typescript", "package_script", "workspace_write"])
+def test_contained_runner_replies_are_accepted_without_outer_status(transport, tmp_path, runner):
+    reply = {"schema": f"guard-contained-{runner.replace('_', '-')}-execute-result.v1", "result": {"stdout": ""}}
+    transport.client.return_value = json.dumps(reply).encode()
+    assert (
+        bridge._resident_request(
+            operation=f"contained_{runner}_execute",
+            request={},
+            guard_home=tmp_path,
+            timeout_seconds=1.0,
+            required_feature="contained-execution-v1",
+        )
+        == reply
+    )
+    transport.succeeded.assert_called_once_with("a" * 64, tmp_path)
+
+
+def test_containment_health_probe_reply_reaches_the_caller(transport, tmp_path):
+    """The resident answers with a status-free versioned reply, as the contained runners do."""
+    result = {"enforced": True}
+    reply = {"schema": "guard-containment-health-probe-result.v1", "result": result}
+    transport.client.return_value = json.dumps(reply).encode()
+    assert bridge.containment_health_probe_native(daemon_fingerprint="f" * 64, guard_home=tmp_path) == result
+    envelope = json.loads(transport.client.call_args.kwargs["payload"])
+    # The resident clamps this operation to 15 seconds; asking for less leaves
+    # the worst-case probe and reap with almost no room for start-up.
+    assert envelope["deadline_budget_ms"] == 15_000
+    transport.client.return_value = json.dumps({**reply, "status": "ok"}).encode()
+    assert bridge.containment_health_probe_native(daemon_fingerprint="f" * 64, guard_home=tmp_path) is None
+
+
+def test_contained_runner_transport_budget_covers_resident_overhead(transport, tmp_path):
+    transport.client.return_value = b'{"schema":"guard-contained-node-execute-result.v1","result":null}'
+    bridge._contained_runner_request(
+        op_prefix="contained_node_execute",
+        request_schema="guard-contained-node-execute-request.v1",
+        workspace=tmp_path,
+        manager="npx",
+        argv=("--no-install", "vitest", "run"),
+        guard_home=tmp_path,
+        shim_directory=tmp_path,
+        environment={},
+        timeout_seconds=100.0,
+        evidence=None,
+    )
+    envelope = json.loads(transport.client.call_args.kwargs["payload"])
+    assert envelope["deadline_budget_ms"] >= 100_000 + 60_000
+    assert transport.client.call_args.kwargs["timeout_seconds"] >= 160.0
+
+
+@pytest.mark.parametrize(
+    "frame,expected",
+    [
+        ({"error": "native_client_auth_timeout_failed", "retryable": False}, "native_client_auth_timeout_failed"),
+        ({"error": "not-a-finite-code", "retryable": False}, None),
+        ({"error": 7}, None),
+    ],
+)
+def test_framed_resident_refusal_keeps_its_finite_code(transport, tmp_path, frame, expected):
+    from codex_plugin_scanner.guard.native_resident_client import (
+        native_resident_client_failure_code,
+        record_native_resident_client_failure_code,
+    )
+
+    record_native_resident_client_failure_code(None)
+    transport.client.return_value = json.dumps(frame).encode()
+    response = bridge._resident_request(
+        operation="daemon_lifecycle_decide",
+        request={},
+        guard_home=tmp_path,
+        timeout_seconds=4.5,
+        required_feature="contained-execution-v1",
+        response_schema="guard-daemon-lifecycle-decision-result.v1",
+        record_success=False,
+    )
+    assert response is None
+    assert native_resident_client_failure_code() == expected
+    transport.failed.assert_called_once_with("a" * 64, tmp_path, reason="native_daemon_lifecycle_decide_schema")
+
+
+def test_contained_execute_reply_reaches_the_caller(transport, tmp_path):
+    """The contained execute op answers with a status-free versioned reply."""
+    result = {"exit_code": 0, "enforcement": "bubblewrap"}
+    transport.client.return_value = json.dumps(
+        {"schema": "guard-contained-execute-result.v1", "result": result}
+    ).encode()
+    request = {
+        "schema_version": "containment-contract-v1",
+        "kind": "probe",
+        "argv": ["/bin/true"],
+        "cwd": str(tmp_path),
+        "env_allowlist": [],
+        "timeout_seconds": 60,
+        "max_output_bytes": 1024,
+        "additional_read_paths": [],
+        "allow_outbound_network": False,
+    }
+    policy = {"schema_version": "containment-contract-v1", "action": "run"}
+    assert bridge.contained_execute_native(request, policy, guard_home=tmp_path, run_id="probe-1") == result
+    envelope = json.loads(transport.client.call_args.kwargs["payload"])
+    # The resident clamps this operation at the contract's one-hour request
+    # timeout plus the client's transport slack, so a minute-long contained run
+    # keeps the budget its own timeout earns.
+    assert envelope["deadline_budget_ms"] == 90_000
+    assert transport.client.call_args.kwargs["timeout_seconds"] == 90.0
+    # A reply carrying an outer status is not this operation's shape.
+    transport.client.return_value = json.dumps(
+        {"schema": "guard-contained-execute-result.v1", "result": result, "status": "ok"}
+    ).encode()
+    assert bridge.contained_execute_native(request, policy, guard_home=tmp_path, run_id="probe-1") is None

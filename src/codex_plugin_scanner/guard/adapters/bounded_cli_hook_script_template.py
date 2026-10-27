@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from ._modules.grok.grok_hook_invocation_template import GROK_HOOK_INVOCATION_TEMPLATE
+from ._modules.grok.grok_hook_readiness_template import GROK_HOOK_READINESS_TEMPLATE
 from .bounded_cli_hook_script_native import BOUNDED_HOOK_NATIVE_TEMPLATE
-from .grok_hook_invocation_template import GROK_HOOK_INVOCATION_TEMPLATE
-from .grok_hook_readiness_template import GROK_HOOK_READINESS_TEMPLATE
 from .hook_http_deadline import HOOK_HTTP_DEADLINE_TEMPLATE
 from .hook_input_reader import HOOK_INPUT_READER_TEMPLATE
 
@@ -19,6 +19,8 @@ _HOOK_STARTED_MONOTONIC = time.monotonic()
 
 import json
 import os
+import re
+import shlex
 import stat
 import sys
 import urllib.error
@@ -29,7 +31,17 @@ from urllib.parse import quote, urlparse
 GUARD_HOME = __GUARD_HOME__
 HARNESS = __HARNESS__
 TIMEOUT_SECONDS = __TIMEOUT_SECONDS__
-_HOOK_DEADLINE_MONOTONIC = _HOOK_STARTED_MONOTONIC + TIMEOUT_SECONDS
+_HOOK_REMAINING_SECONDS = TIMEOUT_SECONDS
+# The native runtime hands over a hook it did not answer with the time it
+# already spent; that time comes out of this client's budget, never added.
+_NATIVE_ELAPSED_MS = os.environ.pop("HOL_GUARD_BOUNDED_NATIVE_ELAPSED_MS", "")
+_NATIVE_DAEMON_TRIED = os.environ.pop("HOL_GUARD_BOUNDED_NATIVE_DAEMON_TRIED", None) == "1"
+if _NATIVE_ELAPSED_MS.isascii() and _NATIVE_ELAPSED_MS.isdigit():
+    try:
+        _HOOK_REMAINING_SECONDS -= min(int(_NATIVE_ELAPSED_MS) / 1000.0, float(TIMEOUT_SECONDS))
+    except (ValueError, OverflowError):
+        _HOOK_REMAINING_SECONDS = 0.0
+_HOOK_DEADLINE_MONOTONIC = _HOOK_STARTED_MONOTONIC + _HOOK_REMAINING_SECONDS
 __HOOK_INPUT_READER__
 __HOOK_HTTP_DEADLINE__
 _MAX_RESPONSE_BYTES = 1_000_000
@@ -79,8 +91,7 @@ _APPROVAL_KEYS = (
 _FAILURE_REASON = "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal."
 _AUTHORITY_MARKER = "native command extension policy"
 _AUTHORITY_REMEDIATION = (
-    " Run `hol-guard command controls acknowledge-degraded` after reviewing the "
-    "degradation, or `hol-guard command controls recover-authority`, to restore the "
+    " Run `hol-guard command controls recover-authority` in a terminal to restore the "
     "protected control floor."
 )
 _GIT_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -90,13 +101,67 @@ def _git_config_no_system_enabled(value: str | None) -> bool:
     return value is not None and value.casefold() in _GIT_TRUE_VALUES
 
 
+# `home` written the way the shell it is pasted into reads it. POSIX quoting
+# puts `C:\\guards\\ci` inside single quotes, which `cmd.exe` hands on as part
+# of the path, so a Windows person pastes a command that repairs nothing. A
+# Windows path needing no quoting stays bare, and one that merely needs holding
+# together is double-quoted, which both shells read literally, backslashes
+# included. A Windows path cannot hold a `"`, so nothing inside has to be
+# escaped. Double quotes are not literal to either shell, though: PowerShell
+# expands `$name` inside them and reads a backtick as an escape, and `cmd.exe`
+# expands `%VAR%` and, with delayed expansion, `!name!`. Single quotes would
+# hold those in PowerShell but become part
+# of the path in `cmd.exe`, so no one rendering reaches such a store and the
+# block keeps the short command instead of naming a path the shell rewrote.
+def _quote_home(home: str, windows: bool) -> str | None:
+    if not windows:
+        return shlex.quote(home)
+    plain = home != "" and all(
+        character.isascii() and (character.isalnum() or character in "_-.:\\\\/")
+        for character in home
+    )
+    if plain:
+        return home
+    if any(character in home for character in "$%`!"):
+        return None
+    return '"' + home + '"'
+
+
+# The block names the home this hook read its authority from. Pasting the bare
+# command into a shell pointing elsewhere recovers a different install while
+# this one stays blocked, so a home the command would not find on its own is
+# named, quoted for the terminal it is pasted into. The default home is left
+# out: the short command is the one almost everyone needs. `--guard-home` is
+# the flag that names a store: `--home` also reaches it, but it moves the home
+# directory too, to a directory nobody lives in. It goes on `command`; the
+# `recover-authority` leaf takes no options. This copy of the decision has to
+# match `zcode_hooks._authority_block_remediation` and the native bridge's
+# `remediation_for_home`, because the script cannot import either; the three
+# are pinned to each other in tests/test_zcode_hooks.py.
+def _authority_remediation() -> str:
+    try:
+        home_dir = Path.home()
+    except RuntimeError:
+        return _AUTHORITY_REMEDIATION
+    guard_home = Path(GUARD_HOME)
+    if home_dir / ".hol-guard" == guard_home:
+        return _AUTHORITY_REMEDIATION
+    quoted = _quote_home(str(guard_home), os.name == "nt")
+    if quoted is None:
+        return _AUTHORITY_REMEDIATION
+    return _AUTHORITY_REMEDIATION.replace(
+        "command controls recover-authority",
+        f"command --guard-home {quoted} controls recover-authority",
+    )
+
+
 def _stderr_reason(reason: str) -> str:
     if (
         HARNESS == "zcode"
         and _AUTHORITY_MARKER in reason
         and "hol-guard command controls" not in reason
     ):
-        return reason + _AUTHORITY_REMEDIATION
+        return reason + _authority_remediation()
     return reason
 
 
@@ -122,14 +187,25 @@ def _json_object(text: str) -> dict[str, object] | None:
     return raw if isinstance(raw, dict) else None
 
 
+def _loader_value_fits(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        return len(value.encode()) <= 32 * 1024
+    except UnicodeEncodeError:
+        return False
+
+
 def _stamp_hook_input(text: str) -> str:
     payload = _json_object(text)
     if payload is None:
         return text
     active = {key: value for key, value in os.environ.items() if value}
+    # Git pages through `less` by default; flags taking a file argument are excluded.
+    pager_ok = re.compile(r"(?:cat|less(?: -[ABCEFGIJKLMNQRSUVWXacdefgimnqrsuw~]+)*)?").fullmatch
     payload["guard_execution_environment"] = {
         "path": os.environ.get("PATH", ""),
-        "environment_names": sorted(active),
+        "environment_names": sorted(set(active) | {n for n in ("GIT_PAGER", "PAGER") if n in os.environ}),
         "environment_digest": hashlib.sha256(
             json.dumps(active, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
@@ -138,10 +214,22 @@ def _stamp_hook_input(text: str) -> str:
             os.environ.get("GIT_CONFIG_NOSYSTEM")
         ),
         "home": os.environ.get("HOME"),
-        "git_pager_disabled": os.environ.get("GIT_PAGER") in ("", "cat"),
-        "pager_disabled": os.environ.get("PAGER") in ("", "cat"),
+        "git_pager_disabled": pager_ok(os.environ.get("GIT_PAGER", "-")) is not None,
+        "pager_disabled": pager_ok(os.environ.get("PAGER", "-")) is not None,
+        "library_search_paths": {
+            name: value
+            for name in (
+                "LD_LIBRARY_PATH",
+                "DYLD_LIBRARY_PATH",
+                "DYLD_FALLBACK_LIBRARY_PATH",
+                "DYLD_FRAMEWORK_PATH",
+                "DYLD_FALLBACK_FRAMEWORK_PATH",
+            )
+            if (value := os.environ.get(name)) and _loader_value_fits(value)
+        },
     }
-    return json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    stamped = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    return stamped if len(stamped) <= 1_000_000 else text
 
 
 def _compact(event_name: str) -> str:
@@ -439,7 +527,7 @@ def _post_hook(input_text: str) -> tuple[str, str, int] | None:
         return None
     host, port, token = auth
     url = _loopback_url(host, port, f"/v1/hooks/{HARNESS}")
-    transport_cap = 10.0 if HARNESS == "grok" and _event_name(input_text) == "UserPromptSubmit" else 5.0
+    transport_cap = 10.0 if _event_name(input_text) == "UserPromptSubmit" else 5.0
     timeout = min(float(TIMEOUT_SECONDS) * 0.5, transport_cap, _HOOK_DEADLINE_MONOTONIC - time.monotonic())
     if HARNESS == "grok" and _compact(_event_name(input_text)) in _GROK_OBSERVE_EVENTS:
         # Keep the daemon request within 1s of Grok's 15s outer hook lifetime.
@@ -475,6 +563,9 @@ def main() -> int:
         return _fail(prefix)
     if HARNESS == "grok" and _grok_pretool_event_conflict(prefix):
         return _fail(prefix, reason="HOL Guard blocked this action because hook event labels conflict.")
+    if _NATIVE_DAEMON_TRIED:
+        # The daemon already failed to answer this hook natively.
+        return _fail(prefix)
     stamped_prefix = _stamp_hook_input(prefix)
     result = _post_hook(stamped_prefix)
     if result is None or time.monotonic() >= _HOOK_DEADLINE_MONOTONIC:

@@ -16,25 +16,22 @@ the artifacts) and deferred for every ref whose diff omits them.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from scripts.ci.detect_pending_extension_regen import contribution_ids
+from scripts.ci.detect_pending_extension_regen import catalog_ids, contribution_ids
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def pending_contribution_regen() -> bool:
-    from codex_plugin_scanner.guard.runtime.command_extensions import (
-        BUILT_IN_COMMAND_EXTENSION_REGISTRY,
-    )
-
-    registry_ids = {extension.extension_id for extension in BUILT_IN_COMMAND_EXTENSION_REGISTRY.extensions}
-    return bool(contribution_ids() - registry_ids)
+    return bool(contribution_ids() - catalog_ids())
 
 
 def _git(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -88,12 +85,21 @@ def _pr_diff_paths() -> list[str] | None:
     if result.returncode:
         if not is_pull_request:
             return None
-        fetched = _git("fetch", "--depth=1", "origin", base_sha)
-        if fetched.returncode:
-            raise RuntimeError("Cannot determine pull-request diff")
-        result = _git("diff", "--name-only", base_sha, "HEAD")
-        if result.returncode:
-            raise RuntimeError("Cannot determine pull-request diff")
+        # xdist workers share the checkout and import this module concurrently;
+        # serialize the ref fetch so only one writes .git while others reuse it.
+        lock_path = Path(tempfile.gettempdir()) / f"guard-diff-{os.getuid()}.lock"
+        with lock_path.open("a+") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            # A prior worker may have already fetched this base ref while we
+            # waited on the lock; re-check before touching .git again.
+            result = _git("diff", "--name-only", base_sha, "HEAD")
+            if result.returncode:
+                fetched = _git("fetch", "--depth=1", "origin", base_sha)
+                if fetched.returncode:
+                    raise RuntimeError("Cannot determine pull-request diff")
+                result = _git("diff", "--name-only", base_sha, "HEAD")
+            if result.returncode:
+                raise RuntimeError("Cannot determine pull-request diff")
     return [path for path in result.stdout.splitlines() if path]
 
 

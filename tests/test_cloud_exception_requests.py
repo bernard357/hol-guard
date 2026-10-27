@@ -16,9 +16,7 @@ from codex_plugin_scanner.guard.cloud_exception_requests import (
     fetch_cloud_exception_requests,
     normalized_cloud_exception_requests_url,
     submit_cloud_exception_request,
-    submit_command_policy_exception_request,
     validate_cloud_exception_request_payload,
-    validate_command_policy_exception_payload,
 )
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.store import GuardStore
@@ -103,140 +101,6 @@ def test_cloud_exception_request_error_carries_http_status() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_validate_command_policy_payload_rejects_missing_kind() -> None:
-    with pytest.raises(ValueError, match="kind='command-policy'"):
-        validate_command_policy_exception_payload(
-            {
-                "sourceLocalRequestId": "req-001",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "once",
-                "reason": "Needs temporary access.",
-            }
-        )
-
-
-def test_validate_command_policy_payload_rejects_raw_command() -> None:
-    with pytest.raises(ValueError, match="must not include 'rawCommand'"):
-        validate_command_policy_exception_payload(
-            {
-                "kind": "command-policy",
-                "sourceLocalRequestId": "req-001",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "once",
-                "reason": "Needs temporary access.",
-                "rawCommand": "rm -rf /",
-            }
-        )
-
-
-def test_validate_command_policy_payload_rejects_graph_injection() -> None:
-    with pytest.raises(ValueError, match="must not include 'graph'"):
-        validate_command_policy_exception_payload(
-            {
-                "kind": "command-policy",
-                "sourceLocalRequestId": "req-001",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "once",
-                "reason": "Needs temporary access.",
-                "graph": {"nodes": []},
-            }
-        )
-
-
-def test_validate_command_policy_payload_rejects_short_reason() -> None:
-    with pytest.raises(ValueError, match="at least 8 characters"):
-        validate_command_policy_exception_payload(
-            {
-                "kind": "command-policy",
-                "sourceLocalRequestId": "req-001",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "once",
-                "reason": "short",
-            }
-        )
-
-
-def test_validate_command_policy_payload_rejects_invalid_duration() -> None:
-    with pytest.raises(ValueError, match="invalid requestedDuration"):
-        validate_command_policy_exception_payload(
-            {
-                "kind": "command-policy",
-                "sourceLocalRequestId": "req-001",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "persistent",
-                "reason": "Needs temporary access.",
-            }
-        )
-
-
-def test_validate_command_policy_payload_rejects_missing_local_request_id() -> None:
-    with pytest.raises(ValueError, match="sourceLocalRequestId"):
-        validate_command_policy_exception_payload(
-            {
-                "kind": "command-policy",
-                "sourceMachineInstallationId": "machine-001",
-                "workspaceId": "ws-001",
-                "requestedDuration": "once",
-                "reason": "Needs temporary access.",
-            }
-        )
-
-
-def test_validate_command_policy_payload_normalizes_valid_input() -> None:
-    normalized = validate_command_policy_exception_payload(
-        {
-            "kind": "command-policy",
-            "sourceLocalRequestId": "req-001",
-            "sourceMachineInstallationId": "machine-001",
-            "workspaceId": "ws-001",
-            "requestedDuration": "workspace",
-            "reason": "Needs temporary workspace access for CI.",
-            "note": "CI runner exception",
-        }
-    )
-    assert normalized["kind"] == "command-policy"
-    assert normalized["sourceLocalRequestId"] == "req-001"
-    assert normalized["sourceMachineInstallationId"] == "machine-001"
-    assert normalized["workspaceId"] == "ws-001"
-    assert normalized["requestedDuration"] == "workspace"
-    assert "rawCommand" not in normalized
-    assert "graph" not in normalized
-    assert "command" not in normalized
-    assert normalized["note"] == "CI runner exception"
-
-
-def test_validate_command_policy_payload_proves_no_command_crosses_boundary() -> None:
-    """The single most important test: prove no raw command, regex,
-    pattern, graph, or expression key survives validation."""
-    forbidden = [
-        "rawCommand",
-        "command",
-        "commandExpression",
-        "expression",
-        "regex",
-        "pattern",
-        "graph",
-        "proposedGraph",
-    ]
-    normalized = validate_command_policy_exception_payload(
-        {
-            "kind": "command-policy",
-            "sourceLocalRequestId": "req-001",
-            "sourceMachineInstallationId": "machine-001",
-            "workspaceId": "ws-001",
-            "requestedDuration": "session",
-            "reason": "Needs temporary session access for CI.",
-        }
-    )
-    for key in forbidden:
-        assert key not in normalized, f"Forbidden key '{key}' leaked into normalized payload"
-
-
 _VALID_RESOURCE_EXCEPTION_PAYLOAD: dict[str, object] = {
     "scope": "workspace",
     "requestedBy": "analyst",
@@ -245,15 +109,6 @@ _VALID_RESOURCE_EXCEPTION_PAYLOAD: dict[str, object] = {
     "requestedExpiresAt": "2026-10-01T00:00:00Z",
     "sourceReceiptId": "receipt-001",
     "workspaceId": "workspace-alpha",
-}
-
-_VALID_COMMAND_POLICY_PAYLOAD: dict[str, object] = {
-    "kind": "command-policy",
-    "sourceLocalRequestId": "req-001",
-    "sourceMachineInstallationId": "machine-001",
-    "workspaceId": "ws-001",
-    "requestedDuration": "session",
-    "reason": "Needs temporary session access for CI.",
 }
 
 
@@ -302,23 +157,6 @@ def test_submit_cloud_exception_request_posts_normalized_payload(
         dict(_VALID_RESOURCE_EXCEPTION_PAYLOAD)
     )
     assert request.headers.get("Authorization") == "Bearer demo-token"
-
-
-def test_submit_command_policy_exception_request_uses_same_sync_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = GuardStore(tmp_path / "guard-home")
-    captured = _hermetic_sync_context(monkeypatch, {"requestId": "policy-1"})
-
-    result = submit_command_policy_exception_request(store, dict(_VALID_COMMAND_POLICY_PAYLOAD))
-
-    assert result == {"requestId": "policy-1"}
-    request = captured[0]
-    assert request.full_url == "https://hol.org/api/guard/exceptions/requests"
-    assert isinstance(request.data, bytes)
-    body = json.loads(request.data.decode("utf-8"))
-    assert body["kind"] == "command-policy"
-    assert "rawCommand" not in body and "command" not in body
 
 
 def test_fetch_cloud_exception_requests_uses_explicit_auth_context(

@@ -3,12 +3,11 @@
 import hashlib
 import struct
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.guard.runtime import restricted_linux_mapping_plan as mapping
 from codex_plugin_scanner.guard.runtime.restricted_linux_landlock import LinuxContainmentUnavailableError
+from tests.restricted_linux_test_support import native_mapping_elf, native_mapping_evidence
 
 
 def _image(path, *, library=False, needed=(), soname=None, entry=0, pie=False):
@@ -44,9 +43,9 @@ def _image(path, *, library=False, needed=(), soname=None, entry=0, pie=False):
     return path
 
 
-def _collect(workspace, images, files, roots=()):
-    return mapping.collect_mapping_evidence(
-        images=set(images), read_files=set(files), runtime_roots=roots, workspace=workspace
+def _collect(workspace, images, files, roots=(), **budgets):
+    return native_mapping_evidence(
+        images=set(images), read_files=set(files), runtime_roots=roots, workspace=workspace, **budgets
     )
 
 
@@ -103,11 +102,10 @@ def test_dependency_names_cannot_inject_paths(tmp_path, name):
 
 def test_program_shaped_workspace_library_cannot_claim_system_libc_exception(tmp_path):
     fake = _image(tmp_path / "libc.so.6", library=True, soname="libc.so.6", entry=4096, pie=True)
-    metadata = SimpleNamespace(st_size=fake.stat().st_size, st_uid=0, st_mode=0o100555)
-    with fake.open("rb") as stream, pytest.raises(ValueError, match="Program image"):
-        mapping._elf(stream, metadata, library=True)
-    with fake.open("rb") as stream, pytest.raises(ValueError, match="Program image"):
-        mapping._elf(stream, metadata, library=True, system_library=True)
+    with pytest.raises(ValueError, match="Program image"):
+        native_mapping_elf(fake, library=True)
+    with pytest.raises(ValueError, match="Program image"):
+        native_mapping_elf(fake, library=True, system_library=True)
 
 
 def test_real_shared_library_entry_metadata_is_not_a_program_flag(tmp_path):
@@ -122,12 +120,11 @@ def test_missing_optional_library_dependency_stays_noexec_without_blocking_runne
     assert [record["path"] for record in records] == [str(program)]
 
 
-def test_oversized_optional_library_stays_noexec_without_blocking_runner(tmp_path, monkeypatch):
+def test_oversized_optional_library_stays_noexec_without_blocking_runner(tmp_path):
     program = _image(tmp_path / "runner")
     optional = _image(tmp_path / "unused.so", library=True)
     optional.write_bytes(optional.read_bytes() + bytes(1024))
-    monkeypatch.setattr(mapping, "_MAX_FILE_BYTES", program.stat().st_size + 1)
-    records = _collect(tmp_path, [program], [optional])
+    records = _collect(tmp_path, [program], [optional], max_file_bytes=program.stat().st_size + 1)
     assert [record["path"] for record in records] == [str(program)]
 
 
@@ -156,8 +153,7 @@ def test_unresolved_symlink_cannot_be_admitted_as_a_program(tmp_path):
         _collect(tmp_path, [alias], [])
 
 
-def test_mapping_budget_fails_closed(tmp_path, monkeypatch):
+def test_mapping_budget_fails_closed(tmp_path):
     program = _image(tmp_path / "runner")
-    monkeypatch.setattr(mapping, "_MAX_MAPPING_BYTES", program.stat().st_size - 1)
     with pytest.raises(LinuxContainmentUnavailableError):
-        _collect(tmp_path, [program], [])
+        _collect(tmp_path, [program], [], max_mapping_bytes=program.stat().st_size - 1)

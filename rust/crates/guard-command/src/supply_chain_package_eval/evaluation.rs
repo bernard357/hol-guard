@@ -42,6 +42,25 @@ pub struct SupplyChainEvalDeps<'a> {
     pub store_extras: &'a dyn StoreExtrasApi,
     pub entitlement: &'a dyn EntitlementRefreshApi,
     pub config: &'a dyn ConfigLoaderApi,
+    pub registry: &'a dyn RegistryMetadataApi,
+    pub saved_policy: &'a SavedPolicyProbe,
+}
+
+/// Saved-policy lookup state for a cached `cloud_validation_error` evaluation.
+///
+/// Python reuses such a cached error only while a saved `block` policy covers
+/// the request. The lookup key is the approval-identity hash and the lookup
+/// itself reads the signed approval store through the integrity keyring, both
+/// of which the caller hydrates. The decision stays here: whether a hydrated
+/// row is stale, and whether its action keeps the cached block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SavedPolicyProbe {
+    /// The caller cannot hydrate a lookup, so a cached error is re-evaluated.
+    Unsupported,
+    /// The caller can hydrate a lookup but has not supplied it yet.
+    Required,
+    /// The hydrated `lookup["decision"]` row, or `None` when no row matched.
+    Supplied(Option<Value>),
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +95,18 @@ pub fn evaluate_package_request_artifact(
         retain_external_archive_blob,
     );
     match (result, error) {
-        (Some(result), _) => Ok(result),
-        (None, Some(message)) => Err(EvalError::Internal(message)),
+        (Some(result), _) => {
+            let result = match ReviewTriggers::load(deps, store, artifact, workspace_dir) {
+                Some(triggers) => apply_review_triggers(deps, artifact, &triggers, result),
+                None => result,
+            };
+            Ok(super::hold_unresolved_package_cwd(
+                deps.identity,
+                artifact,
+                result,
+            ))
+        }
+        (None, Some(error)) => Err(error),
         (None, None) => Err(EvalError::Internal(
             "evaluate_package_request_artifact: no result".into(),
         )),
@@ -96,11 +125,24 @@ pub fn evaluate_package_request_artifact(
 ///     "ask": "require-reapproval", "block": "block"}`.
 // supply_chain_package_eval.py:154-160
 pub(super) fn decision_to_guard_action_variant(decision: &str) -> GuardAction {
-    let mapped = decision_to_guard_action()
-        .get(decision)
-        .copied()
-        .unwrap_or("allow");
-    match mapped {
+    guard_action_variant(
+        decision_to_guard_action()
+            .get(decision)
+            .copied()
+            .unwrap_or("allow"),
+    )
+}
+
+/// Read a `policy_action` field back into its variant.
+///
+/// `_normalize_package_user_copy` (:1506-1523) tests an evaluation's
+/// `policy_action` directly, and that field already holds a guard action rather
+/// than a decision. Routing it through `decision_to_guard_action_variant` would
+/// read `review`, `require-reapproval` and `sandbox-required` as `allow`,
+/// because the decision map has no entry for any of them.
+// supply_chain_package_eval.py:1506-1523
+pub(super) fn guard_action_variant(policy_action: &str) -> GuardAction {
+    match policy_action {
         "warn" => GuardAction::Warn,
         "review" => GuardAction::Review,
         "require-reapproval" => GuardAction::RequireReapproval,
@@ -167,7 +209,7 @@ pub(super) fn normalize_package_name(
 // supply_chain_package_eval.py:2803-2807
 #[allow(dead_code)]
 pub(super) fn normalize_evaluation_timestamp(now_value: &str) -> Option<f64> {
-    crate::local_supply_chain::parse_timestamp(now_value).map(|t| t.unix_seconds() as f64)
+    crate::local_supply_chain::parse_timestamp(now_value).map(|t| t.unix_seconds_f64())
 }
 
 /// `_parse_evaluation_timestamp` (:2803-2807) — alias kept for callers that
@@ -213,82 +255,6 @@ pub(super) fn artifact_has_package_material(
     }
     has_non_empty_string_item(artifact.metadata.get("manifest_paths"))
         || has_non_empty_string_item(artifact.metadata.get("lockfile_paths"))
-}
-
-/// `_empty_package_material_result` (:794-827).
-// supply_chain_package_eval.py:794-827
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
-pub(super) fn empty_package_material_result(
-    _artifact: &GuardArtifact,
-    workspace_id: Option<&str>,
-    bundle_meta: Option<&Map<String, Value>>,
-    package_intent_hash: &str,
-    workspace_fingerprint: Option<&str>,
-) -> PackageEvalResult {
-    let mut reason_map = Map::new();
-    reason_map.insert(
-        "code".to_string(),
-        Value::String("no_package_material".into()),
-    );
-    reason_map.insert(
-        "message".to_string(),
-        Value::String(
-            "Guard found no package targets, manifests, or lockfiles to evaluate for this request."
-                .into(),
-        ),
-    );
-    reason_map.insert("severity".to_string(), Value::String("unknown".into()));
-    reason_map.insert("source".to_string(), Value::String("guard-local".into()));
-    let reasons = vec![reason_map];
-    let decision = "monitor".to_string();
-    let policy_action = decision_to_guard_action_variant(&decision);
-    let title = "No package material".to_string();
-    let summary =
-        "Guard found no package targets, manifests, or lockfiles to evaluate.".to_string();
-    let enforcement = if workspace_id.is_none() {
-        "free_local"
-    } else {
-        "local_fallback"
-    };
-    let entitlement_state = if workspace_id.is_none() {
-        "free"
-    } else {
-        "premium"
-    };
-    let policy_version = bundle_meta
-        .and_then(|m| optional_string(m.get("policy_hash")))
-        .unwrap_or_else(|| "local:none".to_string());
-    let bundle_version = bundle_meta.and_then(|m| optional_string(m.get("bundle_version")));
-    let user_copy = SupplyChainUserCopy {
-        title: title.clone(),
-        summary: summary.clone(),
-        next_step: None,
-        dashboard_url: None,
-        harness_message: format!("{summary} No action needed."),
-    };
-    PackageEvalResult {
-        decision,
-        policy_action: policy_action.as_str().to_string(),
-        enforcement: enforcement.to_string(),
-        entitlement_state: entitlement_state.to_string(),
-        cache_status: "empty".to_string(),
-        package_intent_hash: package_intent_hash.to_string(),
-        policy_version,
-        bundle_version,
-        workspace_fingerprint: workspace_fingerprint.map(str::to_string),
-        reasons,
-        packages: Vec::new(),
-        risk_summary: summary,
-        user_copy,
-        matched_rule_id: None,
-        exception_id: None,
-        refresh_required: false,
-        record_monitor_evidence: false,
-        evidence_ids: Vec::new(),
-        external_archive_downloads: Vec::new(),
-        external_archive_source_hashes: Vec::new(),
-    }
 }
 
 /// `_empty_evaluation` — derived: builds a minimal allow result with no

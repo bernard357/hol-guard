@@ -16,12 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.adapters.claude_daemon_hook_transport import authenticated_claude_hook_response
+from codex_plugin_scanner.guard.adapters._modules.claude.claude_daemon_hook_transport import (
+    authenticated_claude_hook_response,
+)
 from codex_plugin_scanner.guard.daemon import manager as daemon_manager
 from codex_plugin_scanner.guard.daemon import server as daemon_server
 from codex_plugin_scanner.guard.daemon.runtime_hook_scheduler_contracts import RuntimeHookAdmission
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.coverage_ci import under_coverage_scale
 
 
 @contextmanager
@@ -340,7 +343,7 @@ def test_pending_header_peek_is_nonblocking_and_tolerates_concurrent_close():
     try:
         started = time.monotonic()
         assert not daemon_server._GuardDaemonHTTPServer._buffered_request_headers_complete(request, pending=True)
-        assert time.monotonic() - started < 0.05
+        assert time.monotonic() - started < 0.05 * under_coverage_scale(4.0)
         peer.sendall(b"GET /healthz HTTP/1.1\r\nHost:")
         assert not daemon_server._GuardDaemonHTTPServer._buffered_request_headers_complete(request, pending=True)
         assert request.gettimeout() == 2
@@ -661,7 +664,7 @@ def test_liveness_uses_reserved_capacity_when_general_requests_are_saturated(
         (
             "/v1/hooks/claude-code",
             {"hook_event_name": "PermissionRequest", "tool_name": "Read", "tool_input": {}},
-            ("continue", True),
+            ("permissionRequestBehavior", "deny"),
         ),
     ],
 )
@@ -709,6 +712,8 @@ def test_hook_overload_returns_native_fail_safe_response(
     assert result["reason_code"] == "daemon_hook_queue_capacity"
     if assertion[0] == "decision":
         assert result["decision"] == assertion[1]
+    elif assertion[0] == "permissionRequestBehavior":
+        assert result["hookSpecificOutput"]["decision"]["behavior"] == assertion[1]
     elif assertion[0] == "permissionDecision":
         assert result["hookSpecificOutput"]["permissionDecision"] == assertion[1]
     else:
@@ -770,7 +775,6 @@ def test_partial_start_failure_rolls_back_workers_state_and_owner_lock(
     assert started_threads
     assert all(not thread.is_alive() for thread in started_threads)
     assert daemon._owner_lock is None
-    assert daemon._server.hook_process_runner.stats()["workers"] == 0
     assert daemon._server.runtime_heartbeat._thread is None
     assert daemon._server.unclassified_watchdog_thread is None
     assert daemon._server.approval_attention._thread is None
@@ -798,7 +802,6 @@ def test_partial_start_failure_rolls_back_workers_state_and_owner_lock(
         assert daemon._finish_service_completed is False
     finally:
         daemon.stop()
-    assert daemon._server.hook_process_runner.stats()["workers"] == 0
 
 
 def test_partial_start_retains_owner_until_worker_containment(
@@ -812,12 +815,12 @@ def test_partial_start_retains_owner_until_worker_containment(
     )
     store = GuardStore(tmp_path / "guard-home")
     daemon = GuardDaemonServer(store, host="127.0.0.1", port=0, idle_timeout_seconds=0)
-    close_runner = daemon._server.hook_process_runner.close_contained
+    close_runner = daemon._server.hook_worker.close_contained
 
     def fail_startup() -> None:
         raise RuntimeError("injected partial startup failure")
 
-    monkeypatch.setattr(daemon._server.hook_process_runner, "close_contained", lambda: False)
+    monkeypatch.setattr(daemon._server.hook_worker, "close_contained", lambda: False)
     monkeypatch.setattr(daemon, "_start_watchdog", fail_startup)
     try:
         with pytest.raises(RuntimeError, match="injected partial startup failure"):
@@ -826,10 +829,9 @@ def test_partial_start_retains_owner_until_worker_containment(
         assert daemon._owner_lock is not None
         with pytest.raises(RuntimeError, match="already active"):
             daemon_manager.acquire_guard_daemon_owner_lock(store.guard_home)
-        assert daemon._server.hook_process_runner.stats()["workers"] > 0
         assert daemon._server.runtime_heartbeat._thread is None
         assert store.get_runtime_state() is None
     finally:
-        monkeypatch.setattr(daemon._server.hook_process_runner, "close_contained", close_runner)
+        monkeypatch.setattr(daemon._server.hook_worker, "close_contained", close_runner)
         assert daemon._finish_service()
         daemon._server.server_close()

@@ -18,9 +18,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_catalog_publication_does_not_rewrite_tests_or_rebuild_runtime(tmp_path, monkeypatch):
     """Verify catalog publication does not rewrite tests or rebuild runtime."""
+    bindings_dir = tmp_path / "contracts/extensions/trust"
+    bindings_dir.mkdir(parents=True)
+    (bindings_dir / "command.demo.v1.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "guard.extension-trust-binding.v1",
+                "extension": "command.demo",
+                "trustClass": "external",
+            }
+        )
+    )
     trust = tmp_path / "contracts/extensions/trust-class-map.v1.json"
-    trust.parent.mkdir(parents=True)
-    trust.write_text(json.dumps({"classes": {"external": ["command.demo"]}}))
+    trust.parent.mkdir(parents=True, exist_ok=True)
+    trust.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "guard.extension-trust-class-map.v1",
+                "publishers": {
+                    "hol": {"id": "hol", "displayName": "HOL"},
+                    "hol-curated": {"id": "hol-curated", "displayName": "HOL curated library"},
+                },
+                "classes": {"first-party": [], "trusted-library": [], "external": ["command.demo"]},
+            }
+        )
+    )
     (trust.parent / "command-catalog.v1.json").write_text(json.dumps({"catalog_digest": "a" * 64}))
     preserved = {}
     for name in (
@@ -37,6 +59,7 @@ def test_catalog_publication_does_not_rewrite_tests_or_rebuild_runtime(tmp_path,
     calls = []
     monkeypatch.setattr(refresh, "ROOT", tmp_path)
     monkeypatch.setattr(refresh, "TRUST_MAP", trust)
+    monkeypatch.setattr(refresh, "TRUST_BINDINGS", bindings_dir)
     monkeypatch.setattr(refresh, "contribution_ids", lambda: ["command.demo"])
     monkeypatch.setattr(refresh, "pending_contribution_ids", lambda: [])
     monkeypatch.setattr(refresh, "_run", lambda command, **kwargs: calls.append(command))
@@ -47,6 +70,32 @@ def test_catalog_publication_does_not_rewrite_tests_or_rebuild_runtime(tmp_path,
     assert cargo[0][cargo[0].index("--target-dir") + 1] == str(refresh.TARGET_DIR)
     assert all("hol-guard-runtime" not in command for command in calls)
     assert all(not any("tests/" in part for part in command) for command in calls)
+    assert all("scripts/prepare_extension_contribution.py" not in command for command in calls)
+    projections = [command for command in calls if "scripts/build_native_command_program.py" in command]
+    assert projections == [
+        [
+            refresh.sys.executable,
+            "scripts/build_native_command_program.py",
+            "--compiler",
+            str(refresh.COMPILER),
+            "--check-public-descriptors",
+        ],
+        [refresh.sys.executable, "scripts/build_native_command_program.py", "--compiler", str(refresh.COMPILER)],
+        [
+            refresh.sys.executable,
+            "scripts/build_native_command_program.py",
+            "--compiler",
+            str(refresh.COMPILER),
+            "--check",
+        ],
+    ]
+    directory = [refresh.sys.executable, "scripts/prepare_extension_directory.py", "--compiler", str(refresh.COMPILER)]
+    assert [command for command in calls if "scripts/prepare_extension_directory.py" in command] == [
+        directory,
+        [*directory, "--check"],
+        directory,
+        [*directory, "--check"],
+    ]
     assert {path: path.read_bytes() for path in preserved} == preserved
 
 
@@ -69,9 +118,22 @@ def test_native_identity_changes_for_code_but_not_portable_fixture_snapshots(tmp
     inputs = {
         "rust/Cargo.toml": "[workspace]\n",
         "rust/Cargo.lock": "version = 4\n",
+        "rust/build_support/command_identity.rs": "// reviewed build identity\n",
+        "rust/build_support/command_source_inputs.v2.json": json.dumps(
+            {
+                "schema": "guard.command-source-inputs.v2",
+                "identity_domain": "hol-guard.native-source-implementation.v2",
+                "files": [
+                    "build_support/command_identity.rs",
+                    "build_support/command_source_inputs.v2.json",
+                ],
+                "crates": ["example"],
+            }
+        ),
         "rust/crates/example/Cargo.toml": "[package]\n",
         "rust/crates/example/src/lib.rs": "pub fn current() {}\n",
-        "rust/build_support/command_identity.rs": "// reviewed build identity\n",
+        "rust/crates/unlisted/Cargo.toml": "[package]\n",
+        "rust/crates/unlisted/src/lib.rs": "pub fn outside() {}\n",
         "tests/fixtures/command-source-example.v1.json": "{}\n",
     }
     for name, content in inputs.items():
@@ -81,6 +143,8 @@ def test_native_identity_changes_for_code_but_not_portable_fixture_snapshots(tmp
     monkeypatch.setattr(builder, "ROOT", tmp_path)
     original = builder.implementation_digest()
     (tmp_path / "tests/fixtures/command-source-example.v1.json").write_text('{"changed":true}\n')
+    assert builder.implementation_digest() == original
+    (tmp_path / "rust/crates/unlisted/src/lib.rs").write_text("pub fn moved() {}\n")
     assert builder.implementation_digest() == original
     (tmp_path / "rust/crates/example/src/lib.rs").write_text("pub fn changed() {}\n")
     assert builder.implementation_digest() != original
@@ -110,8 +174,8 @@ def test_catalog_and_contributor_interfaces_remain_in_the_repository():
 
 def test_authoring_checks_current_resources_before_tests_and_installed_wheel():
     """Verify authoring checks current resources before tests and installed wheel."""
-    workflow = expand_ci_job_actions(yaml.safe_load((ROOT / ".github/workflows/extension-builder-ci.yml").read_text()))
-    steps = workflow["jobs"]["authoring"]["steps"]
+    workflow = expand_ci_job_actions(yaml.safe_load((ROOT / ".github/workflows/nightly-native.yml").read_text()))
+    steps = workflow["jobs"]["extension-builder"]["steps"]
     prepare = next(
         i for i, step in enumerate(steps) if step.get("name") == "Prepare and verify current extension projections"
     )
@@ -121,7 +185,6 @@ def test_authoring_checks_current_resources_before_tests_and_installed_wheel():
     )
     assert prepare < tests < wheel
     script = steps[prepare]["run"]
-    assert "--changed-from" in script
     assert "--check" in script
     assert "git checkout" not in script and "git clean" not in script
     assert "if" not in steps[prepare] and not steps[prepare].get("continue-on-error")

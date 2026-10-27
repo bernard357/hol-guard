@@ -10,16 +10,11 @@ import codex_plugin_scanner.guard.runtime.runner as runner
 from codex_plugin_scanner.guard import policy_bundle_trusted_keys as trusted_keys_module
 from codex_plugin_scanner.guard.config import update_guard_settings
 from codex_plugin_scanner.guard.models import GuardReceipt
-from codex_plugin_scanner.guard.policy_bundle_parser import (
-    computed_policy_bundle_hash,
-    payload_hash_for_policy_bundle,
-)
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     load_policy_bundle_verification_keys,
-    migrate_legacy_policy_bundle_anchors,
 )
 from codex_plugin_scanner.guard.runtime.actions import GuardActionEnvelope
-from codex_plugin_scanner.guard.runtime.local_request_snapshots import (
+from codex_plugin_scanner.guard.runtime.cloud_review_sync import (
     _resolve_cloud_receipt_redaction_level as _resolve_snapshot_redaction_level,
 )
 from codex_plugin_scanner.guard.runtime.runner import (
@@ -32,6 +27,7 @@ from codex_plugin_scanner.guard.runtime.runner import (
     _resolve_cloud_receipt_redaction_level,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, payload_hash_for_policy_bundle
 from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_keyring,
     policy_bundle_test_verification_key,
@@ -190,11 +186,6 @@ def test_sync_migrates_legacy_anchor_and_restores_cloud_redaction_choice(
         {"keys": [legacy_key], "workspace_id": "workspace-1"},
         "2026-07-01T00:00:00Z",
     )
-    assert migrate_legacy_policy_bundle_anchors(
-        stored_keyring={"keys": [legacy_key], "workspace_id": "workspace-1"},
-        sync_keys=(policy_key,),
-        expected_workspace_id="workspace-1",
-    ) == (policy_key,)
     monkeypatch.setattr(
         trusted_keys_module,
         "managed_policy_bundle_verification_keys",
@@ -243,6 +234,9 @@ def test_signed_receipt_redaction_authority_can_clear_and_relax_again(
 ) -> None:
     store = GuardStore(tmp_path / "guard-home")
     _seed_policy_bundle_trust(store)
+    # Each applied bundle is acknowledged by one receipt-free follow-up request,
+    # which this transport answers with a plain reply.
+    plain_reply = {"syncedAt": "2026-07-01T00:00:00Z", "receiptsStored": 0}
     responses = iter(
         [
             {
@@ -254,6 +248,7 @@ def test_signed_receipt_redaction_authority_can_clear_and_relax_again(
                     issued_at="2026-07-01T00:00:01Z",
                 ),
             },
+            plain_reply,
             {
                 "syncedAt": "2026-07-01T00:00:02Z",
                 "receiptsStored": 0,
@@ -263,6 +258,7 @@ def test_signed_receipt_redaction_authority_can_clear_and_relax_again(
                     issued_at="2026-07-01T00:00:02Z",
                 ),
             },
+            plain_reply,
             {
                 "syncedAt": "2026-07-01T00:00:03Z",
                 "receiptsStored": 0,
@@ -272,6 +268,7 @@ def test_signed_receipt_redaction_authority_can_clear_and_relax_again(
                     issued_at="2026-07-01T00:00:03Z",
                 ),
             },
+            plain_reply,
         ]
     )
 
@@ -637,7 +634,9 @@ def test_relaxed_redaction_sync_adds_recent_blocked_command_detail_backfill(tmp_
         "receipts": 1,
         "queried": 1,
         "before_rowid": 1,
-        "complete": True,
+        # A page that came back short may be one the store shortened to a size
+        # the runtime can reply with, so only an empty page ends the walk.
+        "complete": False,
     }
 
 

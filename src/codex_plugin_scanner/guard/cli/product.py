@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from ..adapters import get_adapter
-from ..adapters.base import HarnessContext
+from ..adapters.base import HarnessContext, _artifact_uses_guard
 from ..config import GuardConfig
 from ..consumer import detect_all
 from ..consumer.service import diff_artifact
 from ..daemon.runtime_peer import load_guard_daemon_endpoint_url
 from ..models import GuardArtifact, HarnessDetection
+from ..native_consumer_artifact_project import NativeConsumerProjectError
 from ..redaction import redact_local_path
+from ..runtime.connector_setup_items import connector_setup_status
 from ..store import GuardStore
 from ..synced_policy import synced_policy_bundle_validation
 from .connect_flow import (
@@ -66,31 +69,6 @@ def build_guard_status_payload(
     )
 
 
-def build_guard_connect_payload(
-    context: HarnessContext,
-    store: GuardStore,
-    config: GuardConfig,
-    *,
-    credentials_saved: bool = False,
-    sync_attempted: bool = False,
-    sync_succeeded: bool = False,
-    sync_error: str | None = None,
-) -> dict[str, object]:
-    """Build a pairing-aware Guard connect payload."""
-
-    payload = _build_guard_product_payload(context, store, config, include_steps=False)
-    payload.update(
-        {
-            "credentials_saved": credentials_saved,
-            "sync_attempted": sync_attempted,
-            "sync_succeeded": sync_succeeded,
-            "sync_error": sync_error,
-        }
-    )
-    payload["next_steps"] = _build_connect_steps(payload)
-    return payload
-
-
 def _build_guard_product_payload(
     context: HarnessContext,
     store: GuardStore,
@@ -109,11 +87,17 @@ def _build_guard_product_payload(
     managed_harnesses = sum(1 for item in harnesses if item["managed"] is True)
     runtime_state = store.get_runtime_state()
     approval_center_url = load_guard_daemon_endpoint_url(context.guard_home)
+    from ..harness_posture import harness_posture_summary
+    from ..protection_coverage import protection_is_in_effect
     from ..protection_posture import protection_status_fields
 
     payload: dict[str, object] = {
         "generated_at": _now(),
         **protection_status_fields(posture=config.protection_posture, mode=config.mode),
+        # The posture alone cannot tell a reader whether anything is registered
+        # to apply it, so state that separately rather than leaving it implied.
+        "protection_in_effect": protection_is_in_effect(harnesses),
+        **harness_posture_summary(config),
         "guard_home": _redacted_path(context.guard_home, context.home_dir),
         "workspace": _redacted_path(context.workspace_dir, context.home_dir),
         "sync_configured": store.get_cloud_sync_profile() is not None,
@@ -126,6 +110,7 @@ def _build_guard_product_payload(
         "managed_harnesses": managed_harnesses,
         "recommended_harness": recommended["harness"] if recommended is not None else None,
         "harnesses": harnesses,
+        "connector_setup": connector_setup_status(store, approval_center_url),
     }
     payload.update(_build_cloud_context(store))
     if include_steps:
@@ -143,6 +128,7 @@ def _summarize_harness(
     approval_flow = get_adapter(detection.harness).approval_flow(managed_install=managed_install)
     review_count = _count_review_artifacts(store, detection.artifacts, detection.harness)
     managed = bool(managed_install and managed_install.get("active"))
+    guard_registered = any(_artifact_uses_guard(artifact) for artifact in detection.artifacts)
     shim_path = None
     if managed_install is not None:
         manifest = managed_install.get("manifest")
@@ -154,6 +140,8 @@ def _summarize_harness(
         "installed": detection.installed,
         "command_available": detection.command_available,
         "artifact_count": len(detection.artifacts),
+        "artifacts_scanned": True,
+        "guard_registered": guard_registered,
         "review_count": review_count,
         "warning_count": len(detection.warnings),
         "managed": managed,
@@ -198,6 +186,7 @@ def _summarize_managed_install(install: dict[str, object], home_dir: Path) -> di
         "installed": managed,
         "command_available": managed,
         "artifact_count": 0,
+        "artifacts_scanned": False,
         "review_count": 0,
         "warning_count": warning_count,
         "managed": managed,
@@ -236,11 +225,23 @@ def _managed_install_warning_count(*, managed: bool, manifest: dict[str, object]
 
 def _count_review_artifacts(store: GuardStore, artifacts: tuple[GuardArtifact, ...], harness: str) -> int:
     previous_snapshots = store.list_snapshots(harness)
-    return sum(
-        1
-        for artifact in artifacts
-        if bool(diff_artifact(previous_snapshots.get(artifact.artifact_id), artifact)["changed"])
-    )
+    guard_home = getattr(store, "guard_home", None)
+    return sum(1 for artifact in artifacts if _artifact_needs_review(previous_snapshots, artifact, guard_home))
+
+
+def _artifact_needs_review(
+    previous_snapshots: Mapping[str, dict[str, object]],
+    artifact: GuardArtifact,
+    guard_home: Path | None,
+) -> bool:
+    try:
+        return bool(
+            diff_artifact(previous_snapshots.get(artifact.artifact_id), artifact, guard_home=guard_home)["changed"]
+        )
+    except NativeConsumerProjectError:
+        # Status stays readable when the resident cannot answer; an artifact
+        # whose diff is unknown is reported as needing review, never as clean.
+        return True
 
 
 def _redacted_path(path: str | Path | None, home_dir: Path) -> str | None:
@@ -409,126 +410,6 @@ def _build_cloud_context(store: GuardStore) -> dict[str, object]:
     }
 
 
-def _build_connect_steps(payload: dict[str, object]) -> list[dict[str, str]]:
-    cloud_state = str(payload.get("cloud_state") or "local_only")
-    recommended = _recommended_summary(payload)
-    dashboard_url = str(payload.get("dashboard_url") or GUARD_DASHBOARD_URL)
-    connect_url = str(payload.get("connect_url") or GUARD_CONNECT_URL)
-    inbox_url = str(payload.get("inbox_url") or GUARD_INBOX_URL)
-    fleet_url = str(payload.get("fleet_url") or GUARD_FLEET_URL)
-    steps: list[dict[str, str]]
-    if cloud_state == "local_only":
-        steps = [
-            {
-                "title": "Run Guard connect",
-                "command": str(payload.get("connect_command") or f"{GUARD_COMMAND} connect"),
-                "detail": (
-                    "Start the local pairing flow, open the browser automatically, and wait for Guard Cloud to pair "
-                    "this machine."
-                ),
-            },
-            {
-                "title": "Complete browser sign-in",
-                "command": connect_url,
-                "detail": (
-                    "Sign in on the Guard connect page if prompted. Guard will resume and run the first sync once the "
-                    "browser pairing finishes."
-                ),
-            },
-        ]
-        if recommended is not None:
-            steps.append(_run_step(recommended))
-        steps.append(
-            {
-                "title": "Open Guard Home",
-                "command": dashboard_url,
-                "detail": (
-                    "Home stays useful before sync is on. Use it to watch this machine "
-                    "and decide when shared memory becomes worth it."
-                ),
-            }
-        )
-        return steps
-    if cloud_state == "paired_waiting":
-        steps = [
-            {
-                "title": "Finish the first cloud sync",
-                "command": str(payload.get("sync_command") or f"{GUARD_COMMAND} sync"),
-                "detail": (
-                    "Keep Local Guard running so it can finish the first cloud sync automatically. "
-                    "Use the sync command only when you want to force the retry now."
-                ),
-            }
-        ]
-        if _int_payload_value(payload, "receipt_count", 0) == 0 and recommended is not None:
-            steps.append(_run_step(recommended))
-        steps.append(
-            {
-                "title": "Open Guard Fleet",
-                "command": fleet_url,
-                "detail": (
-                    "Fleet is the fastest place to confirm the connected machine while "
-                    "the first shared proof is still warming up."
-                ),
-            }
-        )
-        return steps
-    if _int_payload_value(payload, "pending_approvals", 0) > 0:
-        steps = [
-            {
-                "title": "Open Guard Inbox",
-                "command": inbox_url,
-                "detail": "Inbox is the fastest place to resolve live review pressure after this machine connects.",
-            },
-            _approvals_step(),
-        ]
-    elif recommended is not None and str(recommended.get("next_action")) == "review":
-        steps = [
-            {
-                "title": "Open Guard Inbox",
-                "command": inbox_url,
-                "detail": (
-                    "Guard already sees review pressure. Start in Inbox, then drop back "
-                    "to the local approval center only when needed."
-                ),
-            },
-            _install_or_review_step(recommended),
-        ]
-    else:
-        steps = [
-            {
-                "title": "Check local Guard status",
-                "command": f"{GUARD_COMMAND} status",
-                "detail": "Review local protection health, recent sync, and Guard's recommended next step.",
-            }
-        ]
-    steps.insert(
-        0,
-        {
-            "title": "Open Guard Home",
-            "command": dashboard_url,
-            "detail": "Review Home, Inbox, Fleet, Evidence, and upgrade prompts from the signed-in command center.",
-        },
-    )
-    if bool(payload.get("team_policy_active")):
-        steps.append(
-            {
-                "title": "Inspect synced team policy",
-                "command": f"{GUARD_COMMAND} policies",
-                "detail": "Confirm the shared workspace policy Guard pulled down for this machine.",
-            }
-        )
-    elif _int_payload_value(payload, "advisory_count", 0) > 0:
-        steps.append(
-            {
-                "title": "Review Guard advisories",
-                "command": f"{GUARD_COMMAND} advisories",
-                "detail": "Inspect the latest premium trust signals and publisher changes Guard cached locally.",
-            }
-        )
-    return steps
-
-
 def _connect_or_dashboard_step(cloud_state: str, connect_url: str, dashboard_url: str) -> dict[str, str]:
     if cloud_state == "local_only":
         return {
@@ -546,17 +427,6 @@ def _connect_or_dashboard_step(cloud_state: str, connect_url: str, dashboard_url
             "Guard Cloud is already paired. Use the signed-in command center for Home, Fleet, Evidence, and upgrades."
         ),
     }
-
-
-def _recommended_summary(payload: dict[str, object]) -> dict[str, object] | None:
-    recommended_harness = payload.get("recommended_harness")
-    if not isinstance(recommended_harness, str):
-        return None
-    harnesses = payload.get("harnesses")
-    for harness in harnesses if isinstance(harnesses, list) else []:
-        if isinstance(harness, dict) and harness.get("harness") == recommended_harness:
-            return harness
-    return None
 
 
 def _resolve_guard_urls(sync_url: str | None) -> tuple[str, str, str, str]:
@@ -698,4 +568,4 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-__all__ = ["build_guard_connect_payload", "build_guard_start_payload", "build_guard_status_payload"]
+__all__ = ["build_guard_start_payload", "build_guard_status_payload"]

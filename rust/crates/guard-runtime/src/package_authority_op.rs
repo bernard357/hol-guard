@@ -14,37 +14,58 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::package_authority_config::ResidentConfigLoader;
+
+use base64ct::{Base64UrlUnpadded, Encoding};
 use guard_command::local_supply_chain::{
-    resolve_package_firewall_entitlement, resolve_package_firewall_entitlement_with_refresh,
-    CommandExecution, GuardConfig, LocalSupplyChainError, PackageFirewallEntitlementApi,
-    PolicyDecisionLookup, RuntimeRunnerApi, SupplyChainStore,
+    apply_stored_package_policy_override, resolve_package_firewall_entitlement,
+    resolve_package_firewall_entitlement_with_refresh, ApprovalContextApi, CommandExecution,
+    LocalSupplyChainError, PackageEvalApi, PackageFirewallEntitlementApi, PackageIntentParserApi,
+    PackageRequestEvaluation, PathSupportApi, PolicyDecisionLookup, RuntimeRunnerApi,
+    SupplyChainStore,
 };
 use guard_command::package_intent_common::{
-    build_package_request_artifact, resolve_path_within_workspace, GuardArtifact,
+    build_package_request_artifact, resolve_path_within_workspace, GuardArtifact, PackageIntent,
 };
 use guard_command::package_intent_parser::parse_package_intent;
+use guard_command::pep440::{SpecifierSet, Version};
 use guard_command::supply_chain_bundle;
 use guard_command::supply_chain_package_eval::{
     evaluate_package_request_artifact, CanonicalPackageIdentity as EvalCanonicalPackageIdentity,
-    ConfigLoaderApi, EntitlementRefreshApi, EvalError, EvalResult, GuardSyncRequest,
-    GuardSyncRunnerApi, JsSemverApi, LockfileParseApi, LockfileParseResult, ManifestDepsApi,
-    NativeArchiveApi, PackageIdentityApi, RestrictedArchiveApi, RestrictedArchiveDownloadResult,
-    RestrictedArchiveFailure, RiskDetectApi, SpecifierSet, StoreExtrasApi, SupplyChainBundleApi,
-    SupplyChainBundleResponse as EvalBundleResponse, SupplyChainEvalDeps, Version, WorkspaceIoApi,
+    EntitlementRefreshApi, EvalError, EvalResult, GuardSyncRequest, GuardSyncRunnerApi,
+    JsSemverApi, LockfileParseApi, LockfileParseResult, ManifestDepsApi, NativeArchiveApi,
+    PackageIdentityApi, RestrictedArchiveApi,
+    RestrictedArchiveDownload as EvalRestrictedArchiveDownload, RestrictedArchiveDownloadResult,
+    RestrictedArchiveFailure, RiskDetectApi, SavedPolicyProbe, StoreExtrasApi,
+    SupplyChainBundleApi, SupplyChainBundleResponse as EvalBundleResponse, SupplyChainEvalDeps,
+    WorkspaceIoApi,
 };
 use guard_command::supply_chain_package_identity;
 use guard_contracts::{
+    ApplyStoredPackagePolicyRequestV1, ApplyStoredPackagePolicyResultV1,
     PackageAuthorityDecideRequestV1, PackageAuthorityDecideResultV1, PackageIntentParseRequestV1,
-    PackageIntentParseResultV1, SupplyChainEvalRequestV1, SupplyChainEvalResultV1,
+    PackageIntentParseResultV1, PackageRequestArtifactRequestV1, PackageRequestArtifactResultV1,
+    PolicyDecisionLookupRequestV1, SupplyChainEvalRequestV1, SupplyChainEvalResultV1,
     PACKAGE_AUTHORITY_REQUEST_SCHEMA, PACKAGE_AUTHORITY_RESULT_SCHEMA,
+    POLICY_DECISION_LOOKUP_REQUEST_SCHEMA,
 };
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
+use zeroize::Zeroizing;
+
+use crate::supply_chain_egress::{enter_scope, required_reply};
+use crate::supply_chain_eval_seams::*;
+
+#[path = "supply_chain_eval_op.rs"]
+mod supply_chain_eval_op;
+pub(crate) use supply_chain_eval_op::evaluate_supply_chain_eval;
+#[cfg(test)]
+pub(crate) use supply_chain_eval_op::evaluate_supply_chain_eval_with_seams;
 // ---------------------------------------------------------------------------
 // Shared result helpers
 // ---------------------------------------------------------------------------
 
-fn err_result(request_id: &str, request_sha256: &str, code: &str) -> Value {
+pub(crate) fn err_result(request_id: &str, request_sha256: &str, code: &str) -> Value {
     json!({
         "schema": PACKAGE_AUTHORITY_RESULT_SCHEMA,
         "request_id": request_id,
@@ -102,6 +123,7 @@ fn eval_error_code(e: &EvalError) -> &'static str {
         EvalError::NotFound(_) => "not_found",
         EvalError::Internal(_) => "internal",
         EvalError::HttpStatus(_, _) => "http_status",
+        EvalError::SavedPolicyProbeRequired(_) => "saved_policy_probe_required",
     }
 }
 
@@ -126,7 +148,7 @@ impl ResidentSupplyChainStore {
     }
 
     fn conn(&self) -> Result<Connection, rusqlite::Error> {
-        Connection::open(&self.store_path)
+        crate::supply_chain_egress::open_store(&self.store_path)
     }
 
     fn oauth_local_credentials(&self) -> Option<Value> {
@@ -579,9 +601,12 @@ fn oauth_credential_state(guard_home: &Path, payload: Option<&Value>) -> String 
 }
 
 /// `_load_oauth_secret_payload` — resolve the scoped secret ref from
-/// `credentials_ref` (falling back to the home-scoped default ref) and read
-/// the JSON secret from the encrypted file store.
-fn load_oauth_secret_payload(guard_home: &Path, payload: &Value) -> Option<Value> {
+/// `credentials_ref` (falling back to the home-scoped default ref), read the
+/// secret from the encrypted file store, and verify it against the record's
+/// `credentials_sha256` (`store_base._secret_matches_hash`, all three accepted
+/// prefixes). Bytes that no longer match the fingerprint they were stored with
+/// are not usable, so the caller degrades instead of trusting them.
+fn load_oauth_secret_raw(guard_home: &Path, payload: &Value) -> Option<String> {
     let resolved_home = resolve_runtime_home(guard_home)?;
     let default_ref = crate::policy_integrity_resolver::build_scoped_secret_ref(
         "guard-oauth-local-credentials",
@@ -596,7 +621,20 @@ fn load_oauth_secret_payload(guard_home: &Path, payload: &Value) -> Option<Value
         .unwrap_or(default_ref);
     let mut store = crate::encrypted_secret_store::EncryptedFileSecretStore::new(&resolved_home);
     let raw = store.get_secret(&secret_ref)?;
-    serde_json::from_str(&raw).ok()
+    let expected = payload
+        .get(crate::oauth_secret_authority::CREDENTIALS_HASH_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+    crate::oauth_secret_authority::verified_secret_matches(&raw, expected)
+        .ok()
+        .filter(|matches| *matches)?;
+    Some(raw)
+}
+
+/// `_load_oauth_secret_payload` — the parsed form of `load_oauth_secret_raw`.
+fn load_oauth_secret_payload(guard_home: &Path, payload: &Value) -> Option<Value> {
+    serde_json::from_str(&load_oauth_secret_raw(guard_home, payload)?).ok()
 }
 
 /// `_build_oauth_local_credentials_result` — a secret payload is usable only
@@ -654,8 +692,7 @@ impl SupplyChainStore for ResidentSupplyChainStore {
         payload
             .get("workspace_id")
             .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|value| !crate::context_digest::python_strip(value).is_empty())
             .map(str::to_owned)
     }
 
@@ -1008,78 +1045,74 @@ impl SupplyChainStore for ResidentSupplyChainStore {
 
     fn resolve_policy_decision_lookup(
         &self,
-        _harness: &str,
+        harness: &str,
         artifact_id: &str,
-        _artifact_hash: Option<&str>,
-        _workspace: &str,
-        _publisher: Option<&str>,
-        _now: &str,
-        _consume_one_shot: bool,
+        artifact_hash: Option<&str>,
+        workspace: &str,
+        publisher: Option<&str>,
+        now: &str,
+        consume_one_shot: bool,
     ) -> PolicyDecisionLookup {
-        // store_policy.py: resolve_policy_decision_lookup — look up the
-        // materialized decision row for the artifact.
-        let conn = match self.conn() {
-            Ok(c) => c,
-            Err(_) => return PolicyDecisionLookup::default(),
+        // store_policy.py: resolve_policy_decision_lookup — the shared lookup
+        // op owns the scope, eligibility and row-integrity rules and stamps
+        // the authority revision a later claim compares against, so the
+        // resident resolves the row through it rather than reading
+        // `policy_decisions` itself. Python procures the keyring-facing
+        // integrity evidence before dispatch (`policy_lookup_evidence`); in
+        // the resident the same material is resolved in-process, exactly as
+        // `claim_approval_reuse_decision` below resolves it.
+        let resolved_home =
+            std::fs::canonicalize(&self.guard_home).unwrap_or_else(|_| self.guard_home.clone());
+        let mut secret_store =
+            crate::encrypted_secret_store::EncryptedFileSecretStore::new(&resolved_home);
+        let (material, integrity_state) = crate::policy_integrity_resolver::resolve_integrity_state(
+            &mut secret_store,
+            &resolved_home,
+        );
+        let key_b64 = material
+            .as_ref()
+            .map(|m| Zeroizing::new(Base64UrlUnpadded::encode_string(&m.raw_key)));
+        let key_id = material.as_ref().map(|m| m.key_id.clone());
+        let request = PolicyDecisionLookupRequestV1 {
+            schema: POLICY_DECISION_LOOKUP_REQUEST_SCHEMA.to_owned(),
+            request_id: String::new(),
+            store_path: self.store_path.to_string_lossy().into_owned(),
+            guard_home: resolved_home.to_string_lossy().into_owned(),
+            harness: harness.to_owned(),
+            artifact_id: Some(artifact_id.to_owned()),
+            artifact_hash: artifact_hash.map(str::to_owned),
+            workspace: Some(workspace.to_owned()),
+            publisher: publisher.map(str::to_owned),
+            now: now.to_owned(),
+            runtime_exact_match_context: None,
+            consume_one_shot,
+            local_once_only: false,
+            integrity_state: Some(integrity_state),
+            integrity_key_b64: key_b64.as_ref().map(|k| k.to_string()),
+            integrity_key_id: key_id.clone(),
+            local_once_integrity_key_b64: key_b64.as_ref().map(|k| k.to_string()),
+            local_once_integrity_key_id: key_id,
+            policy_bundle_decision_identities: None,
+            probe_groups: None,
+            portable_workspace: None,
+            evidence_binding: None,
         };
-        // `_policy_row_payload` — project the `policy_decisions` columns into
-        // the decision dict the callers inspect.
-        let mut stmt = match conn.prepare(
-            "SELECT harness, scope, artifact_id, artifact_hash, workspace, \
-                    publisher, action, reason, owner, source, expires_at, \
-                    policy_document_schema_version, policy_document_id, \
-                    policy_document_digest, policy_rule_id, \
-                    policy_provenance_json, updated_at \
-             FROM policy_decisions \
-             WHERE artifact_id = ?1 ORDER BY decision_id DESC LIMIT 1",
-        ) {
-            Ok(st) => st,
-            Err(_) => return PolicyDecisionLookup::default(),
+        let payload = match crate::policy_decision_lookup_op::evaluate(&request) {
+            Ok(payload) => payload,
+            Err(code) => {
+                return PolicyDecisionLookup {
+                    error: Some(code),
+                    ..PolicyDecisionLookup::default()
+                };
+            }
         };
-        let decision = stmt
-            .query_row([artifact_id], |row| {
-                let mut map = Map::new();
-                for (i, name) in [
-                    "harness",
-                    "scope",
-                    "artifact_id",
-                    "artifact_hash",
-                    "workspace",
-                    "publisher",
-                    "action",
-                    "reason",
-                    "owner",
-                    "source",
-                    "expires_at",
-                    "policy_document_schema_version",
-                    "policy_document_id",
-                    "policy_document_digest",
-                    "policy_rule_id",
-                    "policy_provenance_json",
-                    "updated_at",
-                ]
-                .iter()
-                .enumerate()
-                {
-                    let v: rusqlite::types::Value = row.get(i)?;
-                    let jv = db_value_to_json(v);
-                    // `policy_provenance_json` is stored as a JSON blob text —
-                    // emit it parsed like the Python `_row_to_payload` does.
-                    let jv = if *name == "policy_provenance_json" {
-                        jv.as_str()
-                            .and_then(|t| serde_json::from_str::<Value>(t).ok())
-                            .unwrap_or(jv)
-                    } else {
-                        jv
-                    };
-                    map.insert(name.to_string(), jv);
-                }
-                Ok(Value::Object(map))
-            })
-            .ok();
+        let field = |name: &str| -> Option<Value> {
+            payload.get(name).filter(|value| !value.is_null()).cloned()
+        };
         PolicyDecisionLookup {
-            decision,
-            ignored_local_integrity: None,
+            decision: field("decision"),
+            ignored_local_integrity: field("ignored_local_integrity"),
+            error: None,
         }
     }
 
@@ -1104,16 +1137,31 @@ impl SupplyChainStore for ResidentSupplyChainStore {
             Ok(c) => c,
             Err(_) => return false,
         };
+        let resolved_home =
+            std::fs::canonicalize(&self.guard_home).unwrap_or_else(|_| self.guard_home.clone());
+        let mut secret_store =
+            crate::encrypted_secret_store::EncryptedFileSecretStore::new(&resolved_home);
+        let (material, state) = crate::policy_integrity_resolver::resolve_integrity_state(
+            &mut secret_store,
+            &resolved_home,
+        );
+        let evidence = crate::claim_reuse::ClaimEvidence {
+            integrity_state: Some(&state),
+            integrity_key: material.as_ref().map(|m| m.raw_key.as_slice()),
+            integrity_key_id: material.as_ref().map(|m| m.key_id.as_str()),
+            local_once_key: material.as_ref().map(|m| m.raw_key.as_slice()),
+            local_once_key_id: material.as_ref().map(|m| m.key_id.as_str()),
+            policy_bundle_identities: None,
+        };
         crate::claim_reuse::claim_approval_reuse_decisions(
             &conn,
             std::slice::from_ref(decision),
-            Some(now),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            now,
+            &evidence,
+            // The resident resolves this evidence itself, in-process, and ships no
+            // policy-bundle identities, so there is no caller-gathered evidence
+            // whose sources could move before the claim's write lock.
+            &|_, _| Ok(true),
         )
         .unwrap_or(false)
     }
@@ -1281,20 +1329,27 @@ impl SupplyChainStore for ResidentSupplyChainStore {
 // ResidentEvalDeps — concrete `SupplyChainEvalDeps` impls.
 // ---------------------------------------------------------------------------
 
-/// Fails closed — resident has no HTTP transport for guard-sync; eval falls
-/// back to local-only exactly like Python `GuardSyncNotConfiguredError`.
+/// Resident `.runtime.runner` guard-sync seam — owns the OAuth credential
+/// read, DPoP proof signing (ES256/ring), origin-allowlist endpoint
+/// validation, and the ureq-backed HTTPS transport with the Python retry
+/// state machine (`_urlopen_with_sync_retries`). Token refresh is not yet
+/// ported (stage B) — a cached-token-miss surfaces `EvalError::Validation`
+/// (`GuardSyncAuthorizationExpiredError` mirror, fail-closed to `ask`).
 ///
 /// `auth_context_override` is a test-only seam: when the originating Python
 /// process is running under pytest (`PYTEST_CURRENT_TEST` set) and exports
 /// `HOL_GUARD_TEST_SYNC_AUTH_CONTEXT_JSON`, `supply_chain_eval_native` forwards
 /// the parsed dict on the request as `sync_auth_context_override`. Two forms:
 ///   * `{"sync_url": ..., "access_token": ...}` — used verbatim as the auth
-///     context so the resident reaches the (still stubbed) transport and
-///     surfaces `cloud_http_error` rather than silently degrading;
+///     context so the resident reaches the transport and surfaces
+///     `cloud_http_error` rather than silently degrading;
 ///   * `{"error": "authorization_expired"}` — surfaces as
 ///     `EvalError::Validation`, which `evaluate_with_cloud` maps to the
 ///     `cloud_auth_error` fail-closed path (parity with
 ///     `GuardSyncAuthorizationExpiredError`).
+///   * `{"error": "trusted_session_failure"}` — surfaces as
+///     `EvalError::Internal`, the availability failure (for example a token
+///     refresh error) that every level routes to review.
 struct ResidentGuardSyncRunner {
     auth_context_override: Option<Map<String, Value>>,
 }
@@ -1302,64 +1357,253 @@ struct ResidentGuardSyncRunner {
 impl GuardSyncRunnerApi for ResidentGuardSyncRunner {
     fn resolve_guard_sync_auth_context(
         &self,
-        _store: &dyn SupplyChainStore,
+        store: &dyn SupplyChainStore,
         _allow_primary_repair: bool,
-        _force_refresh: bool,
+        force_refresh: bool,
     ) -> EvalResult<Map<String, Value>> {
+        use guard_command::guard_sync_transport as gst;
         if let Some(override_ctx) = &self.auth_context_override {
             if override_ctx.get("error").and_then(Value::as_str) == Some("authorization_expired") {
                 return Err(EvalError::Validation(
                     "guard sync authorization expired (test override)".into(),
                 ));
             }
-            return Ok(override_ctx.clone());
+            if override_ctx.get("error").and_then(Value::as_str) == Some("trusted_session_failure")
+            {
+                return Err(EvalError::Internal(
+                    "guard sync trusted session unavailable (test override)".into(),
+                ));
+            }
+            let mut ctx = override_ctx.clone();
+            if let Some(sync_url) = ctx.get("sync_url").and_then(Value::as_str) {
+                let issuer = ctx.get("issuer").and_then(Value::as_str);
+                ctx.insert(
+                    "sync_url".to_owned(),
+                    Value::String(
+                        gst::validate_guard_sync_endpoint(sync_url, issuer)
+                            .map_err(EvalError::Validation)?,
+                    ),
+                );
+            }
+            return Ok(ctx);
         }
-        Err(EvalError::NotFound(
-            "guard sync auth context unavailable in resident".into(),
-        ))
+        if let Some(mut env_ctx) = gst::test_sync_auth_context_from_env() {
+            if let Some(sync_url) = env_ctx.get("sync_url").and_then(Value::as_str) {
+                let issuer = env_ctx.get("issuer").and_then(Value::as_str);
+                env_ctx.insert(
+                    "sync_url".to_owned(),
+                    Value::String(
+                        gst::validate_guard_sync_endpoint(sync_url, issuer)
+                            .map_err(EvalError::Validation)?,
+                    ),
+                );
+            }
+            return Ok(env_ctx);
+        }
+        // `_resolve_guard_sync_auth_context` (:4733) — read the stored OAuth
+        // credentials through the scoped secret authority: metadata from the
+        // `oauth_local_credentials` payload, secret material (refresh token,
+        // DPoP key, cached access token) from the verified secret behind
+        // `credentials_ref`. `store_oauth` never inlines the secret, so the
+        // payload alone cannot start a sync. Token refresh (the network leg +
+        // rotation persist) is still the stage-B port: a missing/expired token
+        // surfaces `EvalError::Validation` (the
+        // `GuardSyncAuthorizationExpiredError` mirror) so `_evaluate_with_cloud`
+        // fail-closes to `ask` rather than mislabeling a refresh-needed
+        // credential as `NotFound` ("not configured") and falling back to
+        // local-only evaluation.
+        // The writer replaces the secret before it republishes the record's
+        // fingerprint, so a read landing inside that window can see a valid pair
+        // torn apart and must not turn a healthy credential into a denial. One
+        // re-read settles it; anything else fails closed.
+        let mut attempt = 0_u8;
+        let oauth_credentials = loop {
+            attempt += 1;
+            let payload = match store.get_sync_payload("oauth_local_credentials") {
+                Some(payload) if payload.is_object() => payload,
+                _ => return Err(EvalError::NotFound("Guard is not logged in.".to_owned())),
+            };
+            match crate::oauth_secret_authority::resolve_credentials(&payload, &|_| {
+                load_oauth_secret_raw(store.guard_home(), &payload)
+            }) {
+                Ok(credentials) => break credentials,
+                Err(reason)
+                    if (reason == "credentials_secret_fingerprint_mismatch"
+                        || reason == "credentials_secret_unavailable")
+                        && attempt < 2 =>
+                {
+                    continue;
+                }
+                Err(reason) => return Err(EvalError::Validation(reason)),
+            }
+        };
+        let issuer = oauth_credentials
+            .get("issuer")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty());
+        let client_id = oauth_credentials
+            .get("client_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty());
+        let refresh_token = oauth_credentials
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty());
+        let (issuer, client_id, refresh_token) = match (issuer, client_id, refresh_token) {
+            (Some(i), Some(c), Some(r)) => (i, c, r),
+            _ => {
+                return Err(EvalError::Validation(
+                    "Guard OAuth credentials are incomplete; reauthorize Guard.".to_owned(),
+                ))
+            }
+        };
+        let dpop_key_material = gst::oauth_dpop_key_material(&oauth_credentials)?;
+        // `(origin, authorize_url, token_endpoint, device_authorize_url,
+        // jwks_url, client_id)` — `token_endpoint` is element 2.
+        let oauth_client_config = gst::resolve_guard_oauth_client_config(issuer).map_err(|e| {
+            EvalError::Validation(format!("Reconnect Guard to Guard Cloud to continue. {e}"))
+        })?;
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or_default();
+        let cached_access_token = if force_refresh {
+            None
+        } else {
+            gst::cached_oauth_access_token(&oauth_credentials, now_unix)
+        };
+        let access_token = match cached_access_token {
+            Some(t) => t,
+            None => {
+                // `runner.py` refresh leg — `_refresh_guard_oauth_access_token`:
+                // circuit-checked, `invalid_grant`-retried, rotation-persisted
+                // under `oauth-refresh.lock`. The reloader hands the loop the
+                // latest stored credential when a peer rotated mid-flight.
+                let store_ref = store;
+                let refreshed = crate::oauth_refresh::refresh_oauth_access_token(
+                    store,
+                    &oauth_credentials,
+                    &oauth_client_config.2,
+                    client_id,
+                    refresh_token,
+                    &dpop_key_material,
+                    &move || {
+                        store_ref
+                            .get_sync_payload("oauth_local_credentials")
+                            .and_then(|payload| {
+                                crate::oauth_secret_authority::resolve_credentials(
+                                    &payload,
+                                    &|_| {
+                                        crate::package_authority_op::load_oauth_secret_raw(
+                                            store_ref.guard_home(),
+                                            &payload,
+                                        )
+                                    },
+                                )
+                                .ok()
+                            })
+                            .and_then(|creds| {
+                                let rt = creds
+                                    .get("refresh_token")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned)?;
+                                let mat = gst::oauth_dpop_key_material(&creds).ok()?;
+                                Some((rt, mat))
+                            })
+                    },
+                );
+                match refreshed {
+                    Ok(auth) => auth.access_token,
+                    Err(e) => return Err(e),
+                }
+            }
+        };
+        let sync_url = gst::validate_guard_sync_endpoint(
+            &gst::oauth_sync_url_from_issuer(issuer).map_err(EvalError::Validation)?,
+            Some(issuer),
+        )
+        .map_err(EvalError::Validation)?;
+        let mut ctx = Map::new();
+        ctx.insert("sync_url".to_owned(), Value::String(sync_url));
+        ctx.insert("access_token".to_owned(), Value::String(access_token));
+        ctx.insert(
+            "dpop_key_material".to_owned(),
+            Value::Object(dpop_key_material),
+        );
+        ctx.insert("issuer".to_owned(), Value::String(issuer.to_owned()));
+        Ok(ctx)
     }
-    fn validate_guard_sync_url(&self, sync_url: &str, _issuer: Option<&str>) -> EvalResult<String> {
-        Ok(sync_url.trim_end_matches('/').to_owned())
+    fn validate_guard_sync_url(&self, sync_url: &str, issuer: Option<&str>) -> EvalResult<String> {
+        guard_command::guard_sync_transport::validate_guard_sync_endpoint(sync_url, issuer)
+            .map_err(EvalError::Validation)
     }
     fn guard_sync_request(
         &self,
-        _auth_context: &Value,
+        auth_context: &Value,
         request_url: &str,
         method: &str,
         data: Option<&[u8]>,
-        _extra_headers: Option<&Map<String, Value>>,
+        extra_headers: Option<&Map<String, Value>>,
         dpop_nonce: Option<&str>,
     ) -> EvalResult<GuardSyncRequest> {
-        Ok(GuardSyncRequest {
-            url: request_url.to_owned(),
-            method: method.to_owned(),
-            headers: BTreeMap::new(),
-            body: data.map(|d| d.to_vec()),
-            dpop_nonce: dpop_nonce.map(str::to_owned),
-        })
+        guard_command::guard_sync_transport::guard_sync_request(
+            auth_context,
+            request_url,
+            method,
+            data,
+            extra_headers,
+            dpop_nonce,
+        )
     }
     fn urlopen_json_with_timeout_retry(
         &self,
-        _request: &GuardSyncRequest,
-        _timeout_seconds: u64,
-        _retry_timeout_seconds: u64,
+        request: &GuardSyncRequest,
+        timeout_seconds: u64,
+        retry_timeout_seconds: u64,
     ) -> EvalResult<Map<String, Value>> {
-        Err(EvalError::Internal(
-            "resident guard-sync transport unavailable".into(),
-        ))
+        let payload = guard_command::guard_sync_transport::urlopen_json_with_timeout_retry(
+            request,
+            timeout_seconds as f64,
+            retry_timeout_seconds as f64,
+        )?;
+        match payload {
+            Value::Object(map) => Ok(map),
+            _ => Err(EvalError::Internal(
+                "Guard Cloud sync returned an invalid response payload.".into(),
+            )),
+        }
     }
-    fn is_timeout_error(&self, _error: &(dyn std::error::Error + 'static)) -> bool {
-        false
+    fn is_timeout_error(&self, error: &(dyn std::error::Error + 'static)) -> bool {
+        // `_is_timeout_error` (:4997) — urllib surfaces `TimeoutError`,
+        // `URLError` with a `timeout` reason, and (rarely) `HTTPException`.
+        // The transport folds all of those into `EvalError::Internal` with a
+        // `timeout:` prefix.
+        error
+            .downcast_ref::<EvalError>()
+            .is_some_and(|e| matches!(e, EvalError::Internal(m) if m.starts_with("timeout:")))
     }
     fn normalized_receipts_sync_url(&self, sync_url: &str) -> String {
-        sync_url.to_owned()
+        // `_normalized_receipts_sync_url` — only a bare `/registry/api/v1`
+        // endpoint is rewritten to the receipts sync path.
+        let parsed = guard_command::local_supply_chain::urlsplit(sync_url);
+        if parsed.path.trim_end_matches('/') != "/registry/api/v1" {
+            return sync_url.to_owned();
+        }
+        let query = if parsed.query.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", parsed.query)
+        };
+        format!(
+            "{}://{}/registry/api/v1/guard/receipts/sync{query}",
+            parsed.scheme, parsed.netloc
+        )
     }
 }
 
-/// Lockfile parse seam — delegates to the ported
-/// `package_manifest_diff::parse_manifest_dependencies` for formats with a
-/// native parser; everything else returns `incomplete` like Python's
-/// `incomplete_lockfile_result` degrade path.
+/// Lockfile parse seam. The complete-or-fail contract (format validation,
+/// limits, error reasons, workspace containment) lives in
+/// `guard_command::supply_chain_package_eval::lockfile_parse`.
 struct ResidentLockfileParse;
 
 impl LockfileParseApi for ResidentLockfileParse {
@@ -1370,36 +1614,12 @@ impl LockfileParseApi for ResidentLockfileParse {
         budget_ms: f64,
         parse_text_result: &dyn Fn(&str, &[u8]) -> LockfileParseResult,
     ) -> Vec<LockfileParseResult> {
-        let mut results = Vec::new();
-        let Some(ws) = workspace_dir else {
-            return results;
-        };
-        let Some(Value::Array(paths)) = lockfile_paths else {
-            return results;
-        };
-        for rel in paths.iter().filter_map(Value::as_str) {
-            let Some(resolved) = resolve_path_within_workspace(ws, rel) else {
-                results.push(self.incomplete_lockfile_result(
-                    rel,
-                    b"",
-                    "path outside workspace",
-                    budget_ms,
-                    0.0,
-                ));
-                continue;
-            };
-            match std::fs::read(&resolved) {
-                Ok(bytes) => results.push(parse_text_result(rel, &bytes)),
-                Err(e) => results.push(self.incomplete_lockfile_result(
-                    rel,
-                    b"",
-                    &format!("read failed: {e}"),
-                    budget_ms,
-                    0.0,
-                )),
-            }
-        }
-        results
+        guard_command::supply_chain_package_eval::collect_lockfile_parse_results(
+            workspace_dir,
+            lockfile_paths,
+            budget_ms,
+            parse_text_result,
+        )
     }
 
     fn parse_lockfile_with_budget(
@@ -1408,49 +1628,11 @@ impl LockfileParseApi for ResidentLockfileParse {
         source_text: &[u8],
         budget_seconds: f64,
     ) -> LockfileParseResult {
-        let text = String::from_utf8_lossy(source_text);
-        let budget_ms = (budget_seconds * 1000.0).max(1.0);
-        let map = guard_command::package_manifest_diff::parse_manifest_dependencies(
+        guard_command::supply_chain_package_eval::parse_lockfile_with_budget(
             path,
-            &text,
-            text.len(),
-            budget_ms as u64,
-        );
-        if map.is_empty() {
-            return self.incomplete_lockfile_result(
-                path,
-                source_text,
-                "no parser produced entries",
-                budget_ms,
-                0.0,
-            );
-        }
-        let entries = map
-            .into_iter()
-            .map(|(dependency_path, version)| {
-                guard_command::supply_chain_package_eval::LockfileDependencyEntry {
-                    dependency_path,
-                    package_name: String::new(),
-                    version,
-                    direct: false,
-                }
-            })
-            .collect();
-        LockfileParseResult {
-            entries,
-            complete: true,
-            format: Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_owned(),
-            source_hash: guard_policy_snapshot::digest_bytes(source_text),
-            elapsed_ms: 0.0,
-            budget_ms,
-            warnings: Vec::new(),
-            error_reason: None,
-            parser_version: "resident-lockfile-parse-v1".into(),
-        }
+            source_text,
+            budget_seconds,
+        )
     }
 
     fn incomplete_lockfile_result(
@@ -1461,30 +1643,18 @@ impl LockfileParseApi for ResidentLockfileParse {
         budget_ms: f64,
         elapsed_ms: f64,
     ) -> LockfileParseResult {
-        LockfileParseResult {
-            entries: Vec::new(),
-            complete: false,
-            format: Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_owned(),
-            source_hash: if source.is_empty() {
-                String::new()
-            } else {
-                guard_policy_snapshot::digest_bytes(source)
-            },
-            elapsed_ms,
+        guard_command::supply_chain_package_eval::incomplete_lockfile_result(
+            path,
+            source,
+            error_reason,
             budget_ms,
-            warnings: Vec::new(),
-            error_reason: Some(error_reason.to_owned()),
-            parser_version: "resident-lockfile-parse-v1".into(),
-        }
+            elapsed_ms,
+        )
     }
 }
 
 /// Bundle seam — delegates to `guard_command::supply_chain_bundle` loaders.
-struct ResidentBundle;
+pub(crate) struct ResidentBundle;
 
 impl SupplyChainBundleApi for ResidentBundle {
     fn load_supply_chain_bundle_response(
@@ -1500,15 +1670,16 @@ impl SupplyChainBundleApi for ResidentBundle {
                 .as_object()
                 .cloned()
                 .unwrap_or_default(),
-            signed_bundle: resp.signed_bundle,
-            payload_hash: resp.payload_hash,
-            signature: resp.signature,
-            signature_algorithm: resp.signature_algorithm,
+            signed_bundle: resp.signed_bundle.clone(),
+            payload_hash: resp.payload_hash.clone(),
+            signature: resp.signature.clone(),
+            signature_algorithm: resp.signature_algorithm.clone(),
             verification_keys: resp
                 .verification_keys
                 .iter()
                 .filter_map(|k| k.to_dict().as_object().cloned())
                 .collect(),
+            parsed: Some(std::sync::Arc::new(resp)),
         })
     }
 
@@ -1531,11 +1702,19 @@ impl SupplyChainBundleApi for ResidentBundle {
         ecosystem: Option<&str>,
         now: Option<f64>,
     ) -> EvalResult<Map<String, Value>> {
-        let raw = response_to_bundle_json(response);
-        let typed = supply_chain_bundle::load_supply_chain_bundle_response(&raw)
-            .map_err(|e| EvalError::Validation(e.to_string()))?;
+        let reparsed;
+        let typed = match response.parsed.as_deref() {
+            Some(typed) => typed,
+            None => {
+                reparsed = supply_chain_bundle::load_supply_chain_bundle_response(
+                    &response_to_bundle_json(response),
+                )
+                .map_err(|e| EvalError::Validation(e.to_string()))?;
+                &reparsed
+            }
+        };
         let decision = supply_chain_bundle::evaluate_cached_supply_chain_bundle(
-            &typed,
+            typed,
             package_name,
             package_version,
             ecosystem,
@@ -1585,187 +1764,49 @@ fn response_to_bundle_json(response: &EvalBundleResponse) -> Value {
     })
 }
 
-/// `packaging`-style PEP-440 + npm-selector semver seam — faithful subset
-/// matching the shape Python's `packaging`/`js_semver` expose.
+/// Native PEP 440 parsing and bounded npm selectors.
 struct ResidentSemver;
-
-impl ResidentSemver {
-    fn parse_version(value: &str) -> EvalResult<Version> {
-        let normalized = value.trim().to_owned();
-        if normalized.is_empty() {
-            return Err(EvalError::Validation("empty version".into()));
-        }
-        let release_part = normalized
-            .split(['-', '+'])
-            .next()
-            .unwrap_or(normalized.as_str());
-        let mut release: Vec<u64> = Vec::new();
-        for seg in release_part.split('.') {
-            if seg.is_empty() {
-                continue;
-            }
-            release.push(seg.parse::<u64>().unwrap_or(0));
-        }
-        if release.is_empty() {
-            release.push(0);
-        }
-        Ok(Version {
-            normalized,
-            release,
-        })
-    }
-
-    fn compare_release(a: &[u64], b: &[u64]) -> std::cmp::Ordering {
-        let len = a.len().max(b.len());
-        for i in 0..len {
-            match a
-                .get(i)
-                .copied()
-                .unwrap_or(0)
-                .cmp(&b.get(i).copied().unwrap_or(0))
-            {
-                std::cmp::Ordering::Equal => continue,
-                ord => return ord,
-            }
-        }
-        std::cmp::Ordering::Equal
-    }
-
-    fn satisfies_specifier(version: &Version, spec: &str) -> bool {
-        let spec = spec.trim();
-        if spec.is_empty() || spec == "*" {
-            return true;
-        }
-        for clause in spec.split(',') {
-            let clause = clause.trim();
-            if clause.is_empty() {
-                continue;
-            }
-            let (op, rhs) = if let Some(rest) = clause.strip_prefix(">=") {
-                (">=", rest)
-            } else if let Some(rest) = clause.strip_prefix("<=") {
-                ("<=", rest)
-            } else if let Some(rest) = clause.strip_prefix("==") {
-                ("==", rest)
-            } else if let Some(rest) = clause.strip_prefix("!=") {
-                ("!=", rest)
-            } else if let Some(rest) = clause.strip_prefix('>') {
-                (">", rest)
-            } else if let Some(rest) = clause.strip_prefix('<') {
-                ("<", rest)
-            } else if let Some(rest) = clause.strip_prefix('~') {
-                ("~=", rest)
-            } else if let Some(rest) = clause.strip_prefix('^') {
-                ("^", rest)
-            } else {
-                ("==", clause)
-            };
-            let rhs_v = match Self::parse_version(rhs.trim()) {
-                Ok(v) => v,
-                Err(_) => return false,
-            };
-            let ord = Self::compare_release(&version.release, &rhs_v.release);
-            let ok = match op {
-                "==" => ord == std::cmp::Ordering::Equal,
-                "!=" => ord != std::cmp::Ordering::Equal,
-                ">=" => ord != std::cmp::Ordering::Less,
-                "<=" => ord != std::cmp::Ordering::Greater,
-                ">" => ord == std::cmp::Ordering::Greater,
-                "<" => ord == std::cmp::Ordering::Less,
-                "~=" | "^" => {
-                    if ord == std::cmp::Ordering::Less {
-                        false
-                    } else {
-                        let mut upper = rhs_v.release.clone();
-                        if op == "^" && upper.first().copied().unwrap_or(0) == 0 && upper.len() > 1
-                        {
-                            upper[1] += 1;
-                            upper.truncate(2);
-                        } else {
-                            upper[0] = upper.first().copied().unwrap_or(0) + 1;
-                            upper.truncate(1);
-                        }
-                        Self::compare_release(&version.release, &upper) == std::cmp::Ordering::Less
-                    }
-                }
-                _ => false,
-            };
-            if !ok {
-                return false;
-            }
-        }
-        true
-    }
-}
 
 impl JsSemverApi for ResidentSemver {
     fn specifier_set(&self, range: &str) -> EvalResult<SpecifierSet> {
-        if range.trim().is_empty() {
-            return Err(EvalError::Validation("empty specifier".into()));
-        }
-        Ok(SpecifierSet {
-            normalized: range.trim().to_owned(),
-        })
+        SpecifierSet::parse(range).map_err(EvalError::Validation)
     }
     fn version(&self, value: &str) -> EvalResult<Version> {
-        Self::parse_version(value)
+        Version::parse(value).map_err(EvalError::Validation)
     }
     fn version_in_specifier_set(&self, version: &Version, set: &SpecifierSet) -> bool {
-        Self::satisfies_specifier(version, &set.normalized)
+        set.contains(version)
     }
     fn highest_js_version_for_selector(
         &self,
         versions: &[String],
         selector: &str,
     ) -> Option<String> {
-        let mut best: Option<Version> = None;
-        let mut best_raw: Option<String> = None;
-        for candidate in versions {
-            let Ok(v) = Self::parse_version(candidate) else {
-                continue;
-            };
-            if !Self::satisfies_specifier(&v, selector) {
-                continue;
-            }
-            let better = match &best {
-                None => true,
-                Some(b) => {
-                    Self::compare_release(&v.release, &b.release) == std::cmp::Ordering::Greater
-                }
-            };
-            if better {
-                best = Some(v);
-                best_raw = Some(candidate.clone());
-            }
-        }
-        best_raw
+        guard_command::js_semver::highest_js_version_for_selector(versions, selector)
+            .map(str::to_owned)
     }
     fn version_matches_js_selector(&self, version: &str, selector: &str) -> bool {
-        match Self::parse_version(version) {
-            Ok(v) => Self::satisfies_specifier(&v, selector),
-            Err(_) => false,
-        }
+        guard_command::js_semver::version_matches_js_selector(version, selector)
     }
 }
 
-/// Risk-detection seam — `detect_supply_chain_risk` is not yet ported; return
-/// an empty signal list so eval continues with zero risk contribution.
+/// Package risk detection delegates to the native supply-chain content rules.
 struct ResidentRisk;
 
 impl RiskDetectApi for ResidentRisk {
     fn detect_supply_chain_risk(
         &self,
-        _content: &str,
+        content: &str,
         _file_path: Option<&str>,
     ) -> EvalResult<Vec<Map<String, Value>>> {
-        Ok(Vec::new())
+        guard_command::supply_chain_risk::detect_supply_chain_risk(content)
     }
     fn evaluate_supply_chain_risk_sync(
         &self,
-        _content: &str,
+        content: &str,
         _file_path: Option<&str>,
     ) -> EvalResult<Vec<Map<String, Value>>> {
-        Ok(Vec::new())
+        guard_command::supply_chain_risk::detect_supply_chain_risk(content)
     }
 }
 
@@ -1773,56 +1814,6 @@ impl RiskDetectApi for ResidentRisk {
 struct ResidentManifestDeps;
 
 impl ManifestDepsApi for ResidentManifestDeps {
-    fn evaluation_targets(
-        &self,
-        artifact: &GuardArtifact,
-        workspace_dir: Option<&Path>,
-        explicit_targets: &[Map<String, Value>],
-        include_locked: bool,
-    ) -> Vec<Map<String, Value>> {
-        let mut out: Vec<Map<String, Value>> = explicit_targets.to_vec();
-        if !include_locked {
-            return out;
-        }
-        let Some(ws) = workspace_dir else {
-            return out;
-        };
-        for key in ["manifest_paths", "lockfile_paths"] {
-            let Some(Value::Array(paths)) = artifact.metadata.get(key).cloned() else {
-                continue;
-            };
-            for rel in paths.iter().filter_map(Value::as_str) {
-                let Some(resolved) = resolve_path_within_workspace(ws, rel) else {
-                    continue;
-                };
-                let Ok(text) = std::fs::read_to_string(&resolved) else {
-                    continue;
-                };
-                let deps = guard_command::package_manifest_diff::parse_manifest_dependencies(
-                    rel,
-                    &text,
-                    text.len(),
-                    4000,
-                );
-                for (name, version) in deps {
-                    out.push(
-                        json!({
-                            "ecosystem": ecosystem_for_path(rel),
-                            "name": name,
-                            "package_name": name,
-                            "version": version,
-                            "source": rel,
-                        })
-                        .as_object()
-                        .cloned()
-                        .unwrap_or_default(),
-                    );
-                }
-            }
-        }
-        out
-    }
-
     fn dependency_map_for_path(
         &self,
         path: &str,
@@ -1854,30 +1845,6 @@ impl ManifestDepsApi for ResidentManifestDeps {
         )
     }
 }
-
-fn ecosystem_for_path(path: &str) -> &'static str {
-    let name = Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    match name {
-        "package.json"
-        | "package-lock.json"
-        | "npm-shrinkwrap.json"
-        | "yarn.lock"
-        | "pnpm-lock.yaml"
-        | "bun.lock"
-        | "bun.lockb" => "npm",
-        "requirements.txt" | "Pipfile" | "Pipfile.lock" | "poetry.lock" | "pyproject.toml"
-        | "uv.lock" | "setup.py" => "pypi",
-        "Cargo.toml" | "Cargo.lock" => "cargo",
-        "Gemfile" | "Gemfile.lock" => "rubygems",
-        "composer.json" | "composer.lock" => "packagist",
-        "go.mod" | "go.sum" => "go",
-        _ => "",
-    }
-}
-
 /// Package-identity seam — delegates to `supply_chain_package_identity` fns.
 struct ResidentPackageIdentity;
 
@@ -1930,32 +1897,59 @@ impl PackageIdentityApi for ResidentPackageIdentity {
     }
 }
 
-/// Restricted-archive seam — no HTTP transport in the resident; return the
-/// policy Failure the Python download produces when the fetch is denied.
+/// Restricted-archive seam. The download is performed by the caller under its
+/// managed network policy (`egress_broker`); this process never dials out for
+/// it. A success carries no blob (the caller holds it): the digest and the
+/// caller's inspection verdict are what the evaluation decides on.
 struct ResidentRestrictedArchive;
 
 impl RestrictedArchiveApi for ResidentRestrictedArchive {
     fn download_restricted_archive(
         &self,
         source_url: &str,
-        _max_bytes: u64,
-        _max_redirects: u32,
-        _timeout_seconds: f64,
+        max_bytes: u64,
+        max_redirects: u32,
+        timeout_seconds: f64,
         _temp_dir: Option<&Path>,
     ) -> EvalResult<RestrictedArchiveDownloadResult> {
-        Ok(RestrictedArchiveDownloadResult::Failure(
-            RestrictedArchiveFailure {
-                code: "external_archive_transport_unavailable".into(),
-                message: format!(
-                    "Restricted archive download is unavailable in the resident: {source_url}"
-                ),
-            },
-        ))
+        use guard_command::egress_broker::{exchange_archive, ArchiveExchange, NO_BROKERED_CALLER};
+        match exchange_archive(source_url, max_bytes, max_redirects, timeout_seconds) {
+            ArchiveExchange::Downloaded {
+                sha256,
+                size,
+                final_url,
+            } => Ok(RestrictedArchiveDownloadResult::Success(
+                EvalRestrictedArchiveDownload {
+                    path: PathBuf::new(),
+                    sha256,
+                    size,
+                    source_url: source_url.to_owned(),
+                    final_url,
+                },
+            )),
+            ArchiveExchange::Failed { code, message } => {
+                Ok(RestrictedArchiveDownloadResult::Failure(
+                    RestrictedArchiveFailure { code, message },
+                ))
+            }
+            // A scope that denies all egress behaves as an unreachable network, exactly as
+            // a failed connection did before archive transfers were brokered. Any other
+            // unavailable state (recorded or deferred need) still aborts the evaluation.
+            ArchiveExchange::Unavailable(reason) if reason == NO_BROKERED_CALLER => Ok(
+                RestrictedArchiveDownloadResult::Failure(RestrictedArchiveFailure {
+                    code: "external_archive_connection_failed".to_owned(),
+                    message: "External archive connection failed.".to_owned(),
+                }),
+            ),
+            ArchiveExchange::Unavailable(reason) => Err(EvalError::Internal(reason)),
+        }
     }
 }
 
-/// Native-archive inspection seam — delegated scanner not yet resident;
-/// report unavailable so eval marks the archive uninspected.
+/// Native-archive inspection seam. The caller downloads the blob and runs the
+/// sandboxed offline inspector on it; this seam only hands the evaluation the
+/// verdict the caller reported for the digest it downloaded. No verdict means
+/// the archive stays uninspected.
 struct ResidentNativeArchive;
 
 impl NativeArchiveApi for ResidentNativeArchive {
@@ -1963,7 +1957,7 @@ impl NativeArchiveApi for ResidentNativeArchive {
     fn inspect_archive_native(
         &self,
         _path: &Path,
-        _expected_sha256: &str,
+        expected_sha256: &str,
         _state_dir: &Path,
         _timeout_seconds: f64,
         _max_archive_bytes: u64,
@@ -1976,9 +1970,9 @@ impl NativeArchiveApi for ResidentNativeArchive {
         _max_nested_archives: u64,
         _max_path_depth: u64,
     ) -> EvalResult<Map<String, Value>> {
-        Err(EvalError::Internal(
-            "native archive inspection unavailable in resident".into(),
-        ))
+        crate::archive_verdict_seam::reported_archive_verdict(expected_sha256).ok_or_else(|| {
+            EvalError::Internal("native archive inspection unavailable in resident".into())
+        })
     }
 }
 
@@ -2006,7 +2000,7 @@ struct ResidentStoreExtras {
 
 impl ResidentStoreExtras {
     fn conn(&self) -> Result<Connection, rusqlite::Error> {
-        Connection::open(&self.store_path)
+        crate::supply_chain_egress::open_store(&self.store_path)
     }
 
     /// `oauth_local_credentials` sync_state payload (`state_key` =
@@ -2190,11 +2184,33 @@ struct ResidentRuntimeRunner;
 impl RuntimeRunnerApi for ResidentRuntimeRunner {
     fn resolve_guard_sync_auth_context(
         &self,
-        _store: &dyn SupplyChainStore,
+        store: &dyn SupplyChainStore,
     ) -> Result<Value, LocalSupplyChainError> {
-        Err(LocalSupplyChainError::NotAvailable {
-            message: "guard sync auth context unavailable in resident".into(),
-            retryable: true,
+        // `.runtime.runner` resolve delegates to the same resident
+        // `GuardSyncRunnerApi` — the OAuth credential read + origin gate +
+        // cached-token check live there. `EvalError` → `LocalSupplyChainError`
+        // mapping: `NotFound` = `GuardSyncNotConfiguredError` (non-retryable
+        // not-configured), `Validation` = `GuardSyncAuthorizationExpiredError`
+        // (fail-closed auth-expired; still `retryable` at this seam so the
+        // caller's `with_refresh` loop can retry once before surfacing).
+        ResidentGuardSyncRunner {
+            auth_context_override: None,
+        }
+        .resolve_guard_sync_auth_context(store, false, false)
+        .map(Value::Object)
+        .map_err(|e| match e {
+            EvalError::NotFound(m) => LocalSupplyChainError::NotAvailable {
+                message: m,
+                retryable: false,
+            },
+            EvalError::Validation(m) => LocalSupplyChainError::NotAvailable {
+                message: m,
+                retryable: true,
+            },
+            other => LocalSupplyChainError::NotAvailable {
+                message: other.to_string(),
+                retryable: true,
+            },
         })
     }
     fn sync_local_guard_cloud_proof(
@@ -2217,14 +2233,118 @@ impl RuntimeRunnerApi for ResidentRuntimeRunner {
             retryable: true,
         })
     }
-    fn guard_sync_headers(&self, _auth_context: &Value) -> BTreeMap<String, String> {
-        BTreeMap::new()
+    fn guard_sync_headers(&self, auth_context: &Value) -> BTreeMap<String, String> {
+        // `_guard_sync_headers` (:4783) without a request_url — the bundle
+        // sync path only needs the Bearer + content-type set (no DPoP proof
+        // is bound to a URL/method yet).
+        let mut headers = BTreeMap::new();
+        let access_token = auth_context
+            .get("access_token")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
+        headers.insert("Content-Type".to_owned(), "application/json".to_owned());
+        headers.insert("Accept".to_owned(), "application/json".to_owned());
+        headers.insert("User-Agent".to_owned(), "hol-guard-native".to_owned());
+        headers
     }
-    fn check_plan_restriction_403(&self, _status: u16, _body: &str) -> (bool, String) {
-        (false, String::new())
+    fn check_plan_restriction_403(&self, _status: u16, body: &str) -> (bool, String) {
+        // `_check_plan_restriction_403` (:4955) — read the 403 body once,
+        // prefer the `error`/`syncEnabled`/`code` fields, keyword-scan the
+        // combined message+code for plan-restriction signals.
+        const PLAN_403_KEYWORDS: &[&str] = &[
+            "sync_not_available",
+            "plan_restriction",
+            "requires a pro",
+            "requires a team",
+            "upgrade your plan",
+            "upgrade to",
+            "subscription required",
+            "not included in your plan",
+            "guard sync requires",
+        ];
+        let fallback = {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                "HTTP Error 403".to_owned()
+            } else {
+                trimmed.to_owned()
+            }
+        };
+        let Ok(Value::Object(payload)) = serde_json::from_str::<Value>(body) else {
+            return (false, fallback);
+        };
+        let message_str = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| fallback.clone());
+        if payload.get("syncEnabled").and_then(Value::as_bool) == Some(false) {
+            return (true, message_str);
+        }
+        let error_field = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_lowercase();
+        let code_field = payload
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_lowercase();
+        let combined = format!("{error_field} {code_field}");
+        if PLAN_403_KEYWORDS.iter().any(|kw| combined.contains(kw)) {
+            return (true, message_str);
+        }
+        (false, message_str)
     }
     fn guard_cloud_http_error_details(&self, status: u16, body: &str) -> (String, bool) {
-        (format!("guard cloud HTTP {status}: {body}"), status >= 500)
+        // `_guard_cloud_http_error_details` (:2874) — retryable codes +
+        // `guardError.retryable`/`guardError.code` signals, message preferring
+        // the structured `guardError.message`/`error`/`message` field.
+        let mut retryable = matches!(status, 429 | 503 | 524);
+        let mut message: Option<String> = None;
+        if let Ok(Value::Object(payload)) = serde_json::from_str::<Value>(body) {
+            for key in ["guardError", "error", "message"] {
+                if let Some(s) = payload.get(key).and_then(Value::as_str).map(str::trim) {
+                    if !s.is_empty() {
+                        message = Some(s.to_owned());
+                        break;
+                    }
+                }
+                if let Some(inner) = payload.get(key).and_then(Value::as_object) {
+                    if let Some(s) = inner.get("message").and_then(Value::as_str).map(str::trim) {
+                        if !s.is_empty() {
+                            message = Some(s.to_owned());
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(guard_error) = payload.get("guardError").and_then(Value::as_object) {
+                if guard_error.get("retryable").and_then(Value::as_bool) == Some(true) {
+                    retryable = true;
+                }
+                if let Some(code) = guard_error.get("code").and_then(Value::as_str) {
+                    let normalized = code.trim().to_lowercase();
+                    if normalized == "guard_unavailable" || normalized == "guard_cloud_unavailable"
+                    {
+                        retryable = true;
+                    }
+                }
+            }
+        }
+        let message = message.unwrap_or_else(|| {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                format!("HTTP Error {status}")
+            } else {
+                trimmed.to_owned()
+            }
+        });
+        (message, retryable)
     }
     fn sync_url_error_message(&self, error: &str) -> String {
         error.to_owned()
@@ -2293,23 +2413,6 @@ impl EntitlementRefreshApi for ResidentEntitlementRefresh {
     }
 }
 
-/// Config seam — `load_guard_config` is not ported; error → callers substitute
-/// `GuardConfig::default()`, matching Python's missing-config path.
-struct ResidentConfigLoader;
-
-impl ConfigLoaderApi for ResidentConfigLoader {
-    fn load_guard_config(
-        &self,
-        _guard_home: &Path,
-        _workspace: Option<&Path>,
-        _require_canonical_workspace: bool,
-    ) -> EvalResult<GuardConfig> {
-        Err(EvalError::Internal(
-            "guard config loader unavailable in resident".into(),
-        ))
-    }
-}
-
 /// Aggregate `SupplyChainEvalDeps` wired to the resident impls.
 pub struct ResidentEvalDeps {
     guard_sync: ResidentGuardSyncRunner,
@@ -2325,6 +2428,8 @@ pub struct ResidentEvalDeps {
     store_extras: ResidentStoreExtras,
     entitlement: ResidentEntitlementRefresh,
     config: ResidentConfigLoader,
+    registry: ResidentRegistryMetadata,
+    saved_policy: SavedPolicyProbe,
 }
 
 impl ResidentEvalDeps {
@@ -2361,7 +2466,22 @@ impl ResidentEvalDeps {
                 entitlement_override,
             },
             config: ResidentConfigLoader,
+            registry: ResidentRegistryMetadata::default(),
+            saved_policy: SavedPolicyProbe::Unsupported,
         }
+    }
+
+    /// Test-only registry metadata fixtures keyed by metadata URL. With a map
+    /// present the network is never used: an absent key is unresolved.
+    pub fn with_registry_metadata_override(mut self, fixtures: Option<Map<String, Value>>) -> Self {
+        self.registry.metadata_override = fixtures;
+        self
+    }
+
+    /// The caller can hydrate a saved-policy lookup for a cached Cloud error.
+    pub fn with_saved_policy(mut self, probe: SavedPolicyProbe) -> Self {
+        self.saved_policy = probe;
+        self
     }
 
     pub fn as_deps(&self) -> SupplyChainEvalDeps<'_> {
@@ -2379,6 +2499,8 @@ impl ResidentEvalDeps {
             store_extras: &self.store_extras,
             entitlement: &self.entitlement,
             config: &self.config,
+            registry: &self.registry,
+            saved_policy: &self.saved_policy,
         }
     }
 }
@@ -2387,11 +2509,19 @@ impl ResidentEvalDeps {
 // Op evaluators
 // ---------------------------------------------------------------------------
 
-fn request_digest<T: serde::Serialize>(request: &T) -> Result<String, String> {
+pub(crate) fn request_digest<T: serde::Serialize>(request: &T) -> Result<String, String> {
+    request_digest_with_limit(request, usize::MAX)
+}
+
+/// Canonical request digest that refuses to serialize more than `limit` bytes.
+pub(crate) fn request_digest_with_limit<T: serde::Serialize>(
+    request: &T,
+    limit: usize,
+) -> Result<String, String> {
     let material =
         serde_json::to_value(request).map_err(|_| "native_package_authority_invalid".to_owned())?;
     let mut bytes = Vec::new();
-    crate::context_digest_json::write_canonical_json_with_limit(&material, &mut bytes, usize::MAX)
+    crate::context_digest_json::write_canonical_json_with_limit(&material, &mut bytes, limit)
         .map_err(|_| "native_package_authority_invalid".to_owned())?;
     Ok(format!(
         "sha256:{}",
@@ -2399,7 +2529,7 @@ fn request_digest<T: serde::Serialize>(request: &T) -> Result<String, String> {
     ))
 }
 
-fn string_environment(value: Option<&Value>) -> Option<BTreeMap<String, String>> {
+pub(crate) fn string_environment(value: Option<&Value>) -> Option<BTreeMap<String, String>> {
     let Value::Object(object) = value? else {
         return None;
     };
@@ -2436,21 +2566,259 @@ pub(crate) fn evaluate_package_intent_parse(
         None,
         environment.as_ref(),
     );
-    let payload = intent.map(|i| i.to_dict()).unwrap_or(Value::Null);
+    package_intent_parse_result(&request.request_id, request_sha256, intent)
+}
+
+/// The parse answer for `intent`: the public intent, and the exact targets and
+/// argv on the private channel ephemeral enforcement reads them from.
+pub(crate) fn package_intent_parse_result(
+    request_id: &str,
+    request_sha256: String,
+    intent: Option<PackageIntent>,
+) -> Result<Vec<u8>, String> {
+    let (payload, runtime_private_metadata) = match intent {
+        Some(intent) => {
+            let mut private_metadata = Map::new();
+            private_metadata.insert("command_tokens".to_owned(), json!(intent.command_tokens));
+            private_metadata.insert(
+                "package_targets".to_owned(),
+                Value::Array(
+                    intent
+                        .targets
+                        .iter()
+                        .map(|target| target.to_execution_dict())
+                        .collect(),
+                ),
+            );
+            (intent.to_dict(), Some(Value::Object(private_metadata)))
+        }
+        None => (Value::Null, None),
+    };
     let result = PackageIntentParseResultV1 {
+        schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.to_owned(),
+        request_id: request_id.to_owned(),
+        request_sha256,
+        status: "ok".to_owned(),
+        code: "ok".to_owned(),
+        payload: Some(payload),
+        runtime_private_metadata,
+    };
+    crate::encode_response(&result)
+}
+
+// ---------------------------------------------------------------------------
+// PackageRequestArtifact — `build_package_request_artifact` resident op.
+// ---------------------------------------------------------------------------
+
+/// Name the review a package intent earns.
+///
+/// The host already holds the intent — the resident parsed it — so nothing is
+/// re-parsed here; the exact intent comes back over the same private channel
+/// its targets went out on, and the runtime decides the artifact id the saved
+/// approval is keyed under.
+///
+/// An intent that will not decode is refused rather than named from whatever
+/// decoded: a partially rebuilt intent would fingerprint to an id no earlier
+/// approval was stored under, which reads to the user as an approval that
+/// stopped working.
+pub(crate) fn evaluate_package_request_artifact_request(
+    request: &PackageRequestArtifactRequestV1,
+) -> Result<Vec<u8>, String> {
+    let request_sha256 = request_digest(request)?;
+    if request.schema != PACKAGE_AUTHORITY_REQUEST_SCHEMA {
+        return serde_json::to_vec(&err_result(
+            &request.request_id,
+            &request_sha256,
+            "schema_mismatch",
+        ))
+        .map_err(|e| e.to_string());
+    }
+    let Some(intent) = PackageIntent::from_exact_dict(&request.intent) else {
+        return serde_json::to_vec(&err_result(
+            &request.request_id,
+            &request_sha256,
+            "invalid_package_intent",
+        ))
+        .map_err(|e| e.to_string());
+    };
+    let artifact = build_package_request_artifact(
+        &request.harness,
+        &intent,
+        &request.config_path,
+        &request.source_scope,
+    );
+    let result = PackageRequestArtifactResultV1 {
         schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.to_owned(),
         request_id: request.request_id.clone(),
         request_sha256,
         status: "ok".to_owned(),
         code: "ok".to_owned(),
-        payload: Some(payload),
+        payload: Some(artifact.to_wire()),
     };
     crate::encode_response(&result)
 }
 
-/// `SupplyChainEval` — `evaluate_package_request_artifact` port.
-pub(crate) fn evaluate_supply_chain_eval(
-    request: &SupplyChainEvalRequestV1,
+// ---------------------------------------------------------------------------
+// ApplyStoredPackagePolicy — `_apply_stored_package_policy_override` resident
+// op. The override reads only `store` + `approval_context_api` live; the other
+// seam params are parity placeholders carried through the ported signature.
+// ---------------------------------------------------------------------------
+
+/// `.approval_context` seam backed by the resident context-digest engine.
+struct ResidentApprovalContext;
+
+impl ApprovalContextApi for ResidentApprovalContext {
+    fn parse_approval_context_token(&self, token: &Value) -> Option<Value> {
+        let parsed = crate::context_digest::parse_context_token(token)?;
+        Some(json!({
+            "identity": parsed.identity,
+            "content": parsed.content,
+            "capabilities": parsed.capabilities,
+            "policy": parsed.policy,
+            "sandbox": parsed.sandbox,
+        }))
+    }
+    fn approval_context_tokens_validation_reason(
+        &self,
+        saved_token: &Value,
+        current_token: &Value,
+    ) -> Option<String> {
+        crate::context_digest::validate_context_tokens(saved_token, current_token)
+    }
+    fn build_approval_context_token(
+        &self,
+        identity: &Value,
+        content: &Value,
+        capabilities: &Value,
+        policy: &Value,
+        sandbox: &Value,
+    ) -> String {
+        // `extension_control_digest` is bound by the caller's snapshot; the
+        // override path never builds tokens, so the empty digest is inert.
+        let components = guard_contracts::ContextDigestComponentsV1 {
+            identity: identity.clone(),
+            content: content.clone(),
+            capabilities: capabilities.clone(),
+            policy: policy.clone(),
+            sandbox: sandbox.clone(),
+            extension_control_digest: String::new(),
+        };
+        crate::context_digest::build_context_token(&components).unwrap_or_default()
+    }
+    fn saved_allow_context_validation_reason(
+        &self,
+        decision: &Value,
+        artifact_hash: &str,
+    ) -> Option<String> {
+        if decision.get("action").and_then(Value::as_str) != Some("allow") {
+            return None;
+        }
+        self.approval_context_tokens_validation_reason(
+            decision.get("artifact_hash").unwrap_or(&Value::Null),
+            &Value::String(artifact_hash.to_string()),
+        )
+    }
+}
+
+/// Unused-in-override intent parser; satisfies the trait for the ported sig.
+struct ResidentIntentParser;
+
+impl PackageIntentParserApi for ResidentIntentParser {
+    fn parse_package_intent(
+        &self,
+        command: &str,
+        workspace: &Path,
+        environment: &BTreeMap<String, String>,
+    ) -> Option<PackageIntent> {
+        parse_package_intent(command, Some(workspace), None, None, Some(environment))
+    }
+}
+
+/// Unused-in-override eval seam; the override never re-evaluates the package.
+pub(crate) struct ResidentPackageEval;
+
+impl PackageEvalApi for ResidentPackageEval {
+    fn evaluate_package_request_artifact(
+        &self,
+        _artifact: &GuardArtifact,
+        _store: &dyn SupplyChainStore,
+        _workspace_dir: &Path,
+        _now: &str,
+        _external_archive_network_authorized: bool,
+        _retain_external_archive_blob: bool,
+    ) -> Result<PackageRequestEvaluation, String> {
+        Err("resident_apply_stored_package_policy_no_eval".to_string())
+    }
+    fn supply_chain_user_copy(
+        &self,
+        title: &str,
+        summary: &str,
+        next_step: Option<&str>,
+        dashboard_url: Option<&str>,
+        harness_message: Option<&str>,
+    ) -> Map<String, Value> {
+        let mut copy = Map::new();
+        copy.insert("title".into(), Value::String(title.to_string()));
+        copy.insert("summary".into(), Value::String(summary.to_string()));
+        copy.insert(
+            "next_step".into(),
+            next_step.map_or(Value::Null, |v| Value::String(v.to_string())),
+        );
+        copy.insert(
+            "dashboard_url".into(),
+            dashboard_url.map_or(Value::Null, |v| Value::String(v.to_string())),
+        );
+        copy.insert(
+            "harness_message".into(),
+            harness_message.map_or(Value::Null, |v| Value::String(v.to_string())),
+        );
+        copy
+    }
+}
+
+/// Path seam over the real filesystem: reads manifests and lockfiles within the
+/// workspace through `read_bytes_within_workspace` (hashed for audit receipts).
+pub(crate) struct ResidentPaths;
+
+impl PathSupportApi for ResidentPaths {
+    fn resolve_path_within_allowed_roots(
+        &self,
+        _candidate: &Path,
+        _allowed_roots: &[PathBuf],
+        _require_exists: bool,
+    ) -> Option<PathBuf> {
+        None
+    }
+    fn resolves_within_root(&self, _root: &Path, _candidate: &Path, _require_exists: bool) -> bool {
+        false
+    }
+    fn read_text_within_workspace(
+        &self,
+        workspace_dir: &Path,
+        relative_path: &str,
+    ) -> Option<String> {
+        let resolved = resolve_path_within_workspace(workspace_dir, relative_path)?;
+        if !resolved.is_file() {
+            return None;
+        }
+        std::fs::read_to_string(resolved).ok()
+    }
+    fn read_bytes_within_workspace(
+        &self,
+        workspace_dir: &Path,
+        relative_path: &str,
+    ) -> Option<Vec<u8>> {
+        let resolved = resolve_path_within_workspace(workspace_dir, relative_path)?;
+        if !resolved.is_file() {
+            return None;
+        }
+        std::fs::read(resolved).ok()
+    }
+}
+
+/// `ApplyStoredPackagePolicy` — `_apply_stored_package_policy_override` port.
+pub(crate) fn evaluate_apply_stored_package_policy(
+    request: &ApplyStoredPackagePolicyRequestV1,
 ) -> Result<Vec<u8>, String> {
     let request_sha256 = request_digest(request)?;
     if request.schema != PACKAGE_AUTHORITY_REQUEST_SCHEMA {
@@ -2472,56 +2840,38 @@ pub(crate) fn evaluate_supply_chain_eval(
     let store_path = PathBuf::from(&request.store_path);
     let guard_home = PathBuf::from(&request.guard_home);
     let store = ResidentSupplyChainStore::new(&store_path, &guard_home);
-    let test_overrides = std::env::var_os("HOL_GUARD_RESIDENT_TEST_SEAMS").is_some();
-    let deps_holder = ResidentEvalDeps::with_sync_auth_override(
-        &store_path,
-        &guard_home,
-        request
-            .sync_auth_context_override
-            .as_ref()
-            .filter(|_| test_overrides)
-            .and_then(Value::as_object)
-            .cloned(),
-        request
-            .package_entitlement_override
-            .as_ref()
-            .filter(|_| test_overrides)
-            .and_then(Value::as_object)
-            .cloned(),
-    );
-    let deps = deps_holder.as_deps();
     let mut artifact = artifact_from_value(&request.artifact);
-    if let Some(private) = &request.runtime_private_metadata {
-        artifact.runtime_private_metadata = private.clone();
+    if let Some(meta) = request.runtime_private_metadata.clone() {
+        artifact.runtime_private_metadata = meta;
     }
-    let workspace = request.workspace_dir.as_deref().map(Path::new);
-    let result = match evaluate_package_request_artifact(
-        &artifact,
-        &store,
-        &deps,
-        workspace,
-        request.now.as_deref(),
-        request.external_archive_network_authorized,
-        request.retain_external_archive_blob,
-    ) {
-        Ok(eval) => SupplyChainEvalResultV1 {
-            schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.to_owned(),
-            request_id: request.request_id.clone(),
-            request_sha256,
-            status: "ok".to_owned(),
-            code: "ok".to_owned(),
-            payload: Some(eval.to_dict()),
-        },
-        Err(e) => SupplyChainEvalResultV1 {
-            schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.to_owned(),
-            request_id: request.request_id.clone(),
-            request_sha256,
-            status: "error".to_owned(),
-            code: format!("native_supply_chain_eval_failed:{}", eval_error_code(&e)),
-            payload: None,
-        },
+    let evaluation = PackageRequestEvaluation {
+        value: request.evaluation.clone(),
     };
-    crate::encode_response(&result)
+    let workspace_dir = PathBuf::from(&request.workspace_dir);
+    let applied = apply_stored_package_policy_override(
+        &evaluation,
+        &store,
+        &artifact,
+        &request.artifact_hash,
+        &workspace_dir,
+        &request.now,
+        None,
+        request.current_action.as_ref(),
+        request.claim_saved_approval,
+        &ResidentIntentParser,
+        &ResidentPackageEval,
+        &ResidentPaths,
+        &ResidentApprovalContext,
+    );
+    let payload = ApplyStoredPackagePolicyResultV1 {
+        schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.to_string(),
+        request_id: request.request_id.clone(),
+        request_sha256,
+        status: "ok".to_string(),
+        code: applied.lookup_error.unwrap_or_else(|| "ok".to_string()),
+        payload: Some(applied.evaluation.value),
+    };
+    crate::encode_response(&payload)
 }
 
 /// `PackageAuthorityDecide` — parse → artifact → eval in one call.
@@ -2574,6 +2924,10 @@ pub(crate) fn evaluate_package_authority_decide(
     let store = ResidentSupplyChainStore::new(&store_path, &guard_home);
     let deps_holder = ResidentEvalDeps::new(&store_path, &guard_home);
     let deps = deps_holder.as_deps();
+    // This op cannot ask a caller to perform an exchange, so the evaluation
+    // sees the network as unreachable instead of dialing out.
+    let _no_egress = crate::supply_chain_egress::deny_egress()
+        .map_err(|code| format!("native_package_authority_decide_{code}"))?;
     let result = match evaluate_package_request_artifact(
         &artifact,
         &store,
@@ -2652,3 +3006,228 @@ fn artifact_from_value(v: &Value) -> GuardArtifact {
         runtime_private_metadata: Value::Null,
     }
 }
+
+pub(crate) fn evaluate_package_advisory_ids(
+    request: &guard_contracts::PackageAdvisoryIdsRequestV1,
+) -> Result<Vec<u8>, String> {
+    let request_sha256 = request_digest(request)?;
+    if request.schema != PACKAGE_AUTHORITY_REQUEST_SCHEMA {
+        return Err("native_package_advisory_schema_mismatch".into());
+    }
+    if let Some(rejected) = reject_empty_resident_paths(
+        &request.request_id,
+        &request_sha256,
+        &request.store_path,
+        &request.guard_home,
+    ) {
+        return rejected;
+    }
+    let matched_ids = matched_advisory_ids(&request.artifact, &request.store_path)?;
+    let mut payload = Map::new();
+    payload.insert(
+        "matched_advisory_ids".into(),
+        Value::Array(matched_ids.into_iter().map(Value::String).collect()),
+    );
+    serde_json::to_vec(&SupplyChainEvalResultV1 {
+        schema: PACKAGE_AUTHORITY_RESULT_SCHEMA.into(),
+        request_id: request.request_id.clone(),
+        request_sha256,
+        status: "ok".into(),
+        code: "ok".into(),
+        payload: Some(Value::Object(payload)),
+    })
+    .map_err(|_| "native_package_advisory_result_invalid".to_owned())
+}
+
+/// Sorted ids of every cached advisory matching the artifact's package targets.
+pub(crate) fn matched_advisory_ids(
+    artifact: &Value,
+    store_path: &str,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    let artifact = artifact_from_value(artifact);
+    let identities: Vec<Value> =
+        guard_command::target_identities::package_target_identities(&artifact)
+            .iter()
+            .map(|identity| Value::Object(identity.to_dict()))
+            .collect();
+    let model = guard_command::target_identities::NativeAdvisoryModel;
+    let connection = rusqlite::Connection::open_with_flags(
+        store_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|_| "native_package_advisory_store_unavailable".to_owned())?;
+    let mut statement = connection
+        .prepare("SELECT payload_json FROM publisher_cache ORDER BY updated_at DESC")
+        .map_err(|_| "native_package_advisory_store_unavailable".to_owned())?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| "native_package_advisory_store_unavailable".to_owned())?;
+    let mut matched_ids = std::collections::BTreeSet::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| "native_package_advisory_store_unavailable".to_owned())?
+    {
+        let raw = row
+            .get_ref(0)
+            .map_err(|_| "native_package_advisory_cache_invalid".to_owned())?;
+        let rusqlite::types::ValueRef::Text(raw) = raw else {
+            return Err("native_package_advisory_cache_invalid".to_owned());
+        };
+        let mut advisory: Value = serde_json::from_slice(raw)
+            .map_err(|_| "native_package_advisory_cache_invalid".to_owned())?;
+        if !advisory.is_object() {
+            continue;
+        }
+        if identities.iter().any(|identity| {
+            guard_command::local_supply_chain::AdvisoryModelApi::advisory_matches_target(
+                &model, &advisory, identity,
+            )
+        }) {
+            if let Some(Value::String(id)) =
+                advisory.as_object_mut().and_then(|row| row.remove("id"))
+            {
+                if !id.is_empty() {
+                    matched_ids.insert(id);
+                }
+            }
+        }
+    }
+    Ok(matched_ids)
+}
+
+#[cfg(test)]
+mod package_advisory_tests {
+    use super::*;
+
+    struct CacheFixture {
+        home: PathBuf,
+        connection: Option<rusqlite::Connection>,
+    }
+
+    impl CacheFixture {
+        fn new() -> Self {
+            let nonce = crate::unique_nanos::unique_nanos();
+            let home = std::env::temp_dir().join(format!(
+                "hol-guard-package-advisory-{}-{nonce}",
+                std::process::id(),
+            ));
+            std::fs::create_dir_all(&home).unwrap();
+            let connection = rusqlite::Connection::open(home.join("guard.db")).unwrap();
+            connection.execute_batch(
+                "CREATE TABLE publisher_cache (publisher_key TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            ).unwrap();
+            Self {
+                home,
+                connection: Some(connection),
+            }
+        }
+
+        fn request(&self) -> guard_contracts::PackageAdvisoryIdsRequestV1 {
+            guard_contracts::PackageAdvisoryIdsRequestV1 {
+                schema: PACKAGE_AUTHORITY_REQUEST_SCHEMA.into(),
+                request_id: "package-policy-feed".into(),
+                store_path: self.home.join("guard.db").to_string_lossy().into_owned(),
+                guard_home: self.home.to_string_lossy().into_owned(),
+                artifact: json!({
+                    "artifact_id":"command:install",
+                    "metadata":{"targets":[{"ecosystem":"npm","package_name":"@scope/résumé","requested_specifier":"2.0"}]}
+                }),
+            }
+        }
+    }
+
+    impl Drop for CacheFixture {
+        fn drop(&mut self) {
+            drop(self.connection.take());
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
+    #[test]
+    fn package_advisory_scan_includes_old_rows_and_deduplicates_matching_ids() {
+        let mut fixture = CacheFixture::new();
+        let transaction = fixture.connection.as_mut().unwrap().transaction().unwrap();
+        for index in 0..150 {
+            let advisory = if index == 0 || index == 149 {
+                json!({"id":"older-risk","package_url":"pkg:npm/@scope/résumé@1.0"})
+            } else {
+                json!({"id":format!("unrelated-{index}"),"package":"not-the-target"})
+            };
+            transaction
+                .execute(
+                    "INSERT INTO publisher_cache VALUES (?1, ?2, ?3)",
+                    rusqlite::params![
+                        index.to_string(),
+                        advisory.to_string(),
+                        format!("{index:03}")
+                    ],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+        let result: Value =
+            serde_json::from_slice(&evaluate_package_advisory_ids(&fixture.request()).unwrap())
+                .unwrap();
+        assert_eq!(
+            result["payload"]["matched_advisory_ids"],
+            json!(["older-risk"])
+        );
+        fixture
+            .connection
+            .as_ref()
+            .unwrap()
+            .execute(
+                "DELETE FROM publisher_cache WHERE publisher_key = '149'",
+                [],
+            )
+            .unwrap();
+        let result: Value =
+            serde_json::from_slice(&evaluate_package_advisory_ids(&fixture.request()).unwrap())
+                .unwrap();
+        assert_eq!(
+            result["payload"]["matched_advisory_ids"],
+            json!(["older-risk"])
+        );
+    }
+
+    #[test]
+    fn package_advisory_scan_fails_closed_on_corrupt_or_missing_cache() {
+        let fixture = CacheFixture::new();
+        fixture
+            .connection
+            .as_ref()
+            .unwrap()
+            .execute(
+                "INSERT INTO publisher_cache VALUES ('broken', '{', '2026')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            evaluate_package_advisory_ids(&fixture.request()).unwrap_err(),
+            "native_package_advisory_cache_invalid",
+        );
+        let mut request = fixture.request();
+        request.store_path = fixture
+            .home
+            .join("missing.db")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            evaluate_package_advisory_ids(&request).unwrap_err(),
+            "native_package_advisory_store_unavailable",
+        );
+        assert!(!fixture.home.join("missing.db").exists());
+    }
+}
+
+#[cfg(test)]
+#[path = "apply_stored_package_policy_tests.rs"]
+mod apply_stored_package_policy_tests;
+
+#[cfg(test)]
+#[path = "supply_chain_eval_seam_tests.rs"]
+mod supply_chain_eval_seam_tests;
+
+#[cfg(test)]
+#[path = "package_request_artifact_op_tests.rs"]
+mod package_request_artifact_op_tests;

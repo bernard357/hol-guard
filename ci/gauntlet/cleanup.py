@@ -10,7 +10,7 @@ from ci.native_runtime import probe_installed_pi_output as probe
 
 
 def cleanup_case_resources(daemon: Any, identity: Any, guard_home: Path, private: Path) -> dict[str, Any]:
-    """Attempt both containment steps even when the first one fails."""
+    """Drain daemon workers before retiring native residents; attempt both steps."""
     failures: list[Exception] = []
     diagnostics: list[str] = []
     for label, cleanup in (
