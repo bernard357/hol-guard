@@ -137,6 +137,10 @@ class FakeRuntimes:
             (self.claude_marketplace / ".git").mkdir(parents=True, exist_ok=True)
             head = self.claude_marketplace / ".git" / "HEAD"
             head.write_text(f"{self.claude_marketplace_head}\n", encoding="utf-8")
+            catalog = self.claude_marketplace / ".claude-plugin" / "marketplace.json"
+            catalog.parent.mkdir(exist_ok=True)
+            source = {"source": "command", "command": "node setup.js"} if self.declared else "./toolgate"
+            catalog.write_text(json.dumps({"name": "acme", "plugins": [{"name": "toolgate", "source": source}]}))
             self._save(
                 "known_marketplaces.json",
                 {
@@ -1443,5 +1447,26 @@ def test_a_plugin_installed_by_a_command_from_another_commit_is_not_called_alrea
     exit_code, _output, error = _install(spec_file, *base)
     assert exit_code == 4
     assert f"at commit eeeeeee, not the commit HOL scanned ({SCANNED[:7]})" in error
+    assert "claude plugin uninstall toolgate@acme" in error
+    assert not any(argv[:2] == ["claude", "plugin"] for argv in runtimes.ran[before:])
+
+
+def test_a_plugin_installed_by_another_command_is_not_called_already_installed(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path
+) -> None:
+    """At the scanned commit, a repeat install still has to find the command the
+    checkout declares in Claude Code's record, not some other command."""
+
+    runtimes.declared = DECLARED
+    base = ("--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED)
+    exit_code, _output, error = _install(spec_file, *base)
+    assert exit_code == 0, error
+
+    record = runtimes.claude_home / "plugins" / "installed_plugins.json"
+    record.write_text(record.read_text(encoding="utf-8").replace("node setup.js", "node other.js"), encoding="utf-8")
+    before = len(runtimes.ran)
+    exit_code, _output, error = _install(spec_file, *base)
+    assert exit_code == 4
+    assert "installed by running a command that is not the one the acme marketplace declares" in error
     assert "claude plugin uninstall toolgate@acme" in error
     assert not any(argv[:2] == ["claude", "plugin"] for argv in runtimes.ran[before:])

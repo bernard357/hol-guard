@@ -722,6 +722,26 @@ def _claude_source_command(home: Path, plugin_id: str) -> str | None:
     return None
 
 
+def _claude_checkout_command(home: Path, marketplace: str, plugin_id: str) -> str | None:
+    """The install command Claude Code's checkout of a marketplace declares
+    for a plugin, or None when it declares none or cannot be read."""
+
+    known = _read_json(home / "plugins" / "known_marketplaces.json")
+    entry = known.get(marketplace) if isinstance(known, dict) else None
+    root = entry.get("installLocation") if isinstance(entry, dict) else None
+    if not isinstance(root, str) or not os.path.isabs(root):
+        return None
+    catalog = _read_json(Path(root) / ".claude-plugin" / "marketplace.json")
+    plugins = catalog.get("plugins") if isinstance(catalog, dict) else None
+    name = plugin_id.rsplit("@", 1)[0]
+    for plugin in plugins if isinstance(plugins, list) else []:
+        source = plugin.get("source") if isinstance(plugin, dict) else None
+        if plugin.get("name") == name and isinstance(source, dict) and source.get("source") == "command":
+            command = source.get("command")
+            return command if isinstance(command, str) else None
+    return None
+
+
 def _claude_marketplace_head(home: Path, name: str) -> str | None:
     """The commit Claude Code's checkout of a marketplace is at."""
 
@@ -932,11 +952,20 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
     if found is None:
         raise _StoppedError("failed", f"{_claude_unreadable(context.home)}, so it changed nothing.")
     had_plugin, prior = found
-    if had_plugin and prior is None and _claude_source_command(context.home, plugin_id) is not None:
+    ran = _claude_source_command(context.home, plugin_id) if had_plugin and prior is None else None
+    if ran is not None:
         # Installed earlier by running its declared command: such a record keeps
         # the command, not a commit, so the marketplace checkout it came from is
-        # the only commit there is to hold against the one HOL scanned.
+        # the only commit there is to hold against the one HOL scanned, and the
+        # command it recorded has to be the one that checkout declares.
         head = _claude_marketplace_head(context.home, marketplace)
+        if ran != _claude_checkout_command(context.home, marketplace, plugin_id):
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code already has {plugin_id}, installed by running a command that is not the one "
+                f"the {marketplace} marketplace declares, so Guard did not change it. "
+                f"To install what HOL scanned, remove it first with: claude plugin uninstall {plugin_id}",
+            )
         if expected and head != expected:
             raise _StoppedError(
                 "blocked",
