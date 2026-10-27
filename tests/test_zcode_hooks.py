@@ -89,9 +89,7 @@ class TestZCodeHookResponses:
     def test_authority_block_reason_leaves_other_reasons_alone(self) -> None:
         assert zcode_authority_block_reason("Blocked by policy.") == "Blocked by policy."
 
-    def test_authority_block_reason_names_a_home_the_bare_command_misses(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_authority_block_reason_names_a_home_the_bare_command_misses(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Pasting the bare command into a shell pointing at the default home
         # would recover a different install while this one stays blocked.
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/casey")))
