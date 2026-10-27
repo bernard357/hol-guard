@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -29,9 +30,13 @@ sys.path.insert(0, str(ROOT))
 
 from codex_plugin_scanner.guard.daemon import hook_native_local_cli as block  # noqa: E402
 from codex_plugin_scanner.guard.daemon import hook_native_saved_approval as saved  # noqa: E402
-from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand  # noqa: E402
+from codex_plugin_scanner.guard.runtime.local_cli_commands import (  # noqa: E402
+    _MAX_DEPTH,
+    OTHER_COMMAND_ID,
+    ROOT_COMMAND_ID,
+    LocalCliCommand,
+)
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity  # noqa: E402
-from tests.local_cli_command_id_client import match_command_id  # noqa: E402
 
 OUT = ROOT / "rust/crates/guard-runtime/tests/fixtures/local_cli_block_vectors.json"
 WORKER = ROOT / "src/codex_plugin_scanner/guard/daemon/hook_worker_native.py"
@@ -39,6 +44,17 @@ CLI_ID = "local-cli.demo-tool"
 HASH = "a" * 64
 OTHER_HASH = "b" * 64
 HARNESSES = ["codex", "claude-code", "copilot", "kimi", "devin", "zcode", "openclaw", "hermes", "cline", "grok"]
+
+
+def match_command_id(tokens: Sequence[str], commands: Sequence[LocalCliCommand]) -> str:
+    if not tokens:
+        return ROOT_COMMAND_ID
+    known = {command.command_id for command in commands}
+    for length in range(min(len(tokens), _MAX_DEPTH), 0, -1):
+        candidate = ".".join(tokens[:length])
+        if candidate in known:
+            return candidate
+    return OTHER_COMMAND_ID
 
 
 def identity(name: str = "demo-tool") -> UnlistedCliIdentity:
