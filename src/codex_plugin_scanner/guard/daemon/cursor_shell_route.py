@@ -124,7 +124,7 @@ def _probe_response(
     deadline: float | None,
 ) -> dict[str, object]:
     from ..adapters.zcode_contained_tests import route_zcode_containment
-    from ..native_hook_containment_route import edge_containment_route, native_containment_sink
+    from ..native_hook_containment_route import edge_containment_route
     from ..native_policy_snapshot_harness_postures import recording_only_for_binding
     from .hook_fail_closed import render_pre_tool
 
@@ -162,11 +162,8 @@ def _probe_response(
     if route != "sink":
         return dict(_ALLOW)
     receipt = render_pre_tool(_RECEIPT_FORMAT, result, guard_home=guard_home, deadline=deadline)
-    sink = native_containment_sink(
-        receipt, harness=_CURSOR, bridge=True, payload=payload, guard_home=guard_home, deadline=deadline
-    )
-    if sink.profile is None:
-        return dict(_ALLOW)
+    # The resident decides whether the sink takes the call and writes its
+    # snapshot in the same answer; a call it keeps comes back as the receipt.
     routed = route_zcode_containment(
         receipt,
         harness=_CURSOR,
@@ -174,7 +171,7 @@ def _probe_response(
         guard_home=guard_home,
         home_dir=home_dir,
         workspace=workspace,
-        sink=sink,
+        bridge=True,
         deadline=deadline,
     )
     if routed.get("policy_action") != "allow" or routed.get("reason_code") != _ROUTED_REASON:

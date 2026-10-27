@@ -16,7 +16,6 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from codex_plugin_scanner.guard.models import PolicyDecision
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     PolicyBundleVerificationKey,
-    policy_bundle_verification_key_from_public_key,
     validate_synced_policy_bundle,
 )
 from codex_plugin_scanner.guard.policy_bundle_v2 import (
@@ -28,6 +27,7 @@ from codex_plugin_scanner.guard.policy_bundle_v2 import (
 from codex_plugin_scanner.guard.policy_document import canonical_json_bytes, canonical_policy_document_bytes
 from codex_plugin_scanner.guard.policy_document_yaml import parse_policy_document_yaml
 from codex_plugin_scanner.guard.runtime import runner as guard_runner
+from tests.policy_bundle_signing_helpers import policy_bundle_verification_key_from_public_key
 from tests.policy_bundle_v2_support import (
     canonical_policy_bundle_v2_payload,
     computed_policy_bundle_v2_hash,

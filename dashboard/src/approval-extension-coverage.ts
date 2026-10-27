@@ -111,3 +111,39 @@ export function coverageStepLabel(segment: GuardCoveredSegment): string {
   const step = `Step ${segment.index + 1}`;
   return segment.executable === null ? step : `${step} · ${segment.executable}`;
 }
+
+/** An extension-page link the recommendation card above already shows. */
+export type CoverageLink = { extension_id: string; rule_id: string | null };
+
+/** Whether the recommendation card already links where this step would send you. */
+function alreadyLinked(extension: GuardCoveredExtension, links: readonly CoverageLink[]): boolean {
+  return links.some(
+    (link) =>
+      link.extension_id === extension.extension_id &&
+      // A step that names no rule of its own lands on the extension page, so any
+      // link to that extension repeats it. A step that points at one rule is a
+      // repeat only when the recommendation links that same rule: an extension
+      // can govern several steps of a compound command through different rules.
+      (extension.focus_rule_id === null || link.rule_id === extension.focus_rule_id),
+  );
+}
+
+/**
+ * The steps still worth listing once the recommendation card names some patterns,
+ * each carrying only the extensions that card does not already link. A step whose
+ * every extension is linked above would only repeat those links, so it is dropped.
+ */
+export function coverageSegmentsBeyond(
+  coverage: GuardApprovalExtensionCoverage,
+  links: readonly CoverageLink[],
+): GuardCoveredSegment[] {
+  const linkedRuleIds = new Set(links.map((link) => link.rule_id).filter((ruleId) => ruleId !== null));
+  return coverage.segments
+    .map((segment) => ({
+      ...segment,
+      extensions: segment.extensions.filter((extension) => !alreadyLinked(extension, links)),
+      // The step's detail names its rules; a rule already linked above is not named again.
+      rules: segment.rules.filter((rule) => !linkedRuleIds.has(rule.rule_id)),
+    }))
+    .filter((segment) => segment.extensions.length > 0);
+}
