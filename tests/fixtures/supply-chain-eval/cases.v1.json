@@ -134,6 +134,21 @@
    }
   },
   {
+   "name": "uv_lock_marker_alternatives",
+   "path": "uv.lock",
+   "text": "version = 1\nresolution-markers = [\n    \"python_full_version >= '3.10'\",\n    \"python_full_version < '3.10'\",\n]\n\n[[package]]\nname = \"numpy\"\nversion = \"1.26.4\"\nresolution-markers = [\n    \"python_full_version < '3.10'\",\n]\n\n[[package]]\nname = \"numpy\"\nversion = \"2.1.3\"\nresolution-markers = [\n    \"python_full_version >= '3.10'\",\n]\n",
+   "expect": {
+    "complete": true,
+    "entries": [
+     [
+      "numpy",
+      "numpy",
+      "2.1.3"
+     ]
+    ]
+   }
+  },
+  {
    "name": "poetry_lock_clean",
    "path": "poetry.lock",
    "text": "[[package]]\nname = \"click\"\nversion = \"8.1.7\"\n\n[metadata]\nlock-version = \"2.0\"\n",

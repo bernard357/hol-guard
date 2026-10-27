@@ -424,20 +424,44 @@ pub fn parse_manifest_dependencies_ordered(
 /// parsing). The error is the lockfile `error_reason` the Python evaluator
 /// reports: `deadline_exceeded` or `parse_error`.
 ///
-/// A lockfile can resolve one package to several versions, so every version
-/// is returned, sorted by package; a package's last-listed version comes last.
+/// A JavaScript lockfile can resolve one package to several versions, each
+/// installed beside the others, so every version is returned, sorted by
+/// package; a package's last-listed version comes last. Other lockfiles keep
+/// one version per package: several versions there are alternatives for
+/// different environments, and only one of them is installed.
 pub fn try_dependency_versions_for_path(
     path: &str,
     text: &str,
     deadline_ms: u64,
 ) -> Result<Vec<(String, String)>, &'static str> {
     let deadline = Deadline::from_ms(deadline_ms);
+    let every_version = installs_every_version(path);
     dependency_map_for_path(path, text, &deadline)
-        .map(DepMap::into_sorted_versions)
+        .map(|map| {
+            if every_version {
+                map.into_sorted_versions()
+            } else {
+                map.into_sorted().into_iter().collect()
+            }
+        })
         .map_err(|failure| match failure {
             ParseFailure::Deadline => "deadline_exceeded",
             ParseFailure::Error => "parse_error",
         })
+}
+
+/// Lockfiles whose package manager installs every version they resolve a
+/// package to, side by side.
+fn installs_every_version(path: &str) -> bool {
+    let lower_path = path.to_lowercase();
+    [
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "bun.lock",
+    ]
+    .iter()
+    .any(|name| lower_path.ends_with(name))
 }
 
 // ---------------------------------------------------------------------------
