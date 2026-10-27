@@ -62,7 +62,12 @@ assert.equal(
   checkedSummary(worktree, failedRun, { ...assessment, finishedAtMs: null }),
   "Showing results from an earlier check.",
 );
-assert.equal(checkedSummary(worktree, failedRun, undefined), "Checked 5m ago", "a first attempt that failed");
+assert.equal(
+  checkedSummary(worktree, failedRun, undefined),
+  "No check has finished yet.",
+  "a failed first attempt is not a finished check",
+);
+assert.equal(checkedSummary(worktree, completedRun, undefined), "Checked 5m ago");
 assert.equal(
   checkedSummary({ ...worktree, lastScanAtMs: null }, undefined, undefined),
   "Waiting for the first check.",

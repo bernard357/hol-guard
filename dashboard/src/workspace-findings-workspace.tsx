@@ -113,6 +113,8 @@ export function checkedSummary(
   assessment: WorkspaceAssessment | undefined,
 ): string {
   const pending = newestRun?.state === "running" || newestRun?.state === "queued" || newestRun?.state === "failed";
+  // lastScanAtMs also moves when a run fails, so it cannot stand in for a finished check.
+  if (assessment === undefined && pending) return "No check has finished yet.";
   const earlier = assessment !== undefined && pending && newestRun?.runId !== assessment.runId;
   const atMs = assessment?.finishedAtMs ?? (earlier ? null : worktree.lastScanAtMs);
   if (atMs === null) return earlier ? "Showing results from an earlier check." : "Waiting for the first check.";
