@@ -101,6 +101,7 @@ pub(in crate::pretool) fn safe_lsof_arguments(arguments: &[String]) -> bool {
     let mut pid = false;
     let mut and = false;
     let mut descriptors = false;
+    let mut excluded_pid = false;
     let mut index = 0;
     while index < arguments.len() {
         let argument = arguments[index].as_str();
@@ -172,6 +173,7 @@ pub(in crate::pretool) fn safe_lsof_arguments(arguments: &[String]) -> bool {
                     if !process_ids(value) {
                         return false;
                     }
+                    excluded_pid |= value.contains('^');
                 }
                 _ => return false,
             }
@@ -179,8 +181,9 @@ pub(in crate::pretool) fn safe_lsof_arguments(arguments: &[String]) -> bool {
         }
     }
     // Without `-a`, `-p` or `-d` also lists every open file of that process,
-    // and `-d` without `-p` names the descriptor of every process.
-    (network || (descriptors && pid)) && (!(pid || descriptors) || and)
+    // and `-d` without `-p` names the descriptor of every process. So does
+    // `-p ^<pid>`, which selects every process but the one named.
+    (network || (descriptors && pid && !excluded_pid)) && (!(pid || descriptors) || and)
 }
 
 /// `cwd`, `rtd` or `txt`, alone or as a comma list. A number would name an
