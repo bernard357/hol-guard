@@ -127,21 +127,3 @@ def native_direct_tool_context(
         return _context_from_report(context.shell)
     except (OSError, RuntimeError, TypeError, ValueError, KeyError):
         return None
-
-
-def native_trusted_tool_command(command: str, *, cwd: Path, home_dir: Path) -> bool:
-    try:
-        payload = _call(
-            {"kind": "trusted_tool", "body": {"command": command, "facts": _facts(cwd, home_dir)}},
-            source="direct_command",
-            guard_home=None,
-            budget_ms=_BUDGET_MS,
-        )
-        return (
-            not isinstance(payload, NativeRequestContextFailure)
-            and set(payload) == {"kind", "trusted"}
-            and payload["kind"] == "trusted_tool"
-            and payload["trusted"] is True
-        )
-    except (OSError, RuntimeError, TypeError, ValueError):
-        return False
