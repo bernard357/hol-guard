@@ -152,10 +152,40 @@ pub struct Step {
     pub marketplace: Option<String>,
     /// The commit HOL scanned. Codex is pinned with `--ref` when the
     /// marketplace is added. Claude Code cannot take a commit on that
-    /// command, so the step records it here. This plan does not compare
-    /// an installed checkout with it.
+    /// command, so the CLI compares Claude Code's installed commit with
+    /// this one after the install and rolls back a mismatch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_commit: Option<String>,
+    /// Uninstall only: removes the marketplace Guard added for this listing.
+    /// The CLI runs it only when no other plugin from it is installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remove_marketplace: Option<Vec<String>>,
+    /// Uninstall only: the repository the recorded marketplace came from, so
+    /// the CLI leaves one the user has since pointed somewhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marketplace_repository: Option<String>,
+}
+
+/// On an uninstall plan, offer to remove each marketplace Guard added
+/// (`owned` names those runtimes) instead of leaving it registered.
+pub fn offer_marketplace_removal(plan: &mut Plan, owned: &[String]) {
+    for step in &mut plan.steps {
+        let Some(name) = step.marketplace.as_deref() else {
+            continue;
+        };
+        if owned.iter().any(|runtime| runtime == step.runtime) {
+            step.remove_marketplace = Some(argv(&[
+                step.program,
+                "plugin",
+                "marketplace",
+                "remove",
+                name,
+            ]));
+            step.note = Some(
+                "Guard added this marketplace, so it removes it too unless another plugin uses it.",
+            );
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -670,8 +700,7 @@ fn step(
         let plugin = target.plugin.as_deref().expect("validated");
         let id = format!("{plugin}@{}", market.name);
         // Only Codex takes a commit when adding a marketplace. Claude Code
-        // clones a branch. `expected_commit` records the scanned commit;
-        // this plan does not compare the checkout.
+        // clones a branch, so the CLI checks its commit after the install.
         let pin = (program == "codex")
             .then_some(market.commit.as_deref())
             .flatten();
@@ -699,6 +728,9 @@ fn step(
                 Action::Install => market.commit.clone(),
                 Action::Uninstall => None,
             },
+            remove_marketplace: None,
+            marketplace_repository: (action == Action::Uninstall)
+                .then(|| market.repository.clone()),
         }
     };
     match target.runtime.as_str() {
@@ -736,6 +768,8 @@ fn step(
                 plugin_id: None,
                 marketplace: None,
                 expected_commit: None,
+                remove_marketplace: None,
+                marketplace_repository: None,
             }
         }
     }

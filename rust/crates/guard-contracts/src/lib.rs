@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod adapter_state_integrity;
+pub use adapter_state_integrity::*;
 mod aibom_report_summaries;
 pub use aibom_report_summaries::*;
 mod approval_contracts;
@@ -152,6 +154,8 @@ mod browser_mcp_intent;
 pub use browser_mcp_intent::*;
 mod risk_action_config;
 pub use risk_action_config::*;
+mod harness_posture_config;
+pub use harness_posture_config::*;
 mod runtime_detector_run;
 pub use runtime_detector_run::*;
 mod runner_authority;
@@ -292,6 +296,8 @@ mod inventory_url_redaction;
 pub use inventory_url_redaction::*;
 mod inventory_scan_findings;
 pub use inventory_scan_findings::*;
+mod supply_chain_bundle_verify;
+pub use supply_chain_bundle_verify::*;
 
 pub const NATIVE_PROTOCOL_VERSION: u16 = 1;
 pub const GUARD_HOOK_ENVELOPE_V2_SCHEMA: &str = "guard-hook-envelope.v2";

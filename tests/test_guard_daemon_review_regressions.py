@@ -282,7 +282,7 @@ def test_recovery_scheduler_keeps_one_live_worker_past_reservation_expiry(
     monkeypatch.setattr(
         daemon_manager,
         "_isolated_python_module_command",
-        lambda *_args: ["python", "recovery-worker"],
+        lambda *_args: ["python", "-m", "codex_plugin_scanner.guard.daemon.recovery_worker"],
     )
     monkeypatch.setattr(daemon_manager, "_daemon_launcher_env", lambda **_kwargs: {})
     _patch_worker_popen(monkeypatch, lambda *_args, **_kwargs: spawned.append(FakeProcess()) or spawned[-1])

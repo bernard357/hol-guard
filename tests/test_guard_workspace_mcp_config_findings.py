@@ -158,6 +158,8 @@ def test_an_unreadable_mcp_result_is_an_error(payload: dict[str, object]) -> Non
         native_finding(server="bad\nname"),
         native_finding(severity="severe"),
         native_finding(confidence="certain"),
+        native_finding(severity=["high"]),
+        native_finding(confidence={"level": "strong"}),
         native_finding(title=None),
     ],
 )
