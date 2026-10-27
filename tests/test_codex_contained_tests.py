@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import codex_plugin_scanner
 from tests import codex_containment_route as route
 
 
@@ -66,6 +67,9 @@ def test_current_codex_rewrites_to_the_contained_sink(containment_resident, tmp_
     assert argv[argv.index("--guard-home") + 1] == str(tmp_path / "guard")
     assert argv[argv.index("--home") + 1] == str(hook_home)
     assert argv[argv.index("--home") + 1] != str(Path.home())
+    package_root = Path(codex_plugin_scanner.__file__).resolve().parents[1]
+    assert (package_root / "codex_plugin_scanner").is_dir()
+    assert any(f"sys.path.insert(0, {str(package_root)!r})" in arg for arg in argv)
     Path(argv[argv.index("--request-file") + 1]).unlink()
 
 

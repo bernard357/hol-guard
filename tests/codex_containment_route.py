@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import TypeGuard
 
+import codex_plugin_scanner
 from codex_plugin_scanner.guard.adapters.zcode_contained_tests import contained_zcode_response
 from codex_plugin_scanner.guard.native_hook_containment_route import native_containment_sink
 
@@ -86,7 +87,7 @@ def route_codex_containment(
             "harness": "codex",
             "guard_home": str(guard_home),
             "python_executable": sys.executable,
-            "package_root": str(Path(__file__).resolve().parents[3]),
+            "package_root": str(Path(codex_plugin_scanner.__file__).resolve().parents[1]),
         },
         cli_args=["--home", str(home_dir)],
         sink=sink,
