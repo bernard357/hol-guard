@@ -748,6 +748,7 @@ mod runtime_artifact_identity_op;
 mod runtime_cli;
 mod runtime_detector_run_op;
 mod runtime_identity;
+mod runtime_identity_instances;
 mod runtime_identity_launch;
 mod runtime_identity_launch_shebang;
 mod runtime_identity_probe;

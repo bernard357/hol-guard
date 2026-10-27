@@ -59,6 +59,7 @@ def observe_workspace_runtimes(store: Any, root: Path, *, home_dir: Path | None 
         skipped_harnesses=skipped,
         advisory_bundle=bundle,
         advisory_bundle_reason=reason,
+        instance_home=Path(store.guard_home),
     )
 
 
