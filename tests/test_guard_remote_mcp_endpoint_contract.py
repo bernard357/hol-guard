@@ -10,11 +10,8 @@ from codex_plugin_scanner.guard.cli.commands_support_runtime_resolution import (
     _CopilotMcpRuntimeServer,
 )
 from codex_plugin_scanner.guard.mcp_tool_calls import build_tool_call_artifact
-from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
-    normalized_remote_mcp_url,
-    remote_mcp_endpoint_identity,
-)
-from tests.mcp_contribution_loader import load_mcp_contribution_payloads
+from codex_plugin_scanner.guard.runtime.mcp_server_contribution import normalized_remote_mcp_url
+from tests.mcp_contribution_loader import load_mcp_contribution_payloads, remote_mcp_endpoint_identity
 
 from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
 from .mcp_recorded_expectations import instapods_matches

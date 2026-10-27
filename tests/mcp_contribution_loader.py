@@ -13,12 +13,11 @@ from pathlib import Path
 
 from codex_plugin_scanner.guard.runtime.extension_contribution import frozen_package_data
 from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
+    _bound_grammar,
     _frozen_runtime,
-    contributions_dir,
     direct_mcp_command_name,
     normalized_remote_mcp_url,
     normalized_remote_server_name,
-    remote_mcp_endpoint_identity,
     validate_mcp_contribution,
 )
 
@@ -136,3 +135,16 @@ def _finalize_payloads(payloads: tuple[dict[str, object], ...]) -> tuple[dict[st
                 raise ValueError(f"duplicate MCP remote server name {raw_name} for {previous_name} and {mcp_id}")
             remote_names[server_name] = mcp_id
     return payloads
+
+
+def contributions_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "contributions" / "mcp-servers"
+
+
+def catalog_id_for_mcp_id(mcp_id: str) -> str:
+    return f"command.mcp-{mcp_id.removeprefix('mcp.')}"
+
+
+def remote_mcp_endpoint_identity(value: object) -> str | None:
+    """Identify the launch endpoint a configured remote MCP URL points at."""
+    return _bound_grammar("remote_endpoint_identity", value)

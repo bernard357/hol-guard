@@ -47,14 +47,6 @@ def _bound_grammar(operation: str, value: object) -> str | None:
     return result
 
 
-def contributions_dir() -> Path:
-    return Path(__file__).resolve().parents[4] / "contributions" / "mcp-servers"
-
-
-def catalog_id_for_mcp_id(mcp_id: str) -> str:
-    return f"command.mcp-{mcp_id.removeprefix('mcp.')}"
-
-
 def direct_mcp_command_name(value: object) -> str | None:
     """Recognize a portable executable basename for tightening-only MCP defaults.
 
@@ -75,11 +67,6 @@ def _normalized_tool_name(name: object) -> str:
 def normalized_remote_mcp_url(value: object) -> str | None:
     """Normalize a configured remote MCP URL, keeping its validated query."""
     return _bound_grammar("remote_url", value)
-
-
-def remote_mcp_endpoint_identity(value: object) -> str | None:
-    """Identify the launch endpoint a configured remote MCP URL points at."""
-    return _bound_grammar("remote_endpoint_identity", value)
 
 
 def normalized_remote_server_name(value: object) -> str | None:

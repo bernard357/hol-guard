@@ -14,7 +14,6 @@ from typing import cast
 
 from codex_plugin_scanner.guard.runtime.extension_contribution import (
     _frozen_runtime,
-    contributions_dir,
     frozen_package_data,
     validate_contribution,
 )
@@ -83,3 +82,7 @@ def _load_packaged_payloads() -> tuple[dict[str, object], ...]:
     for item in sorted(names, key=lambda entry: entry.name):
         payloads.append(_validated_payload(json.loads(item.read_text(encoding="utf-8")), item.name))
     return tuple(payloads)
+
+
+def contributions_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "contributions" / "extensions"
