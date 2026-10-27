@@ -52,13 +52,6 @@ def _truncate_codex_display_text(value: str, *, limit: int) -> str:
         return value
     return f"{value[: limit - 1].rstrip()}…"
 
-def _is_copilot_permission_request(payload: dict[str, object]) -> bool:
-    from ..daemon.hook_availability_policy import hook_event_is_permission_request as _perm
-    return any(
-        isinstance(payload.get(key), str) and _perm(str(payload.get(key)))
-        for key in ("hook_name", "hook_event_name", "hookEventName")
-    )
-
 def _validated_pi_runtime_policy_override(
     home_dir: Path,
     workspace: Path | None,
@@ -311,7 +304,6 @@ def _server_command(server: dict[str, object]) -> list[str]:
 
 __all__ = [
     "_canonical_harness_name",
-    "_is_copilot_permission_request",
     "_managed_install_for", "_managed_manifest_server",
     "_redact_codex_prompt_secret_assignments",
     "_run_hermes_mcp_proxy",

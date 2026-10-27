@@ -7,6 +7,9 @@ Claude ``UserPromptSubmit`` outside Watch (``hook_direct_claude_prompt_text.rs``
 and replays every vector: one native prompt result, the harness response the
 edge rendered for it, and the response after the notice is added.
 
+That Python copy is retired; run this at a commit that still carries it
+(``31f50cfb82`` or earlier).
+
 Usage: python scripts/record_claude_prompt_notice_vectors.py [--check]
 Deterministic output.
 """
