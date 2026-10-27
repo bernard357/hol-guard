@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use guard_command::dep_map::DepMap;
+use guard_command::js_semver::highest_js_version_for_selector;
 use guard_command::package_manifest_diff::{
     installs_every_version, parse_manifest_dependencies_ordered,
 };
@@ -98,30 +99,51 @@ pub(crate) fn merge_dependencies(
                 Some(range) => (true, range),
                 None => (false, None),
             };
-        let entry = item(
-            ecosystem,
-            namespace.clone(),
-            name.clone(),
-            direct,
-            range,
-            stripped,
-        );
-        merge_inventory_item(inventory, &entry);
         let earlier = if every_version {
             dependencies.earlier(package_name)
         } else {
             &[]
         };
-        for version in earlier {
+        let selected = direct_copy(ecosystem, stripped.as_deref(), earlier, range.as_deref());
+        let copies = std::iter::once(stripped).chain(earlier.iter().map(|v| stripped_or_none(v)));
+        for copy in copies {
+            let chosen = direct && copy == selected;
             let entry = item(
                 ecosystem,
                 namespace.clone(),
                 name.clone(),
-                false,
-                None,
-                stripped_or_none(version),
+                chosen,
+                if chosen { range.clone() } else { None },
+                copy,
             );
             merge_inventory_item(inventory, &entry);
         }
     }
+}
+
+/// The copy a manifest's range installs when one lockfile resolves several:
+/// npm takes the highest version the range allows. Without such a match, or
+/// outside npm, the version the lockfile names last.
+fn direct_copy(
+    ecosystem: &str,
+    current: Option<&str>,
+    earlier: &[String],
+    range: Option<&str>,
+) -> Option<String> {
+    let fallback = current.map(str::to_owned);
+    let (Some(range), false) = (range, earlier.is_empty() || ecosystem != "npm") else {
+        return fallback;
+    };
+    let copies: Vec<String> = current
+        .map(str::to_owned)
+        .into_iter()
+        .chain(
+            earlier
+                .iter()
+                .filter_map(|version| stripped_or_none(version)),
+        )
+        .collect();
+    highest_js_version_for_selector(&copies, range)
+        .map(str::to_owned)
+        .or(fallback)
 }
