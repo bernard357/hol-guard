@@ -34,7 +34,6 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .approval_gate import ApprovalGateGrant, require_policy_clear, require_policy_write, require_request_resolution
 from .cli.oauth_client import resolve_guard_oauth_client_config
-from .edge_events import build_receipt_event
 from .fork_safety import forget_in_child
 from .local_trust_contract import (
     POLICY_INTEGRITY_ENFORCEMENT_ENFORCE,
@@ -72,9 +71,6 @@ from .store_approvals import (
     approval_index_statements,
     approval_schema_statement,
     backfill_approval_queue_columns,
-)
-from .store_approvals import (
-    bulk_resolve_approval_requests as persist_bulk_resolution,
 )
 from .store_approvals import (
     get_approval_request as load_approval_request,
