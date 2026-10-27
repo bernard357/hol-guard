@@ -3,10 +3,16 @@ from __future__ import annotations
 import pytest
 
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
-    Destination,
-    DestinationKind,
     EnforcementGrade,
     NetworkAction,
+)
+from tests.linux_tcp_enforcement import (
+    compile_linux_tcp_policy,
+    evaluate_linux_tcp_artifact,
+)
+from tests.network_policy_model import (
+    Destination,
+    DestinationKind,
     NetworkPolicy,
     NetworkProtocol,
     NetworkRule,
@@ -15,10 +21,6 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     ProcessScope,
     ProcessScopeKind,
     ProcessTreeIdentity,
-)
-from tests.linux_tcp_enforcement import (
-    compile_linux_tcp_policy,
-    evaluate_linux_tcp_artifact,
 )
 
 
