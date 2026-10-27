@@ -101,6 +101,43 @@ mod launched {
     }
 
     #[test]
+    fn a_shell_run_selects_the_subcommand_a_direct_launch_selects() {
+        let scratch = Scratch::new();
+        let path = scratch.tool("relayctl", SHELL_TOOL, 0o755);
+        let home = scratch.0.to_str().unwrap();
+        let tokens = |command: &str| {
+            let found = scratch.one(command);
+            crate::local_cli_hook_op::invocation_command_tokens(
+                command,
+                home,
+                Some(home),
+                &found.name,
+                &found.kind,
+                None,
+            )
+        };
+        let direct = tokens(&format!("{path} lane drain --force"));
+        assert_eq!(direct, ["lane", "drain"]);
+        for shell in ["bash", "sh"] {
+            assert_eq!(
+                tokens(&format!("{shell} {path} lane drain --force")),
+                direct
+            );
+        }
+    }
+
+    #[test]
+    fn a_shell_option_before_the_script_names_no_direct_launch() {
+        let scratch = Scratch::new();
+        let path = scratch.tool("relayctl", SHELL_TOOL, 0o755);
+        let found = scratch.launched(&format!("bash -e {path} lane drain"));
+        assert!(
+            found.iter().all(|cli| cli.kind != "executable"),
+            "{found:?}"
+        );
+    }
+
+    #[test]
     fn a_changed_script_names_a_new_identity_in_every_form() {
         let scratch = Scratch::new();
         let path = scratch.tool("relayctl", SHELL_TOOL, 0o755);

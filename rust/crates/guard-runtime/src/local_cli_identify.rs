@@ -216,7 +216,7 @@ impl Scope<'_> {
             return Ok(None);
         };
         if is_shell_name(&exe_name) {
-            if let Some(direct) = self.direct_launch(entrypoint)? {
+            if let Some(direct) = self.direct_launch(segment, entrypoint)? {
                 return Ok(Some(direct));
             }
         }
@@ -349,11 +349,18 @@ impl Scope<'_> {
 
     /// The executable identity a direct launch of the shell script a shell
     /// runs derives, so both forms meet the same grant.
-    fn direct_launch(&self, entrypoint: &Value) -> Outcome<Option<UnlistedCliV1>> {
+    fn direct_launch(
+        &self,
+        segment: &CommandSegment,
+        entrypoint: &Value,
+    ) -> Outcome<Option<UnlistedCliV1>> {
         let Some(name) = forms::direct_launch_name(entrypoint) else {
             return Ok(None);
         };
-        if is_interpreter_name(&name)
+        // The script must be the shell's first operand, so the words after it
+        // are the ones a direct launch passes and select the same subcommand.
+        if forms::shell_script_arguments(segment, &name).is_none()
+            || is_interpreter_name(&name)
             || is_common_tool_name(&name)
             || is_reserved_tool_name(&name)
             || self.owned.contains(&name)
@@ -652,6 +659,8 @@ fn owned_executables() -> Outcome<&'static HashSet<String>> {
 
 #[path = "local_cli_identify_forms.rs"]
 mod forms;
+
+pub(crate) use forms::launch_arguments;
 
 #[cfg(test)]
 #[path = "local_cli_identify_tests.rs"]

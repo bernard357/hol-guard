@@ -28,7 +28,7 @@ use crate::context_digest_local_cli::python_path_name;
 use crate::context_digest_package_scripts::package_json_scripts;
 use crate::hook_direct::local_cli::block::{match_command_id, valid_package, valid_unlisted};
 use crate::local_cli_hook_contained::{self as contained, Refined};
-use crate::local_cli_identify::{identify, Request};
+use crate::local_cli_identify::{identify, launch_arguments, Request};
 use crate::local_store_read;
 use crate::native_exact_action_op::runner_bin::runner_split;
 
@@ -420,7 +420,12 @@ fn invocation_tokens(request: &LocalCliHookRequestV1, launch: &Launch) -> Result
     Ok(model
         .segments
         .first()
-        .map(|segment| command_tokens(&segment.arguments, launch))
+        .map(|segment| {
+            command_tokens(
+                launch_arguments(segment, &launch.name, &launch.kind),
+                launch,
+            )
+        })
         .unwrap_or_default())
 }
 
@@ -451,7 +456,9 @@ pub(crate) fn invocation_command_tokens(
     model
         .segments
         .first()
-        .map(|segment| tokens_for_identity(&segment.arguments, name, kind, runner))
+        .map(|segment| {
+            tokens_for_identity(launch_arguments(segment, name, kind), name, kind, runner)
+        })
         .unwrap_or_default()
 }
 

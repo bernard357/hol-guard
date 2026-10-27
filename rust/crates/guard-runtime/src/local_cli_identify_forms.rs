@@ -17,7 +17,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use guard_command::command_model::CanonicalCommand;
+use guard_command::command_model::{CanonicalCommand, CommandSegment};
 use guard_command::is_bounded_read_only_filter;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -57,6 +57,33 @@ pub(super) fn direct_launch_name(entrypoint: &Value) -> Option<String> {
         return None;
     }
     executable_name(Some(text("launch_path").unwrap_or(path))).filter(|name| !name.is_empty())
+}
+
+/// The words after the script when `segment` is a shell running the script
+/// named `name` as its first operand: `bash ~/.local/bin/tool status` passes
+/// `status`, as `tool status` does.
+pub(super) fn shell_script_arguments<'a>(
+    segment: &'a CommandSegment,
+    name: &str,
+) -> Option<&'a [String]> {
+    let program = executable_name(segment.executable.as_deref())?;
+    let (script, rest) = segment.arguments.split_first()?;
+    (super::is_shell_name(&program) && executable_name(Some(script)).as_deref() == Some(name))
+        .then_some(rest)
+}
+
+/// The arguments a launch's subcommand tokens are read from. A shell's
+/// direct-launch identity reads past the script operand, so a subcommand
+/// rule meets `bash tool status` as it meets `tool status`.
+pub(crate) fn launch_arguments<'a>(
+    segment: &'a CommandSegment,
+    name: &str,
+    kind: &str,
+) -> &'a [String] {
+    match shell_script_arguments(segment, name) {
+        Some(rest) if kind == "executable" => rest,
+        _ => &segment.arguments,
+    }
 }
 
 /// The first stage of a top-level pipeline whose later stages only filter
