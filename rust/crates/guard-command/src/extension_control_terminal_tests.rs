@@ -336,13 +336,16 @@ fn windows_console_descriptors_that_do_not_answer_are_not_interactive() {
 
 #[test]
 fn a_request_without_a_platform_block_is_malformed() {
-    assert_eq!(extension_control_terminal_verdict(&[], None, None), Err(()));
+    assert_eq!(
+        extension_control_terminal_verdict(&[], None, None),
+        Err(TerminalSignalsMalformed)
+    );
 }
 
 #[test]
 fn a_request_naming_both_platforms_is_malformed() {
     assert_eq!(
         extension_control_terminal_verdict(&[], Some(&posix()), Some(&windows())),
-        Err(())
+        Err(TerminalSignalsMalformed)
     );
 }

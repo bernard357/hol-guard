@@ -375,9 +375,7 @@ def test_an_unreadable_terminal_session_is_reported_as_unanswered(
     assert posix["descriptors_share_session"] is None
 
 
-def test_probes_that_cannot_run_are_reported_as_unanswered(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_probes_that_cannot_run_are_reported_as_unanswered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     enrollment = _enrollment()
     _without_remote_terminal_environment(monkeypatch)
     _patch_posix_session(monkeypatch)
@@ -565,7 +563,10 @@ def test_windows_enrollment_reports_its_console_signals(tmp_path: Path, monkeypa
     monkeypatch.setattr(f"{_MODULE}.os.name", "nt")
     monkeypatch.setattr(f"{_MODULE}.sys.stdin", _ConsoleStream(_CONFIRMATION, 10))
     monkeypatch.setattr(f"{_MODULE}.sys.stdout", stdout)
-    monkeypatch.setattr(f"{_MODULE}._windows_console_descriptor_is_interactive", lambda descriptor: descriptor in {10, 11})
+    monkeypatch.setattr(
+        f"{_MODULE}._windows_console_descriptor_is_interactive",
+        lambda descriptor: descriptor in {10, 11},
+    )
     monkeypatch.setattr(f"{_MODULE}._windows_session_probe", lambda: (False, 0))
     monkeypatch.setenv("SESSIONNAME", "Console")
     monkeypatch.delenv("CLIENTNAME", raising=False)
@@ -591,7 +592,10 @@ def test_windows_enrollment_rejects_mismatched_confirmation(tmp_path: Path, monk
     monkeypatch.setattr(f"{_MODULE}.os.name", "nt")
     monkeypatch.setattr(f"{_MODULE}.sys.stdin", _ConsoleStream("ENROLL EXTENSION CONTROL another-actor\n", 10))
     monkeypatch.setattr(f"{_MODULE}.sys.stdout", _ConsoleStream("", 11))
-    monkeypatch.setattr(f"{_MODULE}._windows_console_descriptor_is_interactive", lambda descriptor: descriptor in {10, 11})
+    monkeypatch.setattr(
+        f"{_MODULE}._windows_console_descriptor_is_interactive",
+        lambda descriptor: descriptor in {10, 11},
+    )
     monkeypatch.setattr(f"{_MODULE}._windows_session_probe", lambda: (False, 0))
     _record_verdict(monkeypatch, "local")
 

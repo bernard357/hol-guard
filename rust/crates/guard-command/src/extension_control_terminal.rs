@@ -83,7 +83,7 @@ fn terminal_session_is_local(signals: &PosixTerminalSignalsV1) -> bool {
     let Some(remote) = signals.logind_remote.as_deref() else {
         return false;
     };
-    if remote.trim().to_ascii_lowercase() != "no" {
+    if !remote.trim().eq_ignore_ascii_case("no") {
         return false;
     }
     let (Some(owner_uid), Some(is_char_device)) =
@@ -157,18 +157,26 @@ fn windows_verdict(signals: &WindowsTerminalSignalsV1) -> ExtensionControlTermin
 /// set and non-empty. Exactly one of `posix` and `windows` carries the probes
 /// for the platform the caller is on; neither, or both, is a malformed request
 /// and is refused rather than guessed at.
+/// A request that does not name exactly one platform's probes.
+///
+/// Neither block means the caller collected nothing; both mean it claims to be
+/// on two platforms at once. Either way there is no reading to judge, so the
+/// op publishes its own invalid-request reason rather than a verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSignalsMalformed;
+
 pub fn extension_control_terminal_verdict(
     remote_environment: &[String],
     posix: Option<&PosixTerminalSignalsV1>,
     windows: Option<&WindowsTerminalSignalsV1>,
-) -> Result<ExtensionControlTerminalVerdictV1, ()> {
+) -> Result<ExtensionControlTerminalVerdictV1, TerminalSignalsMalformed> {
     if !remote_environment.is_empty() {
         return Ok(ExtensionControlTerminalVerdictV1::RemoteTerminal);
     }
     match (posix, windows) {
         (Some(signals), None) => Ok(posix_verdict(signals)),
         (None, Some(signals)) => Ok(windows_verdict(signals)),
-        _ => Err(()),
+        _ => Err(TerminalSignalsMalformed),
     }
 }
 

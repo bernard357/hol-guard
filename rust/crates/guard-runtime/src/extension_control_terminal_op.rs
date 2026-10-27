@@ -48,7 +48,7 @@ fn evaluate(request: &ExtensionControlTerminalRequestV1) -> Result<Value, String
         request.posix.as_ref(),
         request.windows.as_ref(),
     )
-    .map_err(|()| INVALID.to_owned())?;
+    .map_err(|_| INVALID.to_owned())?;
     Ok(json!({ "verdict": verdict.as_str() }))
 }
 
