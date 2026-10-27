@@ -30,7 +30,7 @@ from .hook_native_review_binding import (
     native_review_matching_block,
     native_review_policy_binding,
 )
-from .hook_native_saved_approval import native_saved_review_response
+from .hook_native_saved_approval import native_saved_decision_response
 from .hook_request_parsing import native_review_launch_target as _native_review_launch_target
 from .hook_request_parsing import native_review_tool_name as _native_review_tool_name
 from .hook_request_parsing import pre_tool_command
@@ -66,9 +66,21 @@ def pause_native_pre_tool_for_approval(
     claimed_saved_allow_hash: str | None = None,
     claimed_approval_request_id: str | None = None,
 ) -> dict[str, object]:
-    try:
-        native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
-    except ValueError:
+    launch_target = _native_review_launch_target(payload)
+    tool_name = _native_review_tool_name(payload)
+    # One resident ask checks the receipt's policy binding and answers both the
+    # retry binding and the exact-action token. The saved-decision lookup and
+    # the queued request must bind the identical token, so it is derived once.
+    valid, identity, exact_token, once_only_reason = native_review_evidence(
+        harness=harness,
+        payload=payload,
+        native_result=native_result,
+        native_receipt=native_receipt,
+        workspace=workspace,
+        home_dir=home_dir,
+        guard_home=guard_home,
+    )
+    if not valid:
         failed = dict(native_result)
         failed.update(
             decision="deny",
@@ -78,8 +90,6 @@ def pause_native_pre_tool_for_approval(
             reason="HOL Guard could not bind this review to its native policy.",
         )
         return render_pre_tool(harness, failed, guard_home=guard_home)
-    launch_target = _native_review_launch_target(payload)
-    tool_name = _native_review_tool_name(payload)
     # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
     custom = native_local_cli_grant_response(
         store,
@@ -91,33 +101,13 @@ def pause_native_pre_tool_for_approval(
     )
     if custom is not None and custom[0]:
         return custom[1]
-    # A matching custom grant never uses the evidence below, so it settles first.
-    # One resident ask answers both the retry binding and the exact-action token.
-    # The saved-decision lookup and the queued request must bind the identical
-    # token, and each derivation re-reads operands and repeats resident
-    # launch-identity round trips, so it is derived once here.
-    identity, exact_token, once_only_reason = native_review_evidence(
-        harness=harness,
-        tool_name=tool_name,
-        payload=payload,
-        native_result=native_result,
-        native_receipt=native_receipt,
-        workspace=workspace,
-        home_dir=home_dir,
-        guard_home=guard_home,
-    )
-    saved = native_saved_review_response(
+    saved = native_saved_decision_response(
         store,
         harness=harness,
-        tool_name=tool_name,
+        token=exact_token,
         artifact_id=_native_review_artifact_id(harness, tool_name),
-        payload=payload,
         native_result=native_result,
-        native_receipt=native_receipt,
         workspace=workspace,
-        home_dir=home_dir,
-        precomputed_token=exact_token,
-        guard_home=guard_home,
     )
     if saved is not None:
         return saved
@@ -227,6 +217,7 @@ def pause_native_pre_tool_for_approval(
             approval_center_url=approval_center_url,
             review_binding=identity,
             connector=connector,
+            policy_binding_verified=True,
         )
         if queued is None:
             _LOGGER.warning("Silent review blocked without an inbox row for %s", harness)
@@ -267,6 +258,7 @@ def pause_native_pre_tool_for_approval(
         approval_center_url=approval_center_url,
         review_binding=identity,
         connector=connector,
+        policy_binding_verified=True,
         claude_notice=canonical_harness(harness) == "claude-code",
     )
     if queued is None:
@@ -307,11 +299,13 @@ def queue_native_pre_tool_review(
     connector: SetupConnector | None = None,
     bound_bash: Mapping[str, object] | None = None,
     claude_notice: bool = False,
+    policy_binding_verified: bool = False,
 ) -> dict[str, object] | None:
-    try:
-        native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
-    except ValueError:
-        return None
+    if not policy_binding_verified:
+        try:
+            native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
+        except ValueError:
+            return None
     persist = getattr(store, "add_approval_request", None)
     lookup = getattr(store, "get_approval_request", None)
     if not callable(persist) or not callable(lookup):
