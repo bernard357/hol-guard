@@ -328,6 +328,7 @@ pub(super) fn evaluate_signals(
     if action_type == PreToolActionTypeV1::FileRead
         && !signals.sensitive_target
         && signals.url_values.is_empty()
+        && !signals.mirrored_input_unproven
         && signals.path_values.len() == 1
         && if matches!(signals.tool_name.as_deref(), Some("Read" | "read")) {
             // Only the host `Read` tools open their path literally, so a
