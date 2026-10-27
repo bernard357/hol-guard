@@ -1587,6 +1587,14 @@
    "body": "532a900bb473"
   },
   {
+   "verdict": "windows-unsupported",
+   "note": "The verified workspace read opens every path component beneath the repository by descriptor with O_NOFOLLOW so a parent swapped for a symlink after resolution is never followed; Windows has no openat, so the op answers native_verified_read_execute_unsupported and the read stays under ordinary review. File reads were already Unix-only before this op existed; pwd now fails closed the same way. The arm is compiled by the windows-native-runtime CI job and asserted by an_argv_outside_the_cohort_is_refused's not(unix) branch.",
+   "file": "rust/crates/guard-runtime/src/verified_read_execute_op.rs",
+   "item": "fn perform( _argv: &[String], _cwd: &str, _home_dir: Option<&str>, ) -> Result<VerifiedReadExecutePayloadV1, &'static str>",
+   "cfg": "not(unix)",
+   "body": "71d849460720"
+  },
+  {
    "verdict": "posix-primitive",
    "note": "Windows has no openat/O_NOFOLLOW directory descriptors, so the manifest fix walks by path: symlink_metadata classifies symlinks and junctions as symlinks and each component is refused if it is one, and files open with FILE_FLAG_OPEN_REPARSE_POINT and must still be a regular file with the creation and last-write times inspected (stable std exposes no file index off Unix). That narrows but does not close a directory-to-junction swap race, which could redirect a write outside the root, so the arm sets REPLACE_SUPPORTED to false and replace_if_unchanged returns fix_apply_unsupported before writing anything: Windows can prepare and review a fix but never applies one. Reads stay path-based with the checks above. The arm is compiled by the windows-native-runtime CI job; the refusal has a not(unix) unit test that the job does not run, and the reparse-point refusal is covered only by the Unix symlink tests.",
    "file": "rust/crates/guard-runtime/src/workspace_fix_fs.rs",

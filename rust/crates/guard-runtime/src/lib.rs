@@ -805,7 +805,9 @@ mod trust_attestation_verify_op;
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
 mod verified_read_decision_op;
-mod verified_read_plan_op;
+#[cfg(unix)]
+mod verified_read_execute;
+mod verified_read_execute_op;
 #[cfg(windows)]
 mod windows_node_build;
 #[cfg(windows)]

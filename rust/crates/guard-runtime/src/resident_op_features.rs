@@ -62,7 +62,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::TOOL_ACTION_REQUEST_IDENTITY_FEATURE,
     guard_contracts::RUNTIME_ARTIFACT_IDENTITY_FEATURE,
     guard_contracts::VERIFIED_READ_DECISION_FEATURE,
-    guard_contracts::VERIFIED_READ_PLAN_FEATURE,
+    guard_contracts::VERIFIED_READ_EXECUTE_FEATURE,
     guard_contracts::POLICY_DECISION_LOOKUP_FEATURE,
     guard_contracts::RUNTIME_SAVED_REUSE_FEATURE,
     guard_contracts::POLICY_LOOKUP_MEMORY_FEATURE,
