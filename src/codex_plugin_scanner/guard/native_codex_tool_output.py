@@ -18,39 +18,36 @@ import json
 import os
 import shutil
 import sys
-import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
 
 from . import native_git_execution_safety as _git_safety
-from .native_context import _canonical_request_sha256, _resolve_digest_home, ensure_resident_prerequisite
 from .native_path_anchor import anchor_to_process_directory
-from .native_resident_client import native_resident_client_request
-from .native_runtime import _isolated_environment, _native_error, native_runtime_status
-from .native_runtime_resilience import (
-    native_record_overload,
-    native_record_resident_failure,
-    native_record_resident_success,
-    native_runtime_health_snapshot,
-)
+from .native_resident_decision import BoundCall, ResidentCallError, bound_resident_call
 
-_MAX_REQUEST_BYTES = 256 * 1024
 # The largest envelope a post-tool review will frame, which is more than
 # ``CODEX_POST_TOOL_OUTPUT_MAX_BYTES``: that bound counts the op's own canonical
 # request and this counts the envelope around it. Held under the transport's
 # frame limit so a request past it is refused for its size rather than as a
 # malformed frame.
 _MAX_POST_TOOL_REQUEST_BYTES = 6 * 1024 * 1024 - 64 * 1024
-_RESIDENT_PROTOCOL_FEATURE = "resident-protocol-v2"
-_FEATURE = "codex-tool-output-v1"
 # The resident derives the post-tool command texts from the payload itself.
 _POST_TOOL_COMMANDS_FEATURE = "codex-post-tool-commands-v1"
 _POST_TOOL_PAYLOAD_KINDS = frozenset({"post_tool_output", "post_tool_read_only_payload"})
 _REQUEST_SCHEMA = "guard-codex-tool-output-request.v1"
 _RESULT_SCHEMA = "guard-codex-tool-output-result.v1"
 _DEFAULT_TIMEOUT_SECONDS = 8.0
+_CALL = BoundCall(
+    operation="codex_tool_output",
+    feature="codex-tool-output-v1",
+    prefix="native_codex_tool_output",
+    result_schema=_RESULT_SCHEMA,
+    max_request_bytes=256 * 1024,
+    timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+    check_circuit=True,
+)
+_LARGE_CALL = replace(_CALL, max_request_bytes=_MAX_POST_TOOL_REQUEST_BYTES)
 _UNAVAILABLE = "native_codex_tool_output_unavailable"
 _UNSUPPORTED_PLATFORM = "native_codex_tool_output_unsupported_platform"
 _EXTRA_SNAPSHOT_NAMES = frozenset({"RIPGREP_CONFIG_PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMP", "TEMP", "TMPDIR"})
@@ -112,23 +109,6 @@ def codex_tool_output_native(
     global _request_counter
     if not _platform_is_supported():
         return _deny(_UNSUPPORTED_PLATFORM)
-    effective_deadline = time.monotonic() + timeout_seconds
-    status = native_runtime_status(deadline_monotonic=effective_deadline)
-    if (
-        not status.available
-        or not status.compatible
-        or status.identity is None
-        or status.capabilities is None
-        or _RESIDENT_PROTOCOL_FEATURE not in status.capabilities.features
-        or _FEATURE not in status.capabilities.features
-        or (kind in _POST_TOOL_PAYLOAD_KINDS and _POST_TOOL_COMMANDS_FEATURE not in status.capabilities.features)
-    ):
-        return _deny(_UNAVAILABLE)
-    guard_home = _resolve_digest_home(None)
-    if native_runtime_health_snapshot(status.identity.sha256, guard_home).circuit_open:
-        return _deny(_UNAVAILABLE)
-    if not ensure_resident_prerequisite(guard_home):
-        return _deny(_UNAVAILABLE)
     try:
         action: dict[str, object] = {"kind": kind}
         if kind in _POST_TOOL_PAYLOAD_KINDS:
@@ -181,67 +161,24 @@ def codex_tool_output_native(
         "action": action,
         "facts": facts,
     }
-    remaining_seconds = effective_deadline - time.monotonic()
-    if remaining_seconds <= 0:
-        return _deny(_UNAVAILABLE)
-    try:
-        request_sha256 = "sha256:" + _canonical_request_sha256(request)
-        resident = json.dumps(
-            {
-                "operation": "codex_tool_output",
-                "deadline_budget_ms": max(1, min(9_000, int(remaining_seconds * 1_000))),
-                "request": request,
-            },
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError):
-        return _deny("native_codex_tool_output_invalid")
     # A harness accepts up to a megabyte of hook input, so a prompt review
     # carries whatever the user pasted. Holding a prompt to the ordinary
     # request limit turned a long one into a blocking "native runtime
     # unavailable" artifact, which is a review the user did not need.
-    limit = (
-        _MAX_POST_TOOL_REQUEST_BYTES
-        if kind in _POST_TOOL_PAYLOAD_KINDS or kind in {"prompt_credential_file", "prompt_attachment"}
-        else _MAX_REQUEST_BYTES
-    )
-    if len(resident) > limit or time.monotonic() >= effective_deadline:
-        return _deny(_UNAVAILABLE)
-    output = native_resident_client_request(
-        executable=status.identity.path,
-        guard_home=guard_home,
-        environment=_isolated_environment(),
-        payload=resident,
-        deadline_monotonic=effective_deadline,
-    )
-    if output is None:
-        native_record_resident_failure(status.identity.sha256, guard_home, reason=_UNAVAILABLE)
-        return _deny(_UNAVAILABLE)
+    large = kind in _POST_TOOL_PAYLOAD_KINDS or kind in {"prompt_credential_file", "prompt_attachment"}
     try:
-        decoded: object = json.loads(output)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        native_record_resident_failure(
-            status.identity.sha256, guard_home, reason="native_codex_tool_output_decode_failed"
+        reply = bound_resident_call(
+            _LARGE_CALL if large else _CALL,
+            request,
+            timeout_seconds=timeout_seconds,
+            extra_features=(_POST_TOOL_COMMANDS_FEATURE,) if kind in _POST_TOOL_PAYLOAD_KINDS else (),
         )
-        return _deny("native_codex_tool_output_decode_failed")
-    if _native_error(decoded) == "native_overloaded":
-        native_record_overload(status.identity.sha256, guard_home)
-        return _deny("native_overloaded")
-    envelope = cast("dict[str, object]", decoded) if isinstance(decoded, dict) else None
-    if (
-        envelope is None
-        or envelope.get("schema") != _RESULT_SCHEMA
-        or envelope.get("request_id") != request["request_id"]
-        or envelope.get("request_sha256") != request_sha256
-        or not isinstance(envelope.get("allowed"), bool)
-    ):
-        native_record_resident_failure(
-            status.identity.sha256, guard_home, reason="native_codex_tool_output_schema_mismatch"
-        )
-        return _deny("native_codex_tool_output_schema_mismatch")
-    native_record_resident_success(status.identity.sha256, guard_home)
+    except ResidentCallError as error:
+        return _deny(str(error))
+    envelope = reply.envelope
+    if not isinstance(envelope.get("allowed"), bool):
+        return _deny(str(reply.fail()))
+    reply.healthy()
     if envelope.get("status") != "ok" or envelope.get("code") != "ok":
         code = envelope.get("code")
         return _deny(code if isinstance(code, str) else "native_codex_tool_output_invalid")
