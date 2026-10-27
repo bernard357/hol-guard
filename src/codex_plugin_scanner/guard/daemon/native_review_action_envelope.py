@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 
+from ..native_decision_receipt import validate_native_decision_receipt
 from ..runtime.actions import normalize_harness_payload
 
 
@@ -72,10 +73,9 @@ def native_review_action_envelope(
         command_category = _native_review_command_category(native_result)
         if command_category is not None:
             envelope["command_category"] = command_category
-    # The receipt reaches a review from a checked edge answer or a checked bound
-    # Bash review, and the native workspace review request validates it again.
-    if not isinstance(native_receipt, Mapping) or "origin_authentication" not in native_receipt:
+    validated = validate_native_decision_receipt(native_receipt)
+    if validated is None or "origin_authentication" not in validated:
         return envelope
-    # Keep only the aggregate receipt, without aliasing nested maps.
-    envelope["native_origin_receipt"] = deepcopy(dict(native_receipt))
+    # Keep only the validated aggregate receipt, without aliasing nested maps.
+    envelope["native_origin_receipt"] = deepcopy(validated)
     return envelope
