@@ -314,6 +314,42 @@ def test_an_engine_the_activation_cannot_serve_records_a_floor_and_runs(device, 
     assert result["quarantine"] == [] and result["applicable_digest"] is not None
 
 
+def test_changed_trust_still_quarantines_under_an_engine_mismatch(device, delivery):
+    """A floor is not a reason to stop reading reviewed trust.
+
+    The retained root was written by another compiler, so the engine it names
+    says nothing about this pack. Its trust digest covers the declared trust
+    alone, so a change there is the publisher's judgement about this extension
+    and still quarantines it.
+    """
+    observe(device, delivery.verified(), delivery)
+    directory = activation_store.directory_for_store(device)
+    local = ObjectStore(directory / "objects")
+    old = PackReader(directory / "objects").json(delivery.manifests["command.core"])
+    replacement = local.put_json({**old, "trust_digest": "9" * 64})
+    index = local.index({**delivery.manifests, "command.core": replacement})
+    wrapper = delivery.store.json(delivery.value["policy"]["transport"])
+    rows = []
+    for identity, reference in wrapper["records"]:
+        if identity == "command.core":
+            metadata = delivery.store.json(reference)
+            reference = delivery.store.put_json({**metadata, "manifest": replacement})
+        rows.append([identity, reference])
+    native = delivery.store.put(PackReader(directory / "objects").blob(index))
+    transport = delivery.store.put_json({**wrapper, "native": native, "records": rows})
+    root = copy.deepcopy(delivery.value)
+    root["publication_id"] = "12.2"
+    root["engine"] = "2" * 64
+    root["policy"]["root"]["engine"] = "2" * 64
+    root["policy"]["root"]["index"] = index
+    root["policy"]["transport"] = transport
+    core_record = next(reference for identity, reference in rows if identity == "command.core")
+    root["policy"]["defaults"] = dict(count=1, index=delivery.store.index({"command.core": core_record}))
+    delivery.plan.finish()
+    result = observe(device, delivery.verified(root), delivery)
+    assert result["quarantine"] == ["command.core"]
+
+
 def test_security_fetches_never_hold_the_mutation_lease(device, delivery):
     from codex_plugin_scanner.guard.native_command_control_authority_io import (
         require_exclusive_command_control_mutation_lease,

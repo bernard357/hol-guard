@@ -272,14 +272,20 @@ pub(super) fn complete(state: &mut Security, header: &Value, directory: &Path) -
         let mut denied = rollback;
         // A publisher can change reviewed trust without revoking the entire
         // extension. Only the active identity's authenticated native path is
-        // traversed; inactive policy payload never participates. The retained
-        // root's trust index describes its own engine, so under a mismatch it
-        // holds no entry for this extension and would deny on absence alone.
-        if !denied && !engine_mismatch {
+        // traversed; inactive policy payload never participates. Reviewed trust
+        // is read under an engine mismatch too: a trust digest covers the
+        // declared trust alone and a semantic profile is a declared constant,
+        // so either changing is the publisher's judgement about this extension
+        // and not an artefact of which compiler wrote the root. Two parts of
+        // the comparison are such an artefact and are left out under a
+        // mismatch: the engine the entry names is the retained root's own, and
+        // an index that never described this engine's pack is silent about an
+        // extension rather than withdrawing it.
+        if !denied {
             match super::trust::latest(directory, &state.root, &id)? {
                 Some(latest) => {
                     let incompatible = latest["trust_digest"] != old_manifest["trust_digest"]
-                        || latest["engine"] != old_manifest["engine"]
+                        || (!engine_mismatch && latest["engine"] != old_manifest["engine"])
                         || latest["semantic_profile"] != old_manifest["semantic_profile"];
                     denied |= incompatible;
                     if incompatible {
@@ -287,7 +293,7 @@ pub(super) fn complete(state: &mut Security, header: &Value, directory: &Path) -
                         "trust":latest["trust_digest"],"engine":latest["engine"],"semantics":latest["semantic_profile"]}));
                     }
                 }
-                None => denied = true,
+                None => denied = !engine_mismatch,
             }
         }
         if rollback || engine_mismatch {
