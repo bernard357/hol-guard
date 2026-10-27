@@ -436,9 +436,11 @@ def test_compound_rg_ignore_case_does_not_become_sed_in_place(live_hook_root: Pa
     )
 
     assert artifact is None
+    outside = home / "outside.txt"
+    outside.write_text("hol-guard\n", encoding="utf-8")
     assert (
         _artifact(
-            f"sed -i 's/a/b/' {shlex.quote(str(source))}",
+            f"sed -i 's/a/b/' {shlex.quote(str(outside))}",
             home=home,
             workspace=workspace,
         )

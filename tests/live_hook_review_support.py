@@ -190,3 +190,10 @@ LIVE_REVIEWS_RETIRED_ALLOW = pytest.mark.xfail(
     reason="the live hook path reviews this shape; only the retired Python composition allowed it",
     strict=True,
 )
+# Shapes whose live verdict turns on where the host installs the program
+# (npm, git): the Linux CI runner and a macOS developer host disagree, so the
+# retired expectation is kept but neither outcome fails the run.
+LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS = pytest.mark.xfail(
+    reason="the live verdict depends on which trusted directory holds the program on this host",
+    strict=False,
+)

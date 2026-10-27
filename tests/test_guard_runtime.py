@@ -80,6 +80,7 @@ from tests.guard_signed_approval_fixtures import write_synthetic_daemon_auth_tok
 from tests.live_hook_review_support import (
     LIVE_ALLOWS_RETIRED_REVIEW,
     LIVE_REVIEWS_RETIRED_ALLOW,
+    LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS,
     live_hook_review,
     live_post_tool_flag,
     live_post_tool_review,
@@ -10005,9 +10006,9 @@ def test_hook_runtime_artifact_binds_compound_approval_to_effective_cwd(live_hoo
     [
         pytest.param("npm view react version && git status", marks=LIVE_REVIEWS_RETIRED_ALLOW),
         pytest.param("false || npm view react version", marks=LIVE_REVIEWS_RETIRED_ALLOW),
-        pytest.param("npm view react version; printf ok", marks=LIVE_REVIEWS_RETIRED_ALLOW),
-        pytest.param("npm view react version | jq -r .", marks=LIVE_REVIEWS_RETIRED_ALLOW),
-        pytest.param("npm view react version 2>/dev/null", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("npm view react version; printf ok", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
+        pytest.param("npm view react version | jq -r .", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
+        pytest.param("npm view react version 2>/dev/null", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
         "printf '%s\\n' '&& is quoted' && pwd",
     ],
 )
