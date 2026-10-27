@@ -125,6 +125,7 @@
                   "executables": [
                     "givi"
                   ],
+                  "fail_secure_unknown_options": true,
                   "forbidden_flags": [
                     "--repo",
                     "--task-id",
@@ -263,6 +264,7 @@
                   "executables": [
                     "givi"
                   ],
+                  "fail_secure_unknown_options": true,
                   "forbidden_flags": [
                     "--repo",
                     "--task-id",
@@ -401,6 +403,7 @@
                   "executables": [
                     "givi"
                   ],
+                  "fail_secure_unknown_options": true,
                   "forbidden_flags": [
                     "--repo",
                     "--task-id",
@@ -539,6 +542,7 @@
                   "executables": [
                     "givi"
                   ],
+                  "fail_secure_unknown_options": true,
                   "forbidden_flags": [
                     "--repo",
                     "--task-id",
@@ -680,6 +684,7 @@
                       "executables": [
                         "givi"
                       ],
+                      "fail_secure_unknown_options": true,
                       "forbidden_flags": [
                         "--repo",
                         "--run-id",
@@ -735,6 +740,7 @@
                       "executables": [
                         "givi"
                       ],
+                      "fail_secure_unknown_options": true,
                       "forbidden_flags": [
                         "--repo",
                         "--run-id",
@@ -897,6 +903,7 @@
                       "executables": [
                         "givi"
                       ],
+                      "fail_secure_unknown_options": true,
                       "forbidden_flags": [
                         "--repo",
                         "--run-id",
@@ -952,6 +959,7 @@
                       "executables": [
                         "givi"
                       ],
+                      "fail_secure_unknown_options": true,
                       "forbidden_flags": [
                         "--repo",
                         "--run-id",
@@ -1542,9 +1550,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "auto-review-enable-no-dry-run",
       "rule_id": "command.givi.auto-review-enable"
     },
@@ -1784,9 +1790,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "auto-review-disable-no-dry-run",
       "rule_id": "command.givi.auto-review-disable"
     },
@@ -2026,9 +2030,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "auto-review-acknowledge-no-dry-run",
       "rule_id": "command.givi.auto-review-acknowledge"
     },
@@ -2268,9 +2270,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "auto-review-run-no-dry-run",
       "rule_id": "command.givi.auto-review-run"
     },
@@ -2510,9 +2510,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "findings-add-no-dry-run",
       "rule_id": "command.givi.findings-add"
     },
@@ -2752,9 +2750,7 @@
         "command.givi"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "id": "findings-update-no-dry-run",
       "rule_id": "command.givi.findings-update"
     },

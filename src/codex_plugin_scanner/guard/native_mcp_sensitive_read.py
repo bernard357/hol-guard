@@ -130,21 +130,6 @@ def sensitive_read_context(
     return _text(payload, "current_action"), _text(payload, "artifact_hash")
 
 
-def lookup_facts(policy_lookup: Mapping[str, Any] | None, diagnosed_reason: str | None) -> dict[str, object] | None:
-    """The policy-store lookup for one context hash; ``None`` without a store."""
-
-    if policy_lookup is None:
-        return None
-    decision = policy_lookup["decision"]
-    return {
-        "decision_present": decision is not None,
-        "decision_action": decision.get("action") if decision is not None else None,
-        "decision_artifact_hash": decision.get("artifact_hash") if decision is not None else None,
-        "ignored_integrity": policy_lookup["ignored_local_integrity"] is not None,
-        "diagnosed_reason": diagnosed_reason,
-    }
-
-
 def sensitive_read_reuse(
     *,
     stage: str,

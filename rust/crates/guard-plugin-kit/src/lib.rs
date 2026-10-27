@@ -119,6 +119,9 @@ enum Request {
         spec: Option<Value>,
         #[serde(default)]
         listing_origin: Option<String>,
+        /// Guard registered the marketplace for this install.
+        #[serde(default)]
+        marketplace_added: bool,
     },
     Installs {
         guard_home: String,
@@ -214,7 +217,8 @@ fn handle(request: Request) -> Result<Value, String> {
             if listing.is_some_and(|url| !url.starts_with(origin)) {
                 return Err("plugin_kit_install_recorded_elsewhere".to_owned());
             }
-            let plan = install::plan(
+            let owned = ledger::marketplaces_added(&guard_home, &slug)?;
+            let mut plan = install::plan(
                 spec,
                 install::Action::Uninstall,
                 &available,
@@ -227,6 +231,7 @@ fn handle(request: Request) -> Result<Value, String> {
                 "plugin_kit_install_runtime_unknown" => error,
                 _ => ledger::INVALID.to_owned(),
             })?;
+            install::offer_marketplace_removal(&mut plan, &owned);
             encode(&plan)
         }
         Request::Record {
@@ -236,9 +241,18 @@ fn handle(request: Request) -> Result<Value, String> {
             installed,
             spec,
             listing_origin,
+            marketplace_added,
         } => {
             let origin = origin(listing_origin.as_deref())?;
-            ledger::record(&guard_home, &slug, &runtime, installed, spec, origin)
+            ledger::record(
+                &guard_home,
+                &slug,
+                &runtime,
+                installed,
+                spec,
+                origin,
+                marketplace_added,
+            )
         }
         Request::Installs {
             guard_home,
@@ -415,10 +429,11 @@ fn package(
         }
     };
     let detection = detect::detect(root)?;
+    output::reject_unsafe_out(root, &out)?;
     output::reject_source_overlap(root, &out, &detection.plugin)?;
     let outputs = package_plan(root, requested)?;
     let mode = if force {
-        output::clear_previous(&out)?;
+        output::clear_previous(&out, &outputs)?;
         output::Mode::Replace
     } else {
         output::require_empty(&out)?;
