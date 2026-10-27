@@ -43,6 +43,7 @@ macro_rules! under_one_frame {
 #[test]
 fn every_declared_bound_fits_one_resident_frame() {
     under_one_frame!(
+        ADAPTER_STATE_INTEGRITY_MAX_BYTES,
         AIBOM_REPORT_SUMMARIES_MAX_REQUEST_BYTES,
         APPROVAL_BULK_ELIGIBILITY_MAX_BYTES,
         APPROVAL_CONTEXT_TOKEN_MAX_BYTES,
