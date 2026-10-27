@@ -22,6 +22,11 @@ from packaging.tags import Tag
 from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
+# The newest core metadata version PyPI's upload check can parse. A build
+# backend that defaults past this produces a wheel nothing can upload, so the
+# release artifacts are rejected here while they are still ours to rebuild.
+MAX_CORE_METADATA_VERSION = Version("2.4")
+
 EXPECTED_PLATFORMS: Mapping[str, str] = {
     "manylinux_2_17_x86_64": "x86_64-unknown-linux-musl",
     "macosx_13_0_x86_64": "x86_64-apple-darwin",
@@ -115,6 +120,15 @@ def _validate_wheel_metadata(path: Path, *, name: str, version: str, tag: Tag) -
     except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
         raise ReleaseArtifactError(f"wheel metadata could not be read: {path.name}") from error
     fields = {line.split(":", 1)[0]: line.split(":", 1)[1].strip() for line in metadata.splitlines() if ":" in line}
+    try:
+        declared = Version(fields.get("Metadata-Version", ""))
+    except InvalidVersion as error:
+        raise ReleaseArtifactError(f"wheel declares no readable core metadata version: {path.name}") from error
+    if declared > MAX_CORE_METADATA_VERSION:
+        raise ReleaseArtifactError(
+            f"wheel declares core metadata {declared}, which the publishing toolchain "
+            f"cannot upload; {MAX_CORE_METADATA_VERSION} is the newest it accepts: {path.name}"
+        )
     if fields.get("Name", "").replace("-", "_").lower() != name.replace("-", "_").lower():
         raise ReleaseArtifactError(f"wheel metadata package name mismatch: {path.name}")
     if fields.get("Version") != version:

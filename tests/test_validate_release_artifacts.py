@@ -165,6 +165,43 @@ def test_validate_wheel_set_rejects_unsafe_archive_entry(tmp_path: Path) -> None
         )
 
 
+def _restate_metadata_version(wheel: Path, metadata_version: str) -> None:
+    """Rewrite a built wheel's core metadata version, leaving everything else alone."""
+
+    members = []
+    with zipfile.ZipFile(wheel) as archive:
+        for item in archive.infolist():
+            payload = archive.read(item.filename)
+            if item.filename.endswith(".dist-info/METADATA"):
+                payload = payload.replace(b"Metadata-Version: 2.4", f"Metadata-Version: {metadata_version}".encode())
+            members.append((item.filename, payload))
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, payload in members:
+            archive.writestr(name, payload)
+
+
+@pytest.mark.parametrize("wheel_name", [f"hol_guard-{VERSION}-py3-none-any.whl", None])
+def test_validate_wheel_set_rejects_core_metadata_the_publisher_cannot_upload(
+    tmp_path: Path, wheel_name: str | None
+) -> None:
+    """A build backend that defaults past 2.4 makes an unpublishable wheel; catch it here."""
+
+    platform = NON_WINDOWS[0]
+    dist = _dist(tmp_path / "dist", (platform,))
+    target = dist / (wheel_name or f"hol_guard-{VERSION}-py3-none-{platform}.whl")
+    _restate_metadata_version(target, "2.5")
+
+    with pytest.raises(ReleaseArtifactError, match="core metadata 2.5"):
+        validate_wheel_set(
+            dist,
+            version=VERSION,
+            source_sha=SOURCE_SHA,
+            rule_digest=RULE_DIGEST,
+            platforms=(platform,),
+            windows_waiver="Windows omitted for this run",
+        )
+
+
 def test_validate_wheel_set_rejects_pathful_windows_waiver(tmp_path: Path) -> None:
     with pytest.raises(ReleaseArtifactError, match="bounded release text"):
         validate_wheel_set(
