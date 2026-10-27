@@ -86,7 +86,7 @@ Guard removes the plugin with each runtime's own command. It also removes a mark
 | :--- | :--- |
 | 0 | Done, or plan shown |
 | 1 | A runtime command or the post-install check failed |
-| 2 | Usage error, or no terminal to confirm in |
+| 2 | Usage error, a listing that is not on HOL or was removed, or no terminal to confirm in |
 | 3 | Nothing Guard can install here |
 | 4 | Stopped by HOL's scan result, a commit other than the scanned one, or a declared command not accepted |
 | 5 | This Guard is too old for the listing |
