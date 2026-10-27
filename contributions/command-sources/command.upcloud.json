@@ -1,0 +1,172 @@
+{
+  "schema": "guard.command-extension-source.v1",
+  "extension": {
+    "extension_id": "command.upcloud",
+    "version": "1.0.0",
+    "name": "UpCloud CLI account-resource purge protection",
+    "description": "HOL-authored optional review policy for the UpCloud upctl all purge command. The command can delete multiple cloud resources and force deletion after disabling resource protections. External and off until a local administrator enables it. UpCloud does not distribute or maintain this Guard contribution.",
+    "action_classes": [
+      "UpCloud account resource destruction"
+    ],
+    "risk_classes": [
+      "destructive_shell",
+      "network_egress"
+    ],
+    "safer_alternatives": [
+      "Run `upctl all list --include '<pattern>' --exclude '<pattern>'` to preview resources before any purge.",
+      "Use narrowly scoped `--include` patterns, check each resource and confirm UpCloud account identity.",
+      "Keep this external Guard extension disabled unless a local administrator explicitly opts in."
+    ],
+    "reference_urls": [
+      "https://github.com/UpCloudLtd/upcloud-cli/blob/main/internal/commands/all/purge.go",
+      "https://upcloud.com/docs/tooling/cli/",
+      "https://github.com/UpCloudLtd/upcloud-cli"
+    ],
+    "required": false,
+    "source": "built-in",
+    "aliases": [],
+    "dependencies": [],
+    "conflicts": [],
+    "ecosystem_ids": [
+      "upcloud"
+    ],
+    "executables": [
+      "upctl",
+      "upctl.exe"
+    ],
+    "project_markers": [],
+    "permissions": [
+      {
+        "permission_id": "command.upcloud.permission.all-purge",
+        "implementation_version": "1.0.0",
+        "label": "Purge UpCloud account resources",
+        "description": "Reviews upctl all purge, a destructive multi-resource cleanup that may force deletes and clear termination protection.",
+        "risk_tier": "high",
+        "baseline_floor": "review",
+        "default_enabled": true,
+        "configurable": true,
+        "typed_capabilities": [],
+        "action_classes": [
+          "UpCloud account resource destruction"
+        ],
+        "dependencies": [],
+        "conflicts": [],
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "deprecated": false,
+        "safer_guidance": [
+          "Run `upctl all list --include '<pattern>' --exclude '<pattern>'` to preview resources before any purge.",
+          "Use narrowly scoped `--include` patterns, check each resource and confirm UpCloud account identity."
+        ],
+        "example_command": "upctl all purge --include 'test-*'"
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "command.upcloud.all-purge",
+        "rule_version": "1.0.0",
+        "permission_id": "command.upcloud.permission.all-purge",
+        "title": "Purge UpCloud account resources",
+        "description": "Reviews upctl all purge, a destructive multi-resource cleanup that may force deletes and clear termination protection.",
+        "severity": "high",
+        "risk_classes": [
+          "destructive_shell"
+        ],
+        "action_classes": [
+          "UpCloud account resource destruction"
+        ],
+        "safer_alternatives": [
+          "Run `upctl all list --include '<pattern>' --exclude '<pattern>'` to preview resources before any purge.",
+          "Use narrowly scoped `--include` patterns, check each resource and confirm UpCloud account identity."
+        ],
+        "default_mode": "review",
+        "matcher": {
+          "op": "executable.v1",
+          "config": {
+            "allow_leading_options": true,
+            "executables": [
+              "upctl",
+              "upctl.exe"
+            ],
+            "fail_secure_unknown_options": true,
+            "forbidden_flags": [],
+            "interspersed_flags": [],
+            "interspersed_options_with_values": [
+              "--include",
+              "-i",
+              "--exclude",
+              "-e",
+              "--output",
+              "-o"
+            ],
+            "inverse_flag_pairs": [],
+            "leading_options_with_values": [
+              "--output",
+              "-o"
+            ],
+            "options_with_values": [],
+            "required_flags": [],
+            "required_flags_in_all_arguments": false,
+            "required_option_values": [],
+            "subcommands": [
+              "all",
+              "purge"
+            ]
+          }
+        },
+        "safe_variants": [
+          {
+            "variant_id": "help",
+            "title": "Show purge help without deleting resources",
+            "matcher": {
+              "op": "executable.v1",
+              "config": {
+                "allow_leading_options": true,
+                "executables": [
+                  "upctl",
+                  "upctl.exe"
+                ],
+                "fail_secure_unknown_options": true,
+                "forbidden_flags": [],
+                "interspersed_flags": [],
+                "interspersed_options_with_values": [
+                  "--include",
+                  "-i",
+                  "--exclude",
+                  "-e",
+                  "--output",
+                  "-o"
+                ],
+                "inverse_flag_pairs": [],
+                "leading_options_with_values": [
+                  "--output",
+                  "-o"
+                ],
+                "options_with_values": [],
+                "required_flags": [
+                  "--help"
+                ],
+                "required_flags_in_all_arguments": true,
+                "required_option_values": [],
+                "subcommands": [
+                  "all",
+                  "purge"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "homepage": "https://github.com/UpCloudLtd/upcloud-cli",
+    "icon": {
+      "kind": "none"
+    },
+    "license": null,
+    "publisher": {
+      "id": "community.kantorcodes",
+      "display_name": "Michael Kantor (HOL)",
+      "url": "https://github.com/kantorcodes"
+    }
+  }
+}
