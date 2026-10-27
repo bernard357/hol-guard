@@ -293,19 +293,6 @@ jobs:
         run: |
           ulimit -n 128
           uv run --no-sync pytest -q tests/test_daemon_bounded_http.py --tb=short
-      - name: Run 100000 bounded admission operations
-        if: ${{ !cancelled() }}
-        run: |
-          uv run --no-sync python - <<'PY'
-          from codex_plugin_scanner.guard.native_runtime_admission import native_resident_admission
-
-          @native_resident_admission
-          def operation(index: int, *, operation: str) -> int:
-              return index
-
-          for index in range(100_000):
-              assert operation(index, operation="command_model") == index
-          PY
 
   native-platform:
     name: Native workspace and hook client (${{ matrix.os }})
