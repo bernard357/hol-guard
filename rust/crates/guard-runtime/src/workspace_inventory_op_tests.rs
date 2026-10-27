@@ -418,3 +418,56 @@ fn inventory_row_larger_than_the_resident_reply_is_rejected() {
         "workspace_inventory_exceeds_resident_response"
     );
 }
+
+#[test]
+fn every_resolved_version_in_the_workspace_is_listed() {
+    // A monorepo lockfile pins lodash below the root's version, and the root
+    // lock nests an old minimist under `a`. Each is audited on its own.
+    let scratch = Scratch::new("resolved-versions");
+    let workspace = scratch.0.join("ws");
+    write_files(
+        &workspace,
+        &json!({
+            "package.json": r#"{"dependencies": {"lodash": "^4"}}"#,
+            "package-lock.json": r#"{"lockfileVersion": 3, "packages": {
+                "": {"dependencies": {"lodash": "^4"}},
+                "node_modules/lodash": {"version": "4.17.21"},
+                "node_modules/a": {"version": "1.0.0"},
+                "node_modules/a/node_modules/minimist": {"version": "0.0.8"},
+                "node_modules/minimist": {"version": "1.2.8"}
+            }}"#,
+            "packages/app/package.json": r#"{"dependencies": {"lodash": "^4"}}"#,
+            "packages/app/package-lock.json": r#"{"lockfileVersion": 3, "packages": {
+                "": {"dependencies": {"lodash": "^4"}},
+                "node_modules/lodash": {"version": "4.17.15"}
+            }}"#,
+        }),
+    );
+    let payload = run(&request(&workspace, None, &[], "inventory")).unwrap();
+    let mut resolved: Vec<(String, String)> = payload["inventory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["name"].as_str().unwrap().to_owned(),
+                item["version"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .collect();
+    resolved.sort();
+    let expected = [
+        ("a", "1.0.0"),
+        ("lodash", "4.17.15"),
+        ("lodash", "4.17.21"),
+        ("minimist", "0.0.8"),
+        ("minimist", "1.2.8"),
+    ];
+    assert_eq!(
+        resolved,
+        expected
+            .iter()
+            .map(|(name, version)| (name.to_string(), version.to_string()))
+            .collect::<Vec<_>>()
+    );
+}
