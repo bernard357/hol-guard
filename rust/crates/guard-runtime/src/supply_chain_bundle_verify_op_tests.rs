@@ -239,3 +239,28 @@ fn refuses_a_response_that_advertises_no_verification_keys() {
     assert_eq!(kind, "malformed");
     assert_eq!(message, "Bundle response must include verification keys");
 }
+
+#[test]
+fn refuses_a_trusted_keyring_that_lists_no_keys() {
+    // Not the bootstrap case: the caller declared a trust boundary, so it must
+    // not receive a verified result for a bundle signed by the keyring the
+    // response itself advertises.
+    let (kind, message) = refusal(&request(response(), Some(Vec::new())));
+
+    assert_eq!(kind, "keyring");
+    assert_eq!(
+        message,
+        "Trusted keyring is present but lists no verification keys"
+    );
+}
+
+#[test]
+fn refuses_a_request_bearing_a_schema_this_resident_does_not_know() {
+    let mut request = request(response(), None);
+    request.schema = "guard-supply-chain-bundle-verify-request.v99".to_owned();
+
+    let error = evaluate_supply_chain_bundle_verify_request(&request)
+        .expect_err("an unknown request schema is refused, not interpreted");
+
+    assert_eq!(error, "native_supply_chain_bundle_verify_schema_mismatch");
+}

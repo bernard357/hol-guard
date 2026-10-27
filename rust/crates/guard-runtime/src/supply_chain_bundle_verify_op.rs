@@ -12,7 +12,7 @@ use guard_command::supply_chain_bundle::{
 };
 use guard_contracts::{
     SupplyChainBundleVerifyRequestV1, SupplyChainBundleVerifyResultV1, MAX_NATIVE_REQUEST_BYTES,
-    SUPPLY_CHAIN_BUNDLE_VERIFY_RESULT_SCHEMA,
+    SUPPLY_CHAIN_BUNDLE_VERIFY_REQUEST_SCHEMA, SUPPLY_CHAIN_BUNDLE_VERIFY_RESULT_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -42,6 +42,12 @@ fn refused(error: &SupplyChainBundleError) -> Value {
 pub(crate) fn evaluate_supply_chain_bundle_verify_request(
     request: &SupplyChainBundleVerifyRequestV1,
 ) -> Result<Vec<u8>, String> {
+    // A request this resident cannot read is not a bundle it may judge. Reading
+    // an unknown schema's fields under this version's meaning would answer
+    // "verified" for a request whose author meant something else.
+    if request.schema != SUPPLY_CHAIN_BUNDLE_VERIFY_REQUEST_SCHEMA {
+        return Err("native_supply_chain_bundle_verify_schema_mismatch".to_owned());
+    }
     let request_sha256 = request_digest_with_limit(request, MAX_NATIVE_REQUEST_BYTES)
         .map_err(|_| "native_supply_chain_bundle_verify_too_large".to_owned())?;
 
@@ -62,11 +68,22 @@ pub(crate) fn evaluate_supply_chain_bundle_verify_request(
 
 fn verify(request: &SupplyChainBundleVerifyRequestV1) -> Result<(), SupplyChainBundleError> {
     let response = load_supply_chain_bundle_response(&request.response)?;
+    // An absent keyring is the bootstrap case: a caller that has saved nothing
+    // accepts the keyring the response advertises. A keyring that is present
+    // but lists no keys is not that case. The shared verifier skips anchoring
+    // for an empty list, so letting one through would hand a caller that
+    // declared a trust boundary a bundle signed by its own advertised key.
     let trusted = match &request.trusted_keys {
         None => None,
-        Some(keys) => Some(load_supply_chain_verification_keys(Some(&Value::Array(
-            keys.clone(),
-        )))?),
+        Some(keys) => {
+            let loaded = load_supply_chain_verification_keys(Some(&Value::Array(keys.clone())))?;
+            if loaded.is_empty() {
+                return Err(SupplyChainBundleError::Keyring(
+                    "Trusted keyring is present but lists no verification keys".to_string(),
+                ));
+            }
+            Some(loaded)
+        }
     };
     verify_supply_chain_bundle_response(
         &response,

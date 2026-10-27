@@ -286,3 +286,48 @@ def test_supply_chain_bundle_reads_a_portal_signed_payload_with_sparse_policy_ru
 
     assert len(response.bundle.policy_rules) == 1
     assert response.bundle.policy_rules[0].rule_id == "rule-1"
+
+
+def test_verify_refuses_a_request_larger_than_the_resident_accepts(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # An oversized request is dropped by the transport with no explanation,
+    # which reads as an unreachable verifier. The bridge measures it first so
+    # the failure names the size instead.
+    from codex_plugin_scanner.guard import native_supply_chain_bundle as bridge
+
+    monkeypatch.setattr(bridge, "ensure_resident_prerequisite", lambda home, **kwargs: True)
+
+    def _unreachable(**kwargs: object) -> None:
+        raise AssertionError("an oversized request must not reach the transport")
+
+    monkeypatch.setattr(bridge, "_resident_request", _unreachable)
+    oversized = {"filler": "a" * (bridge._MAX_REQUEST_BYTES + 1)}
+
+    with pytest.raises(bridge.SupplyChainBundleTooLargeError) as raised:
+        bridge.native_verify_supply_chain_bundle_response(oversized, guard_home=tmp_path)
+
+    assert "over the" in str(raised.value)
+    assert str(bridge._MAX_REQUEST_BYTES) in str(raised.value)
+
+
+def test_verify_provisions_the_resident_against_the_caller_s_own_store(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The verifier key is derived from the policy-integrity master, so
+    # provisioning has to read the store the caller already opened rather than
+    # whatever secret store a freshly opened default store resolves.
+    from codex_plugin_scanner.guard import native_supply_chain_bundle as bridge
+
+    seen: dict[str, object] = {}
+
+    def _record(home: object, **kwargs: object) -> bool:
+        seen.update(kwargs)
+        return True
+
+    monkeypatch.setattr(bridge, "ensure_resident_prerequisite", _record)
+    monkeypatch.setattr(bridge, "_resident_request", lambda **kwargs: None)
+    monkeypatch.setattr(bridge, "_payload", lambda *args, **kwargs: {"outcome": "verified"})
+    sentinel = object()
+
+    bridge.native_verify_supply_chain_bundle_response({}, guard_home=tmp_path, store=sentinel)
+
+    assert seen["store"] is sentinel

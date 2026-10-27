@@ -12,8 +12,10 @@ unverified rather than accepted.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from .native_context import _resolve_digest_home, ensure_resident_prerequisite
@@ -34,6 +36,14 @@ _REQUEST_SCHEMA = "guard-supply-chain-bundle-verify-request.v1"
 _RESULT_SCHEMA = "guard-supply-chain-bundle-verify-result.v1"
 _TIMEOUT_SECONDS = 15.0
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
+# What the envelope costs beyond the response itself: the saved keyring, the
+# request id, the cached version and the clock. Generous, so a response that
+# fits this budget still fits the request the resident will read.
+_ENVELOPE_ALLOWANCE_BYTES = 64 * 1024
+#: The largest bundle response that can reach the verifier. A fetch that stops
+#: at this size fails where the caller can say why, rather than producing a
+#: response no verifier in the product can be asked about.
+MAX_SUPPLY_CHAIN_BUNDLE_RESPONSE_BYTES = _MAX_REQUEST_BYTES - _ENVELOPE_ALLOWANCE_BYTES
 
 _REFUSAL_CLASSES: dict[str, type[SupplyChainBundleError]] = {
     "signature": SupplyChainBundleSignatureError,
@@ -56,6 +66,23 @@ class SupplyChainBundleUnavailableError(SupplyChainBundleError):
         super().__init__("Supply-chain bundle verification is unavailable")
 
 
+class SupplyChainBundleTooLargeError(SupplyChainBundleError):
+    """The bundle is larger than the verifier can be asked about.
+
+    Distinct from an unavailable verifier, which is a resident that cannot be
+    reached. Here the resident is reachable and the request itself is the
+    problem, so the message names both sizes: an operator reading a failed sync
+    can tell a bundle that has outgrown the transport from a runtime that is
+    missing or wedged, and the fix is a partitioned sync, not a reinstall.
+    """
+
+    def __init__(self, size_bytes: int, limit_bytes: int) -> None:
+        super().__init__(
+            f"Supply-chain bundle verification request is {size_bytes} bytes, "
+            f"over the {limit_bytes}-byte limit the native runtime accepts"
+        )
+
+
 def native_verify_supply_chain_bundle_response(
     response: Mapping[str, object],
     *,
@@ -63,6 +90,7 @@ def native_verify_supply_chain_bundle_response(
     cached_bundle_version: str | None = None,
     now: float | None = None,
     guard_home: Path | None = None,
+    store: Any | None = None,
 ) -> None:
     """Return when the resident verified the bundle; raise when it did not.
 
@@ -70,11 +98,17 @@ def native_verify_supply_chain_bundle_response(
     the resident recomputes the canonical payload over it. ``trusted_keys``
     carries the saved keyring in the same wire form; ``None`` accepts the
     keyring the response advertises, which only a caller that has not saved
-    one yet should send.
+    one yet should send. An empty keyring is not that case and the resident
+    refuses it.
+
+    ``store`` is the already-open store the caller is verifying for. The
+    resident's prerequisite key is derived from the policy-integrity master,
+    so provisioning it has to read the caller's own secret store rather than
+    whatever a freshly opened default store resolves.
     """
 
     home = Path(_resolve_digest_home(guard_home))
-    if not ensure_resident_prerequisite(home):
+    if not ensure_resident_prerequisite(home, store=store):
         raise SupplyChainBundleUnavailableError
     wire: dict[str, object] = {
         "schema": _REQUEST_SCHEMA,
@@ -84,6 +118,12 @@ def native_verify_supply_chain_bundle_response(
         "cached_bundle_version": cached_bundle_version,
         "now": now,
     }
+    # The transport drops an oversized request without saying so, which reads
+    # as an unreachable verifier and leaves the workspace on a stale bundle
+    # with nothing to act on. Measure it here instead and name the size.
+    encoded_bytes = len(json.dumps(wire, separators=(",", ":"), default=str).encode("utf-8"))
+    if encoded_bytes > _MAX_REQUEST_BYTES:
+        raise SupplyChainBundleTooLargeError(encoded_bytes, _MAX_REQUEST_BYTES)
     try:
         reply = _resident_request(
             operation="supply_chain_bundle_verify",
