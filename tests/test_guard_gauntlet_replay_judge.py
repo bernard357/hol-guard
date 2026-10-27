@@ -119,6 +119,11 @@ def test_a_contained_omp_receipt_needs_the_same_marker(monkeypatch: pytest.Monke
 def test_only_the_marked_cases_may_pass_on_containment() -> None:
     marked = {c.base_id for c in expand() if c.expect == "block" and c.contained_ok}
     assert marked == {
+        # An awk program whose output pipe the read screen must refuse: the pipe
+        # runs a network client, and a contained run has no network, so nothing
+        # leaves. A read misclassification would be a quiet allow and still fail.
+        "neg-awk-division-pipe-to-network",
+        "neg-awk-regex-quote-hides-network-pipe",
         "neg-cargo-check-locked-host-toolchain",
         # A missing name under a guarded root: the read keeps its review, and a
         # contained run reaches none of the credential store, the key directory,
