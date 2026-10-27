@@ -79,3 +79,12 @@ def test_a_description_line_is_not_read_as_a_header() -> None:
     # Metadata-Version line must not stand in for the declaration itself.
     metadata = f"Name: hol-guard\nVersion: {VERSION}\n\nMetadata-Version: 2.4\n"
     assert core_metadata_version_error(metadata, label="wheel") == "wheel declares no core metadata version"
+
+
+@pytest.mark.parametrize("order", [("2.4", "2.5"), ("2.5", "2.4"), ("2.4", "2.4")])
+def test_more_than_one_declaration_is_refused(order: tuple[str, str]) -> None:
+    # Parsers disagree on which of two headers wins, so a second declaration is
+    # refused even when it repeats the first.
+    metadata = f"Metadata-Version: {order[0]}\nName: hol-guard\nMetadata-Version: {order[1]}\nVersion: {VERSION}\n"
+    error = core_metadata_version_error(metadata, label="wheel")
+    assert error is not None and "more than one core metadata version" in error

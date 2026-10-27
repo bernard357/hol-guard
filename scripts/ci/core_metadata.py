@@ -14,25 +14,31 @@ SUPPORTED_CORE_METADATA_VERSIONS: frozenset[str] = frozenset({"1.0", "1.1", "1.2
 NEWEST_SUPPORTED_CORE_METADATA_VERSION = "2.4"
 
 
-def declared_core_metadata_version(metadata: str) -> str | None:
-    """Return the ``Metadata-Version`` the header declares, or ``None``."""
+def declared_core_metadata_versions(metadata: str) -> list[str]:
+    """Return every ``Metadata-Version`` the header declares, in order."""
 
+    declared: list[str] = []
     for line in metadata.splitlines():
         if not line.strip():
             # The header ends at the first blank line; the description follows.
             break
         name, separator, value = line.partition(":")
         if separator and name.strip().lower() == "metadata-version":
-            return value.strip()
-    return None
+            declared.append(value.strip())
+    return declared
 
 
 def core_metadata_version_error(metadata: str, *, label: str) -> str | None:
     """Return why ``metadata`` cannot be published, or ``None`` when it can."""
 
-    declared = declared_core_metadata_version(metadata)
-    if declared is None:
+    versions = declared_core_metadata_versions(metadata)
+    if not versions:
         return f"{label} declares no core metadata version"
+    if len(versions) > 1:
+        # A parser that reads the last header would see a different version
+        # than one that reads the first, so neither answer can be trusted.
+        return f"{label} declares more than one core metadata version: {', '.join(repr(v) for v in versions)}"
+    declared = versions[0]
     if declared not in SUPPORTED_CORE_METADATA_VERSIONS:
         return (
             f"{label} declares core metadata {declared!r}, which the publishing toolchain "
