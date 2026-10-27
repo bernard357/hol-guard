@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from codex_plugin_scanner.guard.policy_bundle_parser import (
+from tests.policy_bundle_parser_support import (
     POLICY_BUNDLE_RULE_MATCHER_FAMILIES,
     computed_policy_bundle_hash,
     validated_policy_bundle_payload,

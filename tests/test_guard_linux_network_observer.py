@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import NetworkProtocol
 from tests.linux_network_observer import (
     LinuxNetworkObservationError,
     LinuxProcessIdentity,
     observe_linux_sockets,
+)
+from tests.network_policy_model import (
+    NetworkProtocol,
 )
 
 _HEADER = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode"

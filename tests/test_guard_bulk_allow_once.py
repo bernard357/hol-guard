@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from itertools import pairwise
 from pathlib import Path
@@ -19,10 +19,7 @@ from codex_plugin_scanner.guard.approval_gate import (
     confirm_totp_enrollment,
 )
 from codex_plugin_scanner.guard.approval_gate import update_settings as update_approval_gate_settings
-from codex_plugin_scanner.guard.approvals import (
-    bulk_allow_read_only_once,
-    is_bulk_allow_once_eligible,
-)
+from codex_plugin_scanner.guard.approvals import bulk_allow_read_only_once
 from codex_plugin_scanner.guard.daemon import GuardDaemonServer
 from codex_plugin_scanner.guard.models import GuardApprovalRequest
 from codex_plugin_scanner.guard.native_approval_bulk_eligibility import (
@@ -36,6 +33,10 @@ from codex_plugin_scanner.guard.store import GuardStore
 from tests.guard_totp_support import totp_code_at_counter
 
 PASSWORD = "bulk-approve-password"
+
+
+def is_bulk_allow_once_eligible(request: Mapping[str, object], *, guard_home: Path) -> bool:
+    return native_bulk_allow_once_eligibility([request], guard_home=guard_home)[0]
 
 
 def _store(tmp_path: Path) -> GuardStore:

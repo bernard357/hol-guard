@@ -268,3 +268,37 @@ def test_integer_answers_reject_anything_but_an_integer(
     _resident_returning(monkeypatch, lambda request: _good(request, payload=payload))
     with pytest.raises(compose.NativeHookComposeError):
         compose.native_hook_compose("policy_lookup_select", {"lookups": []}, guard_home=None)
+
+
+def test_the_live_allow_precheck_is_bounded_where_its_envelopes_are(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The precheck carries two action envelopes, so the default cap is too small.
+
+    An envelope the hook adapter accepted must not be refused on the way to the
+    resident: that would deny an action the user had already approved.
+    """
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(compose, "_resolve_digest_home", lambda _home: Path("/tmp/hook-compose-home"))
+    monkeypatch.setattr(compose, "ensure_resident_prerequisite", lambda _home: True)
+
+    def fake(*, request, **kwargs: object) -> dict[str, object]:
+        seen.update(kwargs)
+        return _good(
+            request,
+            payload={
+                "review_required": False,
+                "claimed_saved_allow_hash": None,
+                "claimed_approval_request_id": None,
+            },
+        )
+
+    monkeypatch.setattr(compose, "_resident_request", fake)
+
+    answer = compose.native_hook_compose(
+        "codex_live_allow_precheck",
+        dict.fromkeys(compose._FIELDS["codex_live_allow_precheck"]),
+        guard_home=None,
+    )
+
+    assert answer["review_required"] is False
+    assert seen["max_request_bytes"] == 4 * 1024 * 1024

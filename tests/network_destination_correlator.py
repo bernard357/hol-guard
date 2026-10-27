@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from codex_plugin_scanner.guard.runtime.network_policy_contract import Destination, DestinationKind
 from tests.network_local_core import ResolutionBinding, resolution_allows
+from tests.network_policy_model import (
+    Destination,
+    DestinationKind,
+)
 
 
 @dataclass(frozen=True, slots=True)

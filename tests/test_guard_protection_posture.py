@@ -262,7 +262,7 @@ def test_watch_auto_revert_accepts_naive_entered_at(tmp_path: Path) -> None:
 def test_explicit_protected_survives_mode_lock_overlay(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    from codex_plugin_scanner.guard.config import _reapply_managed_config
+    from codex_plugin_scanner.guard.config import _overlay
 
     guard_home = tmp_path / ".hol-guard"
     loaded = update_guard_settings(guard_home, {"protection_posture": "protected"})
@@ -271,7 +271,7 @@ def test_explicit_protected_survives_mode_lock_overlay(tmp_path: Path) -> None:
         managed_policy=SimpleNamespace(settings={"mode": "enforce"}, locked_settings=frozenset({"mode"})),
         managed_locked_settings=("mode",),
     )
-    overlaid = _reapply_managed_config(locked)
+    overlaid = _overlay(locked, None)
     assert overlaid.protection_posture_explicit is True
     assert resolve_risk_action(overlaid, "package_script", harness="codex") == "require-reapproval"
 

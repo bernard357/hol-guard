@@ -16,9 +16,9 @@ from uuid import uuid4
 from codex_plugin_scanner.guard.models import GuardAction, GuardArtifact
 from codex_plugin_scanner.guard.native_context import ensure_resident_prerequisite
 from codex_plugin_scanner.guard.native_execution import _resident_request
-from codex_plugin_scanner.guard.native_local_cli_identity import LocalCliIdentityUnavailableError
 from codex_plugin_scanner.guard.native_mcp_extension_input import build_extension_input
 
+from .local_cli_command_id_client import LocalCliIdentityUnavailableError
 from .local_cli_native_fixture import ensure_keyed_home
 from .mcp_policy_native_fixture import admit_mcp_policy_home
 
