@@ -23,8 +23,7 @@
   },
   "riskClasses": [
     "forum-content-write",
-    "private-message-write",
-    "remote-account-mutation"
+    "private-message-write"
   ],
   "tools": [
     {
@@ -41,6 +40,14 @@
     },
     {
       "name": "discourse_create_private_message",
+      "state": "review"
+    },
+    {
+      "name": "discourse_reply_private_message",
+      "state": "review"
+    },
+    {
+      "name": "discourse_invite_to_private_message",
       "state": "review"
     },
     {

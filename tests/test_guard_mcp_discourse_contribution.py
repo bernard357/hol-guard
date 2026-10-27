@@ -41,6 +41,8 @@ def test_discourse_selected_write_actions_require_review() -> None:
         "discourse_create_topic",
         "discourse_update_topic",
         "discourse_create_private_message",
+        "discourse_reply_private_message",
+        "discourse_invite_to_private_message",
     }
     declared = {tool["name"]: tool["state"] for tool in contribution["tools"]}
     assert required <= declared.keys()

@@ -25,12 +25,15 @@ The initial scoped policy requests review of these exact MCP tool names:
 - `discourse_create_topic`
 - `discourse_update_topic`
 - `discourse_create_private_message`
+- `discourse_reply_private_message`
+- `discourse_invite_to_private_message`
 
 All other names **inherit** existing Guard policy. The contribution does
 not claim an exhaustive inventory of Discourse's expanding toolsets, and
 does not claim to prevent every write or bypass of Discourse's own
-authorization. Discourse MCP itself leaves writes unregistered unless
-`--allow_writes` is provided and a matching credential is configured.
+authorization. Discourse MCP registers write tools only when `--allow_writes` is supplied.
+Invoking a registered write tool additionally requires a matching credential
+for the selected site; without one, the server returns an error.
 
 Before allowing a call, confirm the selected Discourse site, target,
 intended audience (especially for private messages), and content.
