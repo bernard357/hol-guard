@@ -48,7 +48,6 @@
     "src/codex_plugin_scanner/guard/native_runtime_process_cache.py",
     "src/codex_plugin_scanner/guard/native_runtime_status_share.py",
     "src/codex_plugin_scanner/guard/native_runtime_values.py",
-    "src/codex_plugin_scanner/guard/native_runtime_admission.py",
     "src/codex_plugin_scanner/guard/native_runtime_resilience.py",
     "src/codex_plugin_scanner/guard/native_runtime_durable.py",
     "src/codex_plugin_scanner/guard/native_runtime_detectors.py",
