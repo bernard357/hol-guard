@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "comment": "Every non-Unix behaviour arm in rust/crates/*/src \u2014 `#[cfg(..)]` attribute or `cfg!(..)` expression \u2014 with the verdict a reviewer gave it. scripts/ci/platform_arm_inventory.py keeps this list honest.",
+ "comment": "Every non-Unix behaviour arm in rust/crates/*/src — `#[cfg(..)]` attribute or `cfg!(..)` expression — with the verdict a reviewer gave it. scripts/ci/platform_arm_inventory.py keeps this list honest.",
  "arms": [
   {
    "file": "rust/crates/guard-command/src/adapters/hook/hook_adapter_paths.rs",
@@ -1409,14 +1409,6 @@
    "item": "fn publish_without_replacing( temporary: &Path, path: &Path, private_root: &Path, ) -> Result<bool, Option<String>>",
    "cfg": "not(unix)",
    "body": "8d076d82e34c"
-  },
-  {
-   "verdict": "windows-unsupported",
-   "note": "A bare name is resolved against a POSIX-rooted cwd only. Off Unix it returns `Unmirrored`, which the resident answers as no portable identity, so a bare-name workspace on Windows matches only local policy. Fails closed.",
-   "file": "rust/crates/guard-runtime/src/project_identity.rs",
-   "item": "fn relative_path -- cfg! expression",
-   "cfg": "unix",
-   "body": "796040e01e80"
   },
   {
    "verdict": "windows-equivalent",
