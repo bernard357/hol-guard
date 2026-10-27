@@ -574,14 +574,15 @@ class HarnessAdapter:
                 f"{self.harness} config was found, but Guard is not installed for this harness. "
                 f"Run `hol-guard install {self.harness}` to enable protection."
             )
-        if detection.config_paths and not detection.command_available:
+        if guard_managed and not detection.command_available:
+            warnings.append(
+                f"Guard is configured for {self.harness}, but the {self.executable} command is not available on "
+                f"this machine. Install {self.executable}, or run `hol-guard uninstall {self.harness}` to remove "
+                "the leftover Guard configuration."
+            )
+        elif detection.config_paths and not detection.command_available:
             warnings.append(
                 f"{self.harness} config was found, but the {self.executable} command is not available on PATH."
-            )
-        elif guard_managed and not detection.command_available:
-            warnings.append(
-                f"Guard launcher for {self.harness} is installed, but the {self.executable} command is not available "
-                "on PATH."
             )
         if runtime_probe is not None and runtime_probe.get("timed_out") is True:
             warnings.append(f"{self.executable} diagnostics timed out before Guard could confirm runtime state.")
@@ -643,6 +644,10 @@ class HarnessAdapter:
 def _diagnostic_setup_status(detection: HarnessDetection, warnings: list[str]) -> str:
     guard_managed = _detection_has_guard_management(detection)
     if guard_managed and _warnings_include_setup_failure(warnings):
+        if _only_tool_command_missing(detection, warnings):
+            # Guard config left behind for a tool that is no longer installed. Nothing can run
+            # unprotected, so report the tool as absent rather than as a broken Guard setup.
+            return "not_found"
         return "broken"
     if guard_managed:
         return "active"
@@ -692,14 +697,24 @@ def _is_guard_launcher_shim(path: Path) -> bool:
     return "codex_plugin_scanner.cli" in contents and "guard" in contents and "run" in contents
 
 
+_MISSING_COMMAND_MARKER = "command is not available"
+
+
 def _warnings_include_setup_failure(warnings: list[str]) -> bool:
     setup_markers = (
         "guard is not installed",
-        "command is not available",
+        _MISSING_COMMAND_MARKER,
         "native hooks are disabled",
         "managed codex hooks are missing",
     )
     return any(any(marker in warning.lower() for marker in setup_markers) for warning in warnings)
+
+
+def _only_tool_command_missing(detection: HarnessDetection, warnings: list[str]) -> bool:
+    if detection.command_available:
+        return False
+    other_warnings = [warning for warning in warnings if _MISSING_COMMAND_MARKER not in warning.lower()]
+    return not _warnings_include_setup_failure(other_warnings)
 
 
 __all__ = [
