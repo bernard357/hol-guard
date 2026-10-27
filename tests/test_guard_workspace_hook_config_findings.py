@@ -315,6 +315,11 @@ def test_a_hook_file_that_stops_parsing_keeps_its_finding_open(tmp_path: Path, n
     assert latest["run_id"] == second_run
     assert latest["state"] == "partial"
     assert latest["coverage"]["detectors"]["hook_config_v1"] == "incomplete"
+    assert "hook_config_incomplete" in latest["coverage"]["reasons"]
+    # The runtime itself reported the file as unparsed, so the detector is
+    # incomplete for that reason and found nothing new in the broken file.
+    assert latest["coverage"]["hook_config"]["skipped"]["unparsed"] == 1
+    assert latest["coverage"]["hook_config"]["files_scanned"] == 0
     hooks = [item for item in latest["findings"] if item["detector"] == "hook_config_v1"]
     assert [(item["finding_id"], item["carried_from_run_id"]) for item in hooks] == [
         (first["finding_id"], admitted["run_id"])
