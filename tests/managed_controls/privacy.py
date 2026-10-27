@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
-from ..redaction import redact_local_path, redact_sensitive_text, redact_text
+from codex_plugin_scanner.guard.redaction import redact_local_path, redact_sensitive_text, redact_text
 
 _ALLOWED_EXTENSION_FIELDS = frozenset({"extension_id", "name", "version", "required", "custom", "permissions"})
 _ALLOWED_PERMISSION_FIELDS = frozenset(

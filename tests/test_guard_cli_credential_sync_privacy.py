@@ -9,13 +9,13 @@ from typing import cast
 
 import pytest
 
-from codex_plugin_scanner.guard.managed_controls.telemetry import (
-    TelemetryPrivacyError,
-    managed_controls_telemetry_event,
-)
 from codex_plugin_scanner.guard.runtime import cloud_review_event_projection as projection
 from codex_plugin_scanner.guard.runtime.runner import _cloud_sync_receipt_payload
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.managed_controls.telemetry import (
+    TelemetryPrivacyError,
+    managed_controls_telemetry_event,
+)
 from tests.test_guard_cloud_review_sync_worker import Store
 
 ACCESS_VALUE = "fake-access-value-0001"

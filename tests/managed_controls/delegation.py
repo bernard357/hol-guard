@@ -30,7 +30,7 @@ def compile_delegated_control(
     delegated_protection: str | None,
     blocked: bool,
 ) -> CompiledExtensionControl:
-    from ..runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
+    from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
 
     extension = BUILT_IN_COMMAND_EXTENSION_REGISTRY.get(extension_id)
     if extension is None:
