@@ -570,7 +570,6 @@ def test_native_review_derives_the_exact_action_token_once(
         calls.append(evidence[1])
         return evidence
 
-    monkeypatch.setattr(hook_native_review_approval, "native_exact_action", counting)
     monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
     monkeypatch.setattr(hook_native_saved_approval, "native_exact_action", counting)
     payload: dict[str, object] = {

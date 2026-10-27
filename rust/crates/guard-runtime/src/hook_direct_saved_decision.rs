@@ -540,7 +540,7 @@ mod portable;
 
 // Read once the direct lane queues a reviewed `PreToolUse` itself.
 #[path = "hook_direct_review_request.rs"]
-mod review_request;
+pub(crate) mod review_request;
 
 #[path = "hook_direct_review_queue.rs"]
 pub(crate) mod review_queue;

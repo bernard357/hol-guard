@@ -68,6 +68,30 @@ _MAX_PLAIN_CHARS = _MAX_PLAIN_BYTES // 4
 _PASS_THROUGH_ROOT_KEYS = frozenset({"output", "stderr", "stdout", "tool_response"})
 _REDACTED = "[redacted]"
 
+# The ``GuardApprovalRequest`` fields a ``review_request`` answer sets.
+_REVIEW_REQUEST_KEYS = frozenset(
+    {
+        "request_id",
+        "harness",
+        "artifact_id",
+        "artifact_name",
+        "artifact_hash",
+        "policy_action",
+        "recommended_scope",
+        "changed_fields",
+        "source_scope",
+        "config_path",
+        "review_command",
+        "approval_url",
+        "workspace",
+        "artifact_type",
+        "launch_target",
+        "risk_summary",
+        "action_envelope_json",
+        "raw_command_text",
+        "queue_group_id",
+    }
+)
 _ENVELOPE_KEYS = frozenset(
     {
         "schema_version",
@@ -355,6 +379,47 @@ def native_action_envelope(
     return result
 
 
+def native_review_request(
+    harness: str,
+    payload: Mapping[str, object],
+    review: Mapping[str, object],
+    *,
+    workspace: Path | str | None,
+    home_dir: Path | str | None,
+    guard_home: Path | str | None = None,
+    deadline: float | None = None,
+) -> dict[str, object]:
+    """Return the resident's ``GuardApprovalRequest`` fields for one paused ``PreToolUse``.
+
+    ``review`` carries the pause's own facts: the native result, its decision
+    receipt, the request ID and approval center, the review binding, the exact
+    action token or once-only reason, the connector queue group and the bound
+    script review.
+    """
+
+    def build(shrunk: bool) -> _Built | None:
+        source: Mapping[str, object] | None = _without_pass_through_blobs(payload) if shrunk else payload
+        if source is None:
+            return None
+        tagger = _Tagger()
+        envelope: dict[str, object] = {
+            "harness": harness,
+            "event_name": "PreToolUse",
+            "payload": _tagged(tagger, source),
+            "workspace": _optional_text(workspace),
+            "home_dir": _optional_text(home_dir),
+            "devin_project_dir": os.environ.get("DEVIN_PROJECT_DIR") or None,
+            "path_env": os.environ.get("PATH") or None,
+            "host": _host_facts(),
+        }
+        return {"kind": "review_request", "envelope": envelope, **review}, tagger
+
+    result = _call(build, guard_home=guard_home, deadline=deadline, shape="envelope")
+    if not isinstance(result, dict) or set(result) != _REVIEW_REQUEST_KEYS:
+        raise NativeHookAdapterError(_INVALID)
+    return result
+
+
 def _plain(query: dict[str, object]) -> _Builder:
     # Typed string fields cannot be chunked; one that exceeds the resident's
     # string slot is refused here with the explicit size code, never cut.
@@ -453,5 +518,6 @@ __all__ = [
     "native_action_envelope",
     "native_apply_patch_paths",
     "native_command_text",
+    "native_review_request",
     "native_workspace_label",
 ]
