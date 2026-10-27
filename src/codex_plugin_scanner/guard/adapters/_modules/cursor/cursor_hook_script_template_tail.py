@@ -361,6 +361,9 @@ def _main_inner() -> int:
             guard_env["HOL_GUARD_CURSOR_APPROVAL_BINDING"] = approval_binding
         if proof:
             guard_env["HOL_GUARD_CURSOR_AFTER_SHELL_PROOF"] = proof
+    if _cursor_shell_route_probe(prepared):
+        # The daemon answers silently only a probe this hook names as one.
+        prepared = {**prepared, "cursor_route_probe": True}
     payload_json = json.dumps(prepared)
     try:
         from codex_plugin_scanner.guard.hook_execution_environment import stamp_hook_input_text

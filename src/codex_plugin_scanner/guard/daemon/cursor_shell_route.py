@@ -35,11 +35,17 @@ _CURSOR = "cursor"
 _PRE_TOOL_USE = "PreToolUse"
 _SHELL_TOOL = "Shell"
 _SOURCE_HOOK_FIELD = "cursor_source_hook_event"
+_PROBE_FIELD = "cursor_route_probe"
 _BEFORE_SHELL = "beforeShellExecution"
 _RECEIPT_ONLY_FIELD = "guard_containment_receipt_only"
 _ROUTED_REASON = "native_contained_execution_routed"
 _SINK_ARGS = ("guard", "execute-contained-test")
 _ALLOW: dict[str, object] = {"policy_action": "allow"}
+# The sink rewrite reads a Claude-shaped receipt (policy fields beside
+# ``hookSpecificOutput``). Cursor's own rendering has neither, so the probe
+# renders the verdict in Z Code's shape; the hook copies only the rewritten
+# input back to Cursor.
+_RECEIPT_FORMAT = "zcode"
 
 
 def cursor_shell_route_response(
@@ -77,12 +83,17 @@ def cursor_shell_route_response(
 
 
 def is_cursor_shell_probe(payload: Mapping[str, object]) -> bool:
-    """Cursor's own ``preToolUse`` for ``Shell``, which names no source hook."""
+    """Cursor's own ``preToolUse`` for ``Shell``, which names no source hook.
+
+    Guard's Cursor hook names its probe with ``cursor_route_probe``. Any other
+    caller that sends a ``Shell`` call for Cursor gets the ordinary review.
+    """
 
     return (
         payload.get("hook_event_name") == _PRE_TOOL_USE
         and payload.get("tool_name") == _SHELL_TOOL
         and _SOURCE_HOOK_FIELD not in payload
+        and payload.get(_PROBE_FIELD) is True
     )
 
 
@@ -150,7 +161,7 @@ def _probe_response(
     )
     if route != "sink":
         return dict(_ALLOW)
-    receipt = render_pre_tool(_CURSOR, result, guard_home=guard_home, deadline=deadline)
+    receipt = render_pre_tool(_RECEIPT_FORMAT, result, guard_home=guard_home, deadline=deadline)
     sink = native_containment_sink(
         receipt, harness=_CURSOR, bridge=True, payload=payload, guard_home=guard_home, deadline=deadline
     )
@@ -178,10 +189,14 @@ def _admitted_sink(
     guard_home: Path,
     workspace: Path | None,
 ) -> bool:
-    """Whether a ``beforeShellExecution`` call is the sink command a probe wrote."""
+    """Whether a ``beforeShellExecution`` call has the shape of the sink command a probe wrote.
+
+    The hook checks only the argv shape. The sink itself opens the request
+    owner-only, checks its digest and re-authorizes the command, so a request
+    that fails those checks is refused there.
+    """
 
     from ..adapters.zcode_contained_tests import contained_sink_command_prefix
-    from ..runtime.contained_test_hook import read_contained_test_request
 
     call = _command(payload)
     if workspace is None or call is None or "execute-contained-test" not in call[1]:
@@ -197,12 +212,13 @@ def _admitted_sink(
         if flags != ["--workspace", "--request-file", "--request-sha256", "--home"]:
             return False
         sink_workspace, request_file, request_sha256, sink_home = values
+        if len(request_sha256) != 64 or not set(request_sha256) <= set("0123456789abcdef"):
+            return False
         if sink_home != str(home_dir) or not _same_directory(sink_workspace, workspace):
             return False
         request = Path(request_file)
         if not request.is_absolute() or request.parent.parent.resolve() != Path(tempfile.gettempdir()).resolve():
             return False
-        read_contained_test_request(request, request_sha256, workspace=Path(sink_workspace))
     except Exception:
         return False
     return True

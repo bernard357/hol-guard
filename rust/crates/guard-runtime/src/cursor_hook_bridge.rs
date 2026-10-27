@@ -80,6 +80,8 @@ const SHELL_TOOL: &str = "Shell";
 /// The field `_prepare_cursor_hook_payload` names a `beforeShellExecution`
 /// hook's source with.
 const SOURCE_HOOK_FIELD: &str = "cursor_source_hook_event";
+/// Names the probe to the daemon, which answers only a named probe silently.
+const PROBE_FIELD: &str = "cursor_route_probe";
 
 /// The client's fail-closed reply for a hook it names `event`.
 fn fail_closed(event: &str) -> Reply {
@@ -262,7 +264,7 @@ fn request_for(client: &Client, payload: &OMap, mapped: bool) -> Option<Request>
     // Cursor's `after*` hooks prepare as themselves; one is sent only where
     // the client would also answer it as an observer.
     let event = cursor_client_event(payload)?;
-    let prepared = prepare_payload("cursor", payload, None).ok()?;
+    let mut prepared = prepare_payload("cursor", payload, None).ok()?;
     let kind = match prepared.get_str("hook_event_name") {
         Some(PRE_TOOL_USE) => Kind::PreToolUse,
         // The daemon reads `event` and `eventName` before this name.
@@ -284,6 +286,9 @@ fn request_for(client: &Client, payload: &OMap, mapped: bool) -> Option<Request>
     let probe = kind == Kind::PreToolUse
         && prepared.get_str("tool_name") == Some(SHELL_TOOL)
         && !prepared.contains_key(SOURCE_HOOK_FIELD);
+    if probe {
+        prepared.insert(PROBE_FIELD, OValue::Bool(true));
+    }
     let workspace = workspace(&prepared, std::env::var_os(PROJECT_DIR_ENV), mapped).ok()?;
     let compact = OValue::Map(prepared).compact_json();
     // The stamp writes the surrogates back only when it reads them as such.

@@ -13,8 +13,9 @@ from codex_plugin_scanner.guard.adapters._modules.cursor.cursor_hook_script_temp
 )
 from codex_plugin_scanner.guard.daemon import cursor_shell_route as route
 
-_PROBE = {"hook_event_name": "PreToolUse", "tool_name": "Shell", "tool_input": {"command": "pytest -q"}}
-_BEFORE_SHELL = {**_PROBE, "cursor_source_hook_event": "beforeShellExecution"}
+_SHELL = {"hook_event_name": "PreToolUse", "tool_name": "Shell", "tool_input": {"command": "pytest -q"}}
+_PROBE = {**_SHELL, "cursor_route_probe": True}
+_BEFORE_SHELL = {**_SHELL, "cursor_source_hook_event": "beforeShellExecution"}
 _ROUTED = "native_contained_execution_routed"
 _SINK = {"command": "guard execute-contained-test", "cwd": "/w"}
 
@@ -45,6 +46,10 @@ def _respond(
 
 def test_only_cursors_own_shell_pretooluse_is_a_probe() -> None:
     assert route.is_cursor_shell_probe(_PROBE)
+    # A Shell call another hook sends for Cursor keeps its ordinary review.
+    assert not route.is_cursor_shell_probe(_SHELL)
+    assert not route.is_cursor_shell_probe({**_SHELL, "cursor_route_probe": "true"})
+    assert not route.is_cursor_shell_probe({**_PROBE, "cursor_source_hook_event": "beforeShellExecution"})
     assert not route.is_cursor_shell_probe(_BEFORE_SHELL)
     assert not route.is_cursor_shell_probe({**_PROBE, "tool_name": "Write"})
     assert not route.is_cursor_shell_probe({**_PROBE, "hook_event_name": "PostToolUse"})
@@ -103,6 +108,7 @@ def test_the_sink_command_accepts_the_cursor_harness(tmp_path: Path) -> None:
 @posix_only
 def test_non_probe_calls_are_reviewed_as_usual(tmp_path: Path) -> None:
     assert _respond({**_PROBE, "tool_name": "Write"}, tmp_path) is None
+    assert _respond(_SHELL, tmp_path) is None
     assert _respond(_BEFORE_SHELL, tmp_path) is None
     assert _respond({**_PROBE, "guard_containment_receipt_only": True}, tmp_path) is None
 
@@ -158,6 +164,7 @@ def test_hook_copy_returns_the_sink_command_only_for_a_routed_answer() -> None:
 
 
 def test_hook_copy_probe_matches_the_daemon() -> None:
+    # The hook detects its probe before it names it for the daemon.
     probe = _hook_copy()["_cursor_shell_route_probe"]
-    for payload in (_PROBE, _BEFORE_SHELL, {**_PROBE, "tool_name": "Write"}):
-        assert probe(payload) == route.is_cursor_shell_probe(payload)
+    for payload in (_SHELL, _BEFORE_SHELL, {**_SHELL, "tool_name": "Write"}):
+        assert probe(payload) == route.is_cursor_shell_probe({**payload, "cursor_route_probe": True})

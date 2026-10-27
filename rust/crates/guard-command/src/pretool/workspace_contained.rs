@@ -411,12 +411,14 @@ pub(super) fn host_eligible(harness: &str, event: &str, payload: &Value) -> bool
 
 /// Whether a Cursor call can be rewritten into the contained sink. Cursor
 /// rewrites a shell call only from its `preToolUse` hook for `Shell`, which
-/// carries no `cursor_source_hook_event`; the sink then re-authorizes the call
+/// carries no `cursor_source_hook_event` and which Guard's hook names with
+/// `cursor_route_probe`; the sink then re-authorizes the call
 /// it saved with the receipt-only flag. `beforeShellExecution` cannot rewrite,
 /// so there the same command keeps its review.
 pub(crate) fn cursor_shell_route(harness: &str, payload: &Value) -> bool {
     let probe = payload.get("tool_name").and_then(Value::as_str) == Some("Shell")
-        && payload.get("cursor_source_hook_event").is_none();
+        && payload.get("cursor_source_hook_event").is_none()
+        && payload.get("cursor_route_probe").and_then(Value::as_bool) == Some(true);
     let receipt = payload
         .get("guard_containment_receipt_only")
         .and_then(Value::as_bool)

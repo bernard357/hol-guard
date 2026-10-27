@@ -257,7 +257,17 @@ fn unrelated_execution_and_shell_effects_do_not_inherit_test_delegation() {
             Some("/home/tester/project"),
         )
     };
-    let probe = cursor(json!({"tool_name":"Shell","tool_input":{"command":"pytest -q"}}));
+    let probe = cursor(json!({
+        "tool_name":"Shell",
+        "tool_input":{"command":"pytest -q"},
+        "cursor_route_probe":true,
+    }));
+    // A Shell call that Guard's hook did not name as its probe keeps its review.
+    let unnamed = cursor(json!({"tool_name":"Shell","tool_input":{"command":"pytest -q"}}));
+    assert_ne!(
+        unnamed.reason_code,
+        "native_pytest_readonly_containment_required"
+    );
     let before_shell = cursor(json!({
         "tool_name":"Shell",
         "tool_input":{"command":"pytest -q"},

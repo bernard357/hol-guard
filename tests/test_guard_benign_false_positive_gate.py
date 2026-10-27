@@ -36,7 +36,7 @@ from tests.benign_fp_gate_connectors import allow_ready_cli, assert_connector_se
 from tests.benign_fp_gate_fixture import BenignFixture, build_fixture, route_codex
 from tests.benign_fp_gate_mcp import McpCase, mcp_cases, mcp_failure, replay
 from tests.benign_fp_gate_projects import host_tool_path
-from tests.gauntlet_replay import OMP_CONTAINED, cursor_hook_fields, source_ref_payload
+from tests.gauntlet_replay import OMP_CONTAINED, cursor_hook_fields, cursor_route_probe, source_ref_payload
 from tests.native_gate_retry import BUDGET_MISS_REASONS, review_with_unavailable_retry
 
 pytestmark = pytest.mark.usefixtures("native_hook_force")
@@ -228,7 +228,7 @@ def _review(case: GateCase, fixture: BenignFixture, worker: HookWorker) -> tuple
         spelled = str(tool_input.get("path") or tool_input["file_path"])
         payload["guard_source_ref"] = source_ref_payload(spelled, fixture.cwd(case.cwd))
     if case.harness == "cursor" and case.tool == "shell" and case.event == "PreToolUse":
-        payload = _cursor_route_probe(case, payload, fixture, worker)
+        payload = cursor_route_probe(case.case_id, payload, fixture, worker, fixture.cwd(case.cwd))
     if case.harness == "cursor":
         payload.update(cursor_hook_fields(case.tool, payload))
     # Approval baselines stay from before the first attempt, so a retry never hides a row.
@@ -251,36 +251,6 @@ def _review(case: GateCase, fixture: BenignFixture, worker: HookWorker) -> tuple
     _ROWS[case.case_id] = approval_rows(worker.store, known)
     routed = _harness_route(case, result, payload, fixture)
     return routed, worker.store.count_approval_requests(status=None) - before
-
-
-def _cursor_route_probe(
-    case: GateCase, payload: dict[str, object], fixture: BenignFixture, worker: HookWorker
-) -> dict[str, object]:
-    """Send Cursor's silent preToolUse probe and return the call its shell hook then reviews.
-
-    Cursor asks its preToolUse hook for Shell first, and that hook may rewrite
-    the call into the workspace sandbox. beforeShellExecution follows with the
-    rewritten command, so the gate counts approvals across both hooks.
-    """
-    tool_input = payload["tool_input"]
-    assert isinstance(tool_input, dict)
-    probe = {**payload, "tool_input": {**tool_input, "cwd": payload["cwd"]}}
-    answer = review_with_unavailable_retry(
-        case.case_id,
-        lambda: worker.review_http_payload(
-            payload=probe,
-            params={},
-            default_harness=case.harness,
-            home_dir=fixture.home,
-            guard_home=fixture.guard_home,
-            workspace=fixture.cwd(case.cwd),
-        ),
-    )
-    output = answer.get("hookSpecificOutput")
-    updated = output.get("updatedInput") if isinstance(output, dict) else None
-    if not isinstance(updated, dict) or not isinstance(updated.get("command"), str):
-        return payload
-    return {**payload, "tool_input": {**tool_input, "command": updated["command"]}}
 
 
 def _harness_route(
