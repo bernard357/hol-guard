@@ -33,7 +33,7 @@ def load_mcp_contribution_payloads(root: Path | None = None) -> tuple[dict[str, 
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
-    return _load_from_directory(contributions_dir())
+    return _load_from_directory(Path(__file__).resolve().parents[1] / "contributions" / "mcp-servers")
 
 
 def validate_mcp_contribution_file(path: Path) -> dict[str, object]:

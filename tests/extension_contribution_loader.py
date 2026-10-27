@@ -30,7 +30,7 @@ def load_contribution_payloads(root: Path | None = None) -> tuple[dict[str, obje
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
-    return _load_from_directory(contributions_dir())
+    return _load_from_directory(Path(__file__).resolve().parents[1] / "contributions" / "extensions")
 
 
 def validate_contribution_file(path: Path) -> dict[str, object]:

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from codex_plugin_scanner.guard.runtime import local_cli_runner
-from codex_plugin_scanner.guard.runtime.local_cli_runner import runner_inner_arguments
+from codex_plugin_scanner.guard.runtime.local_cli_runner import _split_runner_arguments
 
 _OWNER_NAMES = frozenset({"ROOT_COMMAND_ID", "OTHER_COMMAND_ID", "_COMMAND_NAME", "_MAX_DEPTH", "match_command_id"})
 
@@ -51,6 +51,11 @@ _OWNER = _owner_objects()
 _COMMAND_NAME = _OWNER["_COMMAND_NAME"]
 _MAX_DEPTH = _OWNER["_MAX_DEPTH"]
 match_command_id = _OWNER["match_command_id"]
+
+
+def runner_inner_arguments(runner: str, arguments: list[str]) -> list[str] | None:
+    split = _split_runner_arguments(runner, arguments)
+    return split[1] if split is not None else None
 
 
 def _tokens(arguments: list[str], *, runner: str | None, kind: str, name: str) -> list[str]:
