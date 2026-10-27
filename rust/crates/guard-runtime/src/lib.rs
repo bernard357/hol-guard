@@ -191,6 +191,7 @@ mod consumer_capabilities;
 mod consumer_capability_delta;
 mod consumer_evidence;
 mod consumer_incident;
+mod consumer_low_trust_floor;
 mod consumer_outcome;
 mod consumer_result;
 mod consumer_url;
@@ -348,6 +349,7 @@ mod guard_store_connect_effective;
 mod guard_store_connect_vectors_tests;
 mod guard_store_connector_context;
 mod guard_store_db;
+mod guard_store_exact_cloud_apply;
 mod guard_store_guard_event;
 #[cfg(test)]
 mod guard_store_guard_event_tests;
@@ -780,6 +782,7 @@ mod state_directory_lock;
 #[cfg(test)]
 mod store_vectors_support_tests;
 mod strict_json;
+mod supply_chain_bundle_verify_op;
 #[cfg(test)]
 mod supply_chain_cloud_vectors_tests;
 mod supply_chain_egress;
