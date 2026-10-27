@@ -169,6 +169,7 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     #[cfg(target_os = "macos")]
     guard_contracts::NATIVE_BASH_RESULT_POLICY_FEATURE,
     guard_contracts::SKILL_WORKFLOW_PREFLIGHT_FEATURE,
+    guard_contracts::NETWORK_PROTECTION_VERIFY_FEATURE,
     guard_contracts::INVENTORY_ITEM_CLASSIFICATION_FEATURE,
     guard_contracts::INVENTORY_SCAN_TARGETS_FEATURE,
     guard_contracts::INVENTORY_SNAPSHOT_DIGEST_FEATURE,
