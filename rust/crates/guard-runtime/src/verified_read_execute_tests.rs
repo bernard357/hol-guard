@@ -166,15 +166,13 @@ fn a_replaced_repository_is_not_read_beneath() {
 }
 
 #[test]
-fn hard_links_fifos_and_non_utf8_targets_are_not_read() {
+fn hard_links_sockets_and_non_utf8_targets_are_not_read() {
     let workspace = workspace();
     fs::write(workspace.cwd.join("main.py"), "safe\n").unwrap();
     fs::hard_link(workspace.cwd.join("main.py"), workspace.cwd.join("twin.py")).unwrap();
     fs::write(workspace.cwd.join("binary.py"), [0xff, 0xfe, b'\n']).unwrap();
-    let fifo = std::ffi::CString::new(workspace.cwd.join("pipe.py").to_str().unwrap()).unwrap();
-    // SAFETY: `fifo` is a valid NUL-terminated path the test owns.
-    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-    for name in ["main.py", "twin.py", "binary.py", "pipe.py"] {
+    let _socket = std::os::unix::net::UnixListener::bind(workspace.cwd.join("socket.py")).unwrap();
+    for name in ["main.py", "twin.py", "binary.py", "socket.py"] {
         assert_eq!(
             run(&workspace, &["head", "-1", name]).unwrap_err(),
             Failure::Unavailable,
