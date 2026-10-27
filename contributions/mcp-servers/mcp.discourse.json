@@ -7,9 +7,9 @@
   "trustClass": "external",
   "activation": "opt-in",
   "publisher": {
-    "id": "discourse.org",
-    "displayName": "Discourse",
-    "url": "https://www.discourse.org"
+    "id": "community.kantorcodes",
+    "displayName": "Michael Kantor (HOL)",
+    "url": "https://github.com/kantorcodes"
   },
   "icon": {
     "kind": "none"
