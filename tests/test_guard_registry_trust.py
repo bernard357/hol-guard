@@ -251,12 +251,15 @@ def test_an_unknown_score_never_asks_the_resident_again(tmp_path: Path, monkeypa
     assert len(resident.queries) == 1
 
 
-def test_an_unreachable_resident_adds_no_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unreachable_resident_fails_the_artifact_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _lookup(monkeypatch, 42)
     _resident(monkeypatch, NativeConsumerComposeError("native_consumer_artifact_compose_unavailable"))
     config = GuardConfig(guard_home=tmp_path / "guard-home", workspace=None)
 
-    assert _floor(config) is None
+    with pytest.raises(NativeConsumerComposeError) as unreachable:
+        _floor(config)
+
+    assert unreachable.value.code == "native_consumer_artifact_compose_unavailable"
     assert calls == []
 
 
@@ -269,11 +272,14 @@ def test_an_unreachable_resident_adds_no_floor(tmp_path: Path, monkeypatch: pyte
     ],
     ids=["action", "score", "signal"],
 )
-def test_a_floor_that_does_not_decode_adds_no_floor(
+def test_a_floor_that_does_not_decode_fails_the_artifact_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, floor: dict[str, object]
 ) -> None:
     _lookup(monkeypatch, 42)
     _resident(monkeypatch, {"score_required": False, "floor": floor})
     config = GuardConfig(guard_home=tmp_path / "guard-home", workspace=None)
 
-    assert _floor(config) is None
+    with pytest.raises(NativeConsumerComposeError) as undecodable:
+        _floor(config)
+
+    assert undecodable.value.code == "native_consumer_artifact_compose_low_trust_floor_invalid"

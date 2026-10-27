@@ -22,7 +22,12 @@ pub const CONSUMER_ARTIFACT_COMPOSE_REQUEST_SCHEMA: &str =
 pub const CONSUMER_ARTIFACT_COMPOSE_RESULT_SCHEMA: &str =
     "guard-consumer-artifact-compose-result.v1";
 /// Capability advertised by the runtime when this operation is available.
-pub const CONSUMER_ARTIFACT_COMPOSE_FEATURE: &str = "consumer-artifact-compose-v2";
+///
+/// v3 adds the `LowTrustFloor` query. A resident still advertising v2 would
+/// refuse that query while answering the rest, which is how a fresh low-trust
+/// artifact could be composed with no review floor, so the capability moves
+/// with the query set rather than the request schema.
+pub const CONSUMER_ARTIFACT_COMPOSE_FEATURE: &str = "consumer-artifact-compose-v3";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

@@ -27,6 +27,8 @@ from ..native_consumer_artifact_compose import NativeConsumerComposeError, nativ
 from ..registry_trust import registry_trust_score
 from ..runtime.signals import RiskSignalV2
 
+_FLOOR_INVALID = "native_consumer_artifact_compose_low_trust_floor_invalid"
+
 
 @dataclass(frozen=True, slots=True)
 class LowTrustFloor:
@@ -50,6 +52,9 @@ def low_trust_floor(
     configured override or an unchanged, already decided artifact keeps its
     decision, and a saved Always allow still applies after the floor raises the
     action.
+
+    Raises ``NativeConsumerComposeError`` when the resident cannot answer. The
+    caller fails the artifact closed rather than evaluating it with no floor.
     """
 
     facts: dict[str, object] = {
@@ -71,30 +76,37 @@ def low_trust_floor(
     return None if floor is None else _decode(cast(Mapping[str, object], floor))
 
 
-def _compose(facts: Mapping[str, object], guard_home: Path | None) -> dict[str, object] | None:
-    """The resident's answer, or ``None`` when it could not be reached.
+def _compose(facts: Mapping[str, object], guard_home: Path | None) -> dict[str, object]:
+    """The resident's answer to one floor query.
 
-    The floor only ever strengthens an action, and the evaluation that reads it
-    composes its current action through the same resident a moment later, so an
-    unreachable runtime fails the artifact closed there rather than here.
+    ``NativeConsumerComposeError`` is deliberately not caught. A failed query
+    is not "no floor": the floor only ever strengthens an action, and these
+    failures are per request, so the floor query can fail — on a timeout, an
+    unbound reply, or a resident that cannot decode this query kind — while the
+    ``current_action`` query a moment later succeeds. Swallowing it would leave
+    a fresh, low-trust artifact composed with no review floor and nothing in
+    the record to say why. Raising fails the evaluation closed in the same call.
     """
 
-    try:
-        return native_consumer_compose("low_trust_floor", facts, guard_home=guard_home)
-    except NativeConsumerComposeError:
-        return None
+    return native_consumer_compose("low_trust_floor", facts, guard_home=guard_home)
 
 
-def _decode(floor: Mapping[str, object]) -> LowTrustFloor | None:
+def _decode(floor: Mapping[str, object]) -> LowTrustFloor:
+    """The decoded floor, or a compose failure.
+
+    The resident answered, so a floor that does not decode is a contract
+    mismatch, not an absent floor, and it fails the artifact closed as well.
+    """
+
     action, score, signal = floor.get("action"), floor.get("score"), floor.get("signal")
     if not isinstance(action, str) or not isinstance(score, int) or isinstance(score, bool):
-        return None
+        raise NativeConsumerComposeError(_FLOOR_INVALID)
     if not isinstance(signal, Mapping):
-        return None
+        raise NativeConsumerComposeError(_FLOOR_INVALID)
     try:
         decoded = RiskSignalV2.from_dict(signal)
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as error:
+        raise NativeConsumerComposeError(_FLOOR_INVALID) from error
     return LowTrustFloor(action=action, score=score, signal=decoded)
 
 
