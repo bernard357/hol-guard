@@ -235,6 +235,15 @@ def _resident_request(
 # ---------------------------------------------------------------------------
 
 
+class ContainedVerdictUnavailableError(RuntimeError):
+    """The resident gave no usable verdict for a contained launch.
+
+    Raised only for a caller that asked for it: a transport failure, a missing
+    feature, a schema mismatch or an undecodable reply, as distinct from a
+    well-formed reply that returns the launch to review.
+    """
+
+
 def _contained_request(
     *,
     op_prefix: str,
@@ -245,6 +254,7 @@ def _contained_request(
     guard_home: Path,
     extra_fields: dict[str, object] | None = None,
     timeout_seconds: float = 10.0,
+    require_verdict: bool = False,
 ) -> dict[str, object] | None:
     request: dict[str, object] = {
         "schema": request_schema,
@@ -264,6 +274,8 @@ def _contained_request(
         required_feature=_CONTAINED_EXECUTION_FEATURE,
     )
     if decoded is None:
+        if require_verdict:
+            raise ContainedVerdictUnavailableError("resident_unavailable")
         return None
     refusal = decoded.get("refusal")
     if isinstance(refusal, str) and refusal:
@@ -271,7 +283,11 @@ def _contained_request(
         # review, where it would otherwise run uncontained.
         raise SystemExit(refusal)
     result = decoded.get("result")
-    return result if isinstance(result, dict) else None
+    if isinstance(result, dict):
+        return result
+    if require_verdict and result is not None:
+        raise ContainedVerdictUnavailableError("result_invalid")
+    return None
 
 
 _CONTAINED_RUNNER_MAX_SECONDS = 600.0
@@ -294,6 +310,7 @@ def _contained_runner_request(
     shim_directory: Path,
     environment: Mapping[str, str],
     timeout_seconds: float,
+    require_verdict: bool = False,
 ) -> dict[str, object] | None:
     """Send one contained local-runner request.
 
@@ -317,6 +334,7 @@ def _contained_runner_request(
         guard_home=guard_home,
         extra_fields=extra_fields,
         timeout_seconds=process_timeout + _CONTAINED_RUNNER_TRANSPORT_SLACK_SECONDS,
+        require_verdict=require_verdict,
     )
 
 
@@ -340,11 +358,14 @@ def contained_runner_execute_native(
     shim_directory: Path,
     environment: Mapping[str, str],
     timeout_seconds: float = 120.0,
+    require_verdict: bool = False,
 ) -> ContainedRunnerResult | None:
     """Run one exact local runner in the resident and decode its typed result.
 
     A node launch the resident refuses outright raises ``SystemExit`` with
-    the resident's reason instead of returning to review.
+    the resident's reason instead of returning to review. With
+    ``require_verdict``, a reply that carries no usable verdict raises
+    ``ContainedVerdictUnavailableError`` instead of returning ``None``.
     """
 
     operation, request_schema = _RUNNER_OPERATIONS[runner]
@@ -358,12 +379,15 @@ def contained_runner_execute_native(
         shim_directory=shim_directory,
         environment=environment,
         timeout_seconds=timeout_seconds,
+        require_verdict=require_verdict,
     )
     if result is None:
         return None
     try:
         return _contained_runner_result(result)
     except (KeyError, TypeError, ValueError):
+        if require_verdict:
+            raise ContainedVerdictUnavailableError("result_invalid") from None
         return None
 
 
