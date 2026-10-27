@@ -31,9 +31,19 @@ The initial scoped policy requests review of these exact MCP tool names:
 All other names **inherit** existing Guard policy. The contribution does
 not claim an exhaustive inventory of Discourse's expanding toolsets, and
 does not claim to prevent every write or bypass of Discourse's own
-authorization. Discourse MCP registers write tools only when `--allow_writes` is supplied.
-Invoking a registered write tool additionally requires a matching credential
-for the selected site; without one, the server returns an error.
+authorization. Discourse MCP registers **built-in** write tools when
+`--allow_writes` is passed, or when `"allow_writes": true` is set in a
+`--profile` JSON file without an overriding CLI flag. Invoking one of
+these registered tools additionally requires matching credentials for the
+selected Discourse site; without them, the server returns an error.
+
+Separately, with `--site` set and the default `--tools_mode auto`, Discourse MCP
+may discover remote Tool Execution API tools (`remote_*`). Remote tool calls do
+**not** check `allow_writes` in the MCP server and can have side effects. To
+disable remote discovery, select `--tools_mode discourse_api_only` (or set
+`"tools_mode": "discourse_api_only"` in the profile). This Guard contribution
+only enumerates the six named built-in write tools above; it does not claim
+coverage of dynamically discovered remote tools.
 
 Before allowing a call, confirm the selected Discourse site, target,
 intended audience (especially for private messages), and content.
