@@ -632,9 +632,7 @@ fn evaluate_envelope(
                     &reviewed.command,
                     context,
                     execution_environment,
-                    harness,
-                    event,
-                    payload,
+                    super::workspace_contained::host_eligible(harness, event, payload),
                 )
             {
                 return projected;

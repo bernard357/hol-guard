@@ -121,8 +121,9 @@ def _probe_response(
     if workspace is None or call is None:
         return dict(_ALLOW)
     # The sink runs in the workspace, so only a call that runs there moves.
-    cwd = call[0].get("cwd")
-    if cwd not in (None, "") and not _same_directory(cwd, workspace):
+    # Cursor names the directory at the top level and may repeat it in the call.
+    directories = (payload.get("cwd"), call[0].get("cwd"), call[0].get("working_directory"))
+    if any(value not in (None, "") and not _same_directory(value, workspace) for value in directories):
         return dict(_ALLOW)
     snapshot = worker._native_policy_snapshot(workspace, deadline=deadline)
     if snapshot is None or recording_only_for_binding(snapshot, _CURSOR):

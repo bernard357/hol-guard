@@ -22,13 +22,19 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="Cursor's contai
 
 
 class _FailingWorker:
+    def __init__(self) -> None:
+        self.asked = False
+
     def _native_policy_snapshot(self, *_args: object, **_kwargs: object) -> object:
+        self.asked = True
         raise RuntimeError("snapshot unavailable")
 
 
-def _respond(payload: dict[str, object], workspace: Path | None) -> dict[str, object] | None:
+def _respond(
+    payload: dict[str, object], workspace: Path | None, worker: _FailingWorker | None = None
+) -> dict[str, object] | None:
     return route.cursor_shell_route_response(
-        _FailingWorker(),  # type: ignore[arg-type]
+        worker or _FailingWorker(),  # type: ignore[arg-type]
         payload=payload,
         home_dir=Path("/home/tester"),
         guard_home=Path("/home/tester/.hol-guard"),
@@ -51,11 +57,47 @@ def test_a_failed_probe_is_a_plain_allow(tmp_path: Path) -> None:
 
 
 @posix_only
-def test_a_probe_outside_the_workspace_is_a_plain_allow(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "placement",
+    [
+        lambda directory: {"cwd": directory},
+        lambda directory: {"tool_input": {"command": "pytest -q", "cwd": directory}},
+        lambda directory: {"tool_input": {"command": "pytest -q", "working_directory": directory}},
+    ],
+)
+def test_a_probe_outside_the_workspace_is_never_reviewed(tmp_path: Path, placement: object) -> None:
+    # The sink runs in the workspace, so a call Cursor runs elsewhere keeps its own directory.
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    probe = {**_PROBE, "tool_input": {"command": "pytest -q", "cwd": str(elsewhere)}}
-    assert _respond(probe, tmp_path / "missing") == {"policy_action": "allow"}
+    worker = _FailingWorker()
+    assert _respond({**_PROBE, **placement(str(elsewhere))}, tmp_path, worker) == {"policy_action": "allow"}  # type: ignore[operator]
+    assert not worker.asked
+    inside = _FailingWorker()
+    assert _respond({**_PROBE, **placement(str(tmp_path))}, tmp_path, inside) == {"policy_action": "allow"}  # type: ignore[operator]
+    assert inside.asked
+
+
+def test_the_sink_command_accepts_the_cursor_harness(tmp_path: Path) -> None:
+    from codex_plugin_scanner.cli import _build_parser
+
+    args = _build_parser("hol-guard", program_mode="hol-guard").parse_args(
+        [
+            "execute-contained-test",
+            "--harness",
+            "cursor",
+            "--guard-home",
+            str(tmp_path / "guard"),
+            "--workspace",
+            str(tmp_path),
+            "--request-file",
+            str(tmp_path / "request.json"),
+            "--request-sha256",
+            "0" * 64,
+            "--home",
+            str(tmp_path),
+        ]
+    )
+    assert args.harness == "cursor"
 
 
 @posix_only
