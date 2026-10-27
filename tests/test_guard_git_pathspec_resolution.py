@@ -14,7 +14,7 @@ from codex_plugin_scanner.guard.native_codex_tool_output import codex_tool_outpu
 from tests.codex_read_only_inspection import (
     codex_command_is_read_only_source_inspection,
 )
-from tests.live_hook_review_support import live_post_tool_flag
+from tests.live_hook_review_support import assert_secret_output_held, live_post_tool_flag
 from tests.native_command_test_support import inspect_command_native_test as inspect_command
 
 # Windows rejects ASCII newlines in filenames; keep an unusual Unicode separator
@@ -135,10 +135,11 @@ def test_git_pathspec_selection_changes_post_tool_approval_identity(git_reposito
         cwd=git_repository,
     )
 
-    # Both selections stay held; the identity change itself is pinned by
+    # Both selections stay held. The live output block carries no approval
+    # identity; the identity change itself is pinned by
     # test_git_pathspec_identity_binds_index_and_worktree_state.
-    assert first is not None
-    assert second is not None
+    assert_secret_output_held(first)
+    assert_secret_output_held(second)
 
 
 _DIFF_ENV_COMMAND = "git diff -- ':(top,glob)**/*.env' | sed -n '1,40p'"

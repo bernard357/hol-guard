@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from tests.live_hook_review_support import live_shell_review, quietly_allowed
+from tests.live_hook_review_support import LIVE_ALLOWS_RETIRED_REVIEW, live_shell_review, quietly_allowed
 
 
 def _quiet(command: str, *, home: Path) -> bool:
@@ -37,12 +35,7 @@ def test_dynamic_cd_keeps_compound_github_read_fail_closed(live_hook_root: Path)
     assert not _quiet("cd $TARGET && gh pr view 17 --json state", home=home)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "the live hook path allows a benign step before the leading cd; only the retired Python composition reviewed it"
-    ),
-    strict=False,
-)
+@LIVE_ALLOWS_RETIRED_REVIEW
 def test_execution_before_cd_keeps_compound_github_read_fail_closed(live_hook_root: Path) -> None:
     home = live_hook_root / "home"
     (home / "projects" / "review-worktree").mkdir(parents=True)

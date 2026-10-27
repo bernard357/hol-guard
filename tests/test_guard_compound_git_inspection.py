@@ -10,7 +10,8 @@ from codex_plugin_scanner.guard import native_git_execution_safety
 from tests.live_hook_review_support import (
     LIVE_ALLOWS_RETIRED_REVIEW,
     LIVE_REVIEWS_RETIRED_ALLOW,
-    LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS,
+    live_allows_retired_review_on,
+    live_reviews_retired_allow_on,
     live_shell_review,
     quietly_allowed,
 )
@@ -367,7 +368,9 @@ def test_compound_git_inspection_accepts_bounded_log_forms(live_hook_root: Path,
     "inspection",
     (
         "git show origin/main:public/example.txt | head -20",
-        pytest.param("git diff origin/main -- public/example.txt | head -20", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
+        pytest.param(
+            "git diff origin/main -- public/example.txt | head -20", marks=live_reviews_retired_allow_on("linux")
+        ),
     ),
 )
 def test_compound_git_inspection_accepts_safe_revision_paths(live_hook_root: Path, inspection: str) -> None:
@@ -568,8 +571,8 @@ def test_compound_git_c_status_checks_target_repository_fsmonitor(live_hook_root
     (
         pytest.param("git show origin/main:../settings.txt", marks=LIVE_ALLOWS_RETIRED_REVIEW),
         pytest.param("git show origin/main:/settings.txt", marks=LIVE_ALLOWS_RETIRED_REVIEW),
-        pytest.param("git diff origin/main -- ../settings.txt", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
-        pytest.param("git diff origin/main -- /settings.txt", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
+        pytest.param("git diff origin/main -- ../settings.txt", marks=live_allows_retired_review_on("darwin")),
+        pytest.param("git diff origin/main -- /settings.txt", marks=live_allows_retired_review_on("darwin")),
     ),
 )
 def test_compound_git_inspection_rejects_escaping_revision_paths(live_hook_root: Path, inspection: str) -> None:

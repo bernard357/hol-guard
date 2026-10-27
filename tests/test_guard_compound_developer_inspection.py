@@ -9,7 +9,12 @@ import pytest
 
 from tests.developer_inspection_test_support import assert_leading_cd_inspection_allowed
 from tests.git_execution_test_support import assert_host_git_proof_result
-from tests.live_hook_review_support import LIVE_REVIEWS_RETIRED_ALLOW, live_shell_review, quietly_allowed
+from tests.live_hook_review_support import (
+    LIVE_REVIEWS_RETIRED_ALLOW,
+    live_allows_retired_review_on,
+    live_shell_review,
+    quietly_allowed,
+)
 from tests.shell_wrapper_test_support import native_trusted_absolute_path
 
 
@@ -334,7 +339,7 @@ def test_compound_git_and_filesystem_inspection_requires_host_binary_proof(live_
 @pytest.mark.xfail(
     os.name != "nt",
     reason="the live hook path reviews this shape; only the retired Python composition allowed it",
-    strict=False,
+    strict=True,
 )
 def test_compound_stdin_only_python_observer_requires_host_binary_proof(live_hook_root: Path) -> None:
     # The resident applies the Windows host floor from its own build target,
@@ -446,6 +451,17 @@ def test_compound_rg_ignore_case_does_not_become_sed_in_place(live_hook_root: Pa
         )
         is not None
     )
+
+
+@live_allows_retired_review_on("linux")
+def test_compound_sed_in_place_on_a_workspace_file_is_reviewed(live_hook_root: Path) -> None:
+    home = live_hook_root / "home"
+    workspace = home / "workspace"
+    source = workspace / "source.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("hol-guard\n", encoding="utf-8")
+
+    assert _artifact(f"sed -i 's/a/b/' {shlex.quote(str(source))}", home=home, workspace=workspace) is not None
 
 
 @pytest.mark.parametrize(

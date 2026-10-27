@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.live_hook_review_support import live_shell_review, quietly_allowed
+from tests.live_hook_review_support import LIVE_REVIEWS_RETIRED_ALLOW, live_shell_review, quietly_allowed
 
 
 def _quiet(command: str, *, home: Path, workspace: Path) -> bool:
@@ -25,18 +25,12 @@ def test_command_lookup_does_not_execute_named_package_runner(live_hook_root: Pa
     assert quiet
 
 
-_LIVE_REVIEWS_TIMED_LOOKUP = pytest.mark.xfail(
-    reason="the live hook path reviews a lookup behind `time -p`; only the retired Python composition allowed it",
-    strict=False,
-)
-
-
 @pytest.mark.parametrize(
     "lookup",
     (
         "CHECK=1 command -v npx",
-        pytest.param("time -p command -V npx", marks=_LIVE_REVIEWS_TIMED_LOOKUP),
-        pytest.param("time -p CHECK=1 command -v npx", marks=_LIVE_REVIEWS_TIMED_LOOKUP),
+        pytest.param("time -p command -V npx", marks=LIVE_REVIEWS_RETIRED_ALLOW),
+        pytest.param("time -p CHECK=1 command -v npx", marks=LIVE_REVIEWS_RETIRED_ALLOW),
     ),
 )
 def test_prefixed_command_lookup_does_not_execute_named_package_runner(live_hook_root: Path, lookup: str) -> None:

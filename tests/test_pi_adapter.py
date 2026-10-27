@@ -21,7 +21,7 @@ from codex_plugin_scanner.guard.native_context import ensure_resident_prerequisi
 from codex_plugin_scanner.guard.runtime.actions import normalize_harness_payload
 from codex_plugin_scanner.guard.runtime.secret_sensitivity import classify_secret_content
 from codex_plugin_scanner.guard.store import GuardStore
-from tests.live_hook_review_support import LIVE_REVIEWS_RETIRED_ALLOW, live_post_tool_flag
+from tests.live_hook_review_support import LIVE_REVIEWS_RETIRED_ALLOW, assert_secret_output_held, live_post_tool_flag
 
 
 def _write_worktree_git_marker(checkout_root: Path) -> None:
@@ -737,7 +737,7 @@ class TestPiRuntime:
             home_dir=live_hook_root,
         )
 
-        assert artifact is not None
+        assert_secret_output_held(artifact)
 
     def test_pi_stdout_only_post_tool_output_creates_runtime_artifact(self, live_hook_root: Path) -> None:
         secret_path = live_hook_root / ".npmrc"
@@ -755,7 +755,7 @@ class TestPiRuntime:
             home_dir=live_hook_root,
         )
 
-        assert artifact is not None
+        assert_secret_output_held(artifact)
 
     def test_pi_grep_post_tool_output_records_rendered_command(self, live_hook_root: Path) -> None:
         payload = {
@@ -775,7 +775,7 @@ class TestPiRuntime:
             "pi", "PostToolUse", payload, workspace=live_hook_root, home_dir=live_hook_root
         )
 
-        assert artifact is not None
+        assert_secret_output_held(artifact)
         assert envelope.command == "grep 'SupplyChainContextRow|context.*agent|context.*row' context"
 
     @LIVE_REVIEWS_RETIRED_ALLOW

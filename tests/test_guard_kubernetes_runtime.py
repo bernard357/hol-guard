@@ -14,7 +14,7 @@ from codex_plugin_scanner.guard.runtime.secret_file_requests import extract_sens
 from tests.codex_read_only_inspection import (
     codex_post_tool_command_is_read_only_source_inspection,
 )
-from tests.live_hook_review_support import live_post_tool_flag
+from tests.live_hook_review_support import assert_secret_output_held, live_post_tool_flag
 from tests.native_shell_helpers_client import kubernetes_secret_read_source
 
 pytestmark = pytest.mark.usefixtures("approval_questionnaire_mode")
@@ -347,7 +347,7 @@ def test_pi_post_tool_output_labels_kubernetes_secret_source(live_hook_root: Pat
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_pi_post_tool_output_labels_argv_wrapped_kubernetes_secret_source(live_hook_root: Path) -> None:
@@ -362,7 +362,7 @@ def test_pi_post_tool_output_labels_argv_wrapped_kubernetes_secret_source(live_h
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_pi_post_tool_output_labels_single_item_command_args_kubernetes_secret_source(live_hook_root: Path) -> None:
@@ -377,7 +377,7 @@ def test_pi_post_tool_output_labels_single_item_command_args_kubernetes_secret_s
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_pi_post_tool_output_labels_commands_payload_kubernetes_secret_source(live_hook_root: Path) -> None:
@@ -392,7 +392,7 @@ def test_pi_post_tool_output_labels_commands_payload_kubernetes_secret_source(li
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_pi_post_tool_output_labels_later_commands_payload_kubernetes_secret_source(live_hook_root: Path) -> None:
@@ -407,7 +407,7 @@ def test_pi_post_tool_output_labels_later_commands_payload_kubernetes_secret_sou
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 @pytest.mark.usefixtures("native_hook_force")
@@ -477,7 +477,7 @@ def test_pi_post_tool_output_labels_wrapped_kubernetes_secret_source(live_hook_r
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_pi_post_tool_output_preserves_kubernetes_secret_volume_source(live_hook_root: Path) -> None:
@@ -493,7 +493,7 @@ def test_pi_post_tool_output_preserves_kubernetes_secret_volume_source(live_hook
         home_dir=live_hook_root,
     )
 
-    assert artifact is not None
+    assert_secret_output_held(artifact)
 
 
 def test_local_interpreter_heredoc_after_kubectl_exec_is_not_mislabeled() -> None:

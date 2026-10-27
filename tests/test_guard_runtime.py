@@ -80,10 +80,10 @@ from tests.guard_signed_approval_fixtures import write_synthetic_daemon_auth_tok
 from tests.live_hook_review_support import (
     LIVE_ALLOWS_RETIRED_REVIEW,
     LIVE_REVIEWS_RETIRED_ALLOW,
-    LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS,
     live_hook_review,
     live_post_tool_flag,
     live_post_tool_review,
+    live_reviews_retired_allow_on,
     live_shell_review,
     post_tool_output_flagged,
     quietly_allowed,
@@ -9793,8 +9793,16 @@ def test_hook_runtime_artifact_prefers_raw_file_read_path_over_redacted_action_p
 
     assert action is not None
     assert action.target_paths == (".../.env",)
-    # The redacted action path does not hide the raw read target from review.
-    assert not quietly_allowed(result)
+    # The redacted action path does not hide the raw read target from review:
+    # the queued approval names the raw outside-workspace file.
+    assert result["reason_code"] == "native_policy_reapproval_required"
+    resume = result.get("approval_resume")
+    request_id = resume.get("request_id") if isinstance(resume, dict) else result.get("approval_request_id")
+    assert isinstance(request_id, str), result
+    row = GuardStore(home_dir).get_approval_request(request_id)
+    assert row is not None
+    assert row["launch_target"] == str(outside_secret)
+    assert json.loads(str(row["action_identity"]))["command"] == str(outside_secret)
 
 
 @pytest.mark.parametrize(
@@ -9917,17 +9925,26 @@ def test_hook_runtime_artifact_routes_package_installs_to_package_request(live_h
     assert "package script setting" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+# Each command with the reason the live hook path holds it for. Package
+# scripts are allowed, so only the later shell step can make it a block.
 _PACKAGE_THEN_SHELL_RISK_COMMANDS = (
-    "npm install lodash && rm -f important.txt",
-    "rm -f important.txt; npm install lodash",
-    "npm install lodash || rm -f important.txt",
-    "npm install lodash\nrm -f important.txt",
-    "npm install lodash | sh -c 'rm -f important.txt'",
-    "sh -c 'npm install lodash && rm -f important.txt'",
-    "(npm install lodash) && (rm -f important.txt)",
-    "npm install lodash > install.log",
-    "npm install lodash > install.log && rm -f important.txt",
-    "npm install lodash && bash <<'EOF'\nrm -f important.txt\nEOF",
+    ("npm install lodash && rm -f important.txt", "native_package_review"),
+    ("rm -f important.txt; npm install lodash", "native_package_review"),
+    ("npm install lodash || rm -f important.txt", "native_package_review"),
+    ("npm install lodash\nrm -f important.txt", "native_package_review"),
+    ("npm install lodash | sh -c 'rm -f important.txt'", "native_command_extension_evaluation_failed"),
+    ("sh -c 'npm install lodash && rm -f important.txt'", "native_package_review"),
+    ("(npm install lodash) && (rm -f important.txt)", "native_command_review_required"),
+    ("npm install lodash > install.log", "native_package_review"),
+    ("npm install lodash > install.log && rm -f important.txt", "native_command_review_required"),
+    ("npm install lodash && bash <<'EOF'\nrm -f important.txt\nEOF", "native_command_extension_evaluation_failed"),
+)
+# The live hook path holds these for review; only the retired Python
+# composition escalated the later destructive step to a block.
+_LIVE_REVIEWS_RETIRED_BLOCK = pytest.mark.xfail(
+    reason="the live hook path holds this for review; only the retired Python composition blocked it under "
+    'destructive_shell = "block"',
+    strict=True,
 )
 
 
@@ -9944,17 +9961,25 @@ def _package_then_shell_risk_review(root: Path, command: str) -> dict[str, objec
     return live_shell_review(command, home_dir=home_dir, cwd=workspace_dir, guard_home=home_dir)
 
 
-@pytest.mark.parametrize("command", _PACKAGE_THEN_SHELL_RISK_COMMANDS)
-def test_hook_runtime_artifact_composes_package_and_later_shell_risks(live_hook_root: Path, command: str) -> None:
-    assert not quietly_allowed(_package_then_shell_risk_review(live_hook_root, command))
+@pytest.mark.parametrize(("command", "reason_code"), _PACKAGE_THEN_SHELL_RISK_COMMANDS)
+def test_hook_runtime_artifact_composes_package_and_later_shell_risks(
+    live_hook_root: Path, command: str, reason_code: str
+) -> None:
+    result = _package_then_shell_risk_review(live_hook_root, command)
+
+    assert not quietly_allowed(result)
+    assert result["reason_code"] == reason_code
 
 
-@pytest.mark.xfail(
-    reason="the live hook path holds most of these for review; only the retired Python composition blocked them "
-    'outright under destructive_shell = "block"',
-    strict=False,
+@pytest.mark.parametrize(
+    "command",
+    [
+        command
+        if reason_code == "native_command_extension_evaluation_failed"
+        else pytest.param(command, marks=_LIVE_REVIEWS_RETIRED_BLOCK)
+        for command, reason_code in _PACKAGE_THEN_SHELL_RISK_COMMANDS
+    ],
 )
-@pytest.mark.parametrize("command", _PACKAGE_THEN_SHELL_RISK_COMMANDS)
 def test_hook_runtime_artifact_blocks_composed_shell_risk_under_destructive_block_policy(
     live_hook_root: Path, command: str
 ) -> None:
@@ -10006,9 +10031,9 @@ def test_hook_runtime_artifact_binds_compound_approval_to_effective_cwd(live_hoo
     [
         pytest.param("npm view react version && git status", marks=LIVE_REVIEWS_RETIRED_ALLOW),
         pytest.param("false || npm view react version", marks=LIVE_REVIEWS_RETIRED_ALLOW),
-        pytest.param("npm view react version; printf ok", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
-        pytest.param("npm view react version | jq -r .", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
-        pytest.param("npm view react version 2>/dev/null", marks=LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS),
+        pytest.param("npm view react version; printf ok", marks=live_reviews_retired_allow_on("darwin")),
+        pytest.param("npm view react version | jq -r .", marks=live_reviews_retired_allow_on("darwin")),
+        pytest.param("npm view react version 2>/dev/null", marks=live_reviews_retired_allow_on("darwin")),
         "printf '%s\\n' '&& is quoted' && pwd",
     ],
 )

@@ -9,6 +9,7 @@ native hook edge, which is the path every harness hook takes. Callers need the
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -154,6 +155,14 @@ def live_post_tool_flag(
     return result if post_tool_output_flagged(result) else None
 
 
+def assert_secret_output_held(result: dict[str, object] | None) -> None:
+    """The live post-tool review found a credential in the output and withheld it from the model."""
+
+    assert result is not None
+    assert result["reason_code"] == "output_secret_match"
+    assert result["model_output_action"] == "block"
+
+
 def live_decision(result: dict[str, object]) -> str:
     """The effective verdict across harness response shapes: allow, ask or deny."""
 
@@ -190,10 +199,27 @@ LIVE_REVIEWS_RETIRED_ALLOW = pytest.mark.xfail(
     reason="the live hook path reviews this shape; only the retired Python composition allowed it",
     strict=True,
 )
+
+
 # Shapes whose live verdict turns on where the host installs the program
-# (npm, git): the Linux CI runner and a macOS developer host disagree, so the
-# retired expectation is kept but neither outcome fails the run.
-LIVE_VERDICT_DEPENDS_ON_HOST_TOOLS = pytest.mark.xfail(
-    reason="the live verdict depends on which trusted directory holds the program on this host",
-    strict=False,
-)
+# (npm, git): the Linux CI runner and a macOS developer host disagree. Each
+# host gives a fixed answer, so the retired expectation is pinned strictly on
+# the platform that disagrees and asserted plainly everywhere else.
+def live_allows_retired_review_on(platform: str) -> pytest.MarkDecorator:
+    """``LIVE_ALLOWS_RETIRED_REVIEW``, only where ``sys.platform`` starts with ``platform``."""
+
+    return pytest.mark.xfail(
+        sys.platform.startswith(platform),
+        reason=f"on {platform} the live hook path allows this shape; only the retired Python composition reviewed it",
+        strict=True,
+    )
+
+
+def live_reviews_retired_allow_on(platform: str) -> pytest.MarkDecorator:
+    """``LIVE_REVIEWS_RETIRED_ALLOW``, only where ``sys.platform`` starts with ``platform``."""
+
+    return pytest.mark.xfail(
+        sys.platform.startswith(platform),
+        reason=f"on {platform} the live hook path reviews this shape; only the retired Python composition allowed it",
+        strict=True,
+    )
