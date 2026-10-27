@@ -1,0 +1,170 @@
+{
+  "schema": "guard.command-extension-fixtures.v1",
+  "cases": [
+    {
+      "id": "inactive-destroy",
+      "command": "env0 environment destroy env-123 --yes",
+      "enabled_extensions": [],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": []
+    },
+    {
+      "id": "active-destroy",
+      "command": "env0 environment destroy env-123 --yes",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "disabled-destroy",
+      "command": "env0 environment destroy env-123 --yes",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [
+        "command.env0.permission.destroy-environment"
+      ],
+      "expected_action": "block",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "active-cancel",
+      "command": "env0 deployment cancel dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.cancel-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "active-abort",
+      "command": "env0 deployment abort dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.abort-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "active-approve",
+      "command": "env0 deployment approve dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.approve-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "cancel-disabled",
+      "command": "env0 deployment cancel dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [
+        "command.env0.permission.cancel-deployment"
+      ],
+      "expected_action": "block",
+      "rule_id": "command.env0.cancel-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "abort-disabled",
+      "command": "env0 deployment abort dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [
+        "command.env0.permission.abort-deployment"
+      ],
+      "expected_action": "block",
+      "rule_id": "command.env0.abort-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "approve-disabled",
+      "command": "env0 deployment approve dep-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [
+        "command.env0.permission.approve-deployment"
+      ],
+      "expected_action": "block",
+      "rule_id": "command.env0.approve-deployment",
+      "expected_effective_segments": [
+        0
+      ]
+    },
+    {
+      "id": "destroy-help",
+      "command": "env0 environment destroy --help",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": []
+    },
+    {
+      "id": "cancel-help",
+      "command": "env0 deployment cancel --help",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.cancel-deployment",
+      "expected_effective_segments": []
+    },
+    {
+      "id": "safe-context",
+      "command": "env0 context env-123",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "review",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": []
+    },
+    {
+      "id": "unrelated-safe",
+      "command": "pwd",
+      "enabled_extensions": [
+        "command.env0"
+      ],
+      "disabled_permissions": [],
+      "expected_action": "allow",
+      "rule_id": "command.env0.destroy-environment",
+      "expected_effective_segments": []
+    }
+  ]
+}
