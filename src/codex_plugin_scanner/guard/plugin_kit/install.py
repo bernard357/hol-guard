@@ -710,6 +710,49 @@ def _claude_install(home: Path, plugin_id: str) -> tuple[bool, str | None] | Non
     return False, None
 
 
+def _claude_source_command(home: Path, plugin_id: str) -> str | None:
+    """The command Claude Code ran to install the plugin for the user, for a
+    plugin whose marketplace declares one; such a record has no commit."""
+
+    entries = (_claude_record(home) or {}).get(plugin_id)
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict) and entry.get("scope") == "user":
+            command = entry.get("sourceCommand")
+            return command if isinstance(command, str) else None
+    return None
+
+
+def _claude_checkout_command(home: Path, marketplace: str, plugin_id: str) -> str | None:
+    """The install command Claude Code's checkout of a marketplace declares
+    for a plugin, or None when it declares none or cannot be read."""
+
+    known = _read_json(home / "plugins" / "known_marketplaces.json")
+    entry = known.get(marketplace) if isinstance(known, dict) else None
+    root = entry.get("installLocation") if isinstance(entry, dict) else None
+    if not isinstance(root, str) or not os.path.isabs(root):
+        return None
+    catalog = _read_json(Path(root) / ".claude-plugin" / "marketplace.json")
+    plugins = catalog.get("plugins") if isinstance(catalog, dict) else None
+    name = plugin_id.rsplit("@", 1)[0]
+    for plugin in plugins if isinstance(plugins, list) else []:
+        if not isinstance(plugin, dict) or plugin.get("name") != name:
+            continue
+        source = plugin.get("source")
+        if isinstance(source, dict) and source.get("source") == "command":
+            command = source.get("command")
+            return command if isinstance(command, str) else None
+    return None
+
+
+def _claude_marketplace_head(home: Path, name: str) -> str | None:
+    """The commit Claude Code's checkout of a marketplace is at."""
+
+    known = _read_json(home / "plugins" / "known_marketplaces.json")
+    entry = known.get(name) if isinstance(known, dict) else None
+    root = entry.get("installLocation") if isinstance(entry, dict) else None
+    return git_head(Path(root)) if isinstance(root, str) and os.path.isabs(root) else None
+
+
 def _claude_plugins(home: Path, *, any_scope: bool = False) -> set[str] | None:
     """Plugin ids Claude Code has installed for the user (with ``any_scope``,
     for a project or folder too), or None when its record cannot be read."""
@@ -879,7 +922,7 @@ def _undo(program: runner.Program, argv: Sequence[str], context: _Context) -> st
     return f" Remove it yourself with: {_shown(argv)}"
 
 
-def _declared_command(reply: Mapping[str, Any], context: _Context) -> str:
+def _declared_command(reply: Mapping[str, Any], context: _Context) -> tuple[str, str]:
     shown = reply.get("shownCommand")
     command = shown.get("command") if isinstance(shown, dict) else None
     digest = shown.get("sha256") if isinstance(shown, dict) else None
@@ -888,7 +931,7 @@ def _declared_command(reply: Mapping[str, Any], context: _Context) -> str:
     print("\nclaude-code: this plugin runs a command on your machine when it installs:", file=context.out)
     print(f"  {_printable(command)}", file=context.out)
     print(f"  sha256 {digest}", file=context.out)
-    return digest
+    return command, digest
 
 
 def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _Context) -> bool:
@@ -911,6 +954,28 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
     if found is None:
         raise _StoppedError("failed", f"{_claude_unreadable(context.home)}, so it changed nothing.")
     had_plugin, prior = found
+    ran = _claude_source_command(context.home, plugin_id) if had_plugin and prior is None else None
+    if ran is not None:
+        # Installed earlier by running its declared command: such a record keeps
+        # the command, not a commit, so the marketplace checkout it came from is
+        # the only commit there is to hold against the one HOL scanned, and the
+        # command it recorded has to be the one that checkout declares.
+        head = _claude_marketplace_head(context.home, marketplace)
+        if ran != _claude_checkout_command(context.home, marketplace, plugin_id):
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code already has {plugin_id}, installed by running a command that is not the one "
+                f"the {marketplace} marketplace declares, so Guard did not change it. "
+                f"To install what HOL scanned, remove it first with: claude plugin uninstall {plugin_id}",
+            )
+        if expected and head != expected:
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code already has {plugin_id} from the {marketplace} marketplace at commit "
+                f"{_short(head)}, not the commit HOL scanned ({_short(expected)}), so Guard did not change it. "
+                f"To install what HOL scanned, remove it first with: claude plugin uninstall {plugin_id}",
+            )
+        raise _AlreadyDoneError("already installed")
     if had_plugin and expected and prior != expected:
         raise _StoppedError(
             "blocked",
@@ -948,9 +1013,10 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
     print(f"$ {_shown(install)}", file=context.out)
     completed = run_install(arguments)
     reply = _reply(completed.stdout)
+    declared: str | None = None
     if completed.returncode != 0 and reply.get("failureCode") == "command_source_refused":
         try:
-            digest = _declared_command(reply, context)
+            declared, digest = _declared_command(reply, context)
         except _StoppedError as stop:
             raise _StoppedError(stop.status, f"{stop}{undo_marketplace()}") from None
         accepted = context.accept_command
@@ -963,12 +1029,44 @@ def _install_claude(step: Mapping[str, Any], program: runner.Program, context: _
                 else f"The install command was not accepted, so nothing ran. To run it, add --accept-command {digest}."
             )
             raise _StoppedError("blocked", f"{reason}{undo_marketplace()}")
+        # Running the command is not undoable, so hold the checkout that
+        # declares it against the scanned commit before it runs; the check
+        # after the install still catches a checkout moved while it ran.
+        head = _claude_marketplace_head(context.home, marketplace)
+        if expected and head != expected:
+            raise _StoppedError(
+                "blocked",
+                f"Claude Code's {marketplace} checkout is at commit {_short(head)}, not the commit HOL "
+                f"scanned ({_short(expected)}), so Guard did not let the install command "
+                f"run.{undo_marketplace()}",
+            )
         completed = run_install([*arguments, "--accept-command", digest])
         reply = _reply(completed.stdout)
     try:
         _ran(completed, install, reply)
     except _StoppedError as stop:
         raise _StoppedError(stop.status, f"{stop}{undo_marketplace()}", stop.exit_code) from None
+    if declared is not None:
+        # A plugin installed by running a command has no commit of its own.
+        # HOL scanned the marketplace that declares the command, so check the
+        # command Claude Code ran is the one shown and its checkout of that
+        # marketplace is at the scanned commit.
+        ran = _claude_source_command(context.home, plugin_id)
+        head = _claude_marketplace_head(context.home, marketplace)
+        if ran == declared and (not expected or head == expected):
+            return added
+        problem = (
+            "ran a different install command than the one Guard showed"
+            if ran != declared
+            else f"installed from the {marketplace} marketplace at commit {_short(head)}, "
+            f"not the commit HOL scanned ({_short(expected)})"
+        )
+        undone = _undo(program, ["claude", "plugin", "uninstall", plugin_id], context) + undo_marketplace()
+        raise _StoppedError(
+            "blocked",
+            f"Claude Code {problem}. "
+            + (f"Guard could not remove it.{undone}" if undone else "Guard removed it again."),
+        )
     if not expected:
         return added
     found = _claude_install(context.home, plugin_id)

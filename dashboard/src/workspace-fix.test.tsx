@@ -59,6 +59,7 @@ const finding: WorkspaceFinding = {
   findingId: FINDING,
   severity: "high",
   decision: "block",
+  validation: "confirmed",
   ecosystem: "npm",
   packageName: "lodash",
   packageVersion: "4.17.15",
@@ -74,6 +75,8 @@ const finding: WorkspaceFinding = {
   mcp: null,
   hook: null,
   workflow: null,
+  editorTask: null,
+  carried: false,
 };
 
 function fixes(overrides: Partial<WorktreeFixes> = {}): WorktreeFixes {

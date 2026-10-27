@@ -606,16 +606,29 @@ fn links_block_is_only_returned_when_asked_and_names_the_listing() {
         json!({"command": "links", "root": root_str(&root), "block": true, "slug": "acme/pdf-tools"}),
     );
     let block = links["block"].as_str().expect("block");
-    let lines: Vec<&str> = block.lines().collect();
+    // The portal's owner card prints this same text; its test pins it too.
     assert_eq!(
-        lines[0],
-        "<!-- hol-install-block:v1 slug=acme/pdf-tools -->"
+        block,
+        r#"<!-- hol-install-block:v2 slug=acme/pdf-tools -->
+Install with [HOL Guard](https://hol.org/guard/docs/plugin-scanner/install-with-hol-guard), which checks the [HOL listing](https://hol.org/registry/plugins/acme%2Fpdf-tools) and asks before each runtime:
+
+```sh
+hol-guard plugin install acme/pdf-tools --apply
+```
+
+Get HOL Guard with `pipx install hol-guard` or `uv tool install hol-guard`.
+
+<details>
+<summary>Install with each runtime's own CLI</summary>
+
+| Runtime | Commands |
+| --- | --- |
+| Claude Code | `claude plugin marketplace add acme/pdf-tools`<br>`claude plugin install pdf-tools@acme-claude` |
+| Agent skills (Cursor, Gemini CLI, OpenCode and others) | `npx skills@1.7.4 add acme/pdf-tools` |
+
+</details>
+<!-- /hol-install-block -->"#
     );
-    assert_eq!(lines.last(), Some(&"<!-- /hol-install-block -->"));
-    assert!(block.contains("https://hol.org/registry/plugins/acme%2Fpdf-tools"));
-    assert!(block.contains("hol-guard plugin install acme/pdf-tools --apply"));
-    assert!(block.contains("`claude plugin install pdf-tools@acme-claude`"));
-    assert!(!block.contains("`/plugin"));
 
     for slug in ["../x", "acme/pdf tools", "-acme"] {
         assert_eq!(

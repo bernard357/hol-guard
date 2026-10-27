@@ -50,10 +50,9 @@ use crate::package_manifest_diff::parse_manifest_dependencies;
 use crate::package_policy_override as ppo;
 use crate::package_protect_projection as ppp;
 use crate::workspace_inventory::{
-    inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
-    split_namespace_name, target_for_package_spec, target_from_inventory_item,
-    target_from_manifest_dependency, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST,
-    SEVERITY_RANK,
+    dependency_name, inventory_from_sbom_payload, merge_inventory_item, package_manager_for_scan,
+    target_for_package_spec, target_from_inventory_item, target_from_manifest_dependency,
+    DirectDependencies, InventoryMap, ECOSYSTEM_BY_LOCKFILE, ECOSYSTEM_BY_MANIFEST, SEVERITY_RANK,
 };
 
 pub const WORKSPACE_AUDIT_DISCOVERY_MAX_DEPTH: usize = 3;
@@ -3502,6 +3501,7 @@ fn workspace_inventory_from_paths(
     manifest_parser: &dyn ManifestParserApi,
 ) -> Vec<Map<String, Value>> {
     let mut inventory_map = InventoryMap::new();
+    let mut direct_dependencies = DirectDependencies::default();
 
     for relative_path in manifest_paths {
         let text = match read_workspace_audit_text(paths, workspace_dir, relative_path) {
@@ -3519,23 +3519,10 @@ fn workspace_inventory_from_paths(
             DEFAULT_MANIFEST_PARSE_DEADLINE_MS,
         );
         for (package_name, version) in &dependency_map {
-            let mut item = Map::new();
-            item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
-            item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
-            item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(true));
-            let range = version.trim();
-            item.insert(
-                "range".into(),
-                if range.is_empty() {
-                    Value::Null
-                } else {
-                    Value::String(range.to_string())
-                },
-            );
-            item.insert("version".into(), Value::Null);
-            merge_inventory_item(&mut inventory_map, &item);
+            let range = Some(version.trim())
+                .filter(|range| !range.is_empty())
+                .map(str::to_string);
+            direct_dependencies.record(relative_path, ecosystem, package_name, range);
         }
     }
 
@@ -3557,11 +3544,15 @@ fn workspace_inventory_from_paths(
         for (package_name, version) in &dependency_map {
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
-            let (ns, name) = split_namespace_name(package_name);
+            let (ns, name) = dependency_name(ecosystem, package_name);
             item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
             item.insert("name".into(), json!(name));
-            item.insert("direct".into(), json!(false));
-            item.insert("range".into(), Value::Null);
+            let range = direct_dependencies.lockfile_range(relative_path, ecosystem, package_name);
+            item.insert("direct".into(), json!(range.is_some()));
+            item.insert(
+                "range".into(),
+                range.flatten().map_or(Value::Null, Value::String),
+            );
             let version = version.trim();
             item.insert(
                 "version".into(),
@@ -3574,6 +3565,19 @@ fn workspace_inventory_from_paths(
             merge_inventory_item(&mut inventory_map, &item);
         }
     }
+
+    for (ecosystem, package_name, range) in direct_dependencies.unresolved() {
+        let mut item = Map::new();
+        item.insert("ecosystem".into(), json!(ecosystem));
+        let (ns, name) = dependency_name(ecosystem, package_name);
+        item.insert("namespace".into(), ns.map_or(Value::Null, Value::String));
+        item.insert("name".into(), json!(name));
+        item.insert("direct".into(), json!(true));
+        item.insert("range".into(), range.map_or(Value::Null, Value::String));
+        item.insert("version".into(), Value::Null);
+        merge_inventory_item(&mut inventory_map, &item);
+    }
+    inventory_map.lead_with(direct_dependencies.listed_keys());
 
     inventory_map.into_values()
 }
@@ -3772,7 +3776,7 @@ fn workspace_diff_audit_inventory(
                 Some(v) => v,
                 None => continue,
             };
-            let (ns, name) = split_namespace_name(&change.package_name);
+            let (ns, name) = dependency_name(ecosystem, &change.package_name);
             changed_packages.push(change.package_name.clone());
             let mut item = Map::new();
             item.insert("ecosystem".into(), json!(*ecosystem));
@@ -5895,6 +5899,24 @@ pub fn package_config_policy_context(
     artifact: &GuardArtifact,
     config: Option<&GuardConfig>,
 ) -> Map<String, Value> {
+    package_config_policy_context_for(
+        &artifact.artifact_id,
+        artifact.publisher.as_deref(),
+        &artifact.harness,
+        config,
+    )
+}
+
+/// The same context for a caller that holds the artifact's identity rather
+/// than the artifact itself: a request the resident answers carries the
+/// artifact as a payload, and these three fields are all of it the context
+/// reads.
+pub fn package_config_policy_context_for(
+    artifact_id: &str,
+    publisher: Option<&str>,
+    harness: &str,
+    config: Option<&GuardConfig>,
+) -> Map<String, Value> {
     let mut out = Map::new();
     let Some(config) = config else {
         out.insert("available".into(), json!(false));
@@ -5909,12 +5931,10 @@ pub fn package_config_policy_context(
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    let artifact_override = map_lookup("artifact_actions", &artifact.artifact_id);
-    let publisher_override = artifact
-        .publisher
-        .as_deref()
-        .and_then(|publisher| map_lookup("publisher_actions", publisher));
-    let harness_override = map_lookup("harness_actions", &artifact.harness);
+    let artifact_override = map_lookup("artifact_actions", artifact_id);
+    let publisher_override =
+        publisher.and_then(|publisher| map_lookup("publisher_actions", publisher));
+    let harness_override = map_lookup("harness_actions", harness);
     out.insert("artifact_override".into(), option_json(artifact_override));
     out.insert("available".into(), json!(true));
     out.insert(
@@ -5922,19 +5942,19 @@ pub fn package_config_policy_context(
         option_json(resolve_risk_action(
             config,
             Some("package_script"),
-            Some(&artifact.harness),
+            Some(harness),
         )),
     );
     out.insert(
         "global_package_script_action".into(),
         option_json(resolve_risk_action(config, Some("package_script"), None)),
     );
-    out.insert("harness".into(), json!(artifact.harness));
+    out.insert("harness".into(), json!(harness));
     out.insert("harness_override".into(), option_json(harness_override));
     out.insert(
         "harness_package_script_action".into(),
         option_json(config.harness_risk_actions.as_ref().and_then(|map| {
-            map.get(&artifact.harness)
+            map.get(harness)
                 .and_then(|inner| inner.get("package_script"))
                 .cloned()
         })),

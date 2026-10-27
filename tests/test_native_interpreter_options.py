@@ -6,7 +6,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from codex_plugin_scanner.guard.native_shell_helpers import call
+from tests.native_shell_helpers_client import call
 from tests.shell_wrapper_test_support import native_shell_normalization
 
 

@@ -536,9 +536,11 @@ Current material gaps include:
   `hook_render` `cli_hook_emit` kind: a bridge-rendered harness gets its wire
   output and exit status, any other the policy action its exit status
   follows. When the resident cannot answer, the CLI prints the fixed
-  fail-closed bridge payload or exits with the harness's block status. The
-  Python bounded bridge still renders with `_daemon_response_to_native` when
-  the native bridge cannot run.
+  fail-closed bridge payload or exits with the harness's block status. When
+  the native bridge cannot run, the Python bounded bridge asks the same op with
+  `bridge: true`, which renders the daemon's answer for every harness as the
+  native bridge prints it, and prints the fixed fail-closed payload when the
+  resident cannot answer.
 
 ## No-environment production contract
 
