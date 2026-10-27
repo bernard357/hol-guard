@@ -27,7 +27,7 @@ from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.synced_policy import cached_policy_bundle_validation
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
 from tests.daemon_control_patching import patch_daemon_global
-from tests.policy_bundle_parser_support import computed_policy_bundle_hash
+from tests.policy_bundle_parser_support import computed_policy_bundle_hash, policy_bundle_paged_text
 from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_keyring,
     policy_bundle_test_verification_key,
@@ -171,14 +171,14 @@ def test_paged_text_is_verified_against_its_digest(monkeypatch: pytest.MonkeyPat
             {"value": "wörld", "total": len(encoded), "sha256": digest, "next": None},
         ],
     )
-    assert bridge.policy_bundle_paged_text("v1_canonical_payload", {}) == text
+    assert policy_bundle_paged_text("v1_canonical_payload", {}) == text
 
     _fake_pages(
         monkeypatch,
         [{"value": "tampered", "total": len(encoded), "sha256": digest, "next": None}],
     )
     with pytest.raises(PolicyBundleNativeUnavailableError):
-        bridge.policy_bundle_paged_text("v1_canonical_payload", {})
+        policy_bundle_paged_text("v1_canonical_payload", {})
 
 
 # -- verdict helpers -----------------------------------------------------------

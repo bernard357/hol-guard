@@ -26,7 +26,7 @@ from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
 def load_mcp_contribution_payloads(root: Path | None = None) -> tuple[dict[str, object], ...]:
     if root is not None:
         return _load_from_directory(root)
-    from codex_plugin_scanner.guard.catalog_delivery.installed_bundle import compatibility_payloads
+    from tests.installed_compatibility_support import compatibility_payloads
 
     bundled = compatibility_payloads("mcp")
     if bundled is not None:

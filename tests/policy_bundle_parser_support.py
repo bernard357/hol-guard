@@ -7,13 +7,15 @@ build and check signed fixtures, so the thin wrappers live here.
 
 from __future__ import annotations
 
+import hashlib
 import time
 
+from codex_plugin_scanner.guard import native_policy_bundle as bridge
 from codex_plugin_scanner.guard.native_policy_bundle import (
     PolicyBundleNativeError,
+    PolicyBundleNativeUnavailableError,
     native_rejection_code,
     policy_bundle_chunks,
-    policy_bundle_paged_text,
     policy_bundle_verdict,
 )
 from codex_plugin_scanner.guard.policy_bundle_trusted_keys import PolicyBundleVerificationKey
@@ -22,6 +24,30 @@ from codex_plugin_scanner.version import __version__
 POLICY_BUNDLE_RULE_MATCHER_FAMILIES = frozenset(
     {"file-read", "mcp", "mcp-tool", "package-request", "prompt", "prompt-env-read", "tool-action"}
 )
+
+
+def policy_bundle_paged_text(kind: str, request_input: dict[str, object]) -> str:
+    """Collect a text verdict that can exceed one resident response, page by page.
+
+    The reassembled text must match the byte count and SHA-256 Rust reported for
+    the whole document.
+    """
+
+    parts: list[str] = []
+    total: object = None
+    digest: object = None
+    for page in bridge._pages(kind, request_input):
+        part = page.get("value")
+        if not isinstance(part, str):
+            raise PolicyBundleNativeUnavailableError(bridge._SCHEMA_MISMATCH)
+        if total is not None and (page.get("total") != total or page.get("sha256") != digest):
+            raise PolicyBundleNativeUnavailableError(bridge._SCHEMA_MISMATCH)
+        total, digest = page.get("total"), page.get("sha256")
+        parts.append(part)
+    encoded = "".join(parts).encode("utf-8")
+    if total != len(encoded) or digest != hashlib.sha256(encoded).hexdigest():
+        raise PolicyBundleNativeUnavailableError(bridge._SCHEMA_MISMATCH)
+    return encoded.decode("utf-8")
 
 
 def _bundle_value(kind: str, policy_bundle: dict[str, object]) -> str:

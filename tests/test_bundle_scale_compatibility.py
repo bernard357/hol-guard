@@ -17,6 +17,7 @@ from tests import extension_contribution_loader as commands
 from tests import mcp_contribution_loader as mcp
 from tests.extension_builder_support import metadata
 from tests.installed_bundle_layout import installed_layout
+from tests.installed_compatibility_support import compatibility_payloads
 from tests.test_command_projection_build_hook import hook as hook
 from tests.test_installed_command_pack_bundle import ENGINE, SOURCE, encoded, root
 from tests.test_installed_command_pack_bundle import package as package
@@ -144,9 +145,9 @@ def test_root_compatibility_contract_rejects_source_substitution(compatibility):
 
 
 def test_true_legacy_absence_and_old_root_remain_compatible(package, tmp_path, monkeypatch):
-    assert installed.compatibility_payloads("commands") is None
+    assert compatibility_payloads("commands") is None
     monkeypatch.setattr(installed, "_package", lambda: tmp_path / "legacy")
-    assert installed.compatibility_payloads("mcp") is None
+    assert compatibility_payloads("mcp") is None
 
 
 @pytest.mark.parametrize("target", ["wheel", "sdist"])
