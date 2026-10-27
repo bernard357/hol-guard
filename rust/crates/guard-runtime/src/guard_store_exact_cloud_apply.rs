@@ -318,6 +318,11 @@ pub(crate) fn apply_signed_remote_exact_result(
     let expected_request = args.object("expected_request")?;
     let expected_raw_request = args.object("expected_raw_request")?;
     let dpop_thumbprint = args.opt_str("dpop_thumbprint")?;
+    // The caller derived `expected_request` from a queue read made in its own
+    // directory. Both rereads below resolve the request's scope from the same
+    // place, so a relative `config_path` with no stored workspace does not read
+    // as a changed request.
+    let cwd = args.opt_str("cwd")?;
 
     let allowing = resolution_action == "allow";
     let material = integrity_material(args)?;
@@ -370,7 +375,7 @@ pub(crate) fn apply_signed_remote_exact_result(
         return exact_error("remote_approval_expired", &resolved_at);
     };
 
-    let current = request(connection, guard_home, request_id, None, owner)?;
+    let current = request(connection, guard_home, request_id, cwd, owner)?;
     let Some(current_fields) = current.as_object() else {
         return exact_error("remote_exact_request_not_pending", &resolved_at);
     };
@@ -474,7 +479,7 @@ pub(crate) fn apply_signed_remote_exact_result(
         }
     }
 
-    let resolved_request = request(connection, guard_home, request_id, None, owner)?;
+    let resolved_request = request(connection, guard_home, request_id, cwd, owner)?;
     record_event(
         connection,
         "cloud_review.exact_applied",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
@@ -32,6 +33,15 @@ class _ConnectionOwner(Protocol):
         promote: bool = True,
         allow_primary: bool = True,
     ) -> dict[str, object] | None: ...
+
+
+def _process_cwd() -> str | None:
+    """This process's directory, as the approval queue reads pass it."""
+
+    try:
+        return os.getcwd()
+    except OSError:
+        return None
 
 
 def _exact_dpop_thumbprint(owner: _ConnectionOwner) -> str | None:
@@ -186,6 +196,12 @@ class StoreExactCloudReviewMixin:
                     "expected_request": expected_request,
                     "expected_raw_request": expected_raw_request,
                     "dpop_thumbprint": _exact_dpop_thumbprint(self),
+                    # The expected snapshot was read with this process's
+                    # directory, which is what resolves a relative config path
+                    # into a workspace scope. The recheck reads the request
+                    # again, so it resolves from the same place or an unchanged
+                    # request reads as stale.
+                    "cwd": _process_cwd(),
                     "integrity_key_b64": integrity_key_b64,
                     "integrity_key_id": integrity_key_id,
                 },

@@ -6,6 +6,7 @@ import argparse
 import json
 import sqlite3
 import threading
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,6 +102,38 @@ def test_review_sync_keys_reject_unanchored_key_material(tmp_path: Path) -> None
             store=store,
             workspace_id="workspace-1",
         )
+
+
+def test_exact_cloud_review_resolves_a_request_whose_scope_comes_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request with no stored workspace resolves its scope from the caller's directory.
+
+    Nothing about the request changes between the read that builds the expected
+    snapshot and the recheck inside the write transaction, so the signed verdict
+    must apply. It only does when both reads resolve the relative config path
+    from the same directory.
+    """
+
+    monkeypatch.chdir(tmp_path)
+    store = _connected_store(tmp_path)
+    target = replace(
+        _request("exact-relative"),
+        config_path=".guard/config.toml",
+        workspace=None,
+    )
+    _add_request(store, target)
+    enable_exact_cloud_review(store)
+
+    resolution = apply_exact_cloud_review(
+        store,
+        remote_approval=_remote_approval(store, target.request_id, receipt_id="exact-receipt-relative"),
+        expected_harness="codex",
+    )
+
+    assert resolution.request_id == target.request_id
+    target_row = store.get_approval_request(target.request_id)
+    assert target_row is not None and target_row["status"] == "resolved"
 
 
 def test_exact_cloud_review_resolves_one_request_without_policy_or_memory(tmp_path: Path) -> None:
