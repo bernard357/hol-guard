@@ -18,7 +18,7 @@ from codex_plugin_scanner.guard.policy_bundle_trusted_keys import (
     load_policy_bundle_verification_keys,
 )
 from codex_plugin_scanner.guard.runtime.actions import GuardActionEnvelope
-from codex_plugin_scanner.guard.runtime.local_request_snapshots import (
+from codex_plugin_scanner.guard.runtime.cloud_review_sync import (
     _resolve_cloud_receipt_redaction_level as _resolve_snapshot_redaction_level,
 )
 from codex_plugin_scanner.guard.runtime.runner import (

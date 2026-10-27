@@ -1,4 +1,4 @@
-"""Proposed extension packs. Never imported by runtime enforcement.
+"""Validates proposed extension packs against the catalog for tests.
 
 A pack groups existing catalog extensions and permissions for presentation and
 setup. It cannot enable an extension, change a trust class, lower a baseline
@@ -11,17 +11,16 @@ from __future__ import annotations
 import json
 from collections.abc import Collection
 from functools import lru_cache
-from importlib.resources import files
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError
 
-from ..action_lattice import guard_action_severity, most_restrictive_guard_action
-from .errors import BuilderError
-from .io import canonical_json, checked_path, parse_json, read_bytes
-from .validation import text, token
+from codex_plugin_scanner.guard.action_lattice import guard_action_severity, most_restrictive_guard_action
+from codex_plugin_scanner.guard.extension_builder.errors import BuilderError
+from codex_plugin_scanner.guard.extension_builder.io import canonical_json, checked_path, parse_json, read_bytes
+from codex_plugin_scanner.guard.extension_builder.validation import text, token
 
 PACK_SCHEMA = "guard.extension-pack.v1"
 MAX_PACK_BYTES = 32_768
@@ -62,7 +61,7 @@ class PackCatalog(Protocol):
 
 @lru_cache(maxsize=1)
 def pack_schema() -> dict[str, object]:
-    payload = files("codex_plugin_scanner.guard.extension_builder").joinpath("pack.v1.schema.json")
+    payload = Path(__file__).resolve().parents[1] / "contracts/extensions/pack.v1.schema.json"
     return cast(dict[str, object], json.loads(payload.read_text(encoding="utf-8")))
 
 

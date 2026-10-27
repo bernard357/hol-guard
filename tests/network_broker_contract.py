@@ -6,7 +6,7 @@ import ipaddress
 from dataclasses import dataclass
 from enum import Enum
 
-from .network_policy_contract import (
+from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     NETWORK_BACKEND_SCHEMA_VERSION,
     NETWORK_BROKER_SCHEMA_VERSION,
     BackendCapability,

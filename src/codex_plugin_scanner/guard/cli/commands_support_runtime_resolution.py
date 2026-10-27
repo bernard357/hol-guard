@@ -10,8 +10,6 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..store import GuardStore
-    from ._commands_shared import _now
-    from .commands_support_hook_payload import _action_envelope_json
     from .commands_support_runtime_artifacts import _CODEX_PROMPT_SECRET_KEY_MARKERS
 
 
@@ -119,14 +117,6 @@ def _copilot_runtime_server_identity(
     return server_identity, result["fingerprint"], result["transport"]
 
 
-
-
-
-
-
-
-
-
 def _validated_pi_runtime_policy_override(
     home_dir: Path,
     workspace: Path | None,
@@ -185,61 +175,6 @@ def _runtime_policy_path(
     if workspace is not None:
         return workspace / ".mcp.json"
     return home_dir / ".mcp.json"
-
-def _runtime_detection(harness: str, artifact: GuardArtifact) -> HarnessDetection:
-    return HarnessDetection(
-        harness=harness,
-        installed=True,
-        command_available=True,
-        config_paths=(artifact.config_path,),
-        artifacts=(artifact,),
-    )
-
-def _queue_claude_native_approval_gate_fallback(
-    *,
-    store: GuardStore,
-    harness: str,
-    artifact: GuardArtifact,
-    artifact_digest: str,
-    approval_center_url: str,
-    action_envelope: GuardActionEnvelope | None = None,
-    redaction_level: str = "full",
-) -> list[dict[str, object]]:
-    now = _now()
-    queued = queue_blocked_approvals(
-        detection=_runtime_detection(harness, artifact),
-        evaluation={
-            "artifacts": [
-                {
-                    "artifact_id": artifact.artifact_id,
-                    "artifact_name": artifact.name,
-                    "artifact_hash": artifact_digest,
-                    "artifact_type": artifact.artifact_type,
-                    "policy_action": "require-reapproval",
-                    "changed_fields": [artifact.artifact_type, "claude-native-approval-gate"],
-                    "source_scope": artifact.source_scope,
-                    "config_path": artifact.config_path,
-                    "risk_summary": "Native Claude approval requires the HOL Guard approval password.",
-                    "risk_signals": ["approval_gate_required", "claude_native_approval"],
-                    "action_envelope_json": _action_envelope_json(action_envelope),
-                }
-            ]
-        },
-        store=store,
-        approval_center_url=approval_center_url,
-        now=now,
-        redaction_level=redaction_level,
-    )
-    store.add_event(
-        "approval_gate/native_fallback_queued",
-        {
-            "harness": harness,
-            "artifact_id": artifact.artifact_id,
-            "queued_count": len(queued),
-        },
-        now,
-    )
-    return queued
 
 def _runtime_request_summary(artifact: GuardArtifact) -> str | None:
     summary = artifact.metadata.get("request_summary")
@@ -436,10 +371,10 @@ __all__ = [
     "_canonical_harness_name",
     "_expand_prompt_scan_path", "_is_copilot_permission_request",
     "_managed_install_for", "_managed_manifest_server",
-    "_prompt_scan_path_exists", "_queue_claude_native_approval_gate_fallback",
+    "_prompt_scan_path_exists",
     "_redact_codex_prompt_secret_assignments",
     "_resolve_prompt_scan_path", "_run_hermes_mcp_proxy",
-    "_runtime_detection", "_runtime_policy_path", "_runtime_request_summary",
+    "_runtime_policy_path", "_runtime_request_summary",
     "_server_command", "_server_env", "_server_headers",
     "_truncate_codex_display_text",
 ]

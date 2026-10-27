@@ -7,6 +7,9 @@ original command, so the bridge rewrites only after it has confirmed the Codex
 process that launched it is new enough. A pre-release counts only when its
 base version is newer than 0.131.0: ``0.131.0-alpha.N`` precedes the release
 that added the rewrite. Otherwise the denial stands.
+
+The Rust hook bridge owns this route at runtime. This copy stays with the
+tests, which use it to model the Codex lane in the benign gate.
 """
 
 from __future__ import annotations
@@ -21,8 +24,9 @@ import time
 from pathlib import Path
 from typing import TypeGuard
 
-from ..native_hook_containment_route import native_containment_sink
-from .zcode_contained_tests import contained_zcode_response
+import codex_plugin_scanner
+from codex_plugin_scanner.guard.adapters.zcode_contained_tests import contained_zcode_response
+from codex_plugin_scanner.guard.native_hook_containment_route import native_containment_sink
 
 _MIN_VERSION = (0, 131, 0)
 _MAX_ANCESTORS = 6
@@ -83,7 +87,7 @@ def route_codex_containment(
             "harness": "codex",
             "guard_home": str(guard_home),
             "python_executable": sys.executable,
-            "package_root": str(Path(__file__).resolve().parents[3]),
+            "package_root": str(Path(codex_plugin_scanner.__file__).resolve().parents[1]),
         },
         cli_args=["--home", str(home_dir)],
         sink=sink,
@@ -105,7 +109,7 @@ def launching_codex_executable() -> Path | None:
     if sys.platform == "linux":
         return _linux_codex_ancestor()
     if sys.platform == "win32":
-        from .codex_contained_tests_windows import windows_codex_ancestor
+        from tests.codex_containment_route_windows import windows_codex_ancestor
 
         return windows_codex_ancestor(is_codex_binary_name, _MAX_ANCESTORS)
     try:

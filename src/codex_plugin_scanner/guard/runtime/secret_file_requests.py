@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..native_sensitive_request import (
-    native_benign_file_read,
     native_command_list_candidate_texts,
     native_read_only_lookup_target_is_safe,
     native_sensitive_file_read_request,
@@ -184,18 +183,6 @@ def command_list_candidate_texts(values: list[str], *, preserve_items: bool = Fa
     return native_command_list_candidate_texts(values, preserve_items=preserve_items)
 
 
-def is_explicitly_benign_native_file_read_request(
-    tool_name: object,
-    arguments: object,
-    *,
-    cwd: Path | None = None,
-    home_dir: Path | None = None,
-) -> bool:
-    """Whether the resident proves one native ``Read`` target existing and non-sensitive."""
-
-    return native_benign_file_read(tool_name, arguments, cwd=cwd, home_dir=home_dir)
-
-
 def _read_only_lookup_target_is_safe(target: str, *, allow_dirs: bool, home_dir: Path | None = None) -> bool:
     return native_read_only_lookup_target_is_safe(target, allow_dirs=allow_dirs, home_dir=home_dir)
 
@@ -222,7 +209,6 @@ __all__ = [
     "extract_sensitive_file_write_request",
     "extract_sensitive_file_write_request_artifact",
     "extract_sensitive_tool_action_request",
-    "is_explicitly_benign_native_file_read_request",
     "is_file_read_tool_name",
     "low_risk_compound_developer_execution_context",
 ]
