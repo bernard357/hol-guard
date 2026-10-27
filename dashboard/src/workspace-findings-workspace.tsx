@@ -15,7 +15,9 @@ import {
 } from "./workspace-findings-api";
 import { createLatestRefresh } from "./workspace-findings-refresh";
 import {
+  CarriedNote,
   Cell,
+  EditorTaskFindingsTable,
   HookFindingsTable,
   McpFindingsTable,
   PluginFindingsTable,
@@ -52,6 +54,8 @@ const COVERAGE_REASONS: Record<string, string> = {
   hook_config_incomplete: "Some agent hook settings could not be fully checked, so not every project hook was screened.",
   plugin_manifest_incomplete: "Some agent plugin files could not be fully read, so not every plugin hook or MCP server was checked.",
   ci_workflow_incomplete: "Some GitHub Actions workflows could not be fully read, so not every workflow was checked.",
+  editor_task_incomplete:
+    "Some editor task or dev container files could not be fully read, so not every file was checked.",
 };
 
 const FAILURE_REASONS: Record<string, string> = {
@@ -73,6 +77,7 @@ const DETECTOR_LABELS: Record<string, string> = {
   hook_config_v1: "Project hook checking",
   plugin_manifest_v1: "Agent plugin checking",
   ci_workflow_v1: "CI workflow checking",
+  editor_task_v1: "Editor task checking",
 };
 
 export type WorktreeStatus = { label: string; tone: TagTone; detail: string | null };
@@ -347,6 +352,7 @@ function FindingsSections(props: FindingsSectionsProps) {
   const hooks = props.findings.filter((finding) => finding.kind === "hook");
   const plugins = props.findings.filter((finding) => finding.kind === "plugin");
   const workflows = props.findings.filter((finding) => finding.kind === "workflow");
+  const editorTasks = props.findings.filter((finding) => finding.kind === "editor_task");
   if (props.findings.length === 0) {
     return <p className="text-sm text-slate-600">{emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked)}</p>;
   }
@@ -360,6 +366,7 @@ function FindingsSections(props: FindingsSectionsProps) {
       {hooks.length > 0 && <HookFindingsTable findings={hooks} />}
       {plugins.length > 0 && <PluginFindingsTable findings={plugins} />}
       {workflows.length > 0 && <WorkflowFindingsTable findings={workflows} />}
+      {editorTasks.length > 0 && <EditorTaskFindingsTable findings={editorTasks} />}
     </div>
   );
 }
@@ -391,6 +398,7 @@ function FindingsTable({ findings, fixes }: { findings: WorkspaceFinding[]; fixe
               <Cell label="Fixed in"><Mono value={finding.fixVersion} fallback="No fix yet" /></Cell>
               <Cell label="Decision">
                 <Tag tone={decisionTone(finding.decision)}>{DECISION_LABELS[finding.decision] ?? finding.decision}</Tag>
+                <CarriedNote finding={finding} />
               </Cell>
               <Cell label="Severity"><span className="capitalize text-slate-700">{finding.severity}</span></Cell>
               <Cell label="Advisories" wide>

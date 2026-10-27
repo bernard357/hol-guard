@@ -6,17 +6,6 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from codex_plugin_scanner.guard.runtime.linux_tcp_enforcement import (
-    compile_linux_tcp_policy,
-    evaluate_linux_tcp_artifact,
-)
-from codex_plugin_scanner.guard.runtime.linux_udp_dns_enforcement import (
-    LinuxResolverRoute,
-    LinuxSocketHook,
-    compile_linux_udp_dns_policy,
-    create_linux_resolver_route,
-    evaluate_linux_udp_dns_artifact,
-)
 from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     Destination,
     DestinationKind,
@@ -28,6 +17,17 @@ from codex_plugin_scanner.guard.runtime.network_policy_contract import (
     PolicyOwner,
     PortRange,
     ProcessTreeIdentity,
+)
+from tests.linux_tcp_enforcement import (
+    compile_linux_tcp_policy,
+    evaluate_linux_tcp_artifact,
+)
+from tests.linux_udp_dns_enforcement import (
+    LinuxResolverRoute,
+    LinuxSocketHook,
+    compile_linux_udp_dns_policy,
+    create_linux_resolver_route,
+    evaluate_linux_udp_dns_artifact,
 )
 
 RESOLVER_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))

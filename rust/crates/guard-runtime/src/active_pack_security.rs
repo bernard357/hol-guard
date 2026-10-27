@@ -293,12 +293,14 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
             // same authority and revocations: the published one is the fresher
             // observation of the same security state. That only holds while the
             // retained Root describes the engine the active activation names.
-            // `complete` quarantines every extension whose Root engine differs
-            // from that header, so a Root admitted under another engine denies
-            // the whole pack with nothing actually revoked. Guard homes are
-            // shared between runtimes built from different sources -- a Desktop
-            // core beside a CLI install, or a development build that ran once --
-            // so this is reachable without an attacker. Let the installed bundle
+            // `complete` records a floor against every extension whose Root
+            // engine differs from that header, and this build can never clear
+            // it: a publication is admitted only when its root engine equals
+            // this implementation digest, so a Root held under another engine
+            // carries no revocation this runtime could ever act on. Guard homes
+            // are shared between runtimes built from different sources -- a
+            // Desktop core beside a CLI install, or a development build that ran
+            // once -- so this is reachable without an attacker. Let the installed bundle
             // take the Root back in exactly that case: the retained Root does
             // not match the authenticated activation's engine and the candidate
             // does. The revocation check below still refuses any bundle that
@@ -380,8 +382,9 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
             // exactly this publication. Only that release, under the same
             // authority and revocations, keeps its verified program; the
             // lineage floor stays where the upgrade put it. Without this the
-            // newer engine stays the security root and every pack stays
-            // quarantined until that upgrade comes back.
+            // newer engine stays the security root, and every pack carries its
+            // floor against a Root this build cannot refresh, until that
+            // upgrade comes back.
             Err(code)
                 if code == "pack_lifecycle_version_rollback"
                     && input["profile"] == "installed"
@@ -470,3 +473,5 @@ pub(crate) fn evaluate(input: &Value) -> Result<Value, String> {
 mod tests;
 #[cfg(test)]
 pub(crate) use tests::fixture as fixture_record;
+#[cfg(test)]
+pub(crate) use tests::floor_fixture as fixture_floor_record;
