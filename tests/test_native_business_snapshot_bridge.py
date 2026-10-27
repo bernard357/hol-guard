@@ -375,3 +375,42 @@ def test_business_cache_requires_removal_authority_and_cannot_be_skipped_for_old
         cache_path(home), verifier_key=api.derive_native_policy_verifier_key(b"m" * 32)
     )
     assert preserved is not None and preserved[0] == first
+
+
+def test_materialize_lock_wait_ends_before_the_process_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codex_plugin_scanner.guard import native_policy_snapshot_business_bridge as bridge
+    from codex_plugin_scanner.guard import native_runtime
+
+    status = SimpleNamespace(
+        identity=SimpleNamespace(path=tmp_path / "unused"),
+        capabilities=SimpleNamespace(features=("native-policy-snapshot-materialize-v1",)),
+    )
+    monkeypatch.setattr(bridge, "_selected_runtime", lambda **kwargs: status)
+    observed: list[tuple[dict[str, object], float]] = []
+
+    def recording(*_args: object, **kwargs: object) -> SimpleNamespace:
+        timeout = kwargs["timeout_seconds"]
+        assert isinstance(timeout, float)
+        observed.append((json.loads(str(kwargs["input_text"])), timeout))
+        return SimpleNamespace(
+            timed_out=False,
+            returncode=0,
+            output_limit_exceeded=False,
+            containment_failed=False,
+            stdout='{"schema":"ok"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(native_runtime, "_run_native_process_result", recording)
+    token = bridge.begin_business_deadline(time.monotonic() + 2.0)
+    try:
+        _ = bridge.materialize_native_snapshot({"schema": "request"})
+    finally:
+        bridge.end_business_deadline(token)
+    (request, timeout_seconds), *_ = observed
+    lock_wait_ms = request["lock_wait_ms"]
+    assert isinstance(lock_wait_ms, int)
+    assert 0 < lock_wait_ms < timeout_seconds * 1000

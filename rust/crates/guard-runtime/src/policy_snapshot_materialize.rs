@@ -38,6 +38,9 @@ const RESIDENT_STATE_NAMES: [&str; 2] = [
 ];
 const MAX_STATE_BYTES: u64 = 4096;
 const LOCK_POLL: Duration = Duration::from_millis(10);
+/// The longest a publisher waits for the generation lock; the caller's own
+/// process deadline is far shorter.
+const MAX_LOCK_WAIT_MS: u64 = 60_000;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,6 +97,9 @@ pub(crate) fn materialize_from_reader(reader: impl Read) -> Result<Vec<u8>, Stri
     if request.renew_after_generation == Some(0) {
         return Err("native_policy_snapshot_generation_invalid".into());
     }
+    if request.lock_wait_ms > MAX_LOCK_WAIT_MS {
+        return Err(ERROR.into());
+    }
     let home = Home {
         runtime: request.guard_home.join(RUNTIME_DIRECTORY),
         root: request.guard_home,
@@ -111,6 +117,14 @@ pub(crate) fn materialize_from_reader(reader: impl Read) -> Result<Vec<u8>, Stri
         expires_at_ms: request.expires_at_ms,
     })?;
     let _lock = GenerationLock::acquire(&home, Duration::from_millis(request.lock_wait_ms))?;
+    // The resident authenticates snapshots with the home's verifier key, so a
+    // generation sealed under any other key could never be read. Refuse it
+    // before anything is written.
+    if let Some(existing) = crate::policy_verifier_key_provision::existing_key(&home.runtime)? {
+        if !crate::resident_transport::constant_time_eq(&existing, key.bytes()) {
+            return Err("native_policy_verifier_key_mismatch".into());
+        }
+    }
     recover_pending(&home, key.bytes())?;
     let current = read_generation(&home)?;
     let mut renew = request.renew_after_generation;
@@ -402,7 +416,7 @@ impl GenerationLock {
             crate::resident_state::private_lock_file(&path, &home.root).map_err(|_| invalid())?;
         #[cfg(not(windows))]
         let file = open_unix_lock(&path, &home.root).ok_or_else(invalid)?;
-        let deadline = Instant::now() + wait;
+        let deadline = Instant::now().checked_add(wait).ok_or_else(invalid)?;
         loop {
             match fs2::FileExt::try_lock_exclusive(&file) {
                 Ok(()) => break,

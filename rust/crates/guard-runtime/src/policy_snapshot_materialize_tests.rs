@@ -294,3 +294,32 @@ fn a_held_lock_times_out() {
     drop(holder);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_request_sealed_under_another_verifier_key_commits_nothing() {
+    let root = home("key-mismatch");
+    let key = root
+        .join(RUNTIME_DIRECTORY)
+        .join(crate::policy_store::VERIFIER_KEY_FILE_NAME);
+    plant(&key, &[9; 32]);
+    assert_eq!(
+        materialize(&business(request(&root))).unwrap_err(),
+        "native_policy_verifier_key_mismatch"
+    );
+    assert!(!root.join(RUNTIME_DIRECTORY).join(CACHE_NAME).exists());
+    assert!(!root.join(RUNTIME_DIRECTORY).join(PENDING_NAME).exists());
+    assert!(!root.join(STATE_NAME).exists());
+    // The home's own key is accepted.
+    plant(&key, &KEY);
+    materialize(&business(request(&root))).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_unbounded_lock_wait_is_refused() {
+    let root = home("lock-wait");
+    let mut value = request(&root);
+    value["lock_wait_ms"] = json!(u64::MAX);
+    assert_eq!(materialize(&value).unwrap_err(), ERROR);
+    fs::remove_dir_all(root).unwrap();
+}

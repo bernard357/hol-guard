@@ -138,7 +138,6 @@ def native_policy_snapshot_v3(
             "issued_at_ms": issued,
             "expires_at_ms": expires,
             "renew_after_generation": renew_after_generation,
-            "lock_wait_ms": max(0, int((deadline_monotonic - time.monotonic()) * 800)),
         }
         if binding is not None:
             request["command_extensions"] = binding

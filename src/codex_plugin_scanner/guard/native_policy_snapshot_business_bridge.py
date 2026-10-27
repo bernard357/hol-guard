@@ -261,14 +261,18 @@ def materialize_native_snapshot(request: Mapping[str, object]) -> dict[str, obje
     assert status.identity is not None and status.capabilities is not None
     if "native-policy-snapshot-materialize-v1" not in status.capabilities.features:
         raise NativePolicySnapshotError("native_business_policy_consumer_unavailable")
-    encoded = _canonical_json_bytes_v3(request)
+    timeout = _remaining_timeout()
+    # The runtime gives up on a held generation lock well inside the time this
+    # process may run, so contention is reported as such and never cut off
+    # mid-commit.
+    encoded = _canonical_json_bytes_v3({**request, "lock_wait_ms": int(timeout * 800)})
     if len(encoded) > POLICY_SNAPSHOT_MAX_BYTES:
         raise NativePolicySnapshotError("native_policy_snapshot_too_large")
     result = _run_native_process_result(
         status.identity.path,
         ("policy-snapshot-materialize", "--stdin"),
         input_text=encoded.decode("utf-8"),
-        timeout_seconds=_remaining_timeout(),
+        timeout_seconds=timeout,
         output_limit=POLICY_SNAPSHOT_MAX_BYTES,
     )
     if result.timed_out:
