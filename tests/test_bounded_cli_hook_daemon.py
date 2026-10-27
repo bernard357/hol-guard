@@ -62,7 +62,8 @@ def test_frozen_grok_transport_budget_and_failure(tmp_path: Path, event: str) ->
     assert code == 0
 
 
-@pytest.mark.parametrize("harness", ["copilot", "grok", "hermes", "openclaw", "kimi", "zcode", "devin", "pi", "omp"])
+# Hermes answers go through hermes_bridge_response, never the bridge renderer.
+@pytest.mark.parametrize("harness", ["copilot", "grok", "openclaw", "kimi", "zcode", "devin", "pi", "omp"])
 @pytest.mark.parametrize("explicit_block", [False, True])
 def test_unavailable_posttool_observation_preserves_explicit_decision(
     harness: str, explicit_block: bool, native_bridge_render

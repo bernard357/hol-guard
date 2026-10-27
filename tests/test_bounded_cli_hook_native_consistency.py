@@ -99,7 +99,9 @@ def test_zcode_authority_block_stderr_carries_remediation(_translate) -> None:
     )
 
     assert code == 2
-    assert "hol-guard command controls recover-authority" in stderr
+    # The fixture home is not the default, so the command names it with --guard-home.
+    assert "hol-guard command --guard-home " in stderr
+    assert " controls recover-authority" in stderr
 
 
 def test_zcode_prompt_blocks_keep_blocking_exit(_translate) -> None:
