@@ -56,6 +56,7 @@ from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_b
 from tests.guard_totp_support import read_totp_secret, totp_code_at_counter
 from tests.native_permission_plan_stub import answer_persist_plans
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
+from tests.policy_store_support import replace_remote_policies, resolve_policy
 from tests.support.network import stub_authenticated_urlopen
 
 pytestmark = pytest.mark.usefixtures("approval_questionnaire_mode")
@@ -1837,7 +1838,8 @@ def test_daemon_approval_false_artifact_scope_still_allows_once(
     assert body["resolved"] is True
     assert store.list_policy_decisions("codex") == []
     assert (
-        store.resolve_policy(
+        resolve_policy(
+            store,
             "codex",
             f"codex:project:{request_id}",
             f"hash-{request_id}",
@@ -1846,7 +1848,8 @@ def test_daemon_approval_false_artifact_scope_still_allows_once(
         == "allow"
     )
     assert (
-        store.resolve_policy(
+        resolve_policy(
+            store,
             "codex",
             f"codex:project:{request_id}",
             f"hash-{request_id}",
@@ -1897,7 +1900,7 @@ def test_approval_gate_direct_lower_layers_cannot_bypass(tmp_path: Path) -> None
     with pytest.raises(ApprovalGateError):
         store.upsert_policy(decision, "2026-04-11T00:00:00+00:00")
     with pytest.raises(ApprovalGateError):
-        store.replace_remote_policies([decision], "2026-04-11T00:00:00+00:00")
+        replace_remote_policies(store, [decision], "2026-04-11T00:00:00+00:00")
     with pytest.raises(ApprovalGateError):
         record_policy(store, "codex", "allow", "artifact", "codex:project:record", None)
     with pytest.raises(ApprovalGateError):

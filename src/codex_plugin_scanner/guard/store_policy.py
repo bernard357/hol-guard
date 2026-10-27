@@ -377,23 +377,6 @@ class StorePolicyMixin:
             raise RuntimeError("Guard policy integrity control state is invalid.")
         self._finalize_policy_integrity_control_state(next_control_state)
 
-    def replace_remote_policies(
-        self,
-        decisions: list[PolicyDecision],
-        now: str,
-        *,
-        approval_gate_grant: ApprovalGateGrant | None = None,
-        remote_write_authorized: bool = False,
-    ) -> None:
-        now, rows = self._prepared_remote_policy_rows(
-            decisions,
-            now,
-            approval_gate_grant=approval_gate_grant,
-            remote_write_authorized=remote_write_authorized,
-        )
-        with self._connect() as connection:
-            self._replace_remote_policy_rows_locked(connection, rows)
-
     def apply_policy_bundle_authority(self, *args: Any, **kwargs: Any) -> dict[str, object] | None:
         """Activate one authenticated policy bundle atomically.
 
@@ -915,35 +898,6 @@ class StorePolicyMixin:
             """,
             rows,
         )
-
-    def resolve_policy(
-        self,
-        harness: str,
-        artifact_id: str | None,
-        artifact_hash: str | None = None,
-        workspace: str | None = None,
-        publisher: str | None = None,
-        now: str | None = None,
-        *,
-        memory_command: str | None = None,
-        memory_artifact_type: str | None = None,
-        memory_artifact_name: str | None = None,
-        consume_one_shot: bool = True,
-    ) -> str | None:
-        lookup = self.resolve_policy_decision_lookup_with_memory_pattern(
-            harness,
-            artifact_id,
-            artifact_hash=artifact_hash,
-            workspace=workspace,
-            publisher=publisher,
-            now=now,
-            memory_command=memory_command,
-            memory_artifact_type=memory_artifact_type,
-            memory_artifact_name=memory_artifact_name,
-            consume_one_shot=consume_one_shot,
-        )
-        decision = lookup["decision"]
-        return str(decision["action"]) if decision is not None else None
 
     def resolve_policy_decision_lookup_with_memory_pattern(
         self,
