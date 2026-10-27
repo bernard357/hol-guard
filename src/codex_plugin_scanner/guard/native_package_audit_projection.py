@@ -43,6 +43,21 @@ _FINDING_KEYS = frozenset(
 )
 # The workspace projection reads only these; the rest of the audit stays local.
 _PROJECTED_KEYS = ("evaluation", "audit_status", "lockfile_warnings")
+_EVALUATION_KEYS = ("bundle_version", "packages")
+_PACKAGE_KEYS = (
+    "decision",
+    "ecosystem",
+    "name",
+    "namespace",
+    "resolvedVersion",
+    "requestedVersion",
+    "ruleId",
+    "recommendedFixVersion",
+    "reasons",
+    "relatedAdvisoryIds",
+    "advisoryAliases",
+)
+_REASON_KEYS = ("code", "severity", "advisoryId")
 _SEVERITIES = frozenset({"critical", "high", "medium", "low", "info", "unknown"})
 _FINDING_DECISIONS = frozenset({"block", "ask", "warn"})
 # Matches PACKAGE_AUDIT_PROJECTION_MAX_BYTES; stays under the resident client frame limit.
@@ -179,6 +194,8 @@ def native_workspace_package_findings(
     """Return the resident's supply-chain findings for a workspace audit, most severe first."""
 
     projected = {key: payload[key] for key in _PROJECTED_KEYS if key in payload}
+    if "evaluation" in projected:
+        projected["evaluation"] = _projected_evaluation(projected["evaluation"])
     reply = _send({"query": "workspace_findings", "worktree_key": worktree_key, "payload": projected}, store)
     findings, listed = reply.get("findings"), reply.get("listed")
     unresolved, unchecked = reply.get("unresolved"), reply.get("unchecked")
@@ -225,12 +242,40 @@ def native_package_identities(
         set(reply) != {"finding_ids", "settled"}
         or not isinstance(finding_ids, list)
         or len(finding_ids) != len(findings)
+        or not all(_kept_id(item, new_id) for item, new_id in zip(findings, finding_ids, strict=True))
         or not isinstance(settled, list)
         or len(settled) != len(earlier)
         or not all(isinstance(item, bool) for item in settled)
     ):
         raise NativePackageAuditProjectionError("Native package identities invalid")
     return finding_ids, settled
+
+
+def _projected_evaluation(evaluation: object) -> object:
+    """``evaluation`` with only the fields the resident reads, so a large audit stays under the request limit."""
+
+    if not isinstance(evaluation, Mapping):
+        return evaluation
+    projected = {key: evaluation[key] for key in _EVALUATION_KEYS if key in evaluation}
+    packages = projected.get("packages")
+    if isinstance(packages, list):
+        projected["packages"] = [_projected(package, _PACKAGE_KEYS) for package in packages]
+        for package in projected["packages"]:
+            if isinstance(package, dict) and isinstance(package.get("reasons"), list):
+                package["reasons"] = [_projected(reason, _REASON_KEYS) for reason in package["reasons"]]
+    return projected
+
+
+def _projected(item: object, keys: tuple[str, ...]) -> object:
+    return {key: item[key] for key in keys if key in item} if isinstance(item, Mapping) else item
+
+
+def _kept_id(finding: Mapping[str, object], finding_id: object) -> bool:
+    """A package finding may take an earlier id; any other finding keeps its own."""
+
+    if finding.get("source_kind") == "supply_chain":
+        return _text(finding_id)
+    return finding_id == finding.get("finding_id")
 
 
 def _valid_finding(item: object) -> bool:

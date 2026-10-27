@@ -151,6 +151,36 @@ def test_workspace_findings_send_only_what_the_projection_reads(monkeypatch: pyt
     }
 
 
+def test_workspace_findings_drop_evaluation_fields_the_projection_does_not_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _patch(monkeypatch, dict(_WORKSPACE))
+    package = {
+        "decision": "block",
+        "ecosystem": "npm",
+        "name": "a",
+        "reasons": [{"code": "malicious_package", "severity": "high", "message": "m" * 4096}, "text"],
+        "metadata": {"tarball": "x" * 4096},
+    }
+    evaluation = {"bundle_version": "v1", "packages": [package, 7], "trace": ["t"] * 100}
+    bridge.native_workspace_package_findings("w", {"evaluation": evaluation}, store=_STORE)
+    query = seen[0]["request"]["query"]  # type: ignore[index]
+    assert query["payload"] == {
+        "evaluation": {
+            "bundle_version": "v1",
+            "packages": [
+                {
+                    "decision": "block",
+                    "ecosystem": "npm",
+                    "name": "a",
+                    "reasons": [{"code": "malicious_package", "severity": "high"}, "text"],
+                },
+                7,
+            ],
+        }
+    }
+
+
 def test_a_short_package_list_stays_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch(monkeypatch, {**_WORKSPACE, "listed": None})
     assert bridge.native_workspace_package_findings("w", {}, store=None).listed is None
@@ -198,9 +228,19 @@ def test_package_identities_stay_aligned_with_their_inputs(monkeypatch: pytest.M
         {"finding_ids": ["b"], "settled": []},
         {"finding_ids": ["b"], "settled": [1]},
         {"finding_ids": ["b"], "settled": [False], "extra": 1},
+        {"finding_ids": [None], "settled": [False]},
+        {"finding_ids": [7], "settled": [False]},
+        {"finding_ids": [""], "settled": [False]},
     ],
 )
 def test_misaligned_package_identities_fail_closed(monkeypatch: pytest.MonkeyPatch, reply: dict[str, object]) -> None:
     _patch(monkeypatch, reply)
     with pytest.raises(bridge.NativePackageAuditProjectionError):
         bridge.native_package_identities([_FINDING], [{}], None, store=_STORE)
+
+
+def test_a_finding_that_is_not_a_package_keeps_its_own_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch(monkeypatch, {"finding_ids": ["b" * 32], "settled": [False]})
+    secret = {"finding_id": "s" * 32, "source_kind": "secret"}
+    with pytest.raises(bridge.NativePackageAuditProjectionError):
+        bridge.native_package_identities([secret], [{}], None, store=_STORE)

@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import workspace_assessment_store as assessments
-from .native_package_audit_projection import SupplyChainProjection, native_workspace_package_findings
+from .native_package_audit_projection import (
+    NativePackageAuditProjectionError,
+    SupplyChainProjection,
+    native_workspace_package_findings,
+)
 from .native_supply_chain_egress import offline_egress
 from .native_workspace_snapshot import WorkspaceSnapshot, WorkspaceSnapshotError, workspace_snapshot
 from .store_workspace_assessment_schema import FINDINGS_BYTE_BUDGET, MAX_FINDINGS
@@ -113,6 +117,11 @@ def run_next(
         # A result over its storage bound is recorded as a failure instead of
         # leaving the lease to expire and the same run to repeat.
         failed = assessments.RunOutcome(state="failed", error_code="assessment_result_too_large")
+        assessments.finish(store, claimed, failed, now_ms=clock())
+    except NativePackageAuditProjectionError:
+        # Package ids could not be carried, so the run fails now instead of
+        # holding its lease until it expires and the run repeats.
+        failed = assessments.RunOutcome(state="failed", error_code="supply_chain_detector_failed")
         assessments.finish(store, claimed, failed, now_ms=clock())
     return True
 

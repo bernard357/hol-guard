@@ -672,3 +672,20 @@ def test_host_without_load_average_reports_no_pressure(monkeypatch) -> None:
 
     monkeypatch.setattr(pressure.os, "getloadavg", unavailable)
     assert pressure.host_resource_pressure() is None
+
+
+def test_a_failed_package_id_carry_is_recorded_as_failure(tmp_path: Path, monkeypatch) -> None:
+    store, claimed = queued_run(tmp_path)
+    found = assessments.RunOutcome(state="completed", snapshot_digest=SNAPSHOT.snapshot_digest, findings=[])
+
+    def unavailable(outcome, previous, *, store=None):
+        if outcome.state == "failed":
+            return outcome, []
+        raise runner.NativePackageAuditProjectionError("Native package identities invalid")
+
+    monkeypatch.setattr(assessments, "claim_next", lambda store, owner, now_ms, **_: claimed)
+    monkeypatch.setattr(runner, "execute", lambda store, config, run, **_: found)
+    monkeypatch.setattr(assessments, "keep_package_identities", unavailable)
+    assert runner.run_next(store, None, owner="test", clock=lambda: T0 + 1)
+    run = assessments.get_run(store, claimed.run_id)
+    assert run is not None and (run["state"], run["error_code"]) == ("failed", "supply_chain_detector_failed")
