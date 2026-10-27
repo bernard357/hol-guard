@@ -1,0 +1,12 @@
+== ruff-check
+All checks passed!
+== ruff-format
+5 files already formatted
+== basedpyright
+0 errors, 0 warnings, 0 notes
+== cargo-fmt
+== approval-contract-500
+native approval contract gate: pass
+== stale-imports
+PRE-PUSH: OK (light)
+EXIT=0

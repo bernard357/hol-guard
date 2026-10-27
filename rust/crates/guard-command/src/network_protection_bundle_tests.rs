@@ -123,7 +123,7 @@ impl Fixture {
     fn build(self) -> Value {
         let version_ms = self
             .version_ms
-            .unwrap_or_else(|| (self.generated_at * 1_000.0) as i64);
+            .unwrap_or((self.generated_at * 1_000.0) as i64);
         let mut bundle = Map::new();
         bundle.insert(
             "contractVersion".into(),
