@@ -36,7 +36,7 @@ def _cases_from(payloads) -> list[tuple[str, str, str, str, str]]:
         launch = payload["launch"]
         if launch["kind"] != "package-launcher":
             continue
-        tools = [tool["name"] for tool in payload["tools"][:3]] + ["unlisted_tool"]
+        tools = [tool["name"] for tool in payload["tools"] if tool["name"] != "other"] + ["unlisted_tool"]
         for tool in tools:
             cases.append((payload["id"], launch["command"], launch["package"], tool, mcp_tool_state(payload, tool)))
     return cases
