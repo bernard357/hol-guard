@@ -435,7 +435,12 @@ def reads_only(command: str) -> bool:
 
 # --- name scrubbing -----------------------------------------------------------------------------
 
-WORD = re.compile(r"[A-Za-z][\w.+-]{2,}")
+# A private name can be two characters long -- `proj/ab`. A two-letter word is
+# matched as a path component only, because a bare one is far more often a verb
+# or part of a short flag bundle (`cd`, `-la`, `-rn`) than a name worth
+# scrubbing, and renaming those would both corrupt the command the gate
+# measures and drop most rows through `option_names`.
+WORD = re.compile(r"[A-Za-z][\w.+-]{2,}|(?<=/)[A-Za-z][\w.+-]")
 GENERIC = {
     # shell and tool verbs
     "git",
@@ -778,6 +783,27 @@ def existing_commands(path: Path) -> set[tuple[str, str]]:
     return found
 
 
+MINED_ID = re.compile(r"observed-(?P<verb>.+)-(?P<number>\d+)")
+
+
+def existing_identities(path: Path) -> Counter[str]:
+    """The highest ``observed-<verb>-<n>`` the gate already holds, per verb.
+
+    A fresh run numbers from zero, so without this the next batch emits
+    ``observed-grep-01`` again and collides with the ids already committed and
+    with the ``id@harness`` keys that name them elsewhere.
+    """
+    fixture = json.loads(path.read_text(encoding="utf-8"))
+    highest: Counter[str] = Counter()
+    for case in fixture.get("cases", []):
+        match = MINED_ID.fullmatch(str(case.get("id", "")))
+        if match is None:
+            continue
+        verb = match.group("verb")
+        highest[verb] = max(highest[verb], int(match.group("number")))
+    return highest
+
+
 def payload_of(row: dict[str, Any], owners: list[str]) -> tuple[str, dict[str, Any]] | None:
     tool = str(row.get("tool_name") or row.get("tool") or "")
     tool_input = row.get("tool_input")
@@ -855,7 +881,8 @@ def main() -> int:
 
     covered = existing_commands(args.existing) if args.existing else set()
     table: dict[str, str] = {}
-    counts: Counter[str] = Counter()
+    # New ids continue after the ones the fixture already holds.
+    counts: Counter[str] = existing_identities(args.existing) if args.existing else Counter()
     cases: list[dict[str, Any]] = []
     reasons: dict[str, str] = {}
     seen: set[str] = set()

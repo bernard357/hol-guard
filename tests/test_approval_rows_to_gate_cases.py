@@ -90,3 +90,29 @@ def test_renaming_never_touches_option_tokens_and_ids_are_scrubbed() -> None:
 def test_verb_skips_the_directory_change() -> None:
     assert converter.verb_of("cd sub && ls") == "ls"
     assert converter.verb_of("cd ${WORKTREE} && git status") == "git"
+
+
+def test_two_character_names_are_scrubbed_as_path_components() -> None:
+    # A private name can be two characters long, and a path component is the
+    # one place a two-letter word is a name rather than a verb or a flag.
+    table: dict[str, str] = {}
+    assert converter.rename_names("cat ${WORKTREE}/ab", table) != "cat ${WORKTREE}/ab"
+    assert table["ab"] != "ab"
+    # Short verbs and flag bundles keep their bytes, so the command shape the
+    # gate measures survives and the row is not dropped.
+    assert converter.rename_names("cd sub && ls -la ${WORKTREE}/src", {}) == "cd sub && ls -la ${WORKTREE}/src"
+    assert not converter.option_names("ls -la")
+    assert not converter.option_names("grep -rn pattern")
+
+
+def test_mined_ids_continue_after_the_ids_the_fixture_already_holds(tmp_path: Path) -> None:
+    fixture = tmp_path / "gate.json"
+    fixture.write_text(
+        '{"cases": [{"id": "observed-grep-07"}, {"id": "observed-grep-03"}, '
+        '{"id": "observed-git-12"}, {"id": "hand-written-01"}]}',
+        encoding="utf-8",
+    )
+    counts = converter.existing_identities(fixture)
+    assert counts["grep"] == 7
+    assert counts["git"] == 12
+    assert counts["ls"] == 0
