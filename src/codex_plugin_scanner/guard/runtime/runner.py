@@ -4257,8 +4257,11 @@ def _sync_extension_catalog_from_runtime_handshake(
 
     signal = runtime_response.get("extensionCatalogSync")
     if isinstance(signal, dict) and "protocolVersion" in signal:
+        sent = False
 
         def send_page(url: str, body: bytes) -> object:
+            nonlocal sent
+            sent = True
             request = _guard_sync_request(
                 auth_context,
                 request_url=url,
@@ -4279,38 +4282,44 @@ def _sync_extension_catalog_from_runtime_handshake(
                 raise RuntimeError(_sync_url_error_message(error)) from error
 
         try:
+            # A concurrent publish can drop the view this session named at any
+            # point up to the first page: the lookup, the pin the transfer
+            # takes, and the plan it builds all read the shared cache. None of
+            # those has told Cloud anything, so the session keeps going and the
+            # next sync names a current view. What decides that is whether a
+            # page actually went out, not which call raised: once a transfer
+            # may have reached Cloud, a later failure must not be reported as
+            # an absent catalog.
             view = observed_view(session_payload, guard_home)
-        except ExtensionCatalogUnavailableError:
-            # The shared cache dropped the view this session named, for example
-            # after a concurrent publish; the next sync names a current one.
-            # Only this lookup downgrades: once a transfer may have reached
-            # Cloud, a later failure must not hide it as an absent catalog.
-            return catalog_runtime_unavailable_summary()
-        result = sync_catalog_view(
-            runtime_sync_url=runtime_sync_url,
-            runtime_response=runtime_response,
-            session_payload=session_payload,
-            view=view,
-            send=send_page,
-        )
-        if store is None:
-            raise RuntimeError("Authenticated catalog completion requires the current store")
-        from .extension_catalog_completion import complete_authenticated_view
-
-        result.update(
-            complete_authenticated_view(
-                store=store,
+            result = sync_catalog_view(
+                runtime_sync_url=runtime_sync_url,
+                runtime_response=runtime_response,
+                session_payload=session_payload,
                 view=view,
-                auth_context=auth_context,
-                url=catalog_sync_plan(
-                    view=view,
-                    runtime_sync_url=runtime_sync_url,
-                    runtime_response=runtime_response,
-                    session_payload=session_payload,
-                )["upload_url"],
                 send=send_page,
             )
-        )
+            if store is None:
+                raise RuntimeError("Authenticated catalog completion requires the current store")
+            from .extension_catalog_completion import complete_authenticated_view
+
+            result.update(
+                complete_authenticated_view(
+                    store=store,
+                    view=view,
+                    auth_context=auth_context,
+                    url=catalog_sync_plan(
+                        view=view,
+                        runtime_sync_url=runtime_sync_url,
+                        runtime_response=runtime_response,
+                        session_payload=session_payload,
+                    )["upload_url"],
+                    send=send_page,
+                )
+            )
+        except ExtensionCatalogUnavailableError:
+            if sent:
+                raise
+            return catalog_runtime_unavailable_summary()
         return result
 
     summary, upload = prepare_extension_catalog_handshake(
