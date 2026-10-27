@@ -33,7 +33,9 @@ use crate::blocked_request_mode::{
     safe_alternative_reason_with_retry, BLOCKED_REASON,
 };
 use crate::guard_store_json::py_strip;
-use crate::native_review_link::{canonical_harness, native_review_reason, now_micros};
+use crate::native_review_link::{
+    canonical_harness, native_review_reason, now_micros, without_raw_url, SIGNED_LINK_UNAVAILABLE,
+};
 
 const INVALID: &str = "native_hook_decision_payload_invalid";
 /// The reason a paused review shows when its verdict carries none.
@@ -67,8 +69,8 @@ fn signed_review_reason(
 }
 
 /// The paused review for `inputs`; `link` is `native_review_reason` with the
-/// daemon token and clock already bound. A link shape the resident does not
-/// reproduce keeps the unlinked reason; the queued row is still in the inbox.
+/// daemon token and clock already bound. A link shape the resident cannot sign
+/// leaves no raw URL in the reason; the queued row is still in the inbox.
 fn pause(
     inputs: &PausedReviewInputsV1,
     link: impl FnOnce(&str, &str, &str) -> Option<String>,
@@ -84,7 +86,19 @@ fn pause(
         Some(Value::String(text)) if !text.is_empty() => text.as_str(),
         _ => REVIEW_DEFAULT_REASON,
     };
-    let linked = url.and_then(|url| link(&canonical_harness(&inputs.harness), reason, url));
+    let linked = url.and_then(|url| {
+        link(&canonical_harness(&inputs.harness), reason, url).or_else(|| {
+            // The resident could not reproduce or sign this link shape, so the
+            // agent reads the reason without a raw URL it cannot act on.
+            Some(
+                py_strip(&format!(
+                    "{} {SIGNED_LINK_UNAVAILABLE}",
+                    without_raw_url(reason, url)
+                ))
+                .to_owned(),
+            )
+        })
+    });
     PausedReviewV1 {
         response: pre_tool_review(
             &inputs.harness,
@@ -137,11 +151,16 @@ fn respond(
         .map(py_strip)
         .filter(|url| !url.is_empty());
     if let Some(url) = url {
-        // A link shape the resident does not reproduce keeps the unlinked
-        // reason, as the direct lane does once a request is queued.
-        if let Some(linked) = link(&canonical_harness(&inputs.harness), &reason, url) {
-            reason = linked;
-        }
+        // A link shape the resident cannot sign leaves no raw URL behind, as
+        // the direct lane does once a request is queued.
+        reason = match link(&canonical_harness(&inputs.harness), &reason, url) {
+            Some(linked) => linked,
+            None => py_strip(&format!(
+                "{} {SIGNED_LINK_UNAVAILABLE}",
+                without_raw_url(&reason, url)
+            ))
+            .to_owned(),
+        };
     }
     let mut response = safe_alternative_block(&inputs.harness, result, &reason);
     if let Some(id) = request_id.filter(|id| inputs.retry_reuses_approval && !id.is_empty()) {

@@ -160,7 +160,7 @@ fn colon_before_period(text: &str) -> String {
 }
 
 /// The message with the raw review URL and its dangling separators removed.
-fn without_raw_url(message: &str, review_url: &str) -> String {
+pub(crate) fn without_raw_url(message: &str, review_url: &str) -> String {
     let removed = message.replace(review_url, "");
     let joined = colon_before_period(py_strip(&removed));
     let mut trimmed = joined.trim_end_matches(py_space).to_owned();

@@ -121,6 +121,20 @@ def _verdict_deny(harness: str, verdict: Mapping[str, object]) -> dict[str, obje
     )
 
 
+def _without_approval_url(verdict: Mapping[str, object], url: object) -> Mapping[str, object]:
+    """``verdict`` with a raw approval URL removed from its reason.
+
+    A fixed deny carries no signed link, so a URL the resident never reproduced
+    or signed is not left in the text the agent reads. Only the literal URL is
+    removed; the reason is otherwise the resident's own.
+    """
+
+    reason = _verdict_text(verdict, "reason")
+    if not isinstance(url, str) or not url or reason is None or url not in reason:
+        return verdict
+    return {**verdict, "reason": reason.replace(url, "").strip().rstrip(":;,") or RENDER_UNAVAILABLE_REASON}
+
+
 def _deadline_kwargs(deadline: float | None) -> dict[str, float]:
     return {} if deadline is None else {"deadline": deadline}
 
@@ -175,7 +189,8 @@ def render_pre_tool_review(
     }
     with suppress(NativeHookDecisionError):
         return native_review_response("paused_review", inputs, guard_home=guard_home, deadline=deadline)
-    return _verdict_deny(harness, verdict)
+    approval_url = None if approval is None else approval.get("approval_url")
+    return _verdict_deny(harness, _without_approval_url(verdict, approval_url))
 
 
 def render_silent_review_block(
@@ -189,7 +204,7 @@ def render_silent_review_block(
     with suppress(NativeHookDecisionError):
         return native_review_response("silent_review_block", inputs, guard_home=guard_home, deadline=deadline)
     blocked = {**inputs["result"], "decision": "deny", "minimum_action": "block", "policy_action": "block"}
-    response = _verdict_deny(harness, blocked)
+    response = _verdict_deny(harness, _without_approval_url(blocked, inputs.get("approval_url")))
     response.update(prompted=False, blocked_request_mode="safe-alternative")
     request_id = inputs.get("request_id")
     if inputs.get("retry_reuses_approval") and isinstance(request_id, str) and request_id:

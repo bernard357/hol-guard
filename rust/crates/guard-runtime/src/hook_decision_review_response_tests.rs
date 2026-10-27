@@ -287,9 +287,41 @@ fn a_paused_review_links_the_default_reason_when_it_has_none() {
         reason_of(&response),
         format!("{REVIEW_DEFAULT_REASON} {OPEN_GUARD} {URL}.")
     );
-    // A link the resident does not reproduce leaves the reason unlinked.
+    // A link the resident cannot sign leaves the reason unlinked, and says so.
     let kept = pause(&inputs, |_, _, _| None);
-    assert_eq!(reason_of(&kept.response), REVIEW_DEFAULT_REASON);
+    assert_eq!(
+        reason_of(&kept.response),
+        format!("{REVIEW_DEFAULT_REASON} {SIGNED_LINK_UNAVAILABLE}")
+    );
+}
+
+#[test]
+fn an_unsignable_review_link_leaves_no_raw_url_in_the_reason() {
+    let inputs = paused(
+        "claude-code",
+        &format!("Needs review. Approve it at {URL}."),
+        URL,
+    );
+    let paused_review = pause(&inputs, |_, _, _| None);
+    let reason = reason_of(&paused_review.response);
+    assert!(!reason.contains(URL), "{reason}");
+    assert!(reason.starts_with("Needs review."), "{reason}");
+    assert!(reason.ends_with(SIGNED_LINK_UNAVAILABLE), "{reason}");
+    // The structured link fields still carry the unsigned URL for the daemon.
+    assert_eq!(paused_review.response["approval_url"], URL);
+}
+
+#[test]
+fn an_unsignable_block_link_leaves_no_raw_url_in_the_reason() {
+    let mut inputs = queued("claude-code");
+    inputs.result.insert(
+        "reason".to_owned(),
+        json!(format!("Blocked. Approve it at {URL}.")),
+    );
+    let block = respond(&inputs, |_, _, _| None).expect("block");
+    let reason = block.response["reason"].as_str().expect("reason is text");
+    assert!(!reason.contains(URL), "{reason}");
+    assert!(reason.ends_with(SIGNED_LINK_UNAVAILABLE), "{reason}");
 }
 
 #[test]

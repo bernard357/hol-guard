@@ -97,14 +97,6 @@ def connector_setup_reason(
     return " ".join(part for part in (reason, redirect, SAFE_ALTERNATIVE_GUIDANCE) if part)
 
 
-def is_unlinked_connector_setup_reason(text: object) -> bool:
-    """Whether ``text`` carries a default-mode connector setup reason.
-
-    Harness renderers add no approval link and no approval step to it.
-    """
-    return isinstance(text, str) and CONNECTOR_SETUP_REASON_PREFIX in text and SAFE_ALTERNATIVE_GUIDANCE in text
-
-
 # Plain-language next steps keyed by the reason code Rust already returned.
 _REASON_CODE_HINTS = {
     "native_destructive_command": (

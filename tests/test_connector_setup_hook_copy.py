@@ -16,7 +16,6 @@ import pytest
 from codex_plugin_scanner.guard.blocked_request_mode import (
     SAFE_ALTERNATIVE_GUIDANCE,
     connector_setup_reason,
-    is_unlinked_connector_setup_reason,
 )
 
 _TESTDATA = Path(__file__).resolve().parents[1] / "rust" / "crates" / "guard-runtime" / "testdata"
@@ -39,7 +38,6 @@ def test_reason_matches_the_rust_vectors(case: dict[str, object]) -> None:
         approvable=bool(case["approvable"]),
     )
     assert text == case["text"]
-    assert is_unlinked_connector_setup_reason(text) is case["unlinked"]
 
 
 def test_default_mode_names_only_computed_redirects() -> None:
@@ -57,10 +55,8 @@ def test_a_local_tool_is_an_ordinary_review_offering_the_users_choice(surface: s
     assert "hol-guard approvals" in text
     assert SAFE_ALTERNATIVE_GUIDANCE not in text
     assert "seek permission" not in text
-    assert not is_unlinked_connector_setup_reason(text)
 
 
 def test_a_local_tool_no_approval_can_release_stays_a_plain_block() -> None:
     text = connector_setup_reason("lanectl", "cli", ask=False, approvable=False)
     assert text.endswith(SAFE_ALTERNATIVE_GUIDANCE)
-    assert is_unlinked_connector_setup_reason(text)

@@ -11,6 +11,7 @@ from codex_plugin_scanner.guard.daemon.hook_fail_closed import (
     render_pre_tool,
     render_pre_tool_review,
     render_recording_only_pre_tool,
+    render_silent_review_block,
 )
 from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError
 
@@ -186,3 +187,37 @@ def test_every_event_kind_answers_from_the_shared_contract() -> None:
         "hookEventName": "Notification"
     }
     assert hook_fail_closed.unmanaged_passthrough("OMP") == {"decision": "allow", "reason_code": "harness_not_managed"}
+
+
+def test_review_render_failure_drops_a_raw_approval_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fixed deny carries no signed link, so it carries no raw link either."""
+
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    url = "http://127.0.0.1:8765/approvals/r"
+    verdict = {
+        "decision": "deny",
+        "reason": f"Needs review. Open HOL Guard to approve or keep this blocked: {url}.",
+        "reason_code": "native_pre_tool_review",
+    }
+    rendered = render_pre_tool_review("omp", verdict, approval={"approval_url": url}, guard_home=_HOME)
+    assert rendered["decision"] == "deny"
+    assert rendered["reason_code"] == "native_pre_tool_review"
+    assert url not in str(rendered["reason"])
+    assert "Needs review." in str(rendered["reason"])
+
+
+def test_silent_block_fallback_drops_a_raw_approval_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hook_fail_closed, "native_review_response", _resident_unavailable)
+    url = "http://127.0.0.1:8765/approvals/r"
+    inputs = {
+        "harness": "pi",
+        "result": {"reason": f"Blocked. Approve it at {url}.", "reason_code": "native_package_review"},
+        "approval_url": url,
+        "request_id": "r",
+        "retry_reuses_approval": True,
+    }
+    rendered = render_silent_review_block("pi", inputs, guard_home=_HOME)
+    assert rendered["policy_action"] == "block"
+    assert rendered["prompted"] is False
+    assert rendered["approval_resume"] == {"request_id": "r", "poll_path": "/v1/requests/r"}
+    assert url not in str(rendered)
