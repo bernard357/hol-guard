@@ -550,3 +550,63 @@ def test_unavailable_resident_leaves_a_package_request_without_a_saved_scope(
     )
 
     assert candidates == ()
+
+
+def test_the_resident_s_own_reply_discriminator_is_accepted(
+    tmp_path: Path,
+    package_workspace_scope_native: Path,
+) -> None:
+    """The compiled resident's scope reply reaches the caller intact.
+
+    The transport this op shares with the package-authority family used to
+    accept only that family's reply discriminator, so every answer this op
+    actually sends was discarded as malformed and no package scope could ever
+    be derived.  This exercises the real round trip end to end.
+    """
+
+    from codex_plugin_scanner.guard.native_package_workspace_scope import (
+        _RESULT_SCHEMA,
+        native_package_workspace_scopes,
+    )
+
+    assert _RESULT_SCHEMA == "guard-package-workspace-scope-result.v1"
+    workspace = tmp_path / "workspace"
+    _write_repository(workspace)
+    _write_package_files(workspace)
+    artifact = _artifact()
+    context = _context(workspace, artifact, _environment(tmp_path))
+
+    portable, runtime = native_package_workspace_scopes(
+        artifact_id=artifact.artifact_id,
+        artifact_hash="b" * 64,
+        artifact_type=artifact.artifact_type,
+        execution_context=context,
+    )
+
+    assert portable is not None and portable.startswith("package-request-workspace:v2:")
+    assert runtime is not None and runtime.startswith("package-request-workspace-exact:v2:")
+
+
+def test_a_request_without_an_execution_context_never_reaches_the_resident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both scopes bind a context, so a caller without one has nothing to ask.
+
+    An approval saved against an MCP artifact arrives here with no context.
+    Asking anyway spends a round trip on a pair of nulls, and fails outright
+    wherever the resident is down.
+    """
+
+    from codex_plugin_scanner.guard import native_package_workspace_scope
+
+    def _unreachable(**_kwargs: object) -> dict[str, object]:
+        raise AssertionError("a contextless request must not reach the resident")
+
+    monkeypatch.setattr(native_package_workspace_scope, "_resident_request", _unreachable)
+
+    assert native_package_workspace_scope.native_package_workspace_scopes(
+        artifact_id="artifact",
+        artifact_hash="b" * 64,
+        artifact_type="package-request",
+        execution_context=None,
+    ) == (None, None)

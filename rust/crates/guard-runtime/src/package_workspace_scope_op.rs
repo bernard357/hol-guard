@@ -9,7 +9,8 @@
 
 use guard_contracts::{
     PackageWorkspaceScopeRequestV1, PackageWorkspaceScopeResultV1,
-    PACKAGE_WORKSPACE_SCOPE_MAX_BYTES, PACKAGE_WORKSPACE_SCOPE_RESULT_SCHEMA,
+    PACKAGE_WORKSPACE_SCOPE_MAX_BYTES, PACKAGE_WORKSPACE_SCOPE_REQUEST_SCHEMA,
+    PACKAGE_WORKSPACE_SCOPE_RESULT_SCHEMA,
 };
 use serde_json::json;
 
@@ -20,6 +21,14 @@ pub(crate) fn evaluate_package_workspace_scope_request(
 ) -> Result<Vec<u8>, String> {
     let request_sha256 = request_digest_with_limit(request, PACKAGE_WORKSPACE_SCOPE_MAX_BYTES)
         .map_err(|_| "native_package_workspace_scope_too_large".to_owned())?;
+    if request.schema != PACKAGE_WORKSPACE_SCOPE_REQUEST_SCHEMA {
+        return Err("native_package_workspace_scope_schema_mismatch".to_owned());
+    }
+    // An absent request id reaches the op as the empty string, and echoing it
+    // back would hand the caller a reply it cannot bind to the request it sent.
+    if request.request_id.is_empty() {
+        return Err("native_package_workspace_scope_invalid".to_owned());
+    }
 
     let context = request.execution_context.as_ref().and_then(
         guard_command::package_execution_context::package_execution_context_from_evidence,

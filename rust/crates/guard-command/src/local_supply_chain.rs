@@ -40,6 +40,7 @@ use sha2::{Digest, Sha256, Sha512};
 use crate::action_lattice::{most_restrictive_guard_action, normalize_guard_action};
 use crate::approval_reuse::evaluate_approval_reuse;
 use crate::effect_decision::GuardAction;
+use crate::inventory_fingerprints::python_compact_json;
 use crate::package_execution_context::{
     PackageExecutionContext, PackageExecutionContextComponent, PACKAGE_EXECUTION_CONTEXT_VERSION,
 };
@@ -5400,8 +5401,11 @@ pub fn package_request_runtime_workspace_scope(
         "scope": "package-request-workspace-exact",
         "version": PACKAGE_EXECUTION_CONTEXT_VERSION,
     });
-    let canonical = serde_json::to_string(&material).unwrap_or_default();
-    let digest = stable_digest_hex(canonical.as_bytes());
+    // The key a saved approval is already stored under: `json.dumps(material,
+    // sort_keys=True, separators=(",", ":"))` hashed with plain SHA-256. The
+    // crate's keyed `stable_digest_hex` would be a different string, and a
+    // different string is an approval the user has to grant a second time.
+    let digest = sha256_content_digest(python_compact_json(&material).as_bytes());
     Some(format!(
         "package-request-workspace-exact:v{PACKAGE_EXECUTION_CONTEXT_VERSION}:{digest}"
     ))
@@ -5432,8 +5436,8 @@ pub fn package_request_portable_workspace_scope(
         "scope": "package-request-workspace",
         "version": PACKAGE_EXECUTION_CONTEXT_VERSION,
     });
-    let canonical = serde_json::to_string(&material).unwrap_or_default();
-    let digest = stable_digest_hex(canonical.as_bytes());
+    // See the exact scope above: the digest is the one the stored keys carry.
+    let digest = sha256_content_digest(python_compact_json(&material).as_bytes());
     Some(format!(
         "package-request-workspace:v{PACKAGE_EXECUTION_CONTEXT_VERSION}:{digest}"
     ))

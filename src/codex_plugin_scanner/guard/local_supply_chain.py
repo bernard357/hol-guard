@@ -938,20 +938,27 @@ def _resolve_stored_package_policy_override(
     execution_context: PackageExecutionContext | None = None,
     current_action: object | None = None,
     claim_saved_approval: bool = True,
+    policy_workspaces: tuple[str, ...] | None = None,
 ) -> _StoredPackagePolicyResolution:
-    """Hydrate saved-policy facts and let the resident decide the override."""
+    """Hydrate saved-policy facts and let the resident decide the override.
+
+    A caller that already holds the runtime workspace scope passes it as
+    ``policy_workspaces``; the scope comes from the resident, and deriving it a
+    second time here is a second round trip for an answer already in hand.
+    """
 
     resolved_context = execution_context or build_package_execution_context(
         workspace_dir=workspace_dir,
         artifact=artifact,
     )
-    policy_workspaces = _package_policy_workspace_candidates(
-        artifact=artifact,
-        artifact_hash=artifact_hash,
-        workspace_dir=workspace_dir,
-        execution_context=resolved_context,
-        guard_home=store.guard_home,
-    )
+    if policy_workspaces is None:
+        policy_workspaces = _package_policy_workspace_candidates(
+            artifact=artifact,
+            artifact_hash=artifact_hash,
+            workspace_dir=workspace_dir,
+            execution_context=resolved_context,
+            guard_home=store.guard_home,
+        )
     resolved, claim_disposition, reused_decision = native_resolve_stored_package_policy(
         evaluation,
         store=store,
@@ -1001,6 +1008,10 @@ def _package_policy_workspace_candidates(
         artifact=artifact,
     )
     try:
+        # The home is named rather than left to the bridge: without it the
+        # resident is reached through whichever home the process last bound,
+        # and a scope derived under another home is not the key this store
+        # saved.
         runtime_workspace = package_request_runtime_workspace_scope(
             artifact_id=artifact.artifact_id,
             artifact_hash=artifact_hash,

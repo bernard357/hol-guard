@@ -48,13 +48,22 @@ def native_package_workspace_scopes(
 ) -> tuple[str | None, str | None]:
     """Return the resident's ``(portable, runtime)`` workspace scopes."""
 
+    if execution_context is None:
+        # Both scopes bind a context, so a caller without one has no scope to
+        # look up and nothing for the resident to derive.  Approvals saved
+        # against an MCP artifact reach this path through
+        # ``package_execution_context_from_scanner_evidence``, and asking the
+        # resident for two nulls would make every one of them wait on a round
+        # trip, and fail where the resident is down.
+        return None, None
+
     request: dict[str, object] = {
         "schema": _REQUEST_SCHEMA,
         "request_id": _request_id(),
         "artifact_id": artifact_id,
         "artifact_hash": artifact_hash,
         "artifact_type": artifact_type,
-        "execution_context": execution_context.to_evidence() if execution_context is not None else None,
+        "execution_context": execution_context.to_evidence(),
     }
     try:
         request_sha256 = "sha256:" + _canonical_request_sha256(request)
@@ -70,6 +79,7 @@ def native_package_workspace_scopes(
         timeout_seconds=2.0,
         required_features=(_WORKSPACE_SCOPE_FEATURE,),
         max_request_bytes=_MAX_REQUEST_BYTES,
+        result_schema=_RESULT_SCHEMA,
     )
     if (
         not isinstance(response, dict)

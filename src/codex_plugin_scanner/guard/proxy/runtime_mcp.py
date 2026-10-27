@@ -19,6 +19,7 @@ from uuid import uuid4
 from ..adapters.base import HarnessContext
 from ..approval_gate import ApprovalGateError
 from ..approval_scope_support import package_request_runtime_workspace_scope
+from ..native_package_workspace_scope import NativePackageWorkspaceScopeError
 from ..approvals import approval_prompt_flow, build_approval_browser_url, first_approval_url, queue_blocked_approvals
 from ..blocked_request_mode import asks_for_approval, safe_alternative_reason
 from ..browser_opener import open_browser_url
@@ -1418,12 +1419,22 @@ class RuntimeMcpGuardProxy:
                 execution_context=package_context,
                 config=self.config,
             )
-            policy_workspace = package_request_runtime_workspace_scope(
-                artifact_id=artifact.artifact_id,
-                artifact_hash=artifact_digest,
-                artifact_type=artifact.artifact_type,
-                execution_context=package_context,
-            )
+            try:
+                # The home is named so the scope is derived under the store this
+                # lookup reads, not whichever home the process last bound.
+                policy_workspace = package_request_runtime_workspace_scope(
+                    artifact_id=artifact.artifact_id,
+                    artifact_hash=artifact_digest,
+                    artifact_type=artifact.artifact_type,
+                    execution_context=package_context,
+                    guard_home=self.store.guard_home,
+                )
+            except NativePackageWorkspaceScopeError:
+                # No scope means no saved approval can be matched, which is the
+                # same position as a request that was never approved.  The
+                # enclosing handler would instead fail the package request
+                # outright, which an unavailable resident does not warrant here.
+                policy_workspace = None
             stored_package_resolution = _resolve_stored_package_policy_override(
                 package_evaluation,
                 store=self.store,
@@ -1434,6 +1445,7 @@ class RuntimeMcpGuardProxy:
                 execution_context=package_context,
                 current_action=package_current_action,
                 claim_saved_approval=False,
+                policy_workspaces=(policy_workspace,) if policy_workspace is not None else (),
             )
             resolved_package_evaluation = stored_package_resolution.evaluation
             return _PackagePolicyResolution(

@@ -172,3 +172,84 @@ fn the_result_is_bound_to_the_request_it_answers() {
     .unwrap();
     assert_ne!(first["request_sha256"], second["request_sha256"]);
 }
+
+#[test]
+fn a_saved_approval_s_key_is_the_one_it_was_stored_under() {
+    // The scope string is a key the store already holds. These two values are
+    // what `json.dumps(material, sort_keys=True, separators=(",", ":"))` under
+    // plain SHA-256 produced before the derivation moved into the runtime, so
+    // an "Always allow" granted then still matches now.
+    let context = PackageExecutionContext {
+        digest: "b".repeat(64),
+        portable: true,
+        components: Vec::new(),
+        non_portable_reason: None,
+    };
+    let artifact_id = "guard-cli:project:package-request:fixture";
+    let artifact_hash = "a".repeat(64);
+
+    assert_eq!(
+        guard_command::local_supply_chain::package_request_portable_workspace_scope(
+            Some(artifact_id),
+            Some(&artifact_hash),
+            Some("package_request"),
+            Some(&context),
+        ),
+        Some(
+            "package-request-workspace:v2:\
+             3788a9ec1ac4fec542cbd04b3507241f093bca5933cae58d0183bf43e40a7e5b"
+                .to_owned()
+        )
+    );
+
+    let non_portable = PackageExecutionContext {
+        portable: false,
+        non_portable_reason: Some("workspace_configuration".to_owned()),
+        ..context
+    };
+    assert_eq!(
+        guard_command::local_supply_chain::package_request_runtime_workspace_scope(
+            Some(artifact_id),
+            Some(&artifact_hash),
+            Some("package_request"),
+            &non_portable,
+        ),
+        Some(
+            "package-request-workspace-exact:v2:\
+             af0831550d718fd14904ab837c144672a2a6b8f5bfa3a996b80167f47022378c"
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_request_under_another_schema_is_refused_rather_than_answered() {
+    let mut other = request(
+        Some(ARTIFACT_ID),
+        Some(ARTIFACT_HASH),
+        Some("package_request"),
+        Some(context(true).to_evidence()),
+    );
+    other.schema = "guard-package-authority-request.v1".to_owned();
+
+    assert_eq!(
+        evaluate_package_workspace_scope_request(&other).unwrap_err(),
+        "native_package_workspace_scope_schema_mismatch"
+    );
+}
+
+#[test]
+fn a_request_with_no_id_is_refused_rather_than_answered_with_an_empty_one() {
+    let mut anonymous = request(
+        Some(ARTIFACT_ID),
+        Some(ARTIFACT_HASH),
+        Some("package_request"),
+        Some(context(true).to_evidence()),
+    );
+    anonymous.request_id = String::new();
+
+    assert_eq!(
+        evaluate_package_workspace_scope_request(&anonymous).unwrap_err(),
+        "native_package_workspace_scope_invalid"
+    );
+}
