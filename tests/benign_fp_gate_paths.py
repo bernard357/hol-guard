@@ -142,6 +142,59 @@ def is_file_like(relative: str) -> bool:
     return bool(posixpath.splitext(stem)[1]) and not name.endswith(".d")
 
 
+# The absence is the shape under test: a probe for a file that is not there,
+# or a list of roots where one is missing.
+PROBES_FOR_ABSENCE = frozenset(
+    {
+        "gauntlet-ls-missing-git-leaf-plain-dir",
+        # These two measure the feature worktree's ``node_modules``, and the
+        # session they were mined from had one. The fixture cannot give them
+        # one yet: three other cases link the main checkout's tree in at that
+        # same name, and a link whose destination already exists lands inside
+        # it, which is a different command than the one that was observed and
+        # is still reviewed. Installing here would turn those three red. The
+        # install belongs with the fix for that review, not before it.
+        "session-du-sibling-worktree-modules",
+        "session-du-sibling-worktree-scripts-sort",
+        "observed-ls-lockfile-probe-mixed",
+        "queue-grep-head-wc-absent-tmp-trace",
+        "session-grep-roots-one-missing-tmp-sibling",
+        # A scratch directory under the temporary root, probed for an
+        # optional dependency tree and a stale temp directory. The listing
+        # prints only an error, which is the whole shape.
+        "gauntlet-ls-stage-missing-modules",
+        "gauntlet-ls-stage-missing-hidden-tmp",
+        "gauntlet-ls-stage-missing-hidden-leaf",
+        "observed-ls-06",
+        # A sibling checkout that keeps no workflows, probed for them.
+        "sibling-ls-missing-github-workflows",
+        "sibling-find-missing-github-workflows",
+        "gauntlet-sibling-ls-missing-github-workflows",
+        "gauntlet-sibling-find-missing-github-workflows",
+        # A `-C` route to a directory that was never cloned: the whole point
+        # of the case is that Git prints the path it could not enter.
+        "observed-git-18",
+        "gauntlet-git-C-missing-checkout-log",
+        # A read of a name that is not in the worktree: the absence is the
+        # whole case, since an absent name under the workspace is what the
+        # missing-read screen admits without a review.
+        "cat-missing-name-inside-the-worktree",
+        # A recursive read whose root is not there: the walk opens nothing,
+        # which is exactly the shape these cases measure. Building the root
+        # would turn them into ordinary recursive reads of a populated tree,
+        # which other cases already cover.
+        "grep-recursive-absent-sibling-dir",
+        "grep-recursive-absent-nested-module",
+        "ls-recursive-absent-sibling-dir",
+        "ls-recursive-absent-nested-module",
+        "tree-recursive-absent-sibling-dir",
+        "tree-recursive-absent-nested-module",
+        "grep-recursive-absent-probe-fallback",
+        "ls-recursive-absent-probe-fallback",
+    }
+)
+
+
 def benign_path_tokens(document: dict[str, object] | None = None) -> set[tuple[str, str]]:
     """``(root token, relative path)`` pairs named by cases that expect ``allow``."""
     cases = (document or json.loads(CASES_PATH.read_text(encoding="utf-8")))["cases"]
@@ -153,6 +206,11 @@ def benign_path_tokens(document: dict[str, object] | None = None) -> set[tuple[s
         for target in creation_targets(case.get("tool", ""), case.get("tool_input", {})):
             for match in _PATH_TOKEN.finditer(target):
                 created.add((match.group(1), posixpath.normpath("/" + match.group(2).strip("/")).strip("/")))
+        if case.get("id") in PROBES_FOR_ABSENCE:
+            # The case was mined from a session where the path was not there,
+            # and the absence is what it measures. Building it would turn the
+            # probe into an ordinary read of a populated tree.
+            continue
         for text in _strings(case.get("tool_input", {})):
             for match in _PATH_TOKEN.finditer(text):
                 relative = posixpath.normpath("/" + match.group(2).strip("/")).strip("/")

@@ -30,6 +30,8 @@ from pathlib import Path
 
 from tests.benign_fp_gate_fixture import build_fixture
 from tests.benign_fp_gate_paths import (
+    PROBES_FOR_ABSENCE,
+    ROOT_TOKENS,
     benign_path_tokens,
     creation_targets,
     is_credential_like,
@@ -40,58 +42,6 @@ from tests.benign_fp_gate_paths import (
 _CATALOGUE = Path(__file__).parent / "fixtures" / "benign_false_positive_gate.json"
 _TOKEN_PATH = re.compile(r"\$\{[A-Z_]+\}[A-Za-z0-9_./@+*?\[\]-]*")
 _GLOB_CHARACTERS = ("*", "?", "[")
-
-# The absence is the shape under test: a probe for a file that is not there,
-# or a list of roots where one is missing.
-_PROBES_FOR_ABSENCE = frozenset(
-    {
-        "gauntlet-ls-missing-git-leaf-plain-dir",
-        # These two measure the feature worktree's ``node_modules``, and the
-        # session they were mined from had one. The fixture cannot give them
-        # one yet: three other cases link the main checkout's tree in at that
-        # same name, and a link whose destination already exists lands inside
-        # it, which is a different command than the one that was observed and
-        # is still reviewed. Installing here would turn those three red. The
-        # install belongs with the fix for that review, not before it.
-        "session-du-sibling-worktree-modules",
-        "session-du-sibling-worktree-scripts-sort",
-        "observed-ls-lockfile-probe-mixed",
-        "queue-grep-head-wc-absent-tmp-trace",
-        "session-grep-roots-one-missing-tmp-sibling",
-        # A scratch directory under the temporary root, probed for an
-        # optional dependency tree and a stale temp directory. The listing
-        # prints only an error, which is the whole shape.
-        "gauntlet-ls-stage-missing-modules",
-        "gauntlet-ls-stage-missing-hidden-tmp",
-        "gauntlet-ls-stage-missing-hidden-leaf",
-        "observed-ls-06",
-        # A sibling checkout that keeps no workflows, probed for them.
-        "sibling-ls-missing-github-workflows",
-        "sibling-find-missing-github-workflows",
-        "gauntlet-sibling-ls-missing-github-workflows",
-        "gauntlet-sibling-find-missing-github-workflows",
-        # A `-C` route to a directory that was never cloned: the whole point
-        # of the case is that Git prints the path it could not enter.
-        "observed-git-18",
-        "gauntlet-git-C-missing-checkout-log",
-        # A read of a name that is not in the worktree: the absence is the
-        # whole case, since an absent name under the workspace is what the
-        # missing-read screen admits without a review.
-        "cat-missing-name-inside-the-worktree",
-        # A recursive read whose root is not there: the walk opens nothing,
-        # which is exactly the shape these cases measure. Building the root
-        # would turn them into ordinary recursive reads of a populated tree,
-        # which other cases already cover.
-        "grep-recursive-absent-sibling-dir",
-        "grep-recursive-absent-nested-module",
-        "ls-recursive-absent-sibling-dir",
-        "ls-recursive-absent-nested-module",
-        "tree-recursive-absent-sibling-dir",
-        "tree-recursive-absent-nested-module",
-        "grep-recursive-absent-probe-fallback",
-        "ls-recursive-absent-probe-fallback",
-    }
-)
 
 # Tokens that stand for something other than a path. ``${PORTAL_WEB_HEAD}``
 # resolves to a commit id, which a case names where a revision belongs, so
@@ -128,7 +78,7 @@ def test_every_benign_case_finds_the_paths_it_reads() -> None:
         for case in catalogue["cases"] + catalogue.get("mcp_cases", []):
             if case.get("expect") != "allow":
                 continue
-            if case["id"] in _PROBES_FOR_ABSENCE:
+            if case["id"] in PROBES_FOR_ABSENCE:
                 continue
             for reference in _referenced(case.get("tool", ""), case.get("tool_input", {})):
                 token = reference[: reference.index("}") + 1]
@@ -197,3 +147,30 @@ def test_file_and_directory_shapes() -> None:
     # case naming one must meet a file there, not a placeholder directory.
     assert is_file_like("node_modules/.bin/vitest") and is_file_like("app/node_modules/.bin/vite")
     assert not is_file_like("node_modules/.bin") and not is_file_like("app/node_modules/.bin/")
+
+
+def test_a_probe_for_an_absent_path_is_never_built() -> None:
+    """The fixture leaves the path an absence probe names alone.
+
+    ``benign_path_tokens`` derives the fixture's paths from the cases, so
+    without this exclusion it would build ``${HOME}/not-cloned-yet`` and the
+    other names these cases exist to find missing, and each probe would
+    measure an ordinary read of a populated tree instead.
+    """
+    catalogue = json.loads(_CATALOGUE.read_text())
+    probes = [case for case in catalogue["cases"] if case["id"] in PROBES_FOR_ABSENCE]
+    assert probes, "the catalogue holds no absence probes, so this pin measures nothing"
+    built = benign_path_tokens(catalogue)
+    named: set[tuple[str, str]] = set()
+    for case in probes:
+        for reference in _referenced(case.get("tool", ""), case.get("tool_input", {})):
+            token = reference[: reference.index("}") + 1]
+            if token not in {f"${{{root}}}" for root in ROOT_TOKENS}:
+                continue
+            named.add((token.strip("${}"), reference[len(token) :].strip("/")))
+    # A path another case also names is still built for that case; only the
+    # ones no other case asks for disappear.
+    others = {case["id"] for case in catalogue["cases"]} - PROBES_FOR_ABSENCE
+    kept = benign_path_tokens({"cases": [case for case in catalogue["cases"] if case["id"] in others]})
+    assert named - kept, "no absence probe names a path of its own, so this pin measures nothing"
+    assert (named - kept) & built == set()
