@@ -11,6 +11,7 @@ from codex_plugin_scanner.guard import workspace_assessment_store as assessments
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_workspace_assessment_schema import MAX_FINDINGS
 from codex_plugin_scanner.guard.workspace_assessment_carry import carry_unchecked_findings, listed_packages
+from tests.workspace_fix_support import admit_worktree
 
 DETECTORS = "d" * 64
 T0 = 1_000_000_000
@@ -73,7 +74,7 @@ def assess(store: GuardStore, result: assessments.RunOutcome, *, at: int) -> dic
 
 def admitted(tmp_path: Path) -> GuardStore:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root="/work/0", now_ms=T0)
+    admit_worktree(store, KEYS, root="/work/0", now_ms=T0)
     return store
 
 
