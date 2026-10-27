@@ -315,6 +315,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
+            ResidentOperationV1::NetworkProtectionVerify(request) => {
+                crate::network_protection_verify_op::evaluate_network_protection_verify_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::GithubCliClassify(request) => {
                 crate::github_cli_classify_op::evaluate_github_cli_classify_request(&request)
             }
