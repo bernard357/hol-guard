@@ -306,6 +306,10 @@ pub(super) fn transitive_lockfile_results(
             ));
             continue;
         }
+        // A lockfile can resolve a direct dependency to several versions. Only
+        // the version the manifest resolves to is the direct target; every
+        // other copy is audited as a transitive package.
+        let direct_versions = parse_result.dependency_map();
         let mut entries: Vec<(String, String, String, bool)> = Vec::new();
         for entry in &parse_result.entries {
             let normalized_path = entry.dependency_path.trim_matches('/').to_owned();
@@ -320,7 +324,10 @@ pub(super) fn transitive_lockfile_results(
             let Some(package_name) = package_name else {
                 continue;
             };
-            let direct = direct_names.contains(&normalized_path);
+            let direct = direct_names.contains(&normalized_path)
+                && direct_versions
+                    .get(&entry.dependency_path)
+                    .is_none_or(|version| *version == entry.version);
             entries.push((
                 entry.dependency_path.clone(),
                 package_name,

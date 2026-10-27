@@ -423,14 +423,17 @@ pub fn parse_manifest_dependencies_ordered(
 /// must tell a parse failure from an empty manifest (complete-or-fail lockfile
 /// parsing). The error is the lockfile `error_reason` the Python evaluator
 /// reports: `deadline_exceeded` or `parse_error`.
-pub fn try_dependency_map_for_path(
+///
+/// A lockfile can resolve one package to several versions, so every version
+/// is returned, sorted by package; a package's last-listed version comes last.
+pub fn try_dependency_versions_for_path(
     path: &str,
     text: &str,
     deadline_ms: u64,
-) -> Result<BTreeMap<String, String>, &'static str> {
+) -> Result<Vec<(String, String)>, &'static str> {
     let deadline = Deadline::from_ms(deadline_ms);
     dependency_map_for_path(path, text, &deadline)
-        .map(DepMap::into_sorted)
+        .map(DepMap::into_sorted_versions)
         .map_err(|failure| match failure {
             ParseFailure::Deadline => "deadline_exceeded",
             ParseFailure::Error => "parse_error",
