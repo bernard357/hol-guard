@@ -50,6 +50,12 @@ _CALL = BoundCall(
 _LARGE_CALL = replace(_CALL, max_request_bytes=_MAX_POST_TOOL_REQUEST_BYTES)
 _UNAVAILABLE = "native_codex_tool_output_unavailable"
 _UNSUPPORTED_PLATFORM = "native_codex_tool_output_unsupported_platform"
+# The bridge's own codes for a request it never sends: one that cannot be
+# encoded is invalid, and one over the limit reads as an unavailable runtime.
+_LOCAL_REFUSALS = {
+    "native_codex_tool_output_component_unencodable": "native_codex_tool_output_invalid",
+    "native_codex_tool_output_request_too_large": _UNAVAILABLE,
+}
 _EXTRA_SNAPSHOT_NAMES = frozenset({"RIPGREP_CONFIG_PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMP", "TEMP", "TMPDIR"})
 
 _request_counter = 0
@@ -174,7 +180,7 @@ def codex_tool_output_native(
             extra_features=(_POST_TOOL_COMMANDS_FEATURE,) if kind in _POST_TOOL_PAYLOAD_KINDS else (),
         )
     except ResidentCallError as error:
-        return _deny(str(error))
+        return _deny(_LOCAL_REFUSALS.get(str(error), str(error)))
     envelope = reply.envelope
     if not isinstance(envelope.get("allowed"), bool):
         return _deny(str(reply.fail()))
