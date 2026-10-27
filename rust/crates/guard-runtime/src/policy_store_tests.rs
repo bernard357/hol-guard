@@ -51,7 +51,7 @@ pub(super) fn policy_with_default(default_action: &str) -> EffectiveNativePolicy
     value
 }
 
-fn fixture_directory(path: &Path) {
+pub(super) fn fixture_directory(path: &Path) {
     #[cfg(windows)]
     {
         crate::resident_state::ensure_private_directory(path, true).unwrap();

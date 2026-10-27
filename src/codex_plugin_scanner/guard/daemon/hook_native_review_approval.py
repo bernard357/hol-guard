@@ -11,11 +11,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from ..approval_link_output import native_review_reason
 from ..models import GuardApprovalRequest
 from ..native_hook_adapter import NativeHookAdapterError
 from ..native_hook_authority_state import hook_authority_integrity_key
-from .hook_fail_closed import canonical_harness, render_accepted_allow, render_pre_tool, render_pre_tool_review
+from .hook_fail_closed import (
+    canonical_harness,
+    render_accepted_allow,
+    render_pre_tool,
+    render_pre_tool_review,
+    render_silent_review_block,
+)
 from .hook_native_exact_action import native_exact_action, native_review_binding, native_review_evidence
 from .hook_native_local_cli import native_local_cli_grant_response
 from .hook_native_package_review import native_package_review_response
@@ -189,7 +194,7 @@ def pause_native_pre_tool_for_approval(
     )
     if settled is not None:
         return settled
-    from ..blocked_request_mode import approval_wait_hint, asks_for_approval, safe_alternative_reason
+    from ..blocked_request_mode import asks_for_approval
     from ..config import load_guard_config
 
     try:
@@ -232,40 +237,27 @@ def pause_native_pre_tool_for_approval(
         )
         if queued is None:
             _LOGGER.warning("Silent review blocked without an inbox row for %s", harness)
-            # With no row there is nothing to approve, so the setup text that tells the
-            # agent to wait for the user's approval must not be shown.
-            setup_reason = None
         else:
             record_silent_native_review_event(store, queued)
-        reason = setup_reason or safe_alternative_reason(
-            str(native_result.get("reason") or "HOL Guard blocked this action."),
-            reason_code=str(native_result.get("reason_code") or "") or "unknown",
-            approval_queued=queued is not None,
+        request_id, approval_url = (queued.get("request_id"), queued.get("approval_url")) if queued else (None, None)
+        inputs = {
+            "harness": harness,
+            "result": dict(native_result),
+            # The resident drops the setup text when the review never reached the inbox.
+            "setup_reason": setup_reason,
+            "queued": queued is not None,
+            "request_id": request_id if isinstance(request_id, str) else None,
+            "approval_url": approval_url if isinstance(approval_url, str) else None,
+            "ask": ask,
             # The queued row is stored with this same binding; without one a
             # one-time approval cannot match the agent's retry.
-            retry_reuses_approval=identity is not None,
-            exact_action_allowable=exact_token is not None,
-        )
-        # An MCP setup review never links in the default mode; a local CLI or script one is an
-        # ordinary review, so it links like any other that the user's approval can release.
-        link = approval_can_unblock and (ask or setup_reason is None or connector_is_local(connector))
-        raw_url = queued.get("approval_url") if queued is not None and link else None
-        request_id = queued.get("request_id") if queued is not None else None
-        if identity is not None and isinstance(request_id, str):
-            reason = f"{reason} {approval_wait_hint(request_id, guard_home=guard_home, home_dir=home_dir)}".strip()
-        if isinstance(raw_url, str) and raw_url.strip():
-            # The agent passes the link on, so the user can open the queued row.
-            reason = native_review_reason(canonical_harness(harness), reason, raw_url.strip(), guard_home=guard_home)
-        blocked = dict(native_result)
-        blocked.update(decision="deny", minimum_action="block", policy_action="block", reason=reason)
-        response = render_pre_tool(harness, blocked, guard_home=guard_home, deadline=deadline)
-        response["prompted"] = False
-        response["blocked_request_mode"] = "safe-alternative"
-        # Extensions can watch the handle; other harnesses get the wait command
-        # in their reason. Neither path consumes the bound approval.
-        if identity is not None and isinstance(request_id, str) and request_id:
-            response["approval_resume"] = {"request_id": request_id, "poll_path": f"/v1/requests/{request_id}"}
-        return response
+            "retry_reuses_approval": identity is not None,
+            "exact_action_allowable": exact_token is not None,
+            "connector_is_local": connector_is_local(connector),
+            "guard_home": str(guard_home),
+            "home_dir": str(home_dir or Path.home()),
+        }
+        return render_silent_review_block(harness, inputs, guard_home=guard_home, deadline=deadline)
 
     queued = queue_native_pre_tool_review(
         store,

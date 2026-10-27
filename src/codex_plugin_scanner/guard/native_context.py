@@ -700,7 +700,7 @@ def context_runtime_executable_identity(
     require_executable: bool = True,
     guard_home: Path | None = None,
 ) -> dict[str, Any]:
-    """Transport `build_runtime_executable_identity` inputs to native authority; no fallback."""
+    """Resolve and content-bind an executable through native authority; no fallback."""
     result = native_context_digest(
         "runtime_executable_identity",
         {

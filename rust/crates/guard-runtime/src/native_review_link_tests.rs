@@ -59,7 +59,7 @@ fn review_reasons_match_the_daemon() {
 }
 
 #[test]
-fn links_python_would_rewrite_are_left_to_the_daemon() {
+fn links_it_cannot_reproduce_are_left_unlinked() {
     for url in [
         "http://127.0.0.1:4781/requests/r1?x=1",
         "http://127.0.0.1:4781/requests/r1#guard-token=old",
@@ -113,4 +113,39 @@ fn loopback_links_the_client_would_sign_are_never_shown_unsigned() {
     }
     let signed = live_review_url("http://127.0.0.1:4781/approvals/a", Some("key"), 0).unwrap();
     assert!(signed.starts_with("http://127.0.0.1:4781/approvals/a#guard-token=gld1."));
+}
+
+/// The strip the Python fail-closed fallback replays, recorded in
+/// `tests/fixtures/guard-review-link-strip.v1.json` and read by
+/// `tests/test_review_link_strip_parity.py` as well. The fallback composes the
+/// agent's deny text without the resident, so the two must not drift.
+mod review_link_strip_parity {
+    use serde_json::Value;
+
+    use crate::native_review_link::without_raw_url;
+
+    const STRIP_VECTORS: &str =
+        include_str!("../../../../tests/fixtures/guard-review-link-strip.v1.json");
+
+    fn field<'a>(case: &'a Value, key: &str) -> &'a str {
+        case[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} is text"))
+    }
+
+    #[test]
+    fn without_raw_url_matches_the_recorded_strip() {
+        let document: Value = serde_json::from_str(STRIP_VECTORS).expect("strip vectors parse");
+        assert_eq!(document["schema"], "guard-review-link-strip-parity.v1");
+        let cases = document["cases"].as_array().expect("cases is a list");
+        assert!(!cases.is_empty(), "the fixture records at least one case");
+        for case in cases {
+            let name = field(case, "name");
+            assert_eq!(
+                without_raw_url(field(case, "reason"), field(case, "approval_url")),
+                field(case, "stripped"),
+                "{name}"
+            );
+        }
+    }
 }

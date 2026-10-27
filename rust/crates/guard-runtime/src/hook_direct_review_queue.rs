@@ -12,7 +12,7 @@
 //!   `add_native_review_approval_request` store operation under the shared
 //!   storage gate;
 //! - `render_pre_tool_review` (`hook_fail_closed.py`), with the approval link
-//!   `native_review_reason` (`approval_link_output.py`) signs;
+//!   the resident's `paused_review` signs;
 //! - the `prompted` and `approval_center_url` marks the daemon records the
 //!   activity with;
 //! - for Claude Code, the permission notice the daemon worker then records
@@ -49,6 +49,7 @@ use super::review_request::{build, ExactKeys, RequestInput};
 use super::{Context, HookDirectDefer, ENVELOPE_BYTES, ESCAPE_FACTOR};
 use crate::guard_store_approval_request::rewrite_approval_url;
 use crate::local_store_read::STORE_FILE_NAME;
+use crate::native_review_link::{canonical_harness, now_micros};
 use guard_command::hook_responses::{pre_tool_review, Object};
 use guard_contracts::{
     GuardStoreRequestV1, NativeExactActionQueryV1, GUARD_STORE_REQUEST_SCHEMA,
@@ -67,12 +68,7 @@ const ASK_MODE: &str = "ask";
 const CLAUDE_CODE: &str = "claude-code";
 /// The harness whose hook client rewrites the approval link itself.
 const CURSOR: &str = "cursor";
-/// The mode the daemon records a silent block with.
-const SAFE_ALTERNATIVE_MODE: &str = "safe-alternative";
-/// The silent block's reason when the review gave none.
-const BLOCKED_REASON: &str = "HOL Guard blocked this action.";
-/// `_REVIEW_DEFAULT_REASON` (`hook_fail_closed.py`).
-const DEFAULT_REASON: &str = "HOL Guard requires review before this action can execute.";
+use crate::hook_decision_review_response::REVIEW_DEFAULT_REASON as DEFAULT_REASON;
 /// A hook waits this long for a busy store before the daemon takes over.
 const BUSY_TIMEOUT_MS: u64 = 250;
 
@@ -286,12 +282,7 @@ fn falsy_or_text<'a>(
     value: Option<&'a Value>,
     fallback: &'a str,
 ) -> Result<&'a str, HookDirectDefer> {
-    match value {
-        None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(fallback),
-        Some(Value::String(text)) if text.is_empty() => Ok(fallback),
-        Some(Value::String(text)) => Ok(text),
-        Some(_) => Err(HookDirectDefer::ReviewQueue),
-    }
+    crate::blocked_request_mode::falsy_or_text(value, fallback).ok_or(HookDirectDefer::ReviewQueue)
 }
 
 /// The published facts for a review the resident may queue.
@@ -396,13 +387,6 @@ fn respond(
     Some(Value::Object(response))
 }
 
-/// `canonical_harness` (`hook_fail_closed.py`).
-fn canonical_harness(harness: &str) -> String {
-    crate::guard_store_json::py_strip(harness)
-        .to_lowercase()
-        .replace('_', "-")
-}
-
 /// `uuid.uuid4().hex`.
 fn request_id() -> Option<String> {
     let mut bytes = [0u8; 16];
@@ -410,14 +394,6 @@ fn request_id() -> Option<String> {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Some(hex::encode(bytes))
-}
-
-fn now_micros() -> Option<i64> {
-    let micros = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_micros();
-    i64::try_from(micros).ok()
 }
 
 #[path = "hook_direct_review_silent.rs"]

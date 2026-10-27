@@ -37,10 +37,6 @@ def _ensure_terminal_punctuation(message: str) -> str:
     return _runtime_policy_module()._ensure_terminal_punctuation(message)
 
 
-def _native_hook_reason(*values: object | None) -> str:
-    return _runtime_policy_module()._native_hook_reason(*values)
-
-
 def _guard_action_from_cli(value: object) -> GuardAction:
     normalized = str(value).strip()
     action = coerce_guard_action(normalized)

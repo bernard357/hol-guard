@@ -117,6 +117,28 @@ def test_shadow_native_identity_is_reused_without_another_transport(monkeypatch)
     monkeypatch.setattr(client, "ensure_resident_prerequisite", lambda _: False)
     assert projected.to_dict()["security_identity"] == rich.security_identity
     assert _canonical_command_from_native("echo hi", {**payload, "security_identity": "invalid"}) is None
+    malformed_segment = {key: value for key, value in payload["segments"][0].items() if key != "span"}
+    first = payload["segments"][0]
+    outside_span = {**first, "span": {**first["span"], "end": len("echo hi") + 1}}
+    non_string_text = {**first, "text": 7}
+    for damaged in (
+        {**payload, "segments": [malformed_segment]},
+        {**payload, "segments": []},
+        {**payload, "segments": [outside_span]},
+        {**payload, "segments": [non_string_text]},
+        {**payload, "segments": [first, first]},
+        {**payload, "confidence": "uncertain", "uncertainty_reason": "unsupported_syntax"},
+        {**payload, "uncertainty_reason": "unsupported_syntax"},
+        {**payload, "segments": "echo hi"},
+        {**payload, "dialect": "powershell"},
+        {**payload, "confidence": "guess"},
+        {**payload, "path_overridden": True},
+    ):
+        assert _canonical_command_from_native("echo hi", damaged) is None
+    # Rust rewrites `[[ ... ]]` to `[ ... ]` and keeps the span on the original
+    # characters, so the segment text need not equal its span.
+    rewritten = {**payload, "security_identity": None, "segments": [{**first, "text": "echo  hi"}]}
+    assert _canonical_command_from_native("echo hi", rewritten) is not None
 
 
 @pytest.mark.parametrize(

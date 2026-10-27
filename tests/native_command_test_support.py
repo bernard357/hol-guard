@@ -17,7 +17,6 @@ from codex_plugin_scanner.guard.native_command_model import _canonical_command_f
 from codex_plugin_scanner.guard.runtime.command_evaluation import (
     CommandEvaluationInput,
     evaluate_command,
-    evaluate_commands_batch,
 )
 from codex_plugin_scanner.guard.runtime.command_extensions import BUILT_IN_COMMAND_EXTENSION_REGISTRY
 from codex_plugin_scanner.guard.runtime.extension_control_authority import (
@@ -38,6 +37,7 @@ from codex_plugin_scanner.guard.runtime.extension_control_runtime import (
     _layer_payload,
 )
 from codex_plugin_scanner.guard.runtime.native_command_evaluation import NativeCommandEvaluation
+from tests.native_command_effect_batch import evaluate_commands_batch
 
 ROOT = Path(__file__).resolve().parents[1]
 _NATIVE_TEST_GUARD_HOME: Path | None = None
