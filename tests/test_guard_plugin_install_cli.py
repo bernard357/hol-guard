@@ -103,6 +103,9 @@ class FakeRuntimes:
         self.codex_plugins: set[str] = set()
         self.codex_lists_nothing = False
         self.declared: str | None = None
+        self.declared_ran = "node setup.js"
+        self.claude_marketplace = root / "claude-marketplace"
+        self.claude_marketplace_head = SCANNED
         self.exit_codes: dict[tuple[str, ...], int] = {}
         self.raise_on: tuple[tuple[str, ...], BaseException] | None = None
 
@@ -130,7 +133,18 @@ class FakeRuntimes:
         reply: dict[str, Any] | str = f"{program} did its part\n"
         code = 0
         if program == "claude" and args[:3] == ["plugin", "marketplace", "add"]:
-            self._save("known_marketplaces.json", {"acme": {"source": {"source": "github", "repo": args[3]}}})
+            (self.claude_marketplace / ".git").mkdir(parents=True, exist_ok=True)
+            head = self.claude_marketplace / ".git" / "HEAD"
+            head.write_text(f"{self.claude_marketplace_head}\n", encoding="utf-8")
+            self._save(
+                "known_marketplaces.json",
+                {
+                    "acme": {
+                        "source": {"source": "github", "repo": args[3]},
+                        "installLocation": str(self.claude_marketplace),
+                    }
+                },
+            )
         elif program == "claude" and args[:3] == ["plugin", "marketplace", "remove"]:
             known = self._state("known_marketplaces.json")
             known.pop(args[3], None)
@@ -146,7 +160,10 @@ class FakeRuntimes:
                 }
             else:
                 installed = self._state("installed_plugins.json") or {"version": 2, "plugins": {}}
-                installed["plugins"][args[2]] = [{"scope": "user", "gitCommitSha": self.claude_commit}]
+                # Claude Code records the command it ran, not a commit, for a
+                # plugin installed by running a declared command.
+                entry = {"sourceCommand": self.declared_ran} if self.declared else {"gitCommitSha": self.claude_commit}
+                installed["plugins"][args[2]] = [{"scope": "user", **entry}]
                 self._save("installed_plugins.json", installed)
                 reply = {"command": "install", "outcome": "ok", "pluginId": args[2]}
         elif program == "claude" and args[:2] == ["plugin", "uninstall"]:
@@ -519,6 +536,9 @@ def test_a_declared_install_command_runs_only_when_its_sha256_is_accepted(
     assert exit_code == 0, error
     assert ["claude", "plugin", "install", "toolgate@acme", "--json", "--accept-command", DECLARED] in runtimes.ran
     assert install.recorded_installs(guard_home) == {"acme/toolgate": ["claude-code"]}
+    exit_code, output, error = _install(spec_file, *base, "--accept-command", DECLARED)
+    assert exit_code == 0, error
+    assert "already installed" in output + error
 
     # Installing again would report "already installed", so start over to reach the prompt.
     exit_code, _output, error = _run(["plugin", "uninstall", "acme/toolgate", "--apply", "--yes"])
@@ -1356,3 +1376,27 @@ def test_help_lists_plugin_and_each_command_has_examples(monkeypatch: pytest.Mon
     assert "hol-guard plugin install acme/toolgate --apply" in text
     assert "130  interrupted" in text
     assert max(len(line) for line in text.splitlines()) <= 80
+
+
+@pytest.mark.parametrize(
+    ("ran", "head", "reason"),
+    [
+        ("node other.js", SCANNED, "ran a different install command than the one Guard showed"),
+        ("node setup.js", "e" * 40, f"at commit eeeeeee, not the commit HOL scanned ({SCANNED[:7]})"),
+    ],
+)
+def test_a_declared_command_install_is_removed_when_it_is_not_what_guard_showed(
+    spec_file: Path, runtimes: FakeRuntimes, guard_home: Path, ran: str, head: str, reason: str
+) -> None:
+    runtimes.declared = DECLARED
+    runtimes.declared_ran = ran
+    runtimes.claude_marketplace_head = head
+    exit_code, _output, error = _install(
+        spec_file, "--apply", "--yes", "--runtime", "claude-code", "--accept-command", DECLARED
+    )
+    assert exit_code == 4
+    assert reason in error
+    assert "Guard removed it again." in error
+    assert ["claude", "plugin", "uninstall", "toolgate@acme"] in runtimes.ran
+    assert runtimes.ran[-1] == ["claude", "plugin", "marketplace", "remove", "acme"]
+    assert install.recorded_installs(guard_home) == {}
