@@ -277,6 +277,11 @@ fn answer(
         // A probe carries a request identity only the daemon assigns.
         return Err(HookDirectDefer::TransitionProbe);
     }
+    if cursor_harness && pre_tool && cursor::daemon_only(&payload) {
+        // The daemon answers Cursor's silent route probe and admits the
+        // contained sink it rewrote a shell call into.
+        return Err(HookDirectDefer::PayloadUnsupported);
+    }
     // The edge refuses an encrypted payload reference and reviews a source
     // reference only after a tool ran, reading the file as the daemon does.
     if payload.contains_key(ENCRYPTED_PAYLOAD_FIELD)

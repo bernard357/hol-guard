@@ -26,7 +26,7 @@ from codex_plugin_scanner.guard.adapters._modules.pi.pi_extension_contained_test
 )
 from tests.benign_fp_gate_connectors import connector_setup_failure
 from tests.benign_fp_gate_git import signed_checkout_include
-from tests.native_gate_retry import BUDGET_MISS_REASONS
+from tests.native_gate_retry import BUDGET_MISS_REASONS, review_with_unavailable_retry
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPLAY_DOCUMENT = json.loads((FIXTURES / "gauntlet_replay_cases.json").read_text(encoding="utf-8"))
@@ -159,16 +159,52 @@ def cursor_hook_fields(tool: str, payload: dict[str, object]) -> dict[str, objec
 
     Cursor reports shell calls as beforeShellExecution and reads as beforeReadFile.
     The script forwards both as PreToolUse, keeping the raw command or path beside tool_input.
+    A beforeReadFile event also carries the file's full text as ``content``.
     """
     tool_input = payload["tool_input"]
     assert isinstance(tool_input, dict)
     if tool == "read":
-        return {"file_path": tool_input["file_path"]}
+        file_path = str(tool_input["file_path"])
+        fields: dict[str, object] = {"file_path": file_path}
+        target = Path(str(payload["cwd"]), file_path)
+        if target.is_file():
+            fields["content"] = target.read_text(encoding="utf-8", errors="replace")
+        return fields
     return {
         "command": tool_input["command"],
         "tool_input": {**tool_input, "working_directory": payload["cwd"]},
         "cursor_source_hook_event": "beforeShellExecution",
     }
+
+
+def cursor_route_probe(
+    case_id: str, payload: dict[str, object], fixture: Any, worker: Any, workspace: Path
+) -> dict[str, object]:
+    """Send Cursor's silent preToolUse probe and return the call its shell hook then reviews.
+
+    Cursor asks its preToolUse hook for Shell first, and that hook may rewrite
+    the call into the workspace sandbox. beforeShellExecution follows with the
+    rewritten command, so a gate counts approvals across both hooks.
+    """
+    tool_input = payload["tool_input"]
+    assert isinstance(tool_input, dict)
+    probe = {**payload, "tool_input": {**tool_input, "cwd": payload["cwd"]}, "cursor_route_probe": True}
+    answer = review_with_unavailable_retry(
+        case_id,
+        lambda: worker.review_http_payload(
+            payload=probe,
+            params={},
+            default_harness="cursor",
+            home_dir=fixture.home,
+            guard_home=fixture.guard_home,
+            workspace=workspace,
+        ),
+    )
+    output = answer.get("hookSpecificOutput")
+    updated = output.get("updatedInput") if isinstance(output, dict) else None
+    if not isinstance(updated, dict) or not isinstance(updated.get("command"), str):
+        return payload
+    return {**payload, "tool_input": {**tool_input, "command": updated["command"]}}
 
 
 def environment_overlay(kind: str, home: Path) -> dict[str, str]:

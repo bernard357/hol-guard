@@ -421,6 +421,7 @@ def _assert_policy_floor_fail_closed(path: Path) -> None:
 _CONTAINMENT_ADAPTER = Path("src/codex_plugin_scanner/guard/adapters/zcode_contained_tests.py")
 _CONTAINMENT_DAEMON = Path("src/codex_plugin_scanner/guard/daemon/hook_worker_native.py")
 _CONTAINMENT_TRANSPORT = Path("src/codex_plugin_scanner/guard/native_hook_containment_route.py")
+_CONTAINMENT_GRANT = Path("src/codex_plugin_scanner/guard/daemon/hook_contained_grant.py")
 # The routing tables the resident's ``containment_route``/``containment_sink`` replaced.
 _RETIRED_CONTAINMENT_TABLES = frozenset(
     {"_PROFILES", "_ROUTED_HARNESSES", "_SINK_HARNESSES", "_WINDOWS_PROFILES", "_WINDOWS_SINK_HARNESSES"}
@@ -447,10 +448,21 @@ def _assert_containment_routed_by_resident() -> None:
             raise RuntimeError(f"containment adapter keeps a Python routing table: {sorted(names)}")
         if isinstance(node, ast.FunctionDef) and node.name == "platform_contains":
             raise RuntimeError("containment adapter still decides which host runs a profile")
-    for name in ("route_zcode_containment", "contained_zcode_response"):
-        fn = _top_level_function(adapter, name, _CONTAINMENT_ADAPTER)
-        if "native_containment_sink" not in _ordered_call_names(fn):
-            raise RuntimeError(f"{name} does not ask the resident whether the sink takes the call")
+    # The resident writes the request snapshot and quotes the sink command;
+    # the adapter only names the argv that starts Guard's CLI.
+    route = _top_level_function(adapter, "route_zcode_containment", _CONTAINMENT_ADAPTER)
+    if "native_containment_rewrite" not in _ordered_call_names(route):
+        raise RuntimeError("route_zcode_containment does not ask the resident to rewrite the receipt")
+    imported: set[str] = set()
+    for node in ast.walk(adapter):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    if imported & {"os", "tempfile", "shlex", "json", "hashlib"}:
+        raise RuntimeError(f"containment adapter writes or quotes the sink request itself: {sorted(imported)}")
+    if "native_containment_rewrite(" not in _read(_CONTAINMENT_GRANT):
+        raise RuntimeError("a granted containment review is not rewritten by the resident")
     if "edge_containment_route(" not in _read(_CONTAINMENT_DAEMON):
         raise RuntimeError("daemon containment does not ask the resident for the route")
     if "edge_route(" not in _read(Path("rust/crates/guard-runtime/src/edge.rs")):
@@ -463,7 +475,7 @@ def _assert_containment_routed_by_resident() -> None:
         isinstance(node, ast.Constant) and node.value == "sandbox-required" for node in ast.walk(from_edge)
     ):
         raise RuntimeError("the edge route is not the resident's answer")
-    for name in ("native_containment_route", "native_containment_sink"):
+    for name in ("native_containment_route", "native_containment_sink", "native_containment_rewrite"):
         fn = _top_level_function(transport, name, _CONTAINMENT_TRANSPORT)
         raises_outage = any(
             isinstance(node, ast.Raise)

@@ -327,6 +327,7 @@
       "src/pretool/generic_build_review.rs",
       "src/pretool/generic_cline_view.rs",
       "src/pretool/generic_command_rewrite.rs",
+      "src/pretool/generic_cursor_project_reads.rs",
       "src/pretool/generic_evaluate.rs",
       "src/pretool/generic_extract.rs",
       "src/pretool/generic_github.rs",
