@@ -300,7 +300,7 @@ class TestDaemonLifecycle:
             lambda _url, _auth_token: {"guard_home": str(guard_home), "pid": 111},
         )
 
-        daemon_manager_module._retire_duplicate_guard_daemons(guard_home, keep_port=5707)
+        daemon_manager_module._retire_duplicate_guard_daemons_unlocked(guard_home, keep_port=5707)
         state = json.loads((guard_home / "daemon-state.json").read_text(encoding="utf-8"))
 
         assert killed == [222]
@@ -339,7 +339,7 @@ class TestDaemonLifecycle:
 
         monkeypatch.setattr(daemon_manager_module, "_retire_guard_daemon_pid", fake_retire)
 
-        daemon_manager_module._retire_duplicate_guard_daemons(guard_home, keep_port=5709)
+        daemon_manager_module._retire_duplicate_guard_daemons_unlocked(guard_home, keep_port=5709)
 
         assert json.loads((guard_home / "daemon-state.json").read_text(encoding="utf-8")) == {}
 
@@ -377,7 +377,7 @@ class TestDaemonLifecycle:
         monkeypatch.setattr(daemon_manager_module, "_retire_guard_daemon_pid", fake_retire)
         monkeypatch.setattr(daemon_manager_module, "_daemon_healthz_details_payload", lambda _url, _auth_token: None)
 
-        daemon_manager_module._retire_duplicate_guard_daemons(guard_home, keep_port=5711)
+        daemon_manager_module._retire_duplicate_guard_daemons_unlocked(guard_home, keep_port=5711)
 
         assert json.loads((guard_home / "daemon-state.json").read_text(encoding="utf-8")) == {}
 
@@ -618,7 +618,13 @@ class TestSpawnedDaemonStartClassification:
 
         assert process.terminated is False
         assert process.killed is False
-        assert not (guard_home / "daemon-launch-pending.json").is_file()
+        # The signed pending receipt now outlives a progressing spawn on every platform:
+        # it is the only record binding the escaped child's generation, so the child
+        # clears it when it hands off and nothing else may retire it until that
+        # generation is proven dead.
+        pending = daemon_manager_module.load_authenticated_guard_daemon_pending_launch(guard_home)
+        assert pending is not None
+        assert pending["pid"] == process.pid
         assert not (guard_home / ".guard" / "daemon-state.json").is_file()
 
     def test_progressing_spawn_detected_by_newer_start_requested(self, tmp_path, monkeypatch) -> None:

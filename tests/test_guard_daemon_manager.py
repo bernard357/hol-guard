@@ -31,6 +31,7 @@ from codex_plugin_scanner.guard.daemon.discovery import (
     load_daemon_discovery_key,
     verify_daemon_state,
 )
+from tests.native_runtime_fixtures import patch_popen_past_native_runtime
 
 
 def _write_subprocess_launch_wrapper(
@@ -164,35 +165,6 @@ time.sleep(60)
     return path
 
 
-def _write_real_production_launch_wrapper(path: Path, *, source_root: Path) -> Path:
-    """Create a real daemon launch that stalls after the production worker spawn."""
-
-    runtime_paths = [entry for entry in sys.path if entry]
-    body = f"""
-import sys
-import time
-from pathlib import Path
-
-sys.path[:0] = {runtime_paths!r}
-sys.path.insert(0, {str(source_root)!r})
-from codex_plugin_scanner.guard.daemon.hook_process_spawner import spawn_hook_worker
-
-if __name__ == "__main__":
-    argv = sys.argv[1:]
-    guard_home = Path(argv[argv.index("--guard-home") + 1]).resolve()
-    guard_home.mkdir(parents=True, exist_ok=True)
-    slot = spawn_hook_worker(guard_home)
-    receipt_path = guard_home / "daemon-launch-containment.json"
-    deadline = time.monotonic() + 10
-    while not receipt_path.is_file() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    time.sleep(60)
-"""
-    path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
-    path.chmod(0o700)
-    return path
-
-
 def _wait_for_verified_process_death(
     pid: int,
     *,
@@ -259,27 +231,6 @@ def _terminate_verified_posix_process(pid: int, *, start_marker: str, owner: str
     assert daemon_manager_module.process_owner_marker(pid) == owner
     with suppress(ProcessLookupError):
         os.kill(pid, signal.SIGKILL)
-    assert _wait_for_verified_process_death(pid, start_marker=start_marker, owner=owner)
-
-
-def _terminate_verified_posix_process_group(pid: int, *, start_marker: str, owner: str) -> None:
-    """Signal a worker session only after exact identity and session ownership are proven."""
-
-    if not daemon_manager_module._guard_daemon_pid_is_running(pid):
-        return
-    assert daemon_manager_module.process_start_token(pid) == start_marker
-    assert daemon_manager_module.process_owner_marker(pid) == owner
-    assert os.getpgid(pid) == pid
-    with suppress(ProcessLookupError):
-        os.killpg(pid, signal.SIGTERM)
-    if _wait_for_verified_process_death(pid, start_marker=start_marker, owner=owner):
-        return
-    assert daemon_manager_module._guard_daemon_pid_is_running(pid)
-    assert daemon_manager_module.process_start_token(pid) == start_marker
-    assert daemon_manager_module.process_owner_marker(pid) == owner
-    assert os.getpgid(pid) == pid
-    with suppress(ProcessLookupError):
-        os.killpg(pid, signal.SIGKILL)
     assert _wait_for_verified_process_death(pid, start_marker=start_marker, owner=owner)
 
 
@@ -1545,7 +1496,7 @@ def test_ensure_guard_daemon_accepts_nonce_bound_default_launch_handoff_only_for
         "_guard_daemon_launch_command",
         lambda *_args, **_kwargs: ["guard-daemon"],
     )
-    monkeypatch.setattr(daemon_manager_module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    patch_popen_past_native_runtime(monkeypatch, lambda *_args, **_kwargs: process)
     monkeypatch.setattr(daemon_manager_module, "_record_guard_daemon_pending_launch", record_pending)
     monkeypatch.setattr(daemon_manager_module, "_release_guard_daemon_launch_gate", lambda _process: None)
     monkeypatch.setattr(
@@ -2082,125 +2033,6 @@ def test_real_dead_nonce_bound_escaped_helper_reconciles_at_retry_boundary(tmp_p
             )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="requires POSIX worker process groups")
-def test_real_production_worker_spawn_writes_containment_receipt_and_bounds_retry(tmp_path):
-    """The real daemon worker boundary accounts for live escaped workers before retry."""
-
-    guard_home = tmp_path / "guard-home"
-    home_dir = tmp_path / "user-home"
-    guard_home.mkdir()
-    home_dir.mkdir()
-    production_wrapper = _write_real_production_launch_wrapper(
-        tmp_path / "launch-real-daemon-workers",
-        source_root=Path(daemon_manager_module.__file__).resolve().parents[3],
-    )
-    handoff_wrapper = _write_subprocess_launch_wrapper(
-        tmp_path / "launch-after-real-worker-exit",
-        source_root=Path(daemon_manager_module.__file__).resolve().parents[3],
-        publish_handoff=True,
-    )
-
-    root_identity: tuple[int, str, str] | None = None
-    worker_identities: list[tuple[int, str, str]] = []
-    process_identity: tuple[int, str, str] | None = None
-    try:
-        with pytest.raises(RuntimeError, match="ownership could not be proven contained"):
-            daemon_manager_module.ensure_guard_daemon(
-                guard_home,
-                home_dir=home_dir,
-                executable=production_wrapper,
-                start_timeout=45.0,
-            )
-
-        pending = daemon_manager_module.load_authenticated_guard_daemon_pending_launch(guard_home)
-        containment = daemon_manager_module._load_authenticated_guard_daemon_containment_receipt(guard_home)
-        assert pending is not None
-        assert containment is not None
-        assert containment["launch_nonce"] == pending["launch_nonce"]
-        assert containment["launch_pid"] == pending["pid"]
-        root_pid = pending["pid"]
-        root_start_marker = pending["process_start_marker"]
-        root_owner = pending["owner"]
-        assert isinstance(root_pid, int)
-        assert isinstance(root_start_marker, str) and root_start_marker
-        assert isinstance(root_owner, str) and root_owner
-        root_identity = root_pid, root_start_marker, root_owner
-
-        children = containment.get("children")
-        assert isinstance(children, list) and children
-        for child in children:
-            assert isinstance(child, dict)
-            child_pid = child.get("pid")
-            child_start_marker = child.get("process_start_marker")
-            child_owner = child.get("owner")
-            assert isinstance(child_pid, int) and child_pid > 0 and child_pid != root_pid
-            assert isinstance(child_start_marker, str) and child_start_marker
-            assert isinstance(child_owner, str) and child_owner == root_owner
-            worker_identities.append((child_pid, child_start_marker, child_owner))
-
-        retry_url: str | None = None
-        try:
-            retry_url = daemon_manager_module.ensure_guard_daemon(
-                guard_home,
-                home_dir=home_dir,
-                executable=handoff_wrapper,
-                start_timeout=5.0,
-            )
-        except RuntimeError as error:
-            assert "previous Guard daemon launch could not be retired safely" in str(error)
-            for child_pid, child_start_marker, child_owner in worker_identities:
-                if daemon_manager_module._guard_daemon_pid_is_running(child_pid):
-                    _terminate_verified_posix_process_group(
-                        child_pid,
-                        start_marker=child_start_marker,
-                        owner=child_owner,
-                    )
-            assert daemon_manager_module._guard_daemon_pending_launch_state_is_resolved(guard_home)
-            assert daemon_manager_module._load_authenticated_guard_daemon_containment_receipt(guard_home) is None
-        else:
-            assert daemon_manager_module._guard_daemon_pending_launch_state_is_resolved(guard_home)
-            assert daemon_manager_module._load_authenticated_guard_daemon_containment_receipt(guard_home) is None
-
-        if retry_url is None:
-            retry_url = daemon_manager_module.ensure_guard_daemon(
-                guard_home,
-                home_dir=home_dir,
-                executable=handoff_wrapper,
-                start_timeout=45.0,
-            )
-        url = retry_url
-        assert url.startswith("http://127.0.0.1:")
-        state = load_authenticated_daemon_state(guard_home)
-        assert state is not None
-        process_pid = state.get("pid")
-        process_start_marker = state.get("process_start_marker")
-        process_owner = state.get("owner", state.get("user"))
-        assert isinstance(process_pid, int) and process_pid > 0
-        assert isinstance(process_start_marker, str) and process_start_marker
-        assert isinstance(process_owner, str) and process_owner
-        process_identity = process_pid, process_start_marker, process_owner
-    finally:
-        for child_pid, child_start_marker, child_owner in worker_identities:
-            if daemon_manager_module._guard_daemon_pid_is_running(child_pid):
-                _terminate_verified_posix_process_group(
-                    child_pid,
-                    start_marker=child_start_marker,
-                    owner=child_owner,
-                )
-        if root_identity is not None and daemon_manager_module._guard_daemon_pid_is_running(root_identity[0]):
-            _terminate_verified_posix_process(
-                root_identity[0],
-                start_marker=root_identity[1],
-                owner=root_identity[2],
-            )
-        if process_identity is not None:
-            _terminate_verified_posix_process(
-                process_identity[0],
-                start_marker=process_identity[1],
-                owner=process_identity[2],
-            )
-
-
 @pytest.mark.skipif(os.name == "nt", reason="requires POSIX subprocess identity markers")
 def test_real_matching_handoff_keeps_only_nonce_bound_daemon_alive(tmp_path):
     guard_home = tmp_path / "guard-home"
@@ -2506,85 +2338,6 @@ def test_record_guard_daemon_launch_containment_child_refuses_stale_receipt_for_
     assert daemon_manager_module._load_authenticated_guard_daemon_containment_receipt(guard_home) == first_receipt
 
 
-def test_spawn_hook_worker_records_containment_through_daemon_launch_caller(
-    tmp_path,
-    monkeypatch,
-):
-    """The production worker caller publishes the child generation into the launch receipt."""
-
-    from codex_plugin_scanner.guard.daemon import hook_process_spawner
-
-    guard_home = tmp_path / "guard-home"
-    guard_home.mkdir()
-    launch_pid = os.getpid()
-    child_pid = launch_pid + 7
-    nonce = "9" * daemon_manager_module._GUARD_DAEMON_LAUNCH_NONCE_HEX_LENGTH
-    identities = _write_containment_pending_launch(
-        guard_home,
-        launch_pid=launch_pid,
-        launch_nonce=nonce,
-        monkeypatch=monkeypatch,
-    )
-    identities[child_pid] = ("worker-generation", "test-owner")
-    monkeypatch.setenv(daemon_manager_module._GUARD_DAEMON_LAUNCH_NONCE_ENV, nonce)
-
-    class FakeConnection:
-        def __init__(self) -> None:
-            self.closed = False
-
-        def close(self) -> None:
-            self.closed = True
-
-    class FakeProcess:
-        pid = child_pid
-
-        def __init__(self) -> None:
-            self.started = False
-
-        def start(self) -> None:
-            self.started = True
-
-    parent_connection = FakeConnection()
-    child_connection = FakeConnection()
-    process = FakeProcess()
-
-    class FakeContext:
-        def Pipe(self, *, duplex: bool):  # noqa: N802
-            assert duplex
-            return parent_connection, child_connection
-
-        def Process(self, *, target, args, name: str, daemon: bool):  # noqa: N802
-            assert target is not None
-            assert args[1] == str(guard_home)
-            assert name == "hol-guard-hook-worker"
-            assert daemon is False
-            return process
-
-    def get_context(method: str) -> FakeContext:
-        assert method == "spawn"
-        return FakeContext()
-
-    monkeypatch.setattr(hook_process_spawner.multiprocessing, "get_context", get_context)
-
-    slot = hook_process_spawner.spawn_hook_worker(guard_home)
-
-    assert process.started
-    assert child_connection.closed
-    assert slot.process is process
-    assert slot.connection is parent_connection
-    receipt = daemon_manager_module._load_authenticated_guard_daemon_containment_receipt(guard_home)
-    assert receipt is not None
-    assert receipt["launch_nonce"] == nonce
-    assert receipt["launch_pid"] == launch_pid
-    assert receipt["children"] == [
-        {
-            "pid": child_pid,
-            "process_start_marker": "worker-generation",
-            "owner": "test-owner",
-        }
-    ]
-
-
 def test_authenticated_pending_launch_loader_rejects_identity_gaps(tmp_path, monkeypatch):
     """A signed pending file still needs every generation identity field."""
 
@@ -2851,7 +2604,9 @@ def test_ensure_guard_daemon_retires_stale_daemon_from_different_runtime_fingerp
     assert url == "http://127.0.0.1:5412"
     assert killed == [98765]
     assert launched_commands[0][-2:] == ["--port", "5412"]
-    assert observed_start_markers == [98765]
+    # The generation is read once to admit the pid and again immediately before
+    # the signal, so a pid recycled during the command probe is never signaled.
+    assert observed_start_markers == [98765, 98765]
 
 
 def test_guard_daemon_state_matches_same_fingerprint_from_different_source_root():

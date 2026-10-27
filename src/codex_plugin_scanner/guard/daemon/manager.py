@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Literal, TypedDict, cast
 
 from ...version import __version__
+from .. import live_process_identity as _live_process_identity
 from .. import windows_processes
 from ..fork_safety import forget_in_child
 from ..frozen_runtime_commands import (
@@ -36,7 +37,6 @@ from ..frozen_runtime_commands import (
     frozen_daemon_serve_command,
 )
 from ..live_process_identity import process_owner_marker
-from ..live_process_identity import process_start_token as _live_process_start_token
 from ..mdm.file_lock import release_file_lock
 from ..native_daemon_lifecycle import (
     NativeDaemonLifecycleError,
@@ -1085,11 +1085,7 @@ def _retire_guard_daemons_for_home(
                 else:
                     # Markerless live state cannot identify a PID generation: only a proven-dead
                     # PID may be treated as retired, and no signal is ever sent to it.
-                    retirement_succeeded = (
-                        _guard_daemon_pid_is_proven_dead(state_pid)
-                        if os.name == "nt"
-                        else retire_pid(state_pid, expected_guard_home=guard_home)
-                    )
+                    retirement_succeeded = _guard_daemon_pid_is_proven_dead(state_pid)
                 if retirement_succeeded:
                     if _guard_daemon_pid_is_proven_dead(state_pid):
                         _clear_authenticated_guard_daemon_state_if_current(
@@ -3391,9 +3387,10 @@ def _release_guard_daemon_launch_gate(process: subprocess.Popen[bytes]) -> None:
 def process_start_token(pid: int, *, deadline_monotonic: float | None = None) -> str | None:
     """Resolve the live process generation marker through the identity module at call time."""
 
+    resolve = _live_process_identity.process_start_token
     if deadline_monotonic is None:
-        return _live_process_start_token(pid)
-    return _live_process_start_token(pid, deadline_monotonic=deadline_monotonic)
+        return resolve(pid)
+    return resolve(pid, deadline_monotonic=deadline_monotonic)
 
 
 def _retire_guard_daemon_pid(
