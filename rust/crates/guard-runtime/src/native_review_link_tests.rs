@@ -149,3 +149,25 @@ mod review_link_strip_parity {
         }
     }
 }
+
+#[test]
+fn a_loopback_approval_link_opens_only_once_it_is_signed() {
+    let document = document();
+    let vector = &document["sessions"][0];
+    let url = "http://127.0.0.1:5475/requests/req-1";
+    let auth_token = text(vector, "auth_token");
+    let surface = text(vector, "surface");
+    let expected = session_token(auth_token, surface, micros(vector))
+        .map(|session| format!("{url}#guard-token={session}"));
+    assert!(expected.is_some());
+    assert_eq!(
+        approval_browser_url(url, || Some(auth_token.to_owned()), surface, micros(vector)),
+        expected
+    );
+    // No daemon auth token: there is no signed link to open, and the
+    // unsigned one is never handed to the browser.
+    assert_eq!(
+        approval_browser_url(url, || None, surface, micros(vector)),
+        None
+    );
+}
