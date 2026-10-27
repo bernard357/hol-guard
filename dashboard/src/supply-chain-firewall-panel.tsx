@@ -476,8 +476,8 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
           }
         }
         if (isPackageFirewallOperationInProgressError(err)) {
-          // An earlier sync is still running in the daemon; that is not a failure, so keep the dialog ready.
-          const message = "Guard is still finishing the previous sync. Wait a moment, then sync again if the feed is still out of date.";
+          // Another package protection change (a sync, repair or shim install) holds the daemon's lock; that is not a failure, so keep the dialog ready.
+          const message = "Guard is still finishing another package protection change. Wait a moment, then sync again.";
           setAuditRecoveryErrorOp("sync");
           setAuditRecoveryError(message);
           setAuditRecoveryPhase("ready");
