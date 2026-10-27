@@ -26,11 +26,11 @@ from codex_plugin_scanner.guard.policy_bundle_v2 import (
     computed_policy_bundle_v2_hash,
     validate_policy_bundle_v2_transition,
     validated_policy_bundle_v2_acknowledgement,
-    validated_policy_bundle_v2_payload,
 )
 from codex_plugin_scanner.guard.policy_document import canonical_json_bytes, canonical_policy_document_bytes
 from codex_plugin_scanner.guard.policy_document_yaml import load_policy_document, parse_policy_document_yaml
 from codex_plugin_scanner.guard.runtime import runner as guard_runner
+from tests.policy_bundle_v2_support import validated_policy_bundle_v2_payload
 
 _FIXTURE = Path(__file__).parents[1] / "spec" / "guard-policy" / "v1alpha1" / "fixtures" / "valid" / "basic.yaml"
 
