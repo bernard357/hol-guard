@@ -291,3 +291,31 @@ def test_compiled_runtime_reports_a_risky_hook_without_quoting_it(tmp_path: Path
     ]
     stored = json.dumps(latest)
     assert "evil.example" not in stored and str(workspace) not in stored
+
+
+def test_a_hook_file_that_stops_parsing_keeps_its_finding_open(tmp_path: Path, native_binary: None) -> None:
+    """A configuration the scan can no longer parse is unknown, never fixed."""
+    workspace = tmp_path / "workspace"
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / HOOK_PATH).write_text(REMOTE_HOOK, encoding="utf-8")
+    store = GuardStore(tmp_path / "guard-home")
+    admitted = worker.admit_workspace(store, str(workspace))
+    keys = assessments.WorktreeKeys(str(admitted["codebase_key"]), str(admitted["worktree_key"]))
+    config = load_guard_config(store.guard_home)
+    assert worker.queue_manual_run(store, keys) == admitted["run_id"]
+    assert runner.run_next(store, config, owner="test")
+    [opened] = assessments.latest_assessed_runs(store)
+    [first] = [item for item in opened["findings"] if item["detector"] == "hook_config_v1"]
+
+    (workspace / HOOK_PATH).write_text(REMOTE_HOOK[:-3], encoding="utf-8")
+    second_run = worker.queue_manual_run(store, keys)
+    assert second_run and second_run != admitted["run_id"]
+    assert runner.run_next(store, config, owner="test")
+    [latest] = assessments.latest_assessed_runs(store)
+    assert latest["run_id"] == second_run
+    assert latest["state"] == "partial"
+    assert latest["coverage"]["detectors"]["hook_config_v1"] == "incomplete"
+    hooks = [item for item in latest["findings"] if item["detector"] == "hook_config_v1"]
+    assert [(item["finding_id"], item["carried_from_run_id"]) for item in hooks] == [
+        (first["finding_id"], admitted["run_id"])
+    ]
