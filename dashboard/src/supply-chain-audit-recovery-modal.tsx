@@ -126,11 +126,12 @@ export function resolveBusyHint(phase: AuditRecoveryModalPhase, elapsedSeconds: 
   return null;
 }
 
-function useElapsedSeconds(running: boolean): number {
+/** Seconds spent in the current busy phase; restarts when the dialog moves to another step. */
+function useElapsedSeconds(busyPhase: AuditRecoveryModalPhase | null): number {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   useEffect(() => {
     setElapsedSeconds(0);
-    if (!running) {
+    if (busyPhase === null) {
       return;
     }
     const startedAt = Date.now();
@@ -138,7 +139,7 @@ function useElapsedSeconds(running: boolean): number {
       setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
     return () => window.clearInterval(handle);
-  }, [running]);
+  }, [busyPhase]);
   return elapsedSeconds;
 }
 
@@ -194,7 +195,7 @@ export function AuditRecoveryModal({
   const standaloneSync = isStandaloneSyncRecoveryGate(gate);
   const primaryBusy = phase === "syncing" || phase === "connecting" || phase === "auditing";
   const PrimaryIcon = resolvePrimaryIcon(gate, phase);
-  const elapsedSeconds = useElapsedSeconds(primaryBusy);
+  const elapsedSeconds = useElapsedSeconds(primaryBusy ? phase : null);
   const busyHint = primaryBusy ? resolveBusyHint(phase, elapsedSeconds) : null;
   const showConnectFlow =
     gate.primaryAction === "connect" && connectFlow !== null && phase !== "auditing";
@@ -251,17 +252,20 @@ export function AuditRecoveryModal({
         </div>
 
         {showConnectFlow ? (
-          <ConnectFlowCard
-            minimal
-            purpose="audit"
-            mode="repair"
-            connectFlow={connectFlow}
-            connectStarting={connectStarting}
-            connectError={connectError}
-            headline={gate.headline}
-            detail={gate.detail}
-            onStartConnect={onStartConnect}
-          />
+          <>
+            <ConnectFlowCard
+              minimal
+              purpose="audit"
+              mode="repair"
+              connectFlow={connectFlow}
+              connectStarting={connectStarting}
+              connectError={connectError}
+              headline={gate.headline}
+              detail={gate.detail}
+              onStartConnect={onStartConnect}
+            />
+            {busyHint !== null ? <p className="px-5 pb-4 text-xs leading-relaxed text-slate-500">{busyHint}</p> : null}
+          </>
         ) : showApprovalStep ? (
           <div className="px-5 py-5">
             <ApprovalProofInline

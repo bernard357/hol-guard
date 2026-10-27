@@ -20,6 +20,7 @@ import {
 } from "./guard-api";
 import {
   isApprovalGateRequiredError,
+  isPackageFirewallOperationInProgressError,
   isSupplyChainSyncConnectError,
   isSupplyChainSyncRetryableError,
   readHarnessActionUserMessage,
@@ -473,6 +474,15 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             setAuditRecoveryError(null);
             return;
           }
+        }
+        if (isPackageFirewallOperationInProgressError(err)) {
+          // An earlier sync is still running in the daemon; that is not a failure, so keep the dialog ready.
+          const message = "Guard is still finishing the previous sync. Wait a moment, then sync again if the feed is still out of date.";
+          setAuditRecoveryErrorOp("sync");
+          setAuditRecoveryError(message);
+          setAuditRecoveryPhase("ready");
+          refreshInBackground();
+          return;
         }
         if (err instanceof GuardOperationTimeoutError) {
           // The daemon may still finish this sync, so recheck status instead of asking for approval again.
