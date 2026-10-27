@@ -53,6 +53,12 @@ pub(super) fn jq_is_static(value: &str) -> bool {
         })
 }
 
+/// A `--jq` filter may render with a format string such as `@tsv`; in jq `@`
+/// only names a formatter, never a file the way a typed `-F` value does.
+fn jq_filter_is_static(value: &str) -> bool {
+    !value.contains(['$', '`', '\0', '\n', '\r']) && jq_is_static(value)
+}
+
 fn safe_header(value: &str) -> bool {
     let lowered = value.to_ascii_lowercase();
     let Some((name, value)) = lowered.split_once(':') else {
@@ -193,6 +199,10 @@ pub(super) fn classify(arguments: &[String]) -> Capabilities {
                 if !literal_field_is_static(name, value) {
                     return None;
                 }
+            } else if matches!(name, "--jq" | "-q") {
+                if !jq_filter_is_static(value) {
+                    return None;
+                }
             } else if !field_is_static(value) {
                 return None;
             }
@@ -206,7 +216,6 @@ pub(super) fn classify(arguments: &[String]) -> Capabilities {
                     fields.push((key, value));
                 }
                 "--header" | "-H" if !safe_header(value) => return None,
-                "--jq" | "-q" if !jq_is_static(value) => return None,
                 "--input" => return None,
                 _ => {}
             }
@@ -434,7 +443,18 @@ mod encoded_endpoint_tests {
                 "{attached}"
             );
         }
-        for unsafe_filter in [vec!["-q", "env"], vec!["-qenv.HOME"], vec!["-q", "$x"]] {
+        for format in [".workflow_runs[] | [.id, .name] | @tsv", ".[] | @base64"] {
+            let arguments = vec![endpoint.to_owned(), "--jq".to_owned(), format.to_owned()];
+            assert_eq!(classify(&arguments), Some(vec!["read_remote"]), "{format}");
+        }
+        for unsafe_filter in [
+            vec!["-q", "env"],
+            vec!["-qenv.HOME"],
+            vec!["-q", "$x"],
+            vec!["-q", "@text \"\\($ENV)\""],
+            vec!["-q", "@sh \"`id`\""],
+            vec!["-q", ".a\n| env"],
+        ] {
             let mut arguments = vec![endpoint.to_owned()];
             arguments.extend(unsafe_filter.iter().map(|value| (*value).to_owned()));
             assert_eq!(classify(&arguments), None, "{arguments:?}");
