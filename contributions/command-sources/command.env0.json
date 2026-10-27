@@ -154,18 +154,24 @@
         "matcher": {
           "op": "executable.v1",
           "config": {
-            "allow_leading_options": false,
+            "allow_leading_options": true,
             "executables": [
               "env0",
               "env0.exe",
               "env0.cmd"
             ],
-            "fail_secure_unknown_options": false,
+            "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [],
-            "interspersed_options_with_values": [],
+            "interspersed_flags": [
+              "--yes"
+            ],
+            "interspersed_options_with_values": [
+              "--organization"
+            ],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [],
+            "leading_options_with_values": [
+              "--organization"
+            ],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
@@ -183,18 +189,24 @@
             "matcher": {
               "op": "executable.v1",
               "config": {
-                "allow_leading_options": false,
+                "allow_leading_options": true,
                 "executables": [
                   "env0",
                   "env0.exe",
                   "env0.cmd"
                 ],
-                "fail_secure_unknown_options": false,
+                "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [],
-                "interspersed_options_with_values": [],
+                "interspersed_flags": [
+                  "--yes"
+                ],
+                "interspersed_options_with_values": [
+                  "--organization"
+                ],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [],
+                "leading_options_with_values": [
+                  "--organization"
+                ],
                 "options_with_values": [],
                 "required_flags": [
                   "--help"
@@ -230,18 +242,24 @@
         "matcher": {
           "op": "executable.v1",
           "config": {
-            "allow_leading_options": false,
+            "allow_leading_options": true,
             "executables": [
               "env0",
               "env0.exe",
               "env0.cmd"
             ],
-            "fail_secure_unknown_options": false,
+            "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [],
-            "interspersed_options_with_values": [],
+            "interspersed_flags": [
+              "--yes"
+            ],
+            "interspersed_options_with_values": [
+              "--organization"
+            ],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [],
+            "leading_options_with_values": [
+              "--organization"
+            ],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
@@ -259,18 +277,24 @@
             "matcher": {
               "op": "executable.v1",
               "config": {
-                "allow_leading_options": false,
+                "allow_leading_options": true,
                 "executables": [
                   "env0",
                   "env0.exe",
                   "env0.cmd"
                 ],
-                "fail_secure_unknown_options": false,
+                "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [],
-                "interspersed_options_with_values": [],
+                "interspersed_flags": [
+                  "--yes"
+                ],
+                "interspersed_options_with_values": [
+                  "--organization"
+                ],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [],
+                "leading_options_with_values": [
+                  "--organization"
+                ],
                 "options_with_values": [],
                 "required_flags": [
                   "--help"
@@ -306,18 +330,24 @@
         "matcher": {
           "op": "executable.v1",
           "config": {
-            "allow_leading_options": false,
+            "allow_leading_options": true,
             "executables": [
               "env0",
               "env0.exe",
               "env0.cmd"
             ],
-            "fail_secure_unknown_options": false,
+            "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [],
-            "interspersed_options_with_values": [],
+            "interspersed_flags": [
+              "--yes"
+            ],
+            "interspersed_options_with_values": [
+              "--organization"
+            ],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [],
+            "leading_options_with_values": [
+              "--organization"
+            ],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
@@ -335,18 +365,24 @@
             "matcher": {
               "op": "executable.v1",
               "config": {
-                "allow_leading_options": false,
+                "allow_leading_options": true,
                 "executables": [
                   "env0",
                   "env0.exe",
                   "env0.cmd"
                 ],
-                "fail_secure_unknown_options": false,
+                "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [],
-                "interspersed_options_with_values": [],
+                "interspersed_flags": [
+                  "--yes"
+                ],
+                "interspersed_options_with_values": [
+                  "--organization"
+                ],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [],
+                "leading_options_with_values": [
+                  "--organization"
+                ],
                 "options_with_values": [],
                 "required_flags": [
                   "--help"
@@ -382,18 +418,24 @@
         "matcher": {
           "op": "executable.v1",
           "config": {
-            "allow_leading_options": false,
+            "allow_leading_options": true,
             "executables": [
               "env0",
               "env0.exe",
               "env0.cmd"
             ],
-            "fail_secure_unknown_options": false,
+            "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [],
-            "interspersed_options_with_values": [],
+            "interspersed_flags": [
+              "--yes"
+            ],
+            "interspersed_options_with_values": [
+              "--organization"
+            ],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [],
+            "leading_options_with_values": [
+              "--organization"
+            ],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
@@ -411,18 +453,24 @@
             "matcher": {
               "op": "executable.v1",
               "config": {
-                "allow_leading_options": false,
+                "allow_leading_options": true,
                 "executables": [
                   "env0",
                   "env0.exe",
                   "env0.cmd"
                 ],
-                "fail_secure_unknown_options": false,
+                "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [],
-                "interspersed_options_with_values": [],
+                "interspersed_flags": [
+                  "--yes"
+                ],
+                "interspersed_options_with_values": [
+                  "--organization"
+                ],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [],
+                "leading_options_with_values": [
+                  "--organization"
+                ],
                 "options_with_values": [],
                 "required_flags": [
                   "--help"
