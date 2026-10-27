@@ -84,8 +84,6 @@ from .inventory_contract_models import GuardAgentInventoryDrift as GuardAgentInv
 from .inventory_contract_models import GuardAgentInventoryFinding as GuardAgentInventoryFinding
 from .inventory_contract_models import GuardAgentInventoryItem as GuardAgentInventoryItem
 from .inventory_contract_models import GuardAgentInventorySnapshot as GuardAgentInventorySnapshot
-from .inventory_contract_models import GuardHarnessSetupStep as GuardHarnessSetupStep
-from .inventory_contract_models import GuardInventoryRiskComponent as GuardInventoryRiskComponent
 from .inventory_contract_models import GuardInventorySource as GuardInventorySource
 from .inventory_contract_models import InventoryCapability as InventoryCapability
 from .inventory_contract_models import InventoryConfidence as InventoryConfidence

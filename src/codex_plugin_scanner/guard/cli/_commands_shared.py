@@ -234,11 +234,6 @@ _HOOK_DAEMON_UNREACHABLE_REASON_MARKER = "daemon was unreachable"
 _CODEX_BROWSER_APPROVAL_WAIT_MAX_SECONDS = 8
 
 
-def _hook_command_text(payload: Mapping[str, object]) -> str | None:
-    tool_input = payload.get("tool_input")
-    return command_text_from_tool_payload(payload.get("tool_name"), tool_input)
-
-
 _CLAUDE_GUARD_APPROVAL_HEADER = "HOL Guard"
 _CLAUDE_GUARD_APPROVAL_OPTIONS = (
     "Allow once",
