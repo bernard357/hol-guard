@@ -5,7 +5,11 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from codex_plugin_scanner.guard.action_lattice import GUARD_ACTION_LATTICE, GUARD_ACTION_SEVERITY
+from codex_plugin_scanner.guard.action_lattice import (
+    GUARD_ACTION_LATTICE,
+    GUARD_ACTION_SEVERITY,
+    most_restrictive_guard_action,
+)
 from codex_plugin_scanner.guard.runtime.effect_contract import (
     EFFECT_CONTRACT_SCHEMA_VERSION,
     ContainmentRequirement,
@@ -21,7 +25,6 @@ from codex_plugin_scanner.guard.runtime.effect_contract import (
     ProofRoute,
     UncertaintyKind,
     derive_protection_state,
-    most_restrictive_guard_action,
 )
 
 
