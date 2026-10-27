@@ -52,7 +52,11 @@ def test_discourse_selected_write_actions_require_review() -> None:
         "discourse_invite_to_private_message",
     }
     declared = {tool["name"]: tool["state"] for tool in contribution["tools"]}
-    assert required <= declared.keys()
+    # This is an intentionally narrow opt-in profile: adding another named tool
+    # must be an explicit reviewed scope change, not an accidental allow rule.
+    assert set(declared) == required | {"other"}
+    assert declared["other"] == "inherit"
+    assert all(state != "allow" for state in declared.values())
     for name in required:
         assert declared[name] == "review"
         assert mcp_tool_state(contribution, name) == "review"
