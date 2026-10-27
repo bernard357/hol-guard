@@ -244,6 +244,36 @@ fn unrelated_execution_and_shell_effects_do_not_inherit_test_delegation() {
         classify("cursor", "pytest -q").reason_code,
         "native_pytest_readonly_containment_required"
     );
+    // Cursor's own `preToolUse` for `Shell` can rewrite the call into the
+    // sink; its `beforeShellExecution`, which names its source hook, cannot.
+    let cursor = |payload: serde_json::Value| {
+        evaluate_pre_tool_envelope_with_context(
+            "cursor",
+            "PreToolUse",
+            &payload,
+            None,
+            None,
+            Some("/home/tester"),
+            Some("/home/tester/project"),
+        )
+    };
+    let probe = cursor(json!({"tool_name":"Shell","tool_input":{"command":"pytest -q"}}));
+    let before_shell = cursor(json!({
+        "tool_name":"Shell",
+        "tool_input":{"command":"pytest -q"},
+        "cursor_source_hook_event":"beforeShellExecution",
+    }));
+    assert_ne!(
+        before_shell.reason_code,
+        "native_pytest_readonly_containment_required"
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            probe.reason_code,
+            "native_pytest_readonly_containment_required"
+        );
+        assert_eq!(probe.minimum_action, "sandbox-required");
+    }
     let without_cwd = evaluate_pre_tool_envelope_with_context(
         "omp",
         "PreToolUse",

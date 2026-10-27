@@ -9,6 +9,7 @@
 //! loader or its credentials never reach this path.
 use super::{host_eligible, mark_contained, workspace_admissible, PathContext};
 use guard_contracts::{GuardExecutionEnvironmentV1, PreToolResultV1};
+use serde_json::Value;
 use std::path::Path;
 
 /// Move `projected`, the contained verdict for `command` without its
@@ -22,11 +23,12 @@ pub(in crate::pretool) fn carry_settings(
     execution_environment: Option<&GuardExecutionEnvironmentV1>,
     harness: &str,
     event: &str,
+    payload: &Value,
 ) -> bool {
     let contained = projected.minimum_action == "sandbox-required"
         && projected.reason_code.starts_with("native_")
         && projected.reason_code.ends_with("_containment_required");
-    if !contained || projected.action.sensitive_target || !host_eligible(harness, event) {
+    if !contained || projected.action.sensitive_target || !host_eligible(harness, event, payload) {
         return false;
     }
     let home = context.home_dir.map(Path::new);

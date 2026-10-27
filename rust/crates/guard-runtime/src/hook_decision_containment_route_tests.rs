@@ -326,6 +326,24 @@ fn codex_is_routed_only_by_its_bridge() {
 }
 
 #[test]
+fn cursor_is_routed_only_by_its_shell_probe_and_never_on_windows() {
+    let probe = with(
+        with(pytest_inputs("macos", "cursor"), "bridge", json!(true)),
+        "tool_name",
+        json!("Shell"),
+    );
+    assert_eq!(sink(&probe).0.as_deref(), Some("pytest-readonly-v2"));
+    let linux = with(
+        with(workspace_inputs("linux", "cursor"), "bridge", json!(true)),
+        "tool_name",
+        json!("Shell"),
+    );
+    assert_eq!(sink(&linux).0.as_deref(), Some("workspace-contained-v1"));
+    let windows = with(probe, "platform", json!("windows"));
+    assert_eq!(kept(&windows), "platform_has_no_sink");
+}
+
+#[test]
 fn the_receipt_stands_for_every_unroutable_shape() {
     let base = pytest_inputs("macos", "claude-code");
     let cases = [

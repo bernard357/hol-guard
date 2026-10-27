@@ -634,6 +634,7 @@ fn evaluate_envelope(
                     execution_environment,
                     harness,
                     event,
+                    payload,
                 )
             {
                 return projected;
@@ -974,10 +975,10 @@ fn evaluate_envelope(
         ) && matches!(harness, "claude-code" | "codex" | "omp" | "oh-my-pi" | "pi");
     if (cfg!(target_os = "macos") || (cfg!(windows) && windows_contained))
         && event == "PreToolUse"
-        && matches!(
+        && (matches!(
             harness,
             "omp" | "oh-my-pi" | "pi" | "zcode" | "claude-code" | "codex"
-        )
+        ) || super::workspace_contained::cursor_shell_route(harness, payload))
         && cwd.is_some()
         && (result.action.action_type == PreToolActionTypeV1::Command
             || (matches!(
@@ -1081,6 +1082,7 @@ fn evaluate_envelope(
         execution_environment,
         harness,
         event,
+        payload,
         signals.command.as_deref(),
     );
     super::git_local_writes::settle(

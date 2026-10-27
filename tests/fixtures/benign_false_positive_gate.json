@@ -1,12 +1,7 @@
 {
   "_comment": "Data-driven benign false-positive gate. 'harnesses' expands to one case per harness (id@harness). 'pending_fix' lists expanded case ids known to fail on the Linux CI host until the named fix lands; on CI the test fails if a listed case unexpectedly passes, so remove entries as fixes merge. 'pending_pr' names the in-flight PR that fixes each pending case ('unassigned' if none). 'pending_always' lists review cases whose approval row is expected to lack an Always option until #3961 lands; any other review row for read-only git, file reads or tool reads must offer Always. A plain 'git push' is not modeled here: Guard proves a push only when the shell HOME is the account's home, and this gate runs with a fixture HOME. rust/crates/guard-command/tests/pretool_git_push.rs covers the accepted pushes and the forms that keep their review.",
   "version": 1,
-  "pending_fix": {
-    "gauntlet-python-inline-version-check@cursor": "native_command_review_required",
-    "gauntlet-python-local-test-script@cursor": "native_command_review_required",
-    "pytest-quiet@cursor": "native_command_review_required",
-    "session-rm-workspace-file@cursor": "native_command_extension_review"
-  },
+  "pending_fix": {},
   "cases": [
     {
       "id": "guard-repair-dry-run",
@@ -3776,6 +3771,57 @@
       "tool": "shell",
       "tool_input": {
         "command": "pytest -q"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inbox-jest-local-bin",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "./node_modules/.bin/jest --runInBand --watchman=false __tests__/api/routes/plugin-data-read.test.ts"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inbox-npx-vitest-files",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run --maxWorkers 1 --fileParallelism false __tests__/plugin-data-api.test.ts"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "inbox-nvm-node-version",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "${HOME}/.nvm/versions/node/v24.22.1/bin/node -v"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -31634,11 +31680,6 @@
       "expect": "review"
     }
   ],
-  "pending_pr": {
-    "gauntlet-python-inline-version-check@cursor": "unassigned",
-    "gauntlet-python-local-test-script@cursor": "unassigned",
-    "pytest-quiet@cursor": "unassigned",
-    "session-rm-workspace-file@cursor": "unassigned"
-  },
+  "pending_pr": {},
   "pending_always": {}
 }

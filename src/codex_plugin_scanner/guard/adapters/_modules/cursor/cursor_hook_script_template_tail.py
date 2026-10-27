@@ -369,6 +369,8 @@ def _main_inner() -> int:
     else:
         # Git and pager proofs need the agent's environment, not the daemon's.
         payload_json = stamp_hook_input_text(payload_json)
+    if _cursor_shell_route_probe(prepared):
+        return _cursor_shell_route_main(payload_json, workspace, guard_env)
     deadline_monotonic = _HOOK_DEADLINE_MONOTONIC
     daemon_result, daemon_failure_kind = _daemon_hook_result(
         payload_json,
