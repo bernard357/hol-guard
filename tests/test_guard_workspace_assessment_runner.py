@@ -16,6 +16,7 @@ from codex_plugin_scanner.guard import workspace_assessment_worker as worker
 from codex_plugin_scanner.guard import workspace_runtime_findings as runtimes
 from codex_plugin_scanner.guard.daemon import workspace_assessment_api as api
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.workspace_fix_support import admit_worktree
 
 T0 = 1_000_000_000
 
@@ -131,7 +132,7 @@ def no_launched_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def queued_run(tmp_path: Path) -> tuple[GuardStore, assessments.ClaimedRun]:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0)
     claimed = assessments.claim_next(store, owner="test", now_ms=T0)
     assert claimed is not None
@@ -334,7 +335,7 @@ def test_refused_offline_lookup_leaves_supply_chain_incomplete() -> None:
 @pytest.mark.parametrize(("trigger", "offline"), [("file_change", True), ("manual", False)])
 def test_only_automatic_runs_are_offline(tmp_path: Path, monkeypatch, trigger: str, offline: bool) -> None:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     assessments.enqueue(store, KEYS, trigger_kind=trigger, detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0)
     claimed = assessments.claim_next(store, owner="test", now_ms=T0 + assessments.MAX_DEBOUNCE_WAIT_MS)
     assert claimed is not None
@@ -531,7 +532,7 @@ def test_native_reply_parsing_rejects_malformed_results() -> None:
 def test_a_run_queued_before_an_upgrade_is_relabelled_when_it_is_claimed(tmp_path: Path) -> None:
     store = GuardStore(tmp_path / "home")
     old = digest("old-detector-set")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=old, now_ms=T0)
     claimed = assessments.claim_next(store, owner="test", now_ms=T0, detector_set_digest=runner.DETECTOR_SET_DIGEST)
     assert claimed is not None
@@ -543,7 +544,7 @@ def test_a_run_queued_before_an_upgrade_is_relabelled_when_it_is_claimed(tmp_pat
 
 def test_coalescing_into_a_queued_run_records_the_current_detector_set(tmp_path: Path) -> None:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     first = assessments.enqueue(
         store, KEYS, trigger_kind="workspace_open", detector_set_digest=digest("old"), now_ms=T0
     )
@@ -558,7 +559,7 @@ def test_coalescing_into_a_queued_run_records_the_current_detector_set(tmp_path:
 
 def test_run_next_claims_with_the_running_detector_set(tmp_path: Path, monkeypatch) -> None:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     assessments.enqueue(store, KEYS, trigger_kind="manual", detector_set_digest=digest("old"), now_ms=T0)
     seen: list[str] = []
     monkeypatch.setattr(
@@ -626,7 +627,7 @@ def test_each_claim_in_a_poll_rechecks_host_pressure(tmp_path: Path, monkeypatch
 
 def test_user_only_claim_leaves_automatic_runs_queued(tmp_path: Path) -> None:
     store = GuardStore(tmp_path / "home")
-    assessments.admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
+    admit_worktree(store, KEYS, root=str(tmp_path), now_ms=T0)
     assessments.enqueue(
         store, KEYS, trigger_kind="file_change", detector_set_digest=runner.DETECTOR_SET_DIGEST, now_ms=T0
     )
