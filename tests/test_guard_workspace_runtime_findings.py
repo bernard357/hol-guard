@@ -32,6 +32,7 @@ from tests.test_guard_workspace_assessment_runner import (
 )
 
 NODE = {
+    "location_id": "path:node",
     "path": "/home/dev/.nvm/versions/node/v20.11.1/bin/node",
     "location_state": "present",
     "artifact_id": "rt-node",
@@ -328,3 +329,71 @@ def test_an_observation_pass_probes_a_bounded_number_of_worktrees(tmp_path: Path
     assert probed == ["0", "1"], "a restart does not hash every worktree's runtimes in one poll"
     worker.observe(store, clock=lambda: T0 + 1)
     assert probed == ["0", "1", "2", "3"], "the rest are probed by later polls"
+
+
+UPGRADED = {**NODE, "artifact_id": "rt-node-new", "version": "20.11.2", "executable_sha256": "b" * 64}
+
+
+def instances(*rows: dict[str, object], **extra: object) -> dict[str, object]:
+    return {"enumerated": True, "limit_reached": False, "unbound_processes": 0, "rows": list(rows), **extra}
+
+
+def old_process(state: str = "running", *, instance_id: str = "instance:old") -> dict[str, object]:
+    return {
+        "instance_id": instance_id,
+        "pid": 41,
+        "location_id": "path:node",
+        "state": state,
+        "artifact_id": "rt-node",
+        "version": "20.11.1",
+        "identified": True,
+    }
+
+
+def replaced(*rows: dict[str, object], verdict: str = "restart_required") -> dict[str, object]:
+    """The runtime on disk is upgraded; ``rows`` are the processes the probe saw."""
+
+    running = [row["instance_id"] for row in rows if row["state"] == "running" and row["artifact_id"] == "rt-node"]
+    advisories = [advisory(verdict, affected_instance_ids=running)] if running else []
+    return {**posture(advisories=advisories), "runtimes": [UPGRADED], "instances": instances(*rows)}
+
+
+@pytest.mark.parametrize("verdict", ["restart_required", "affected"])
+def test_a_process_left_on_a_replaced_build_keeps_its_finding(verdict: str) -> None:
+    [before], _ = runtimes.project_runtime_findings(KEYS.worktree_key, posture(advisories=[advisory("affected")]))
+
+    [after], _ = runtimes.project_runtime_findings(KEYS.worktree_key, replaced(old_process(), verdict=verdict))
+
+    assert after["finding_id"] == before["finding_id"], "the upgrade on disk does not close the finding"
+    assert (after["path"], after["runtime_version"], after["rule_ids"]) == (NODE["path"], "20.11.1", [verdict])
+    assert runtimes.project_runtime_findings(KEYS.worktree_key, replaced(old_process("exited"))) == ([], False)
+
+
+def test_an_instance_the_posture_cannot_place_is_not_a_finding() -> None:
+    unplaced = replaced(old_process())
+    unplaced["instances"]["rows"] = [{**old_process(), "location_id": "path:elsewhere"}]
+    assert runtimes.project_runtime_findings(KEYS.worktree_key, unplaced) == ([], False)
+    missing = {**replaced(old_process()), "instances": instances()}
+    assert runtimes.project_runtime_findings(KEYS.worktree_key, missing) == ([], False)
+
+
+def test_processes_guard_could_not_name_leave_runtimes_incomplete() -> None:
+    base = {"status": "complete", "reasons": [], "detectors": {}}
+    named = runtimes.with_runtime_coverage(base, {**posture(), "instances": instances(old_process())})
+    assert (named["status"], named["detectors"]["runtime_identity_v1"]) == ("complete", "complete")
+    for gap in ({"unbound_processes": 1}, {"limit_reached": True}):
+        partial = runtimes.with_runtime_coverage(base, {**posture(), "instances": instances(**gap)})
+        assert (partial["status"], partial["reasons"]) == ("partial", ["runtime_instances_incomplete"])
+        assert partial["detectors"]["runtime_identity_v1"] == "incomplete"
+
+
+def test_the_digest_moves_when_a_process_is_left_on_a_replaced_build_and_when_it_exits() -> None:
+    current = {**old_process(instance_id="instance:new"), "artifact_id": "rt-node-new", "version": "20.11.2"}
+    upgraded = runtimes.runtime_identity_digest({**posture(), "runtimes": [UPGRADED]})
+    assert runtimes.runtime_identity_digest(replaced(current)) == upgraded, "processes on the current build"
+    left = runtimes.runtime_identity_digest(replaced(old_process(), current))
+    assert left != upgraded
+    assert runtimes.runtime_identity_digest(replaced(old_process("exited"), current)) == upgraded
+    assert runtimes.runtime_identity_digest(posture()) == runtimes.runtime_identity_digest(
+        {**posture(), "instances": instances(old_process())}
+    ), "a process on the build that is still on disk does not move the digest"

@@ -14,10 +14,11 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from codex_plugin_scanner.guard import runtime_identity_probe
+from codex_plugin_scanner.guard import runtime_identity_probe, runtime_posture
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
 from codex_plugin_scanner.guard.runtime_identity_assessment import RuntimeIdentityError
 from codex_plugin_scanner.guard.runtime_identity_probe import (
@@ -150,10 +151,54 @@ def test_the_store_keeps_running_instances_and_other_scopes(tmp_path: Path) -> N
         instances=(_instance(pid=7), _instance("exited", pid=8)),
     )
     elsewhere = _known(pid=9, location_id="path:other")
+    _store(tmp_path, [_known(pid=8), elsewhere])
 
-    remember_instances(tmp_path, [_known(pid=8), elsewhere], probe)
+    remember_instances(tmp_path, probe)
 
     assert load_known_instances(tmp_path) == [_known(pid=7), elsewhere]
+
+
+def _store(home: Path, items: list[dict[str, object]]) -> None:
+    payload = {"schema": "guard.runtime-instances.v1", "instances": items}
+    (home / INSTANCE_STORE_NAME).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_a_write_keeps_what_another_scan_stored_after_this_one_loaded(tmp_path: Path) -> None:
+    probe = RuntimeProbe(
+        artifacts=(ARTIFACT,),
+        locations=({"location_id": "path:node", "artifact_id": ARTIFACT["artifact_id"], "state": "present"},),
+        observations=(),
+        instances=(_instance(pid=7),),
+    )
+    _store(tmp_path, [])
+    loaded = load_known_instances(tmp_path)
+    other_scan = _known(pid=9, location_id="path:other")
+    _store(tmp_path, [*loaded, other_scan])
+
+    remember_instances(tmp_path, probe)
+
+    assert load_known_instances(tmp_path) == [_known(pid=7), other_scan]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pid", "7"),
+        ("pid", True),
+        ("pid", 0),
+        ("boot_identity", ""),
+        ("location_id", 7),
+        ("artifact", {**ARTIFACT, "vendor": 7}),
+        ("artifact", {**ARTIFACT, "executable_sha256": "a"}),
+        ("artifact", {**ARTIFACT, "version": " "}),
+        ("artifact", {**ARTIFACT, "identity_assurance": "vendor_verified"}),
+        ("artifact", {**ARTIFACT, "extra": None}),
+    ],
+)
+def test_a_record_the_probe_would_refuse_costs_only_its_own_process(tmp_path: Path, field: str, value: object) -> None:
+    _store(tmp_path, [{**_known(pid=8), field: value}, _known(pid=9)])
+
+    assert load_known_instances(tmp_path) == [_known(pid=9)]
 
 
 def test_a_damaged_store_reads_as_empty(tmp_path: Path) -> None:
@@ -236,6 +281,30 @@ def test_a_replaced_runtime_still_reports_its_old_process(
     assert mine(gone)["state"] == "exited"
     assert mine(gone)["artifact_id"] == mine(first)["artifact_id"]
     assert all(item["pid"] != child.pid for item in load_known_instances(home))
+
+
+def test_processes_the_assessment_refuses_cost_only_themselves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _probe([], monkeypatch, lambda feature, request: _reply(instances=[_instance()]))
+    requests: list[dict[str, object]] = []
+
+    def assess(request: dict[str, object]) -> SimpleNamespace:
+        requests.append(request)
+        if "instances" in request:
+            raise RuntimeIdentityError("runtime_identity_artifact_invalid")
+        return SimpleNamespace(advisory_source=None, artifacts=(), advisories=())
+
+    monkeypatch.setattr(runtime_posture, "assess_runtime_identity", assess)
+    payload = build_runtime_posture(
+        [_detection()], generated_at=NOW, environment={}, instance_home=tmp_path, advisory_bundle={"fixture": True}
+    )
+
+    print("PAYLOAD", payload)
+    assert [("instances" in request) for request in requests] == [True, False]
+    assert payload["status"] == "ok"
+    assert payload["coverage"]["instances_enumerated"] is True
+    assert payload["instances"]["enumerated"] is True
+    assert payload["instances"]["assessed"] is False
+    assert payload["instances"]["assessment_error"] == "runtime_identity_artifact_invalid"
 
 
 def test_posture_without_a_guard_home_enumerates_nothing(native_hook_force: Path, tmp_path: Path) -> None:

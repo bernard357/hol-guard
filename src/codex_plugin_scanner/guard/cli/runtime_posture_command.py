@@ -125,7 +125,8 @@ def _render_instances(summary: object) -> list[str]:
     if summary.get("limit_reached"):
         lines.append("  Instance limit reached; some processes were not listed.")
     if summary.get("assessed") is not True:
-        lines.append("  Processes were too many to assess against advisories; files were assessed alone.")
+        reason = summary.get("assessment_error") or "not assessed"
+        lines.append(f"  Processes could not be assessed against advisories ({reason}); files were assessed alone.")
     return lines
 
 

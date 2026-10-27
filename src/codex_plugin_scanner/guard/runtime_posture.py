@@ -71,7 +71,7 @@ def build_runtime_posture(
         base = {**_base_payload(generated_at, None), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
         return {**base, "status": "unavailable", "error": error.code, "runtimes": []}
     if instance_home is not None and known is not None:
-        remember_instances(instance_home, known, probe)
+        remember_instances(instance_home, probe)
     base = {**_base_payload(generated_at, candidates), "skipped_harnesses": list(dict.fromkeys(skipped_harnesses))}
     # A harness whose config could not be read, or launches past the candidate
     # limit, leave the inventory incomplete, which is not the same as having no servers.
@@ -85,7 +85,9 @@ def build_runtime_posture(
     advisory_rows: list[dict[str, object]] = []
     matches: dict[str, list[object]] = {}
     instances = probe.instances
-    coverage = dict(_coverage(reason=advisory_bundle_reason or ADVISORIES_UNAVAILABLE, instances=instances))
+    instance_error: str | None = None
+    coverage_reason: str | None = advisory_bundle_reason or ADVISORIES_UNAVAILABLE
+    coverage = dict(_coverage(reason=coverage_reason, instances=instances))
     source: dict[str, object] | None = None
     request: dict[str, object] = {
         "artifacts": list(probe.artifacts),
@@ -94,13 +96,13 @@ def build_runtime_posture(
         "scope_complete": False,
     }
     try:
-        assessment, instances = _assess_with_instances(request, probe, advisory_bundle)
+        assessment, instance_error = _assess_with_instances(request, probe, advisory_bundle)
     except RuntimeIdentityError as error:
         status, error_code = "partial", error.code
         coverage = dict(_coverage(reason="runtime_assessment_failed", instances=instances))
     else:
         source = assessment.advisory_source
-        coverage = dict(_coverage(reason=coverage["reason"], instances=instances))
+        coverage = dict(_coverage(reason=coverage_reason, instances=instances))
         if advisory_bundle is not None and source:
             # The native runtime decides what the bundle covers; this only relays it.
             reason = source.get("coverage_reason")
@@ -121,6 +123,7 @@ def build_runtime_posture(
                 "verdict": row.verdict,
                 "reasons": list(row.reasons),
                 "affected_artifact_ids": list(row.affected_artifact_ids),
+                "affected_instance_ids": list(row.affected_instance_ids),
                 "severity": row.severity,
                 "known_exploited": row.known_exploited,
                 "title": row.title,
@@ -135,7 +138,7 @@ def build_runtime_posture(
         "advisory_source": source,
         "runtimes": _runtime_rows(probe, candidates, matches),
         "advisories": advisory_rows,
-        "instances": _instance_summary(probe, instances),
+        "instances": _instance_summary(probe, instance_error),
     }
 
 
@@ -143,21 +146,21 @@ def _assess_with_instances(
     request: dict[str, object],
     probe: RuntimeProbe,
     advisory_bundle: Mapping[str, object] | None,
-) -> tuple[RuntimeIdentityAssessment, tuple[dict[str, object], ...] | None]:
-    """Assess with the running instances, or without them when they do not fit the assessment's bounds."""
+) -> tuple[RuntimeIdentityAssessment, str | None]:
+    """Assess with the running instances, or the files alone and why the instances were left out."""
 
     if probe.instances is None:
         return _assess(request, advisory_bundle), None
     try:
-        return _assess({**request, "instances": list(probe.instances)}, advisory_bundle), probe.instances
-    except RuntimeIdentityError:
-        # Each unidentified process names its own artifact; too many must not cost the files.
+        return _assess({**request, "instances": list(probe.instances)}, advisory_bundle), None
+    except RuntimeIdentityError as error:
+        # Too many processes, or one carried build the assessment rejects, must not cost the files.
         placed = {location.get("artifact_id") for location in probe.locations}
         artifacts = [row for row in probe.artifacts if row.get("artifact_id") in placed]
-        return _assess({**request, "artifacts": artifacts}, advisory_bundle), None
+        return _assess({**request, "artifacts": artifacts}, advisory_bundle), error.code
 
 
-def _instance_summary(probe: RuntimeProbe, assessed: Sequence[Mapping[str, object]] | None) -> dict[str, object]:
+def _instance_summary(probe: RuntimeProbe, instance_error: str | None) -> dict[str, object]:
     by_artifact = {str(artifact["artifact_id"]): artifact for artifact in probe.artifacts}
     rows: list[dict[str, object]] = []
     for instance in probe.instances or ():
@@ -176,7 +179,8 @@ def _instance_summary(probe: RuntimeProbe, assessed: Sequence[Mapping[str, objec
         )
     return {
         "enumerated": probe.instances is not None,
-        "assessed": assessed is not None,
+        "assessed": probe.instances is not None and instance_error is None,
+        "assessment_error": instance_error,
         "running": sum(row["state"] == "running" for row in rows),
         "exited": sum(row["state"] == "exited" for row in rows),
         "unidentified": sum(row["state"] == "running" and not row["identified"] for row in rows),

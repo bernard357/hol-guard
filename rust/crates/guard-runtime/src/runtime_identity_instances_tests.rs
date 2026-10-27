@@ -19,7 +19,7 @@ fn known(artifact: &str) -> Value {
         "artifact": {
             "artifact_id": "artifact:old", "family": "node", "vendor": null,
             "version": "20.11.1", "build_id": null, "os": "linux", "arch": "x86_64",
-            "executable_sha256": "a", "component_identity_sha256": null,
+            "executable_sha256": "a".repeat(64), "component_identity_sha256": null,
             "identity_assurance": artifact,
         },
     })
@@ -36,6 +36,24 @@ fn a_stored_instance_cannot_claim_a_trusted_identity() {
     }
     let reply = reply(json!({"known_instances": [known("self_reported")]}));
     assert_eq!(reply["error"], "runtime_identity_probe_request_invalid");
+}
+
+#[test]
+fn a_stored_artifact_the_assessment_would_reject_is_refused() {
+    let damaged: [(&str, Value); 3] = [
+        ("vendor", json!(7)),
+        ("executable_sha256", json!("a")),
+        ("version", json!(" ")),
+    ];
+    for (key, value) in damaged {
+        let mut item = known("self_reported");
+        item["artifact"][key] = value;
+        let reply = reply(json!({"instances": true, "known_instances": [item]}));
+        assert_eq!(
+            reply["error"], "runtime_identity_probe_known_instance_invalid",
+            "{key}"
+        );
+    }
 }
 
 const MISSING: &str = "/nonexistent/guard-runtime-probe/node";

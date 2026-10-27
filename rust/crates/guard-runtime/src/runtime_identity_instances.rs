@@ -12,7 +12,9 @@
 //! therefore never rewrites what an old process is running.
 //!
 //! A known instance at a probed location that is no longer running is
-//! reported `exited`, the evidence a fix needs that the old build stopped.
+//! reported `exited`, the evidence a fix needs that the old build stopped. On
+//! Windows an exited process keeps its start marker while any handle to it is
+//! open, so only a process that has not exited counts as still running.
 //! Known instances elsewhere belong to another probe and are left out. Only
 //! processes whose executable path this user can read are seen, so the scan
 //! never makes the scope complete.
@@ -27,7 +29,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-use crate::resident_process_identity::process_start_marker;
+use crate::resident_process_identity::{process_start_marker, running_process_start_marker};
 
 pub(crate) const FEATURE: &str = "runtime-identity-instances-v1";
 pub(super) const MAX_INSTANCES: usize = 4_096;
@@ -83,24 +85,14 @@ pub(super) fn validate_known(known: &[KnownInstance]) -> Result<(), String> {
 }
 
 /// A stored artifact may never claim more than the probe itself can: the
-/// store is a local file, and a raised assurance would clear advisories.
+/// store is a local file, and a raised assurance would clear advisories. It
+/// must also be one the assessment accepts, or carrying it would cost the
+/// reply every process it names.
 fn artifact_ok(artifact: &Value) -> bool {
-    let text = |key: &str| {
-        artifact[key]
-            .as_str()
-            .is_some_and(|value| !value.is_empty())
-    };
-    artifact.is_object()
-        && artifact["artifact_id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("artifact:"))
-        && text("family")
-        && text("os")
-        && text("arch")
-        && matches!(
-            artifact["identity_assurance"].as_str(),
-            Some("unknown" | "self_reported")
-        )
+    artifact["artifact_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("artifact:"))
+        && crate::runtime_identity::carried_artifact_ok(artifact)
 }
 
 /// `location_ids` names every location the probe covered, identified or not;
@@ -198,7 +190,8 @@ pub(super) fn enumerate(
             continue;
         }
         let state = if item.boot_identity == boot
-            && process_start_marker(item.pid).is_ok_and(|start| start == item.start_identity)
+            && running_process_start_marker(item.pid)
+                .is_ok_and(|start| start == item.start_identity)
         {
             "running"
         } else {
@@ -286,26 +279,42 @@ fn runs_current_file(pid: u32, started: u64, resolved: &str) -> bool {
     let Ok(meta) = fs::metadata(resolved) else {
         return false;
     };
-    if !changed_secs(&meta).is_some_and(|changed| started > changed) {
+    if changed_secs(&meta).is_none_or(|changed| started <= changed) {
         return false;
     }
     same_inode(pid, &meta)
 }
 
 fn changed_secs(meta: &fs::Metadata) -> Option<u64> {
-    let secs =
-        |time: std::time::SystemTime| time.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs());
     let modified = secs(meta.modified().ok()?)?;
-    #[cfg(unix)]
-    let changed = {
-        use std::os::unix::fs::MetadataExt;
-        u64::try_from(meta.ctime()).ok()?
-    };
-    #[cfg(windows)]
-    let changed = secs(meta.created().ok()?)?;
-    #[cfg(not(any(unix, windows)))]
-    let changed = modified;
-    Some(modified.max(changed))
+    Some(modified.max(status_changed_secs(meta)?))
+}
+
+fn secs(time: std::time::SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+/// When the file was last put in place. A rename into place moves the Unix
+/// change time.
+#[cfg(unix)]
+fn status_changed_secs(meta: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    u64::try_from(meta.ctime()).ok()
+}
+
+/// Windows keeps a file's creation time across a rename, so a build staged
+/// before the process started and renamed into place after it can still bind
+/// the process to the new file. Instances are `observed_only` and never clear
+/// an advisory, so the cost is a missed restart finding, never a false fix.
+#[cfg(windows)]
+fn status_changed_secs(meta: &fs::Metadata) -> Option<u64> {
+    secs(meta.created().ok()?)
+}
+
+/// No change time to read, so no process is ever bound to the current file.
+#[cfg(not(any(unix, windows)))]
+fn status_changed_secs(_meta: &fs::Metadata) -> Option<u64> {
+    None
 }
 
 #[cfg(target_os = "linux")]
