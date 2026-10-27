@@ -229,3 +229,33 @@ fn grok_memory_notes_read_but_its_login_and_databases_do_not() {
         assert_ne!(decision.0, "allow", "{}", denied.display());
     }
 }
+
+#[test]
+fn grok_camel_only_payloads_use_the_one_copy_sent() {
+    let (home, workspace, project) = fixture();
+    let camel_only = |tool: &str, input: Value| {
+        json!({
+            "hookEventName": "PreToolUse",
+            "toolName": tool,
+            "toolInput": input,
+            "toolInputTruncated": false,
+        })
+    };
+    let decision = evaluate(
+        camel_only("Read", json!({"target_directory": text(&project)})),
+        &home,
+        &workspace,
+    );
+    assert!(allowed(&decision, DIRECTORY_READ), "{decision:?}");
+    // The search proof reads the snake-case input, so a camel-only `Grep`
+    // has nothing it can prove.
+    let decision = evaluate(
+        camel_only(
+            "Grep",
+            json!({"pattern": "Guide", "path": text(&project.join("docs"))}),
+        ),
+        &home,
+        &workspace,
+    );
+    assert_ne!(decision.1, SEARCH_SCOPE, "{decision:?}");
+}
