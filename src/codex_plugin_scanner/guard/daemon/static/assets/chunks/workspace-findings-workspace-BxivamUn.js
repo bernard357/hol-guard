@@ -383,9 +383,10 @@ function evidenceSource(finding) {
 }
 const VALIDATION_SUFFIX = { confirmed: ", confirmed", unvalidated: ", not confirmed" };
 function EvidenceNote({ finding }) {
+  const source = evidenceSource(finding);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "mt-1 block text-xs text-slate-500", children: [
-    evidenceSource(finding),
-    VALIDATION_SUFFIX[finding.validation] ?? ""
+    source,
+    source === "Package policy" ? "" : VALIDATION_SUFFIX[finding.validation] ?? ""
   ] });
 }
 function Cell(props) {
@@ -1126,7 +1127,7 @@ function decisionTone(decision) {
   if (decision === "ask") return "attention";
   return "slate";
 }
-const DECISION_LABELS = { block: "Would block", ask: "Would ask", warn: "Warning" };
+const DECISION_LABELS = { block: "Block", ask: "Ask", warn: "Warn" };
 function WorkspaceFindingsWorkspace(props) {
   const [state, setState] = reactExports.useState(null);
   const [loadError, setLoadError] = reactExports.useState(null);
@@ -1311,7 +1312,7 @@ function FindingsTable({ findings, fixes }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Package" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Installed" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Fixed in" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "At install" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Policy" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Severity" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Advisories" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("th", { scope: "col", className: "px-3 py-2", children: "Fix" })
@@ -1323,7 +1324,7 @@ function FindingsTable({ findings, fixes }) {
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Installed", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mono, { value: finding.packageVersion }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Cell, { label: "Fixed in", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mono, { value: finding.fixVersion, fallback: "No fix yet" }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "At install", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Cell, { label: "Policy", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: decisionTone(finding.decision), children: DECISION_LABELS[finding.decision] ?? finding.decision }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(EvidenceNote, { finding }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(CarriedNote, { finding })

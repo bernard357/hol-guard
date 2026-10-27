@@ -185,7 +185,7 @@ for (const copy of [
   "Secret scanning is not part of this check yet.",
   "minimist",
   "1.2.9",
-  "Would block",
+  ">Block<",
   "Advisory match",
   "GHSA-xxxx-yyyy-zzzz",
   "github-token",

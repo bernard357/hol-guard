@@ -23,7 +23,11 @@ function evidence(raw: Record<string, unknown>): string {
 const affected = { package_name: "minimist", package_version: "1.2.5", decision: "block" };
 assert.equal(finding({ ...affected, validation_state: "confirmed" }).validation, "confirmed");
 assert.match(evidence({ ...affected, advisory_ids: ["GHSA-xvch-5gv4-984h"], validation_state: "confirmed" }), />Advisory match, confirmed</);
-assert.match(evidence({ ...affected, decision: "ask" }), />Package policy</, "a policy decision is not an advisory");
+assert.match(
+  evidence({ ...affected, decision: "ask", validation_state: "confirmed" }),
+  />Package policy</,
+  "a policy match is neither an advisory nor shown as confirmed",
+);
 assert.equal(
   finding({ ...affected, validation_state: "proven" }).validation,
   "unknown",

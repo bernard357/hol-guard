@@ -82,9 +82,9 @@ for (const width of [390, 1280]) {
     await expect(storefront).toContainText("Secret scanning is not part of this check yet.");
     await expect(storefront).toContainText("minimist");
     await expect(storefront).toContainText("1.2.8");
-    await expect(storefront).toContainText("Would block");
+    await expect(storefront.getByText("Block", { exact: true })).toBeVisible();
     await expect(storefront).toContainText("Advisory match, confirmed");
-    await expect(storefront).toContainText("Would ask");
+    await expect(storefront.getByText("Ask", { exact: true })).toBeVisible();
     await expect(storefront).toContainText("Package policy");
     await expect(storefront).toContainText("No fix yet");
 

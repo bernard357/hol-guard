@@ -20,10 +20,12 @@ const VALIDATION_SUFFIX: Record<string, string> = { confirmed: ", confirmed", un
  * or a fixed rule; none is an AI judgement.
  */
 export function EvidenceNote({ finding }: { finding: WorkspaceFinding }) {
+  // A policy match has no evidence beyond the match, so it is never shown as confirmed.
+  const source = evidenceSource(finding);
   return (
     <span className="mt-1 block text-xs text-slate-500">
-      {evidenceSource(finding)}
-      {VALIDATION_SUFFIX[finding.validation] ?? ""}
+      {source}
+      {source === "Package policy" ? "" : (VALIDATION_SUFFIX[finding.validation] ?? "")}
     </span>
   );
 }
