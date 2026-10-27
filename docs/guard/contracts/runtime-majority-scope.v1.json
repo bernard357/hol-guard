@@ -1331,7 +1331,6 @@
           "_toml_inline_command_hook",
           "foreign_hook_compat_toml",
           "force_compat_hooks_false",
-          "prepare_managed_config_text",
           "build_managed_config_block"
         ],
         "entry_points": [],

@@ -149,31 +149,6 @@ def force_compat_hooks_false(text: str, vendor: str) -> tuple[str, str | None]:
     return text[:start] + block + text[end:], previous
 
 
-def prepare_managed_config_text(
-    existing_text: str,
-    hook_command: str,
-    *,
-    saved_prior_hooks: Mapping[str, str | None] | None = None,
-) -> tuple[str, dict[str, str | None]]:
-    """Merge Guard's managed block without duplicating compat tables."""
-
-    cleaned = remove_managed_block(existing_text)
-    saved = dict(saved_prior_hooks or {})
-    prior_hooks: dict[str, str | None] = {}
-    emit_vendors: list[str] = []
-    for vendor in FOREIGN_HOOK_COMPAT_VENDORS:
-        if _compat_table_span(cleaned, vendor) is None:
-            emit_vendors.append(vendor)
-            prior_hooks[vendor] = saved.get(vendor)
-            continue
-        cleaned, previous = force_compat_hooks_false(cleaned, vendor)
-        saved_value = saved.get(vendor)
-        prior_hooks[vendor] = saved_value if saved_value is not None else previous
-    managed_block = build_managed_config_block(hook_command, emit_compat_vendors=tuple(emit_vendors))
-    merged = f"{cleaned.rstrip()}\n\n{managed_block}\n".lstrip()
-    return merged, prior_hooks
-
-
 def restore_compat_hooks(text: str, prior_hooks: Mapping[str, str | None]) -> str:
     """Restore pre-install compat.hooks values after Guard uninstall."""
 

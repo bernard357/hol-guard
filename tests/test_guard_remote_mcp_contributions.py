@@ -7,10 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli.commands_support_runtime_resolution import (
-    _copilot_runtime_server_identity,
-    _CopilotMcpRuntimeServer,
-)
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.mcp_tool_calls import (
     build_tool_call_artifact,
@@ -28,6 +24,7 @@ from codex_plugin_scanner.guard.runtime.mcp_server_contribution import (
     validate_mcp_contribution,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.runtime_wrapper_support import _copilot_runtime_server_identity, _CopilotMcpRuntimeServer
 
 from . import mcp_extension_driver as extension_driver
 from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
