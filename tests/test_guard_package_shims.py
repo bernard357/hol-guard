@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer
 from io import StringIO
-from multiprocessing import Event, Process, Queue
+from multiprocessing import Event, Process, Queue, get_context
 from pathlib import Path
 
 import pytest
@@ -37,13 +37,15 @@ from codex_plugin_scanner.guard.package_shim_gate import (
 )
 from codex_plugin_scanner.guard.package_shim_status import PACKAGE_SHIM_STATUS_FD_ENV_VAR
 from codex_plugin_scanner.guard.protect import build_protect_payload
-from codex_plugin_scanner.guard.runtime import supply_chain_package_eval as supply_chain_package_eval_module
+from codex_plugin_scanner.guard.runtime.package_request_evaluation import PackageRequestEvaluation, SupplyChainUserCopy
 from codex_plugin_scanner.guard.shim_probe import SHIM_PROBE_ENV_VALUE, SHIM_PROBE_ENV_VAR
-from codex_plugin_scanner.guard.shims import build_shim_content_hash, install_package_shims, package_shim_status
+from codex_plugin_scanner.guard.shims import install_package_shims, package_shim_status
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.cloud_exception_bundle_fixtures import build_cloud_exception_policy_bundle
+from tests.package_review_settings import review_package_signals
 from tests.policy_bundle_signing_helpers import policy_bundle_test_keyring, sign_policy_bundle
-from tests.shim_execution_helpers import write_fake_manager_script
+from tests.policy_store_support import replace_remote_policies
+from tests.shim_execution_helpers import build_shim_content_hash, write_fake_manager_script
 from tests.test_guard_protect import _seed_bundle_cache_only, _SyncAndEvaluateHandler
 from tests.test_guard_supply_chain_evaluator import _cloud_response, _EvaluateHandler, _force_unpaid_entitlement
 
@@ -390,7 +392,8 @@ def _hold_guard_db_writer_lock(
     hold_seconds: int,
     ready_event: Event | None = None,
 ) -> None:
-    connection = sqlite3.connect(database_path, timeout=1)
+    # Wait out a writer the shim install left behind; the test needs this process to hold the lock.
+    connection = sqlite3.connect(database_path, timeout=30)
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
@@ -554,6 +557,7 @@ def test_guard_protect_does_not_prime_policy_integrity_or_hold_sqlite_writer(
     home_dir = tmp_path / "guard-home"
     workspace_dir = tmp_path / "workspace"
     home_dir.mkdir(parents=True, exist_ok=True)
+    review_package_signals(home_dir)
     workspace_dir.mkdir(parents=True, exist_ok=True)
     refresh_started_event = Event()
     slow_results: Queue = Queue()
@@ -638,6 +642,7 @@ def test_package_manager_shim_uses_trusted_guard_import_path(tmp_path: Path, cap
     home_dir = tmp_path / "guard-home"
     home_dir.mkdir()
     (home_dir / "config.toml").write_text("approval_wait_timeout_seconds = 0\n", encoding="utf-8")
+    review_package_signals(home_dir)
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     malicious_package = workspace_dir / "codex_plugin_scanner"
@@ -700,6 +705,7 @@ def test_guard_protect_requires_reapproval_for_untrusted_package_sources_without
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     store = GuardStore(home_dir)
+    review_package_signals(home_dir)
 
     payload, exit_code = build_protect_payload(
         command=command,
@@ -805,6 +811,7 @@ def test_package_manager_shim_waits_out_transient_store_writer_lock(tmp_path: Pa
     home_dir = tmp_path / "guard-home"
     home_dir.mkdir()
     (home_dir / "config.toml").write_text("approval_wait_timeout_seconds = 0\n", encoding="utf-8")
+    review_package_signals(home_dir)
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     fake_bin = tmp_path / "fake-bin"
@@ -817,10 +824,12 @@ def test_package_manager_shim_waits_out_transient_store_writer_lock(tmp_path: Pa
         manager="bun",
         capsys=capsys,
     )
-    ready_event = Event()
-    lock_process = Process(target=_hold_guard_db_writer_lock, args=(str(home_dir / "guard.db"), 13, ready_event))
+    # A fresh interpreter: a forked child can inherit a lock a parent thread held at fork time.
+    spawn = get_context("spawn")
+    ready_event = spawn.Event()
+    lock_process = spawn.Process(target=_hold_guard_db_writer_lock, args=(str(home_dir / "guard.db"), 13, ready_event))
     lock_process.start()
-    assert ready_event.wait(timeout=5)
+    assert ready_event.wait(timeout=60), f"lock holder never took the lock (exitcode={lock_process.exitcode})"
     env = dict(os.environ)
     env["HOME"] = str(home_dir)
     env["PATH"] = f"{shim_path.parent}{os.pathsep}{fake_bin}{os.pathsep}{env.get('PATH', '')}"
@@ -1051,13 +1060,11 @@ def test_machine_wide_package_shim_uses_current_workspace_across_dashboard_conte
     monkeypatch.setattr(guard_shims_module.sys, "executable", str(frozen_exe))
     monkeypatch.setenv("SHELL", "/bin/bash")
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
-    monkeypatch.setattr(guard_shims_module, "_is_transient_path", lambda _path: False)
     guard_home = home_dir / ".hol-guard"
     first_context = HarnessContext(home_dir=home_dir, guard_home=guard_home, workspace_dir=first_workspace)
     second_context = HarnessContext(home_dir=home_dir, guard_home=guard_home, workspace_dir=second_workspace)
 
     install_package_shims(first_context, managers=("npm",))
-    guard_shims_module.ensure_package_shim_path_in_shell_profile(first_context)
 
     for context in (first_context, second_context):
         status = package_shim_status(context)
@@ -1071,9 +1078,6 @@ def test_machine_wide_package_shim_uses_current_workspace_across_dashboard_conte
     assert "guard_workspace = None" in source
     assert "guard_has_explicit_workspace = False" in source
     assert "--workspace" not in next(line for line in source.splitlines() if line.startswith("base_command = "))
-    dashboard_status = guard_shims_module.package_shim_dashboard_status(second_context)
-    assert dashboard_status["path_status"] == "in_path"
-    assert dashboard_status["path_broken_managers"] == []
 
 
 def test_guard_package_shims_install_status_uninstall_roundtrip(tmp_path: Path, capsys) -> None:
@@ -1552,6 +1556,13 @@ def test_guard_package_shims_block_before_manager_execution(
     assert "HOL Guard" in result.stdout
 
 
+def _installed_shim_source(context: HarnessContext, manager: str) -> str:
+    install_package_shims(context, managers=(manager,))
+    shim_dir = context.guard_home / "package-shims" / "bin"
+    sidecar = shim_dir / f".{manager}.py"
+    return (sidecar if sidecar.exists() else shim_dir / manager).read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     ("manager", "expected_local_only_flag"),
     (("bunx", "--no-install"), ("npx", "--no")),
@@ -1566,7 +1577,7 @@ def test_package_shim_uses_manager_specific_local_only_flag(
         guard_home=tmp_path / ".hol-guard",
         workspace_dir=tmp_path / "workspace",
     )
-    shim_source = guard_shims_module._build_package_manager_python_shim(context, manager)
+    shim_source = _installed_shim_source(context, manager)
 
     assert f"command_name = {manager!r}" in shim_source
     assert "local_only_flag = {'bunx': '--no-install', 'npx': '--no'}.get(command_name)" in shim_source
@@ -1581,7 +1592,7 @@ def test_package_shim_tries_owned_containment_before_guard_review(tmp_path: Path
         workspace_dir=tmp_path / "workspace",
     )
 
-    shim_source = guard_shims_module._build_package_manager_python_shim(context, "npx")
+    shim_source = _installed_shim_source(context, "npx")
 
     package_script_index = shim_source.index("try_execute_contained_package_script")
     typescript_index = shim_source.index("try_execute_contained_typescript")
@@ -1767,35 +1778,6 @@ def test_guard_protect_allows_codex_install_with_local_intelligence_when_cloud_a
     assert store.list_approval_requests(limit=None) == []
 
 
-def test_cloud_reconnect_copy_preserves_existing_package_remediation() -> None:
-    evaluation = supply_chain_package_eval_module.PackageRequestEvaluation(
-        decision="ask",
-        policy_action="require-reapproval",
-        enforcement="premium_cloud",
-        entitlement_state="premium",
-        cache_status="cloud-error",
-        package_intent_hash="a" * 64,
-        policy_version="local:none",
-        bundle_version=None,
-        workspace_fingerprint=None,
-        reasons=(),
-        packages=(),
-        risk_summary="Guard paused the package request for review.",
-        user_copy=supply_chain_package_eval_module.SupplyChainUserCopy(
-            title="Review required",
-            summary="A safer package version is required.",
-            next_step="npm install example@2.0.0",
-            dashboard_url=None,
-            harness_message="Install the safer package version.",
-        ),
-    )
-
-    updated = supply_chain_package_eval_module._with_cloud_auth_reconnect_copy(evaluation)
-
-    assert updated.user_copy.next_step == "npm install example@2.0.0"
-    assert "hol-guard connect" in updated.user_copy.harness_message
-
-
 def test_guard_protect_probe_skips_local_approval_queue_on_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1928,7 +1910,8 @@ def test_guard_protect_keeps_matcher_only_policy_bundle_package_family_block(
     )
     try:
         store = GuardStore(home_dir)
-        store.replace_remote_policies(
+        replace_remote_policies(
+            store,
             [
                 PolicyDecision(
                     harness="*",
@@ -2002,7 +1985,8 @@ def test_guard_protect_ignores_package_family_row_when_signed_matcher_omits_pack
     )
     try:
         store = GuardStore(home_dir)
-        store.replace_remote_policies(
+        replace_remote_policies(
+            store,
             [
                 PolicyDecision(
                     harness="*",
@@ -2073,7 +2057,8 @@ def test_guard_protect_ignores_stale_policy_bundle_package_family_on_cloud_allow
     monkeypatch.setattr(guard_commands_module, "ensure_guard_daemon", lambda _home: "http://127.0.0.1:5474")
     try:
         store = GuardStore(home_dir)
-        store.replace_remote_policies(
+        replace_remote_policies(
+            store,
             [
                 PolicyDecision(
                     harness="*",
@@ -2556,18 +2541,10 @@ def test_guard_protect_saved_approval_does_not_bypass_new_bundle_block_for_unpin
     marker_path = tmp_path / "npm-somepkg-marker.json"
     write_fake_manager_script(fake_bin=fake_bin, manager="npm", marker_path=marker_path, exit_code=0)
     package_name = "somepkg"
-    original_resolved_target_version = supply_chain_package_eval_module._resolved_target_version
-
-    def _resolve_somepkg_version(**kwargs: object) -> str | None:
-        target = kwargs.get("target")
-        if isinstance(target, dict) and str(target.get("normalized_name")) == package_name:
-            return "1.0.0"
-        return original_resolved_target_version(**kwargs)
-
     monkeypatch.setattr(
-        supply_chain_package_eval_module,
-        "_resolved_target_version",
-        _resolve_somepkg_version,
+        native_supply_chain_eval_module,
+        "_test_registry_metadata_override",
+        {f"https://registry.npmjs.org/{package_name}": {"dist-tags": {"latest": "1.0.0"}, "versions": {"1.0.0": {}}}},
     )
     server, thread, sync_url = _start_cloud_eval_server(
         decision="allow",
@@ -2762,7 +2739,7 @@ def test_guard_protect_same_cached_advisory_id_review_to_block_changes_authority
     original_path = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", os.pathsep.join(filter(None, [str(fake_bin), original_path])))
     store = GuardStore(home_dir)
-    review_evaluation = supply_chain_package_eval_module.PackageRequestEvaluation(
+    review_evaluation = PackageRequestEvaluation(
         decision="ask",
         policy_action="review",
         enforcement="local",
@@ -2775,7 +2752,7 @@ def test_guard_protect_same_cached_advisory_id_review_to_block_changes_authority
         reasons=({"code": "package_review", "message": "Review package."},),
         packages=({"name": "badpkg", "requestedVersion": "1.0.0", "decision": "ask"},),
         risk_summary="Review package.",
-        user_copy=supply_chain_package_eval_module.SupplyChainUserCopy(
+        user_copy=SupplyChainUserCopy(
             title="Review package",
             summary="Review package.",
             next_step="Review the package request.",
@@ -2877,7 +2854,7 @@ def test_guard_protect_reloads_cached_advisory_authority_after_atomic_claim(
     original_path = os.environ.get("PATH", "")
     monkeypatch.setenv("PATH", os.pathsep.join(filter(None, [str(fake_bin), original_path])))
     store = GuardStore(home_dir)
-    review_evaluation = supply_chain_package_eval_module.PackageRequestEvaluation(
+    review_evaluation = PackageRequestEvaluation(
         decision="ask",
         policy_action="review",
         enforcement="local",
@@ -2890,7 +2867,7 @@ def test_guard_protect_reloads_cached_advisory_authority_after_atomic_claim(
         reasons=({"code": "package_review", "message": "Review package."},),
         packages=({"name": "badpkg", "requestedVersion": "1.0.0", "decision": "ask"},),
         risk_summary="Review package.",
-        user_copy=supply_chain_package_eval_module.SupplyChainUserCopy(
+        user_copy=SupplyChainUserCopy(
             title="Review package",
             summary="Review package.",
             next_step="Review the package request.",

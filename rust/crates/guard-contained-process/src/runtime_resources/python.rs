@@ -22,11 +22,45 @@ fn version_name(name: &str) -> Option<String> {
     Some(format!("3.{minor}"))
 }
 
+fn directory_binding(path: &Path) -> io::Result<SourceBinding> {
+    let directory = Arc::new(Directory::open(path)?);
+    let identity = bound_fs::identity(directory.handle())?;
+    let entries = directory.entries(Path::new("."), MAX_ENTRIES)?;
+    Ok(SourceBinding {
+        directory,
+        name: PathBuf::from("."),
+        binding: Binding::Directory { identity, entries },
+    })
+}
+
+fn require_absent(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+        Ok(_) => Err(bound_fs::changed()),
+    }
+}
+
+/// Every name under which an interpreter may read a `._pth` path selector.
+/// POSIX appends the suffix and Windows replaces the extension. Windows checks
+/// both, so an extension-less or dotted-version image such as `python3.12`,
+/// which `with_extension` turns into `python3._pth`, cannot dodge the check.
+fn path_overrides(image: &Path) -> Vec<PathBuf> {
+    let mut appended = image.as_os_str().to_os_string();
+    appended.push("._pth");
+    let mut paths = vec![PathBuf::from(appended)];
+    if cfg!(windows) {
+        paths.push(image.with_extension("_pth"));
+    }
+    paths
+}
+
 fn capture(
     executable: &Path,
     guard_home: &Path,
     deadline: Instant,
     cancel: &AtomicBool,
+    include_sites: bool,
 ) -> io::Result<Resources> {
     check(deadline, cancel)?;
     let requested_name = executable
@@ -39,6 +73,8 @@ fn capture(
             directories: Vec::new(),
             bindings: Vec::new(),
             python_version: None,
+            standard_library: None,
+            configuration: Vec::new(),
             total_bytes: 0,
         });
     }
@@ -51,6 +87,18 @@ fn capture(
     let requested_base = installation_root(requested_bin)?;
     let (requested_root, links) = resolve(requested_base)?;
     bindings.extend(links);
+    if !include_sites {
+        bindings.push(directory_binding(requested_bin)?);
+        bindings.push(directory_binding(&requested_root)?);
+        for image in [executable, canonical.as_path()] {
+            for selector in path_overrides(image) {
+                require_absent(&selector)?;
+            }
+        }
+        if requested_bin != requested_root {
+            require_absent(&requested_bin.join("pyvenv.cfg"))?;
+        }
+    }
     let config = venv_config::read(&requested_root, &guard_home, &mut bindings)?;
     let base_image = match &config {
         Some(config) => config.base_image(executable, &canonical, &guard_home, &mut bindings)?,
@@ -104,13 +152,24 @@ fn capture(
         }
         Err(error) => return Err(error),
     };
+    if !include_sites {
+        let lib = stdlib.parent().ok_or_else(bound_fs::changed)?;
+        bindings.push(directory_binding(lib)?);
+        require_absent(&lib.join(format!("python{}.zip", version.replace('.', ""))))?;
+        require_absent(&lib.join(format!("python{version}.zip")))?;
+    }
     let mut approved = vec![
         base.join("lib"),
         base.join("lib64"),
-        base.join("Lib"),
         PathBuf::from("/usr/lib"),
         PathBuf::from("/usr/local/lib"),
     ];
+    // The capitalised layout is Windows-only. Probing it elsewhere aliases
+    // `lib` on case-insensitive filesystems (default macOS APFS), where the
+    // canonical-spelling check correctly refuses the alias.
+    if cfg!(windows) {
+        approved.push(base.join("Lib"));
+    }
     if let Some(framework) = base.ancestors().find(|path| {
         path.file_name()
             .is_some_and(|name| name == "Python.framework")
@@ -140,11 +199,10 @@ fn capture(
     if let Some(config) = &config {
         config.validate_version(&version)?;
     }
-    approved.extend([
-        requested_root.join("lib"),
-        requested_root.join("lib64"),
-        requested_root.join("Lib"),
-    ]);
+    approved.extend([requested_root.join("lib"), requested_root.join("lib64")]);
+    if cfg!(windows) {
+        approved.push(requested_root.join("Lib"));
+    }
     let mut capture = Capture {
         files: BTreeMap::new(),
         directories: BTreeSet::new(),
@@ -165,8 +223,9 @@ fn capture(
     };
     capture.tree(&stdlib, &target, true)?;
     let site = target.join("site-packages");
-    let site_roots = if venv {
-        vec![
+    let mut site_roots = Vec::new();
+    if venv && include_sites {
+        site_roots.extend([
             requested_root
                 .join("lib")
                 .join(format!("python{version}"))
@@ -175,13 +234,13 @@ fn capture(
                 .join("lib64")
                 .join(format!("python{version}"))
                 .join("site-packages"),
-            requested_root.join("Lib/site-packages"),
-        ]
-    } else {
-        Vec::new()
-    };
+        ]);
+        if cfg!(windows) {
+            site_roots.push(requested_root.join("Lib/site-packages"));
+        }
+    }
     let mut roots = site_roots;
-    if include_system {
+    if include_system && include_sites {
         roots.extend([
             stdlib.join("site-packages"),
             base.join("lib/python3/dist-packages"),
@@ -209,6 +268,8 @@ fn capture(
         directories: capture.directories.into_iter().collect(),
         bindings: capture.bindings,
         python_version: Some(version),
+        standard_library: Some(stdlib),
+        configuration: config.into_iter().map(|config| config.evidence).collect(),
         total_bytes: capture.total,
     })
 }
@@ -220,13 +281,36 @@ pub fn python(
     deadline: Instant,
     cancel: &AtomicBool,
 ) -> io::Result<Resources> {
+    python_mode(origin, selected, guard_home, deadline, cancel, true)
+}
+
+/// Exact-action identity already analyzes active site hooks separately. Do
+/// not read unrelated installed packages merely to bind interpreter startup.
+pub fn python_identity(
+    origin: &Path,
+    selected: &Path,
+    guard_home: &Path,
+    deadline: Instant,
+    cancel: &AtomicBool,
+) -> io::Result<Resources> {
+    python_mode(origin, selected, guard_home, deadline, cancel, false)
+}
+
+fn python_mode(
+    origin: &Path,
+    selected: &Path,
+    guard_home: &Path,
+    deadline: Instant,
+    cancel: &AtomicBool,
+    include_sites: bool,
+) -> io::Result<Resources> {
     check(deadline, cancel)?;
     let (image, selectors) = resolve_without_control(origin, guard_home)?;
     let (selected, selected_selectors) = resolve_without_control(selected, guard_home)?;
     if image != selected {
         return Err(bound_fs::changed());
     }
-    let mut resources = capture(origin, guard_home, deadline, cancel)?;
+    let mut resources = capture(origin, guard_home, deadline, cancel, include_sites)?;
     resources.bindings.extend(selectors);
     resources.bindings.extend(selected_selectors);
     resources.verify()?;
@@ -247,3 +331,7 @@ fn installation_root(bin: &Path) -> io::Result<&Path> {
 #[cfg(test)]
 #[path = "python_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "python_identity_tests.rs"]
+mod identity_tests;

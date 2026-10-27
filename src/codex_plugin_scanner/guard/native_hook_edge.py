@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from .native_approval_errors import FINITE_FAILURE_CODES
+from .native_approval_errors import resident_refusal_code
 from .native_decision_receipt import receipt_matches_edge, valid_prompt_risk_classes
 from .native_resident_client import (
     native_resident_client_request,
@@ -24,6 +24,8 @@ from .native_runtime_resilience import (
 
 _EDGE_FEATURE = "hook-envelope-v2"
 _CLIENT_FEATURE = "native-resident-client-v1"
+_RESPONSE_FEATURE = "hook-harness-response-v1"
+_UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
 _GENERIC_PRE_TOOL_SCHEMA = "guard-pre-tool-result.v1"
 _GENERIC_PRE_TOOL_ACTION_SCHEMA = "guard-pre-tool-action.v1"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
@@ -70,7 +72,6 @@ _PRE_TOOL_ACTION_OPERATIONS = {
     "harness": {"start", "stop", "set", "read"},
     "unknown": {"unknown"},
 }
-_UNCERTAIN_EXTENSION_FLOORS = frozenset({"review", "require-reapproval", "block"})
 _PRE_TOOL_RESULT_KEYS = {
     "schema",
     "version",
@@ -176,10 +177,9 @@ def _decode_pre_tool_result(result: object, *, harness: str, event: str = "PreTo
         extensions = validate_native_command_observations(result["command_extensions"])
         if extensions is None:
             return False
-        binding = cast(dict[str, object], extensions["binding"])
+        # The floor for an uncertain match is Rust's to choose; a structurally
+        # valid receipt is trusted rather than second-guessed here.
         if extensions["evaluation_error"] is not None and result.get("minimum_action") != "block":
-            return False
-        if binding["uncertainty_count"] and result.get("minimum_action") not in _UNCERTAIN_EXTENSION_FLOORS:
             return False
     if not _valid_pre_tool_result_fields(result):
         return False
@@ -199,12 +199,7 @@ def _decode_pre_tool_result(result: object, *, harness: str, event: str = "PreTo
 
 def _native_error_code(payload: object) -> str | None:
     """Accept only the resident's finite error envelope for local diagnostics."""
-    if not isinstance(payload, dict) or set(payload) != {"error", "retryable"}:
-        return None
-    code = payload.get("error")
-    if type(payload.get("retryable")) is not bool or not isinstance(code, str):
-        return None
-    return code if code in FINITE_FAILURE_CODES else None
+    return resident_refusal_code(payload)
 
 
 def _decode_edge(payload: object) -> dict[str, Any] | None:
@@ -217,7 +212,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         "result",
         "receipt",
     }
-    allowed = required | {"request_id"}
+    allowed = required | {"request_id", "harness_response", "containment_route"}
     if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
         return None
     event_name = payload.get("event_name")
@@ -233,6 +228,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or not payload["harness"]
         or len(payload["harness"]) > 64
         or not isinstance(payload.get("result"), dict)
+        or not isinstance(payload.get("harness_response"), dict)
     ):
         return None
     if event_name in {"PreToolUse", "UserPromptSubmit"} and not _decode_pre_tool_result(
@@ -242,6 +238,12 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
     if event_name == "UserPromptSubmit" and payload_kind != "inline":
         return None
     if event_name == "PreToolUse" and payload_kind == "encrypted_payload_ref":
+        return None
+    if "containment_route" in payload and (
+        not isinstance(payload["containment_route"], str)
+        or payload["containment_route"] not in {"none", "sink", "grant"}
+        or (event_name != "PreToolUse" and payload["containment_route"] != "none")
+    ):
         return None
     receipt = payload.get("receipt")
     if not receipt_matches_edge(payload, receipt):
@@ -262,6 +264,7 @@ def _encode_hook_envelope(
     snapshot: Mapping[str, object],
     execution_context_supported: bool = False,
     request_id: str | None = None,
+    recording_only: bool = False,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 
@@ -291,6 +294,8 @@ def _encode_hook_envelope(
             "source_ref_external_allowed": source_ref_external_allowed,
         },
     }
+    if recording_only:
+        envelope["recording_only"] = True
     if execution_context_supported:
         # Direct CLI calls capture locally; daemon workers explicitly pass
         # None when caller context is unavailable instead of using daemon env.
@@ -335,7 +340,7 @@ def review_raw_hook_native(
         return record_native_hook_result("native_fail_safe", None)
     status = runtime_status if runtime_status is not None else native_runtime_status()
     event_key = event.strip().lower().replace("_", "").replace("-", "")
-    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE}
+    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE}
     if event_key in {
         "pretool",
         "pretooluse",
@@ -351,8 +356,7 @@ def review_raw_hook_native(
         if event_key not in {"userpromptsubmit", "userpromptsubmitted", "prompt"}:
             required_features.add("git-execution-context-v1")
     if (
-        status.mode not in {"auto", "force"}
-        or not status.available
+        not status.available
         or not status.compatible
         or status.identity is None
         or status.capabilities is None
@@ -360,7 +364,6 @@ def review_raw_hook_native(
     ):
         return record_native_hook_result("native_fail_safe", None)
     deadline_monotonic, deadline_budget_ms = _capture_deadline(deadline)
-    del observe_mode
     if policy_snapshot is None:
         return record_native_hook_result("native_fail_safe", None)
     snapshot = dict(policy_snapshot)
@@ -379,6 +382,7 @@ def review_raw_hook_native(
         snapshot=snapshot,
         execution_context_supported="git-execution-context-v1" in status.capabilities.features,
         request_id=request_id,
+        recording_only=observe_mode,
     )
     if encoded is None:
         return record_native_hook_result("native_fail_safe", None)
@@ -397,9 +401,14 @@ def review_raw_hook_native(
             reason="native_hook_edge_unavailable",
         )
         return record_native_hook_result("native_fail_safe", None)
+    error_code: str | None = None
     try:
         response_payload = json.loads(output)
         error_code = _native_error_code(response_payload)
+        if error_code == _UNSUPPORTED_EVENT_CODE:
+            # A lifecycle event the edge does not review. The resident
+            # answered, so this neither counts against its health nor proves it.
+            return record_native_hook_result("native_fail_safe", None)
         if error_code is not None:
             record_native_resident_client_failure_code(error_code)
         decoded = _decode_edge(response_payload)

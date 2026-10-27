@@ -25,17 +25,20 @@ import {
   ensureGuardDashboardSession,
 } from "./guard-api";
 import { ApprovalCenterLayout, type BulkGateCredentials } from "./approval-center-layout";
+import { bulkApprovalProof, bulkApproveCooldownOpen } from "./queue-bulk-approval-credentials";
 import type { AppView } from "./approval-center-primitives";
 import { buildClearPayload } from "./clear-policy-payload";
 import { harnessDisplayName, normalizeHarnessSlug } from "./approval-center-utils";
 import { ErrorBoundary } from "./error-boundary";
 import { lazyWorkspace } from "./lazy-workspace";
 import { runAutomaticProtectionRepair } from "./protection-repair-flow";
-import { selectNextAfterResolution } from "./queue-state";
+import { selectNextAfterResolution, type QueueGroup } from "./queue-state";
+import { BulkBlockError, blockRequestsOnce, bulkBlockFailureMessage, bulkBlockSummary } from "./bulk-block-requests";
 import { useRouteFocus } from "./use-route-focus";
 import { commitDashboardLocation, useDashboardPathname } from "./dashboard-location";
 import { openRecoveryView } from "./service-recovery";
 
+const HOME_QUEUE_PREVIEW_LIMIT = 50;
 const HomeWorkspace = lazyWorkspace("home-dashboard", () => import("./home-dashboard").then((m) => ({ default: m.HomeWorkspace })));
 const FleetWorkspace = lazyWorkspace("fleet-workspace", () => import("./fleet-workspace").then((m) => ({ default: m.FleetWorkspace })));
 const SettingsWorkspace = lazyWorkspace("settings-workspace", () => import("./settings-workspace").then((m) => ({ default: m.SettingsWorkspace })));
@@ -52,6 +55,9 @@ const PolicyWorkspacePage = lazyWorkspace("policy-workspace-page", () =>
 );
 const AboutWorkspace = lazyWorkspace("about-workspace", () =>
   import("./about/about-workspace").then((m) => ({ default: m.AboutWorkspace }))
+);
+const ReleasesWorkspace = lazyWorkspace("releases-workspace", () =>
+  import("./releases/releases-workspace").then((m) => ({ default: m.ReleasesWorkspace }))
 );
 const ProtectionRepairPage = lazyWorkspace("protection-repair-page", () =>
   import("./protection-repair-page").then((m) => ({ default: m.ProtectionRepairPage }))
@@ -154,7 +160,9 @@ export function viewTitle(view: AppView): string {
   if (view === "audit") return "Audit";
   if (view === "policy") return "Rules & exceptions";
   if (view === "feed-health") return "Feed Health";
+  if (view === "workspaces") return "Workspaces";
   if (view === "about") return "About";
+  if (view === "releases") return "Releases";
   if (view === "extensions") return "Extensions";
   if (view === "protection-repair") return "Repair protection";
   return "App detail";
@@ -206,8 +214,14 @@ export function resolveView(pathname: string): AppView {
   if (pathname === "/feed-health") {
     return "feed-health";
   }
+  if (pathname === "/workspaces") {
+    return "workspaces";
+  }
   if (pathname === "/about") {
     return "about";
+  }
+  if (pathname === "/releases") {
+    return "releases";
   }
   if (
     pathname === "/inbox" ||
@@ -301,7 +315,8 @@ export function App() {
   const latestRefresh = useRef<Promise<{ snapshot: GuardRuntimeSnapshot | null; complete: boolean }> | null>(null);
   const bulkApproveInFlight = useRef(false);
   const queuedItems = requests.kind === "ready" ? requests.items : [];
-  const activeRequestId = requestId ?? queuedItems[0]?.request_id ?? null;
+  // Home only previews the queue, so it never opens a request's detail on its own.
+  const activeRequestId = requestId ?? (view === "home" ? null : queuedItems[0]?.request_id) ?? null;
 
   useEffect(() => {
     if (activeRequestId === null) {
@@ -353,6 +368,7 @@ export function App() {
     let clearedQueue = false;
     const needsFullQueue = view === "inbox" && requestId === null;
     const needsQueuePage = view === "inbox" || requestId !== null;
+    const needsHomePreview = view === "home" && requestId === null;
     const needsRuntimeReceipts =
       view === "home" ||
       view === "fleet" ||
@@ -392,6 +408,19 @@ export function App() {
             if (!cancelled && !resolutionInFlight.current) {
               const message = error instanceof Error ? error.message : queueErrorMessage;
               setRequests({ kind: "error", message });
+            }
+          });
+      } else if (needsHomePreview) {
+        // Home previews the first few paused actions and their age; a failed preview leaves Home usable.
+        pendingRequests = fetchApprovalPage({ status: "pending", limit: HOME_QUEUE_PREVIEW_LIMIT })
+          .then((page) => {
+            if (!cancelled && !resolutionInFlight.current) {
+              setRequests({ kind: "ready", items: page.items });
+            }
+          })
+          .catch(() => {
+            if (!cancelled && !resolutionInFlight.current) {
+              setRequests({ kind: "ready", items: [] });
             }
           });
       } else {
@@ -459,7 +488,7 @@ export function App() {
         }
       })
       .catch(() => {});
-    if (view === "about") {
+    if (view === "about" || view === "releases") {
       fetchGuardUpdateStatus()
         .then((status) => {
           if (!cancelled && status.current_version) {
@@ -473,6 +502,7 @@ export function App() {
 
   useEffect(() => {
     const needsReceipts =
+      view === "home" ||
       view === "evidence" ||
       view === "app-detail" ||
       view === "supply-chain" ||
@@ -788,15 +818,37 @@ export function App() {
     setCodexResume(updated);
   }, [resolvedRequestId]);
 
+  const refreshApprovalGate = useCallback(async (): Promise<GuardApprovalGatePublicConfig | null> => {
+    try {
+      const payload = await fetchSettings();
+      const gate = payload.settings.approval_gate;
+      if (gate === undefined) {
+        return null;
+      }
+      setApprovalGate(gate);
+      return gate;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const handleBulkApprove = useCallback(async (ids: string[], gateCredentials?: BulkGateCredentials) => {
     if (bulkApproveInFlight.current) {
       return;
     }
-    if (!gateCredentials?.approval_password?.trim() && !gateCredentials?.approval_totp_code?.trim()) {
+    const proof = bulkApprovalProof(gateCredentials);
+    if (gateCredentials === undefined || proof === null) {
       throw new Error("Bulk approval requires approval proof.");
     }
     bulkApproveInFlight.current = true;
     try {
+      if (proof === "cooldown") {
+        // The drawer's gate can be stale; recheck the window before relying on it.
+        const freshGate = await refreshApprovalGate();
+        if (!bulkApproveCooldownOpen(freshGate)) {
+          throw new Error("Your approval window has closed. Enter your approval password to continue.");
+        }
+      }
       const result = await bulkAllowReadOnce({
         requestIds: ids,
         approval_password: gateCredentials.approval_password,
@@ -815,10 +867,37 @@ export function App() {
       }
       const label = `${result.resolved_count} item${result.resolved_count !== 1 ? "s" : ""} approved.`;
       setResolutionMessage(label);
+    } catch (error) {
+      // A refused proof may mean the window closed; show the password field again.
+      await refreshApprovalGate();
+      throw error;
     } finally {
       bulkApproveInFlight.current = false;
     }
-  }, [refreshStateAfterAction, setResolutionMessage]);
+  }, [refreshApprovalGate, refreshStateAfterAction, setResolutionMessage]);
+
+  const handleBulkBlock = useCallback(async (selected: QueueGroup[]) => {
+    // A decision already being saved could resolve one of these requests
+    // under the batch and make it look like a failure.
+    if (bulkApproveInFlight.current || resolutionInFlight.current) {
+      throw new Error("Another decision is still being saved. Try again in a moment.");
+    }
+    bulkApproveInFlight.current = true;
+    resolutionInFlight.current = true;
+    const queued = new Map((requests.kind === "ready" ? requests.items : []).map((item) => [item.request_id, item]));
+    try {
+      const outcome = await blockRequestsOnce(selected, (id) => queued.get(id), resolveRequestWithQueueResult);
+      resolutionInFlight.current = false;
+      await refreshStateAfterAction();
+      if (outcome.failed > 0) {
+        throw new BulkBlockError(bulkBlockFailureMessage(outcome), outcome.failedIds);
+      }
+      setResolutionMessage(bulkBlockSummary(outcome));
+    } finally {
+      resolutionInFlight.current = false;
+      bulkApproveInFlight.current = false;
+    }
+  }, [refreshStateAfterAction, requests, setResolutionMessage]);
 
   const handleRetry = useCallback(() => {
     setRuntime({ kind: "loading" });
@@ -968,6 +1047,7 @@ export function App() {
           <HomeWorkspace
             requests={requests}
             runtime={runtime}
+            receipts={receipts.kind === "ready" ? receipts.items : undefined}
             policies={policies}
             onOpenInbox={handleOpenInbox}
             onOpenFleet={handleOpenFleet}
@@ -987,6 +1067,8 @@ export function App() {
             onConfirmClear={handleConfirmClear}
             onCancelClear={handleCancelClear}
             onOpenHelp={handleOpenHelp}
+            onOpenRequest={handleOpenRequest}
+            onConnectHarness={handleConnectHarness}
           />
         </Suspense>
       }
@@ -995,6 +1077,7 @@ export function App() {
       onOpenRequest={handleOpenRequest}
       onResolve={handleResolve}
       onBulkApprove={handleBulkApprove}
+      onBulkBlock={handleBulkBlock}
       onRetry={handleRetry}
       onRetryDetail={() => setDetailRefreshKey((key) => key + 1)}
       onRepair={handleRepair}
@@ -1012,6 +1095,7 @@ export function App() {
               onRepairHarness={handleRepairHarness}
               onRepairProtection={handleRepairProtection}
               onOpenAppDetail={handleOpenAppDetail}
+              onRuntimeRefresh={refreshStateWithoutResult}
             />
           </Suspense>
         ) : null
@@ -1061,6 +1145,13 @@ export function App() {
         ) : null
       }
       policyContent={policyContent}
+      releasesContent={
+        view === "releases" ? (
+          <Suspense fallback={<LazyFallback />}>
+            <ReleasesWorkspace installedVersion={guardVersion} />
+          </Suspense>
+        ) : null
+      }
       aboutContent={
         <Suspense fallback={<LazyFallback />}>
           <AboutWorkspace runtimeSummary={
@@ -1072,6 +1163,7 @@ export function App() {
                   cloudState: runtime.snapshot.cloud_state ?? "unknown",
                   cloudStateLabel: runtime.snapshot.cloud_state_label ?? "Unknown",
                   syncConfigured: runtime.snapshot.sync_configured ?? false,
+                  syncHealth: runtime.snapshot.cloud_sync_health?.state ?? null,
                   pendingCount: runtime.snapshot.pending_count ?? 0,
                   receiptCount: runtime.snapshot.receipt_count ?? 0,
                   protectedAppCount: 0,

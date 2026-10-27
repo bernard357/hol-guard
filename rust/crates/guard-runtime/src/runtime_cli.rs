@@ -3,6 +3,22 @@ use super::*;
 pub(super) fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.as_slice() {
+        [command, flag] if command == "pack-lifecycle" && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&pack_lifecycle::run(&bytes)?)
+        }
+        [command, ..] if command == "restricted-linux-launch" => {
+            let digest = if args.len() == 2 { args[1].as_str() } else { "" };
+            std::process::exit(restricted_linux_launch::launch(digest))
+        }
+        #[cfg(unix)]
+        [command, rest @ ..] if command == contained_workspace_sink::SINK_COMMAND => {
+            std::process::exit(contained_workspace_sink::run(rest))
+        }
+        #[cfg(unix)]
+        [command, rest @ ..] if command == contained_workspace_sink::LAUNCH_COMMAND => {
+            std::process::exit(contained_workspace_sink::launch(rest))
+        }
         [command] if command == "capabilities" => write_json(&capabilities()),
         [command, flag] if command == "capabilities" && flag == "--json" => {
             write_json(&capabilities())
@@ -17,13 +33,71 @@ pub(super) fn run() -> Result<(), String> {
         [command, flag] if command == "self-test" && flag == "--json" => {
             write_json(&serde_json::json!({"ok": true, "capabilities": capabilities()}))
         }
+        [command, mode, marker, config]
+            if command == "claude-hook-bridge"
+                && mode == claude_session_start::SESSION_START_MODE
+                && marker == claude_session_start::SESSION_START_MARKER =>
+        {
+            std::process::exit(claude_session_start::run(config))
+        }
+        [command, marker, config]
+            if command == "claude-hook-bridge" && marker == claude_hook_bridge::BRIDGE_MARKER =>
+        {
+            claude_hook_bridge::run(config)
+        }
+        // The hook carries its config as the last argument. Installs made
+        // before the Python bridge became a launcher pass the whole Python
+        // argv ahead of it, so both shapes reach the same bridge.
+        [command, python_argv @ ..]
+            if command == codex_hook_bridge::BRIDGE_COMMAND && !python_argv.is_empty() =>
+        {
+            std::process::exit(codex_hook_bridge::run(python_argv))
+        }
+        [command, python_argv @ ..]
+            if command == bounded_hook_bridge::BRIDGE_COMMAND && python_argv.len() >= 2 =>
+        {
+            std::process::exit(bounded_hook_bridge::run(python_argv))
+        }
+        [command, python_argv @ ..]
+            if command == cursor_hook_bridge::BRIDGE_COMMAND && python_argv.len() >= 2 =>
+        {
+            std::process::exit(cursor_hook_bridge::run(python_argv))
+        }
+        [command, config] if command == pi_hook_bridge::BRIDGE_COMMAND => {
+            std::process::exit(pi_hook_bridge::run(config))
+        }
+        [command, python_argv @ ..]
+            if command == mcp_relay::RELAY_COMMAND && python_argv.len() >= 2 =>
+        {
+            std::process::exit(mcp_relay::run(python_argv))
+        }
         [command, flag] if command == "hook" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             let response = oneshot::evaluate_hook_bytes(&bytes)?;
             write_bytes_response(&response)
         }
+        [command, flag] if command == "native-bash-host-context" && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_bytes_response(&native_exact_action_op::observe_bash_host_bytes(&bytes)?)
+        }
         [command, flag] if policy_snapshot_build::is_command(command) && flag == "--stdin" => {
             let response = policy_snapshot_build::run_command(command, io::stdin().lock())?;
+            write_bytes_response(&response)
+        }
+        [command, flag] if guard_config_load::is_command(command) && flag == "--stdin" => {
+            let response = guard_config_load::run_command(io::stdin().lock())?;
+            write_bytes_response(&response)
+        }
+        [command, flag] if guard_config_update::is_command(command) && flag == "--stdin" => {
+            let response = guard_config_update::run_command(io::stdin().lock())?;
+            write_bytes_response(&response)
+        }
+        [command, flag] if guard_config_resolve::is_command(command) && flag == "--stdin" => {
+            let response = guard_config_resolve::run_command(io::stdin().lock())?;
+            write_bytes_response(&response)
+        }
+        [command, flag] if policy_effective::is_command(command) && flag == "--stdin" => {
+            let response = policy_effective::run_command(io::stdin().lock())?;
             write_bytes_response(&response)
         }
         [command, flag] if business_source_codec::is_command(command) && flag == "--stdin" => {
@@ -95,6 +169,18 @@ pub(super) fn run() -> Result<(), String> {
             )?;
             write_bytes_response(&request)
         }
+        #[cfg(target_os = "macos")]
+        [command, flag, state_dir, owner_flag, owner_pid]
+            if command == "native-bash-execute-client" && flag == "--stdin" && owner_flag == "--host-owner-pid" => {
+            let pid = owner_pid.parse::<u32>().map_err(|_| "native_bash_host_owner_unavailable")?;
+            let response = native_bash_client::run(std::path::Path::new(state_dir), read_stdin_bounded()?, Some(pid))?;
+            write_bytes_response(&response)
+        }
+        #[cfg(target_os = "macos")]
+        [command, flag, state_dir] if command == "native-bash-execute-client" && flag == "--stdin" => {
+            let response = native_bash_client::run(std::path::Path::new(state_dir), read_stdin_bounded()?, None)?;
+            write_bytes_response(&response)
+        }
         [command, flag, state_dir]
             if matches!(command.as_str(), "hook-client" | "resident-client")
                 && flag == "--stdin" =>
@@ -126,6 +212,11 @@ pub(super) fn run() -> Result<(), String> {
         [command, flag, state_dir] if command == "resident-stop" && flag == "--state-dir" => {
             managed_resident::stop_managed(std::path::Path::new(state_dir), false)
         }
+        [command, flag, state_dir]
+            if command == "resident-reset-restart-budget" && flag == "--state-dir" =>
+        {
+            managed_resident::reset_restart_budget(std::path::Path::new(state_dir))
+        }
         [command, flag] if command == "command-model" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             let response = oneshot::evaluate_command_model_bytes(&bytes)?;
@@ -135,6 +226,32 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             let response = oneshot::evaluate_pre_tool_bytes(&bytes)?;
             write_bytes_response(&response)
+        }
+        // Provisioning the policy verifier key cannot be a resident call: the
+        // resident refuses to serve until that key exists. This one-shot arm
+        // is the bootstrap, so the master arrives on stdin and never on argv,
+        // where another local process could read it.
+        [command, flag, state_dir]
+            if command == "provision-verifier-key" && flag == "--stdin" =>
+        {
+            let bytes = read_stdin_bounded()?;
+            let request = strict_json_value(&bytes)?;
+            let encoded = request
+                .get("policy_integrity_key")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "native_policy_verifier_master_invalid".to_owned())?;
+            let master = zeroize::Zeroizing::new(
+                hex::decode(encoded)
+                    .map_err(|_| "native_policy_verifier_master_invalid".to_owned())?,
+            );
+            let outcome = policy_verifier_key_provision::provision_verifier_key(
+                std::path::Path::new(state_dir),
+                &master,
+            )?;
+            write_json(&serde_json::json!({
+                "schema": "hol-guard-native-verifier-key.v1",
+                "status": outcome.as_str(),
+            }))
         }
         [command, flag, state_dir, request_flag, request_id]
             if command == "workspace-review-decision"
@@ -181,6 +298,38 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             let response = archive_inspect::evaluate_archive_inspection_bytes(&bytes)?;
             write_bytes_response(&response)
+        }
+        [command, flag] if command == runtime_identity::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&runtime_identity::run_command(&bytes)?)
+        }
+        [command, flag] if command == runtime_identity_probe::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&runtime_identity_probe::run_command(&bytes)?)
+        }
+        [command, flag] if command == secrets_cli::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&secrets_cli::run_command(&bytes)?)
+        }
+        [command, flag] if command == guard_plugin_kit::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&guard_plugin_kit::run_request(&bytes))
+        }
+        [command, flag] if command == guard_plugin_telemetry::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&guard_plugin_telemetry::run_request(&bytes))
+        }
+        [command, flag] if command == workspace_snapshot::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_snapshot::run_command(&bytes)?)
+        }
+        [command, flag] if command == workspace_mcp_config::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_mcp_config::run_command(&bytes)?)
+        }
+        [command, flag] if command == workspace_fix::COMMAND && flag == "--stdin" => {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_fix::run_command(&bytes)?)
         }
         [command, flag] if command == "context-digest" && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
@@ -254,7 +403,7 @@ pub(super) fn run() -> Result<(), String> {
             )
         }
         _ => Err(
-            "usage: hol-guard-runtime compile-business-policy --stdin | capabilities --json | rule-contract --json | self-test --json | hook --stdin | migrate-policy --state-dir STATE_DIR | prepare-approval-enrollment --state-dir STATE_DIR | enroll-approval-authority --state-dir STATE_DIR --record RECORD | prepare-approval-v4-enrollment --state-dir STATE_DIR --rp-id RP_ID --origin ORIGIN | enroll-approval-v4-authority --state-dir STATE_DIR --record RECORD | enroll-workspace-review-authority --state-dir STATE_DIR --record RECORD | workspace-review-decision --stdin STATE_DIR --request-id REQUEST_ID | hook-client --stdin STATE_DIR | resident-client --stdin STATE_DIR | resident-client-stream --stdin STATE_DIR | command-model --stdin | pre-tool --stdin | archive-inspect --stdin | context-digest --stdin | serve --socket PATH | serve --tcp-loopback 127.0.0.1:PORT | resident-stop --state-dir STATE_DIR [--retire-clients] | serve-managed --state-dir STATE_DIR --generation N --owner-process-id PID --runtime-sha256 SHA | supervise-managed --state-dir STATE_DIR --generation N --owner-process-id PID --runtime-sha256 SHA"
+            "usage: hol-guard-runtime compile-business-policy --stdin | capabilities --json | rule-contract --json | self-test --json | hook --stdin | migrate-policy --state-dir STATE_DIR | prepare-approval-enrollment --state-dir STATE_DIR | enroll-approval-authority --state-dir STATE_DIR --record RECORD | prepare-approval-v4-enrollment --state-dir STATE_DIR --rp-id RP_ID --origin ORIGIN | enroll-approval-v4-authority --state-dir STATE_DIR --record RECORD | enroll-workspace-review-authority --state-dir STATE_DIR --record RECORD | workspace-review-decision --stdin STATE_DIR --request-id REQUEST_ID | hook-client --stdin STATE_DIR | resident-client --stdin STATE_DIR | resident-client-stream --stdin STATE_DIR | command-model --stdin | pre-tool --stdin | archive-inspect --stdin | secrets-cli --stdin | context-digest --stdin | serve --socket PATH | serve --tcp-loopback 127.0.0.1:PORT | resident-stop --state-dir STATE_DIR [--retire-clients] | resident-reset-restart-budget --state-dir STATE_DIR | serve-managed --state-dir STATE_DIR --generation N --owner-process-id PID --runtime-sha256 SHA | supervise-managed --state-dir STATE_DIR --generation N --owner-process-id PID --runtime-sha256 SHA"
                 .into(),
         ),
     }

@@ -8,7 +8,6 @@ import os
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -87,42 +86,6 @@ def stabilized_process_resources(pid: int) -> tuple[int, int, int] | None:
         max(sample[1] for sample in samples),
         max(sample[2] for sample in samples),
     )
-
-
-def healthz_details(execution: StressExecution) -> Mapping[str, object] | None:
-    """Read the authenticated bounded capacity report for one stress daemon."""
-
-    request = urllib.request.Request(
-        f"{execution.daemon_url}/v1/healthz/details",
-        headers={"X-Guard-Token": execution.auth_token},
-        method="GET",
-    )
-    try:
-        with cast(HTTPResponse, urllib.request.urlopen(request, timeout=1)) as response:
-            body = response.read(_MAX_RESPONSE_BYTES + 1)
-    except (OSError, urllib.error.URLError):
-        return None
-    if len(body) > _MAX_RESPONSE_BYTES:
-        return None
-    try:
-        payload = cast(object, json.loads(body.decode("utf-8")))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return cast(Mapping[str, object], payload) if isinstance(payload, Mapping) else None
-
-
-def worker_capacity(details: Mapping[str, object] | None) -> tuple[int, int, int, int, int] | None:
-    """Extract only bounded worker-capacity counts from the health report."""
-
-    if details is None:
-        return None
-    workers = details.get("hook_workers")
-    if not isinstance(workers, Mapping):
-        return None
-    values = tuple(workers.get(name) for name in ("configured", "target", "workers", "ready", "busy"))
-    if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in values):
-        return None
-    return cast(tuple[int, int, int, int, int], values)
 
 
 def stress_request(endpoint: str, auth_token: str) -> float:
@@ -316,16 +279,28 @@ def collect_batch(
 
 def run_stress_batches(execution: StressExecution, request_count: int) -> None:
     max_workers = min(request_count, 32)
+    # The daemon starts runtime workers on demand, so the tree can still be
+    # adding workers well after warmup. The baseline is the ceiling over the
+    # first tenth of the run; growth after that is what a leak looks like.
+    warm_requests = request_count // 10
+    start = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for start in range(0, request_count, max_workers):
-            futures = [
-                executor.submit(stress_request, execution.endpoint, execution.auth_token)
-                for _ in range(min(max_workers, request_count - start))
-            ]
+        while start < request_count:
+            # A batch never crosses the end of the warm window.
+            size = min(max_workers, request_count - start)
+            if start < warm_requests:
+                size = min(size, warm_requests - start)
+            futures = [executor.submit(stress_request, execution.endpoint, execution.auth_token) for _ in range(size)]
+            # Sample at least once per batch, even one that finishes before the
+            # first check, so the warm-window ceiling and the peak see it.
+            sample_stress_runtime(execution)
             while not all(future.done() for future in futures):
-                sample_stress_runtime(execution)
                 time.sleep(0.05)
+                sample_stress_runtime(execution)
             collect_batch(execution, futures)
+            start += size
+            if start <= warm_requests:
+                execution.rss_baseline_bytes = max(execution.rss_baseline_bytes, execution.rss_peak_bytes)
 
 
 def update_pid_stability(execution: StressExecution, guard_home: Path) -> None:
@@ -359,7 +334,6 @@ __all__ = [
     "finalize_stress_runtime",
     "health_is_ready",
     "health_probe_status",
-    "healthz_details",
     "pid_is_running",
     "process_tree_resources",
     "record_resources",
@@ -372,5 +346,4 @@ __all__ = [
     "update_pid_stability",
     "wait_for_process_resources",
     "wait_until_health_ready",
-    "worker_capacity",
 ]

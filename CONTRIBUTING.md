@@ -26,6 +26,7 @@ maintainer checks across supported AI plugin ecosystems.
 | Generate a review kit from a trusted offline CLI or MCP export | [Extension Builder](docs/guard/extension-builder/README.md) |
 | New matcher operation or a parser, policy, or hook-runtime change | `rust/crates/`, the [command architecture](docs/guard/command-extension-architecture.md), and [native ownership map](docs/guard/native-hook-data-plane-ownership.md) |
 | MCP server package or tool defaults | [MCP server contribution guide](docs/guard/mcp-server-contributions.md) |
+| New AI coding-app harness adapter or host hook integration | [Harness adapter contribution guide](docs/guard/adapter-contributions.md) |
 | Public extension listing or publisher attribution | [Publisher metadata](docs/guard/extensions/publisher-metadata.md) |
 
 Command source files under `contributions/command-sources/` own extension metadata, permissions,
@@ -78,7 +79,7 @@ acceptance tooling must preserve ordinary agent workflows and harmful-call prote
 Run [Guard Gauntlet](ci/gauntlet/README.md) with the actual Oh My Pi CLI, real model
 inference and the exact installed native build. Attach its verified public evidence
 through the **Guard Gauntlet evidence** workflow. Live qualification is an optional
-check, separate from the required `ci (3.12)` aggregate, and does not block merge.
+check, separate from the `hol-guard / required` aggregate, and does not block merge.
 
 A model refusal, admission-only probe, unit-test pass or prose completion is not live
 qualification. Keep failed evidence, add the relevant benign/security pair, and test
@@ -135,7 +136,7 @@ behavior changes. A documentation-only correction needs accurate commands and wo
 not a new runtime test.
 
 For Rust changes, use the same formatting, lint, and test gates as the
-[Rust runtime workflow](.github/workflows/rust-runtime.yml):
+[CI workflow](.github/workflows/ci.yml):
 
 ```bash
 cargo +1.88.0 fmt --manifest-path rust/Cargo.toml --all --check
@@ -193,8 +194,8 @@ the frozen package resources; it does not discover built-in policy from a mutabl
 extension directory at startup. External extensions retain their opt-in requirement.
 
 A source checkout or generic wheel build does not qualify a platform release. The
-[native wheel workflow](.github/workflows/native-wheel-ci.yml) assembles and tests the native
-runtime and source compiler with their manifests; the
+[nightly native workflow](.github/workflows/nightly-native.yml) assembles and tests the native
+runtime — which hosts the source-compiler operations — with its manifests; the
 [installed Builder matrix](docs/guard/extension-builder/VALIDATION.md#installed-wheel-matrix)
 checks authoring outside the checkout. Include the relevant CI results in the PR.
 

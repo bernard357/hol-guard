@@ -45,17 +45,42 @@ pub fn authority_evidence(binding: &NativeCommandControlBindingV1) -> AuthorityE
 pub fn control_layers_from_binding(
     binding: &NativeCommandControlBindingV1,
 ) -> Result<Vec<ExtensionControlLayer>, &'static str> {
-    if binding.layers.len() > 2 {
+    control_layers_from_wire(&binding.layers)
+}
+
+/// Wire layers -> typed layers with structural validation only.
+pub fn control_layers_from_wire(
+    wire_layers: &[guard_contracts::NativeExtensionControlLayerV1],
+) -> Result<Vec<ExtensionControlLayer>, &'static str> {
+    if wire_layers.len() > 2 {
         return Err(ERR_BINDING);
     }
-    let mut layers = Vec::with_capacity(binding.layers.len());
-    for wire in &binding.layers {
+    convert_wire_layers(wire_layers, true)
+}
+
+/// Like [`control_layers_from_wire`] without the layer and control counts.
+///
+/// The resolver reports an oversized input as an `input-limit-exceeded`
+/// failure, so a caller resolving or composing arbitrary layers converts them
+/// here and leaves the count to the resolver.
+pub fn control_layers_from_wire_unbounded(
+    wire_layers: &[guard_contracts::NativeExtensionControlLayerV1],
+) -> Result<Vec<ExtensionControlLayer>, &'static str> {
+    convert_wire_layers(wire_layers, false)
+}
+
+fn convert_wire_layers(
+    wire_layers: &[guard_contracts::NativeExtensionControlLayerV1],
+    bounded: bool,
+) -> Result<Vec<ExtensionControlLayer>, &'static str> {
+    let mut layers = Vec::with_capacity(wire_layers.len());
+    for wire in wire_layers {
         let kind = match wire.kind.as_str() {
             "local-admin" => ControlLayerKind::LocalAdmin,
             "signed-cloud" => ControlLayerKind::SignedCloud,
             _ => return Err(ERR_LAYER),
         };
-        if wire.controls.len() > 512 {
+        if bounded && wire.controls.len() > 512 {
             return Err(ERR_LAYER);
         }
         let mut controls = Vec::with_capacity(wire.controls.len());

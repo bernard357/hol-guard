@@ -60,6 +60,18 @@ pub(super) static LOCAL_APPROVAL_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new
         .expect("LOCAL_APPROVAL_INSTRUCTION_RE")
 });
 
+/// The approval instruction older runtimes wrote into a stored row's harness
+/// message, with its request link and optional retry sentence. A terminal
+/// action has no approval route, so a replayed row must not keep offering one.
+pub(super) static LEGACY_LOCAL_APPROVAL_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    RegexBuilder::new(
+        r"\s*Open HOL Guard to approve or keep this blocked:\s*https?://\S+(?:\s+After you choose,\s+retry the same .*? action\.)?",
+    )
+    .case_insensitive(true)
+    .build()
+    .expect("LEGACY_LOCAL_APPROVAL_INSTRUCTION_RE")
+});
+
 pub(super) static LOCAL_APPROVAL_REQUEST_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     RegexBuilder::new(r"https?://[^\s]+/requests(?:/[^\s]*)?")
         .case_insensitive(true)
@@ -92,16 +104,16 @@ pub(super) const NPM_REGISTRY_METADATA_BASE_URL: &str = "https://registry.npmjs.
 pub(super) const PYPI_REGISTRY_METADATA_BASE_URL: &str = "https://pypi.org/pypi";
 
 #[allow(dead_code)]
-pub(super) const TARBALL_SCAN_TIMEOUT_SECONDS: u64 = 2;
+pub const TARBALL_SCAN_TIMEOUT_SECONDS: u64 = 2;
 
 #[allow(dead_code)]
 pub(super) const TARBALL_SCAN_MAX_BYTES: u64 = 6 * 1024 * 1024;
 
 #[allow(dead_code)]
-pub(super) const TARBALL_SCAN_MAX_FILES: usize = 500;
+pub const TARBALL_SCAN_MAX_FILES: usize = 500;
 
 #[allow(dead_code)]
-pub(super) const TARBALL_SCAN_MAX_PACKAGE_JSON_BYTES: u64 = 256 * 1024;
+pub const TARBALL_SCAN_MAX_PACKAGE_JSON_BYTES: u64 = 256 * 1024;
 
 #[allow(dead_code)]
 pub(super) const EXTERNAL_ARCHIVE_MAX_TARGETS: usize = 4;
@@ -110,7 +122,7 @@ pub(super) const EXTERNAL_ARCHIVE_MAX_TARGETS: usize = 4;
 pub(super) const EXTERNAL_ARCHIVE_MAX_AGGREGATE_BYTES: u64 = 12 * 1024 * 1024;
 
 #[allow(dead_code)]
-pub(super) const EXTERNAL_ARCHIVE_REQUEST_TIMEOUT_SECONDS: f64 = 8.0;
+pub const EXTERNAL_ARCHIVE_REQUEST_TIMEOUT_SECONDS: f64 = 8.0;
 
 #[allow(dead_code)]
 pub(super) const CLOUD_VALIDATION_ERROR_CACHE_TTL_SECONDS: f64 = 15.0 * 60.0;

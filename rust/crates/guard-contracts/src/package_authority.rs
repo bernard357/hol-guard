@@ -19,13 +19,28 @@ pub const PACKAGE_AUTHORITY_RESULT_SCHEMA: &str = "guard-package-authority-resul
 pub const PACKAGE_AUTHORITY_FEATURE: &str = "package-authority-v1";
 /// Capability advertised when the package-evaluation composition op exists.
 pub const PACKAGE_EVALUATION_COMPOSE_FEATURE: &str = "package-evaluation-compose-v1";
+pub const PACKAGE_APPROVAL_HASH_FEATURE: &str = "package-approval-hash-v1";
+/// Capability advertised when the resident plans a package review settle:
+/// it reads the hook's command, checks its shape, parses the package intent,
+/// proves the npm it runs and builds the request artifact the evaluator reads.
+pub const PACKAGE_REVIEW_PLAN_FEATURE: &str = "package-review-plan-v1";
+/// Capability advertised when the stored package policy resolution op exists.
+pub const PACKAGE_POLICY_RESOLVE_FEATURE: &str = "package-policy-resolve-v1";
 /// Capability advertised when `supply_chain_eval` is the sole package-verdict
 /// authority: the resident owns Cloud, bundle, lockfile and heuristic
 /// decisions, and callers have no Python evaluation to fall back to.
 pub const SUPPLY_CHAIN_EVAL_FEATURE: &str = "supply-chain-eval-v1";
 
+/// Capability advertised when `package_intent_extract` reads a whole tool
+/// call for package intent in one request.
+pub const PACKAGE_INTENT_EXTRACT_FEATURE: &str = "package-intent-extract-v1";
+
 /// Largest canonical request serialization any of these ops will accept.
 pub const PACKAGE_AUTHORITY_MAX_BYTES: usize = 1024 * 1024;
+/// Largest canonical `package_intent_extract` request. The tool arguments ride
+/// in it whole, so it matches the MCP tool-call identity bound on the request
+/// that carries the same arguments, a frame's slack under the transport limit.
+pub const PACKAGE_INTENT_EXTRACT_MAX_BYTES: usize = 6 * 1024 * 1024 - 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // PackageIntentParse — `parse_package_intent` port entry.
@@ -73,6 +88,78 @@ pub struct PackageIntentParseResultV1 {
     /// Exact targets for ephemeral enforcement, never public intent metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_private_metadata: Option<Value>,
+}
+
+// ---------------------------------------------------------------------------
+// PackageIntentExtract — `extract_package_intent_request` port entry.
+// ---------------------------------------------------------------------------
+
+/// One tool call to read for package intent. The resident walks the arguments
+/// of a shell tool for command texts, parses each until one names a package
+/// intent, and otherwise parses the action envelope's command. The answer is a
+/// [`PackageIntentParseResultV1`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageIntentExtractRequestV1 {
+    pub schema: String,
+    /// Optional caller correlation id; echoed back in the result.
+    #[serde(default)]
+    pub request_id: String,
+    /// The tool name as the harness sent it. Anything but a string names no
+    /// shell tool, so only the action envelope's command is read.
+    pub tool_name: Value,
+    /// The tool call's arguments, as the harness sent them.
+    pub arguments: Value,
+    /// The command the action envelope names, read when no argument command
+    /// names a package intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_envelope_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_dir: Option<String>,
+    /// Explicit environment overlay. Non-string maps are ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Value>,
+}
+
+// ---------------------------------------------------------------------------
+// PackageRequestArtifact — `build_package_request_artifact` port entry.
+// ---------------------------------------------------------------------------
+
+/// The review a parsed package intent earns. The host sends the intent it
+/// already holds and the naming the review is filed under; the runtime decides
+/// the artifact id a saved package approval is keyed by.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageRequestArtifactRequestV1 {
+    pub schema: String,
+    #[serde(default)]
+    pub request_id: String,
+    /// `intent.to_execution_dict()` — the exact targets and argv the
+    /// fingerprint is taken over, not the redacted public spelling.
+    pub intent: Value,
+    pub harness: String,
+    pub config_path: String,
+    pub source_scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageRequestArtifactResultV1 {
+    pub schema: String,
+    pub request_id: String,
+    /// SHA-256 of the raw request bytes, binding the result to its request.
+    pub request_sha256: String,
+    /// `ok` or `error`.
+    pub status: String,
+    /// `ok`, `invalid_package_intent`, or `schema_mismatch`.
+    pub code: String,
+    /// The whole artifact, unredacted, on success — `GuardArtifact::to_wire`.
+    /// It carries `runtime_private_metadata`, the exact targets ephemeral
+    /// enforcement needs, which the public `to_dict` serialization drops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +308,9 @@ pub struct ApplyStoredPackagePolicyResultV1 {
     pub request_sha256: String,
     /// `ok` or `error`.
     pub status: String,
-    /// `ok`, or `native_apply_stored_package_policy_failed`.
+    /// `ok` when the lookup ran, the lookup error code when the store could
+    /// not answer, or `native_apply_stored_package_policy_failed`. A lookup
+    /// error keeps `status` as `ok` and `payload` as the review evaluation.
     pub code: String,
     /// Updated `PackageRequestEvaluation.to_dict()` on success.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -322,4 +411,229 @@ pub struct PackageEvaluationComposeRequestV1 {
     /// `saved_block` only: the saved-policy clear command shown to the user.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clear_command: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// PackageReviewPlan — resident op planning how a package review may settle.
+// ---------------------------------------------------------------------------
+
+/// Plan the settle of a native package review.
+///
+/// The caller forwards the hook payload as the daemon recorded it, with the
+/// stamped execution environment. The runtime reads the command (including
+/// Copilot's `toolArgs`), checks it is one plain JS package-manager command,
+/// parses its install or exec intent, proves the npm a plain npm install runs,
+/// and answers with the request artifact the package evaluator reads and
+/// whether the evaluator's verdict may let the command continue. Without that
+/// proof only a block verdict applies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageReviewPlanRequestV1 {
+    pub schema: String,
+    pub request_id: String,
+    pub guard_home: String,
+    /// Absolute workspace directory the command runs in.
+    pub workspace: String,
+    pub harness: String,
+    /// The hook payload, forwarded unchanged.
+    pub payload: Value,
+    #[serde(default)]
+    pub home_dir: Option<String>,
+    /// The native review's reason code. A command review, which the edge
+    /// gives an `npx` or `bunx` launch, is planned only for those launchers
+    /// and only a block verdict applies to it. Absent means a package review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// PackageApprovalHash — resident op owning the package approval identity,
+// the composed current policy action, and the approval-context artifact hash
+// that `local_supply_chain.py` used to compute in Python.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageApprovalHashRequestV1 {
+    pub schema: String,
+    pub request_id: String,
+    pub guard_home: String,
+    /// `current_action` (composed action only) or `artifact_hash` (composed
+    /// action plus the approval-context token).
+    pub kind: String,
+    /// `GuardArtifact.to_dict()`.
+    pub artifact: Value,
+    /// Evaluation fields the policy composition reads: `policy_action`,
+    /// `bundle_version`, `decision`, `enforcement`, `entitlement_state`,
+    /// `exception_id`, `matched_rule_id`, `packages`, `policy_version`,
+    /// `reasons`.
+    pub evaluation: Value,
+    /// Hydrated `GuardConfig` policy view (`{"available": false}` when no
+    /// config is bound).
+    pub config_policy: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_current_action: Option<Value>,
+    /// `artifact_hash` only: the signed-store path the cached advisory feed is
+    /// read from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_path: Option<String>,
+    /// `artifact_hash` only: the workspace the manifest and lockfile paths are
+    /// confined to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_dir: Option<String>,
+    /// `artifact_hash` only: `{digest, version, components: [{name, digest}]}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_context: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_identity: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_policy_context: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feed_snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_analysis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_control_digest: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// PackagePolicyResolve — resident op owning the stored package policy
+// override: the saved allow, saved block and rejected-reuse verdicts. The
+// caller hydrates the store facts (lookup, diagnostic, approval request row,
+// bundle rules, claim disposition) and performs the claim; the runtime decides
+// every verdict and returns a patch over the caller's evaluation.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackagePolicyResolveRequestV1 {
+    pub schema: String,
+    pub request_id: String,
+    pub guard_home: String,
+    /// Evaluation fields the rewrites read: `policy_action`, `reasons`, `packages`.
+    pub evaluation: Value,
+    /// Additional current action folded into the evaluation's policy action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_action: Option<Value>,
+    pub harness: String,
+    pub artifact_id: String,
+    pub artifact_hash: String,
+    pub workspace_dir: String,
+    /// The saved policy row the store lookup (or the daemon) resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<Value>,
+    /// The store ignored a saved row because local integrity failed.
+    pub ignored_integrity: bool,
+    /// A daemon policy authority owns the claim for `decision`.
+    pub daemon_authority: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnosed_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnosed_stored_hash: Option<String>,
+    /// Validated synced-bundle rules whose id matches the decision owner;
+    /// absent when no validated bundle is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_rules: Option<Vec<Value>>,
+    /// The approval request row named by `decision.request_id`, if readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_request: Option<Value>,
+    pub claim_saved_approval: bool,
+    /// Outcome of the caller-run claim; absent on the first call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_succeeded: Option<bool>,
+}
+
+// ---------------------------------------------------------------------------
+// PackagePosture — resident op owning the local supply-chain posture: the
+// status, health, bundle and policy projection `local_supply_chain.py` used to
+// derive in Python. The caller hydrates the store payloads, the bound
+// configuration actions and the package-manager shim status; the runtime
+// decides every derived field.
+// ---------------------------------------------------------------------------
+
+/// Capability advertised when the supply-chain posture op exists.
+pub const PACKAGE_POSTURE_FEATURE: &str = "package-posture-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackagePostureRequestV1 {
+    pub schema: String,
+    pub request_id: String,
+    pub guard_home: String,
+    /// Snapshot time; the runtime clock is used when absent or unparsable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// A Guard Cloud sync profile is stored locally.
+    pub credentials_present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// `supply_chain_bundle_summary` sync payload (empty object when unset).
+    pub summary: Value,
+    /// `supply_chain_bundle_entitlement` sync payload (empty object when unset).
+    pub entitlement: Value,
+    /// Validated synced policy payload (empty object when unset).
+    pub remote_policy: Value,
+    /// The cached signed bundle body (empty object when unset).
+    pub bundle_payload: Value,
+    pub security_level: String,
+    /// Configured `cloud_advisory` / `package_script` risk actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_cloud_advisory_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_package_script_action: Option<String>,
+    /// Package-manager shim status; carried through unchanged.
+    pub package_manager_protection: Value,
+}
+
+// ---------------------------------------------------------------------------
+// WorkspaceInventory — resident op owning the workspace audit file discovery,
+// manifest/lockfile/SBOM dependency inventory, the manifest diff projection
+// and the lockfile warnings `local_supply_chain.py` used to derive in Python.
+// ---------------------------------------------------------------------------
+
+/// Capability advertised when the workspace inventory op exists.
+pub const WORKSPACE_INVENTORY_FEATURE: &str = "workspace-inventory-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceInventoryRequestV1 {
+    pub schema: String,
+    pub request_id: String,
+    pub guard_home: String,
+    /// Workspace to inventory; the "after" workspace for a diff.
+    pub workspace_dir: String,
+    /// Baseline workspace; present only for a diff inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_workspace_dir: Option<String>,
+    #[serde(default)]
+    pub sbom_paths: Vec<String>,
+    /// Only discover the manifest and lockfile paths.
+    #[serde(default)]
+    pub files_only: bool,
+    /// Also report the lockfile warnings for `workspace_dir`.
+    #[serde(default)]
+    pub include_lockfile_warnings: bool,
+    /// Return only the package intent targets of the inventory (an empty
+    /// `inventory`), keeping each response inside the native size cap.
+    #[serde(default)]
+    pub targets_only: bool,
+    /// Also build the package intent target for one explicit package spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_spec: Option<WorkspacePackageSpecV1>,
+    /// Index of the first inventory item (or scan target in `targets_only`
+    /// mode) to return. The reply is capped, so a large result is read as
+    /// consecutive pages until `next_offset` is null.
+    #[serde(default)]
+    pub inventory_offset: usize,
+    /// Digest of the full inventory snapshot from page 1. Later pages must
+    /// echo it. A workspace that changed between pages is rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspacePackageSpecV1 {
+    pub ecosystem: String,
+    pub spec: String,
 }

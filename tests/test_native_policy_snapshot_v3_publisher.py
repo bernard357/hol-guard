@@ -11,11 +11,14 @@ from . import test_native_policy_snapshot_persistence as _persistence_tests
 from . import test_native_policy_snapshot_publisher as _publisher_tests
 from . import test_native_policy_snapshot_windows as _windows_tests
 
-test_policy_merge_never_downgrades_enforcing_posture_to_watch = (
-    _contract_tests.test_policy_merge_never_downgrades_enforcing_posture_to_watch
-)
 test_v3_builder_derives_and_provisions_verifier_before_snapshot_push = (
     _contract_tests.test_v3_builder_derives_and_provisions_verifier_before_snapshot_push
+)
+test_resident_build_reproduces_recorded_python_digests_and_mac = (
+    _contract_tests.test_resident_build_reproduces_recorded_python_digests_and_mac
+)
+test_mac_check_fails_closed_on_malformed_integrity_blocks = (
+    _contract_tests.test_mac_check_fails_closed_on_malformed_integrity_blocks
 )
 test_windows_scope_aliases_share_one_digest_identity = (
     _contract_tests.test_windows_scope_aliases_share_one_digest_identity
@@ -93,9 +96,6 @@ test_windows_storage_writer_has_no_path_replace_in_native_branch = (
 test_windows_atomic_writer_cleans_temp_on_precommit_failure = (
     _windows_tests.test_windows_atomic_writer_cleans_temp_on_precommit_failure
 )
-test_windows_verifier_key_provisioning_holds_state_binding = (
-    _windows_storage_tests.test_windows_verifier_key_provisioning_holds_state_binding
-)
 test_windows_private_state_binding_closes_replaced_state_handle = (
     _windows_storage_tests.test_windows_private_state_binding_closes_replaced_state_handle
 )
@@ -135,7 +135,6 @@ __all__ = [
     "test_floor_only_ack_materializes_strictly_new_generation",
     "test_floor_recovery_requires_exact_typed_ack",
     "test_lost_ack_retries_identical_payload",
-    "test_policy_merge_never_downgrades_enforcing_posture_to_watch",
     "test_prepare_workspace_policy_skips_wait_after_publisher_error",
     "test_prepare_workspace_policy_uses_bounded_first_workspace_handshake",
     "test_prepare_workspace_policy_waits_for_transient_resident_restart_lock",
@@ -171,5 +170,4 @@ __all__ = [
     "test_windows_scope_aliases_share_one_digest_identity",
     "test_windows_snapshot_write_holds_parent_binding_across_commit",
     "test_windows_storage_writer_has_no_path_replace_in_native_branch",
-    "test_windows_verifier_key_provisioning_holds_state_binding",
 ]

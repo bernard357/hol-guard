@@ -23,7 +23,8 @@ from codex_plugin_scanner.guard.cli import commands_support_hook_payload as guar
 from codex_plugin_scanner.guard.codex_config import read_toml_payload
 from codex_plugin_scanner.guard.consumer.service import diff_artifact
 from codex_plugin_scanner.guard.policy_integrity import PolicyIntegrityVerificationResult
-from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
+from codex_plugin_scanner.guard.runtime import wrapper_run as wrapper_run
+from codex_plugin_scanner.guard.runtime import wrapper_run_finish
 from codex_plugin_scanner.guard.store import GuardStore
 from tests.conftest import guard_commands_module
 
@@ -52,6 +53,11 @@ def _trust_local_policy_rows(monkeypatch: pytest.MonkeyPatch) -> None:
         return PolicyIntegrityVerificationResult(status="valid")
 
     monkeypatch.setattr(GuardStore, "_policy_integrity_result_for_row", _valid_policy_row)
+    monkeypatch.setattr(
+        GuardStore,
+        "_policy_integrity_results_for_rows",
+        lambda self, rows, **_: [PolicyIntegrityVerificationResult(status="valid") for _ in rows],
+    )
 
 
 def _build_guard_fixture(home_dir: Path, workspace_dir: Path) -> None:
@@ -85,7 +91,7 @@ def _install_codex_native_hooks(home_dir: Path, workspace_dir: Path) -> None:
     )
     config_path = home_dir / ".codex" / "config.toml"
     payload = read_toml_payload(config_path)
-    CodexHarnessAdapter._install_config_hooks(payload, context)
+    CodexHarnessAdapter._install_config_hooks(payload, context, config_path=config_path)
     CodexHarnessAdapter._write_authenticated_hook_config(
         context,
         config_path=config_path,
@@ -103,7 +109,7 @@ class _CompletedProcess:
 
 def _patch_harness_run(monkeypatch, fake_run):
     """Mock only target harnesses, preserving native and interpreter probes."""
-    original = guard_runner_module.subprocess.run
+    original = wrapper_run_finish.subprocess.run
     harnesses = {"codex", "copilot", "opencode", "hermes", "gemini", "cursor-agent"}
 
     def run(command, *args, **kwargs):
@@ -115,7 +121,7 @@ def _patch_harness_run(monkeypatch, fake_run):
                 return fake_run(command, *args, **kwargs)
         return original(command, *args, **kwargs)
 
-    monkeypatch.setattr(guard_runner_module.subprocess, "run", run)
+    monkeypatch.setattr(wrapper_run_finish.subprocess, "run", run)
 
 
 def _capture_launch(monkeypatch) -> dict[str, object]:
@@ -931,7 +937,7 @@ def test_guard_run_opencode_reapproves_changed_plugin_and_skill_content(monkeypa
     monkeypatch.setattr(guard_commands_module, "ensure_guard_daemon", lambda _guard_home: "http://127.0.0.1:4455")
     monkeypatch.setattr(guard_hook_payload_module, "open_browser_url", lambda _url: True)
     context = HarnessContext(home_dir=home_dir, workspace_dir=workspace_dir, guard_home=home_dir)
-    baseline_detection = guard_runner_module.detect_harness("opencode", context)
+    baseline_detection = wrapper_run.detect_harness("opencode", context)
     store = GuardStore(home_dir)
     for artifact in baseline_detection.artifacts:
         artifact_diff = diff_artifact(None, artifact)
@@ -1219,7 +1225,7 @@ def test_claude_prompt_hook_shows_hol_guard_branding(tmp_path, capsys):
 
 
 @pytest.mark.usefixtures("native_hook_force")
-def test_opencode_prompt_hook_queues_prompt_approval(monkeypatch, tmp_path, capsys):
+def test_opencode_prompt_hook_blocks_sensitive_prompt_without_queueing(monkeypatch, tmp_path, capsys):
     home_dir = tmp_path / "home"
     workspace_dir = tmp_path / "workspace"
     _build_opencode_fixture(home_dir, workspace_dir)
@@ -1256,12 +1262,15 @@ def test_opencode_prompt_hook_queues_prompt_approval(monkeypatch, tmp_path, caps
         ]
     )
     output = json.loads(capsys.readouterr().out)
-    prompt_request = output["approval_requests"][0]
 
+    # The daemon stops a prompt that asks for local secrets outright; there is
+    # nothing to approve, so the user rephrases it.
     assert rc == 1
-    assert output["artifact_type"] == "prompt_request"
-    assert prompt_request["artifact_type"] == "prompt_request"
-    assert prompt_request["approval_url"].startswith("http://127.0.0.1:4455/requests/")
+    assert output["decision"] == "block"
+    assert output["reason_code"] == "native_sensitive_prompt"
+    assert "Nothing is waiting for approval" in output["reason"]
+    assert "approval_requests" not in output
+    assert GuardStore(home_dir).list_approval_requests(limit=5) == []
 
 
 def test_guard_run_allows_debug_prompt_with_quoted_publish_error(monkeypatch, tmp_path, capsys):

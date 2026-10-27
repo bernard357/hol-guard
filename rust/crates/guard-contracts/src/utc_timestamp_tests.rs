@@ -206,3 +206,34 @@ fn expiry_boundaries_fixture() {
         );
     }
 }
+
+#[test]
+fn long_fractional_seconds_never_overflow_or_wrap() {
+    // 20 fractional digits used to overflow the u64 accumulator (panic in
+    // debug, wrap in release). Digits past nanoseconds are only validated.
+    let long = "2026-01-01T00:00:00.99999999999999999999+00:00";
+    let short = "2026-01-01T00:00:00.999999999+00:00";
+    assert_eq!(utc_timestamp_micros(long), utc_timestamp_micros(short));
+    assert!(
+        utc_timestamp_micros(long).unwrap()
+            > utc_timestamp_micros("2026-01-01T00:00:00+00:00").unwrap()
+    );
+    let padded = "2026-01-01T00:00:00.100000000000000000000000000000+00:00";
+    assert_eq!(
+        utc_timestamp_micros(padded),
+        utc_timestamp_micros("2026-01-01T00:00:00.1+00:00")
+    );
+}
+
+#[test]
+fn impossible_civil_dates_do_not_extend_a_lease() {
+    assert_eq!(utc_timestamp_micros("2026-02-31T00:00:00+00:00"), None);
+    assert_eq!(utc_timestamp_micros("2026-04-31T12:00:00Z"), None);
+    assert_eq!(utc_timestamp_micros("2026-02-29T00:00:00+00:00"), None);
+    assert!(utc_timestamp_micros("2024-02-29T00:00:00+00:00").is_some());
+    assert!(utc_timestamp_micros("2026-02-28T00:00:00+00:00").is_some());
+    assert!(timestamp_has_expired(
+        "2026-02-31T00:00:00+00:00",
+        "2026-02-28T00:00:00+00:00"
+    ));
+}

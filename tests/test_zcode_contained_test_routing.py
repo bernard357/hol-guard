@@ -1,4 +1,4 @@
-"""ZCode must rewrite native containment receipts, never allow the original runner."""
+"""Harnesses that apply updatedInput must rewrite native containment receipts, never allow the original runner."""
 
 import hashlib
 import json
@@ -10,24 +10,35 @@ from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.cli import _build_parser, _resolve_legacy_args
 from codex_plugin_scanner.guard.adapters.zcode_contained_tests import (
+    cleanup_stale_windows_requests,
     cleanup_stale_zcode_requests,
     contained_zcode_response,
     route_zcode_containment,
 )
+from codex_plugin_scanner.guard.native_hook_containment_route import ContainmentSink
 from codex_plugin_scanner.guard.runtime.contained_test_hook import read_contained_test_request
 
 
-def test_zcode_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("harness", "keys"),
+    [
+        ("zcode", ("hookEventName", "toolName", "toolInput")),
+        ("claude-code", ("hook_event_name", "tool_name", "tool_input")),
+    ],
+)
+def test_routes_multifile_vitest_to_authenticated_sink(containment_resident, tmp_path, monkeypatch, harness, keys):
     monkeypatch.setattr(sys, "platform", "darwin")
+    event_key, tool_key, input_key = keys
     payload = {
-        "hookEventName": "PreToolUse",
-        "toolName": "Bash",
+        event_key: "PreToolUse",
+        tool_key: "Bash",
         "cwd": str(tmp_path),
-        "toolInput": {"command": "bunx vitest run __tests__/one.test.ts __tests__/two.test.ts", "timeout": 120000},
+        input_key: {"command": "bunx vitest run __tests__/one.test.ts __tests__/two.test.ts", "timeout": 120000},
     }
     config = {
-        "harness": "zcode",
+        "harness": harness,
         "python_executable": sys.executable,
         "package_root": str(tmp_path),
         "guard_home": str(tmp_path / "guard"),
@@ -44,7 +55,7 @@ def test_zcode_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypat
     assert updated["timeout"] == 120000
     argv = shlex.split(updated["command"])
     assert "execute-contained-test" in argv
-    assert argv[argv.index("--harness") + 1] == "zcode"
+    assert argv[argv.index("--harness") + 1] == harness
     request = Path(argv[argv.index("--request-file") + 1])
     digest = argv[argv.index("--request-sha256") + 1]
     try:
@@ -52,7 +63,7 @@ def test_zcode_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypat
         assert request.stat().st_mode & 0o777 == 0o600
         assert hashlib.sha256(request.read_bytes()).hexdigest() == digest
         snapshot = read_contained_test_request(request, digest, workspace=tmp_path)
-        assert snapshot["tool_input"] == payload["toolInput"]
+        assert snapshot["tool_input"] == payload[input_key]
     finally:
         request.unlink()
         request.parent.rmdir()
@@ -68,7 +79,7 @@ def test_zcode_routes_multifile_vitest_to_authenticated_sink(tmp_path, monkeypat
         {"reason_code": "native_destructive_command"},
     ],
 )
-def test_zcode_does_not_rewrite_unproven_or_denied_requests(tmp_path, monkeypatch, change):
+def test_zcode_does_not_rewrite_unproven_or_denied_requests(containment_resident, tmp_path, monkeypatch, change):
     monkeypatch.setattr(sys, "platform", "darwin")
     receipt = {
         "decision": "deny",
@@ -77,10 +88,30 @@ def test_zcode_does_not_rewrite_unproven_or_denied_requests(tmp_path, monkeypatc
         "required_execution_profile": "vitest-readonly-v1",
         **change,
     }
-    assert contained_zcode_response(receipt, input_text="{}", config={"harness": "zcode"}, cli_args=[]) is None
+    payload = {"hookEventName": "PreToolUse", "toolName": "Bash", "cwd": str(tmp_path), "toolInput": {"command": "x"}}
+    assert (
+        contained_zcode_response(receipt, input_text=json.dumps(payload), config={"harness": "zcode"}, cli_args=[])
+        is None
+    )
 
 
-def test_execution_sink_receives_original_containment_receipt(tmp_path):
+@pytest.mark.parametrize("harness", ["cursor", "omp", None])
+def test_harnesses_without_updated_input_are_never_rewritten(containment_resident, tmp_path, monkeypatch, harness):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    receipt = {
+        "decision": "deny",
+        "policy_action": "sandbox-required",
+        "reason_code": "native_vitest_readonly_containment_required",
+        "required_execution_profile": "vitest-readonly-v1",
+    }
+    payload = {"hookEventName": "PreToolUse", "toolName": "Bash", "cwd": str(tmp_path), "toolInput": {"command": "x"}}
+    assert (
+        contained_zcode_response(receipt, input_text=json.dumps(payload), config={"harness": harness}, cli_args=[])
+        is None
+    )
+
+
+def test_execution_sink_receives_original_containment_receipt(containment_resident, tmp_path):
     receipt = {
         "decision": "deny",
         "policy_action": "sandbox-required",
@@ -127,7 +158,7 @@ def test_stale_snapshot_cleanup_preserves_fresh_requests_and_symlinks(tmp_path, 
 
 
 @pytest.fixture
-def routing_inputs(tmp_path, monkeypatch):
+def routing_inputs(containment_resident, tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     # All adapter snapshots in these tests are isolated from the real temp root.
     import tempfile
@@ -210,6 +241,11 @@ def test_frozen_routing_preserves_home_and_workspace_arguments(routing_inputs, m
     assert argv[0] == "guard-test-cli"
     assert argv[argv.index("--home") + 1] == str(tmp_path)
     assert argv[argv.index("--workspace") + 1] == str(tmp_path)
+    # The Desktop launcher runs as `hol-guard`; the rewritten command must parse there.
+    parsed = _build_parser("hol-guard", program_mode="hol-guard").parse_args(
+        _resolve_legacy_args(argv[1:], program_mode="hol-guard")
+    )
+    assert parsed.guard_command == "execute-contained-test"
 
 
 @pytest.mark.parametrize("failure", ["launch", "cleanup"])
@@ -241,8 +277,9 @@ def test_authority_edge_returns_routed_response_or_original(monkeypatch, tmp_pat
         return routed
 
     monkeypatch.setattr(adapter, "contained_zcode_response", route)
+    sink = ContainmentSink("vitest-readonly-v1", None)
     assert route_zcode_containment(
-        original, harness="zcode", payload={}, guard_home=tmp_path, home_dir=tmp_path, workspace=tmp_path
+        original, harness="zcode", payload={}, guard_home=tmp_path, home_dir=tmp_path, workspace=tmp_path, sink=sink
     ) is (original if routed is None else routed)
 
 
@@ -254,3 +291,76 @@ def test_cleanup_failure_does_not_interrupt_routing(monkeypatch):
 
     monkeypatch.setattr(adapter.os, "scandir", fail)
     cleanup_stale_zcode_requests()
+
+
+@pytest.mark.parametrize(
+    ("reason", "profile", "routed"),
+    [
+        ("native_workspace_containment_required", "workspace-contained-v1", True),
+        ("native_vitest_readonly_containment_required", "vitest-readonly-v1", False),
+    ],
+)
+def test_linux_routes_only_the_workspace_sandbox(containment_resident, tmp_path, monkeypatch, reason, profile, routed):
+    import tempfile
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    receipt = {
+        "decision": "deny",
+        "policy_action": "sandbox-required",
+        "reason_code": reason,
+        "required_execution_profile": profile,
+    }
+    payload = {
+        "hookEventName": "PreToolUse",
+        "toolName": "Bash",
+        "cwd": str(tmp_path),
+        "toolInput": {"command": "python3 todo.py list > out.txt"},
+    }
+    config = {
+        "harness": "zcode",
+        "guard_home": str(tmp_path / "guard"),
+        "python_executable": sys.executable,
+        "package_root": str(tmp_path),
+    }
+    result = contained_zcode_response(receipt, input_text=json.dumps(payload), config=config, cli_args=[])
+    assert (result is not None) is routed
+
+
+def test_windows_sink_bootstrap_has_no_escaped_backslashes(tmp_path, monkeypatch):
+    """Git Bash halves doubled backslashes, so the bootstrap must not need them."""
+    from codex_plugin_scanner.guard.adapters import zcode_contained_tests as adapter
+
+    package_root = tmp_path / "site\\packages"
+    package_root.mkdir(parents=True)
+    config = {"python_executable": sys.executable, "package_root": str(package_root)}
+    monkeypatch.setattr(sys, "platform", "darwin")
+    unchanged = adapter._sink_command_prefix(config)
+    assert repr(str(package_root.resolve())) in unchanged[-1]
+    monkeypatch.setattr(sys, "platform", "win32")
+    windows = adapter._sink_command_prefix(config)
+    assert windows[:-1] == unchanged[:-1]
+    assert "\\" not in windows[-1]
+    assert repr(str(package_root.resolve()).replace("\\", "/")) in windows[-1]
+
+
+def test_windows_reclaims_only_day_old_snapshots(tmp_path):
+    old = time.time() - 2 * 86_400
+
+    def make(name: str, aged: bool) -> Path:
+        directory = tmp_path / name
+        directory.mkdir()
+        request = directory / "request.json"
+        request.write_text("{}")
+        if aged:
+            os.utime(request, (old, old))
+            os.utime(directory, (old, old))
+        return directory
+
+    stale = make("hol-guard-contained-test-stale", True)
+    fresh = make("hol-guard-contained-test-fresh", False)
+    other = make("unrelated-stale", True)
+    cleanup_stale_windows_requests(tmp_path, time.time() - 86_400)
+    assert not stale.exists()
+    assert (fresh / "request.json").exists()
+    assert (other / "request.json").exists()

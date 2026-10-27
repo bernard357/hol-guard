@@ -41,7 +41,7 @@ fn gate_factor_generation(state: &Value) -> i64 {
 /// `ApprovalGateGrants` supplies the `_APPROVAL_GATE_LOCK` discipline.
 static APPROVAL_GATE_GRANTS: OnceLock<ApprovalGateGrants> = OnceLock::new();
 
-fn grants() -> &'static ApprovalGateGrants {
+pub(crate) fn grants() -> &'static ApprovalGateGrants {
     APPROVAL_GATE_GRANTS.get_or_init(ApprovalGateGrants::new)
 }
 
@@ -410,10 +410,7 @@ mod tests {
             "approval_gate_op_test_{}_{}_{}",
             std::process::id(),
             tag,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            crate::unique_nanos::unique_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir

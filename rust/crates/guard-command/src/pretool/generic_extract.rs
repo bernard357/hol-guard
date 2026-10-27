@@ -24,7 +24,16 @@ pub(super) struct GenericSignals {
     pub(super) package_present: bool,
     pub(super) package_values: Vec<String>,
     pub(super) path_values: Vec<String>,
+    /// A read whose target list is present and explicitly empty.
+    pub(super) empty_read_request: bool,
     pub(super) url_values: Vec<String>,
+    pub(super) request_body_or_method: bool,
+    /// The call's own arguments are retrieval arguments and nothing else: a
+    /// closed set of identifier and timeout keys holding scalars. See
+    /// `retrieval_arguments_only`.
+    pub(super) retrieval_arguments_only: bool,
+    /// Set after extraction, from the tool's own input; see `generic_github`.
+    pub(super) github_read_only: bool,
     pub(super) prompt_present: bool,
     pub(super) env_reference: bool,
     pub(super) benign_prompt: bool,

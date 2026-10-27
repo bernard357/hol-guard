@@ -13,6 +13,10 @@ use guard_contracts::{
 };
 use serde_json::Value;
 
+use crate::hook_decision_native_facts::{
+    apply_patch_may_be_verified, benign_native_file_read, benign_tool_action,
+};
+
 pub(crate) const COPILOT_BENIGN_HINT_REASON: &str =
     "untrusted_hook_payload_hint_ignored_guard_verified_benign";
 pub(crate) const BENIGN_DEFAULT_REASON: &str = "configured_default_relaxed_guard_verified_benign";
@@ -46,6 +50,9 @@ pub(crate) struct Composed {
     pub(crate) daemon_status: Option<String>,
     pub(crate) fail_mode: Option<String>,
     pub(crate) grant_lookups_allowed: bool,
+    /// The resident's own `is_explicitly_benign_tool_action_request` verdict;
+    /// only a `PreToolUse` event asks for it.
+    pub(crate) verified_benign: bool,
 }
 
 /// `Err(name)`: the classifier verdict `name` is needed before composing.
@@ -56,7 +63,11 @@ pub(crate) fn compose(inputs: &HookCompositionInputsV1) -> Needs<Composed> {
     let event = event_name.as_deref();
     let configured =
         normalize_guard_action_result(&inputs.configured_action, GuardAction::RequireReapproval);
-    let relaxed = relax_configured_default(inputs, event, configured.action)?;
+    // Computed once, and only after every classifier fact this round needs is present.
+    let benign = std::cell::OnceCell::new();
+    let verified_benign =
+        || *benign.get_or_init(|| event == Some("PreToolUse") && benign_tool_action(inputs));
+    let relaxed = relax_configured_default(inputs, event, configured.action, &verified_benign)?;
     let current_config_normalization = if relaxed {
         normalize_guard_action_result(&Value::from("warn"), GuardAction::RequireReapproval)
     } else {
@@ -71,7 +82,8 @@ pub(crate) fn compose(inputs: &HookCompositionInputsV1) -> Needs<Composed> {
     let payload = inputs.has_payload_action.then(|| {
         normalize_guard_action_result(&inputs.payload_action, GuardAction::RequireReapproval)
     });
-    let ignored_payload_reason = ignored_payload_reason(inputs, payload.as_ref())?;
+    let ignored_payload_reason =
+        ignored_payload_reason(inputs, payload.as_ref(), verified_benign());
     let payload_disposition = if ignored_payload_reason.is_some() {
         Some("ignored")
     } else if payload.is_some() {
@@ -96,6 +108,7 @@ pub(crate) fn compose(inputs: &HookCompositionInputsV1) -> Needs<Composed> {
     }
     let classifier = relax_classifier(inputs, event);
     let effective_event = event.unwrap_or("PreToolUse").to_owned();
+    let verified_benign = verified_benign();
     let mut out = Composed {
         effective_event,
         event_name,
@@ -117,6 +130,7 @@ pub(crate) fn compose(inputs: &HookCompositionInputsV1) -> Needs<Composed> {
         daemon_status: optional_string(&inputs.daemon_status),
         fail_mode: optional_string(&inputs.fail_mode),
         grant_lookups_allowed: false,
+        verified_benign,
     };
     apply_daemon_hint(&mut out, inputs);
     out.grant_lookups_allowed = !inputs.has_configured_override
@@ -139,11 +153,32 @@ fn fact(inputs: &HookCompositionInputsV1, name: &'static str) -> Needs<bool> {
     inputs.facts.get(name).copied().ok_or(name)
 }
 
+/// Whether a prompt is clean enough to relax a review tier.
+///
+/// The transport reports one observation per name and composes none of them:
+/// a prompt is clean when it carries no prompt request, names no credential
+/// file, and attaches nothing from the account home. The observations are
+/// asked for in turn, so a prompt that already carries a request never pays
+/// for the scans behind the later two.
+fn prompt_is_clean(inputs: &HookCompositionInputsV1) -> Needs<bool> {
+    for name in [
+        "prompt_request_free",
+        "prompt_credential_free",
+        "prompt_attachment_free",
+    ] {
+        if !fact(inputs, name)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// A verified-benign tool call relaxes a review-tier configured default.
 fn relax_configured_default(
     inputs: &HookCompositionInputsV1,
     event: Option<&str>,
     configured: GuardAction,
+    verified_benign: &dyn Fn() -> bool,
 ) -> Needs<bool> {
     if inputs.has_narrow_override
         || !matches!(
@@ -156,7 +191,7 @@ fn relax_configured_default(
     let canonical = inputs.canonical_harness.as_str();
     if event == Some("UserPromptSubmit") {
         return if inputs.prompt_nonblank {
-            fact(inputs, "prompt_clean")
+            prompt_is_clean(inputs)
         } else {
             Ok(false)
         };
@@ -164,17 +199,17 @@ fn relax_configured_default(
     if event == Some("PostToolUse") && inputs.runtime_artifact_checked && canonical == "codex" {
         return fact(inputs, "post_tool_read_only_inspection");
     }
-    if fact(inputs, "verified_apply_patch")? {
-        return Ok(true);
-    }
-    let pre = event == Some("PreToolUse");
-    if pre
-        && matches!(canonical, "claude-code" | "codex")
-        && fact(inputs, "benign_native_file_read")?
+    if event == Some("PreToolUse")
+        && apply_patch_may_be_verified(inputs)
+        && fact(inputs, "apply_patch_targets_non_sensitive")?
     {
         return Ok(true);
     }
-    Ok(pre && fact(inputs, "benign_tool_action")?)
+    let pre = event == Some("PreToolUse");
+    if pre && matches!(canonical, "claude-code" | "codex") && benign_native_file_read(inputs) {
+        return Ok(true);
+    }
+    Ok(pre && verified_benign())
 }
 
 /// The classifier that justified (or would justify) the relaxation, for audit.
@@ -196,15 +231,16 @@ fn relax_classifier(inputs: &HookCompositionInputsV1, event: Option<&str>) -> &'
 fn ignored_payload_reason(
     inputs: &HookCompositionInputsV1,
     payload: Option<&GuardActionNormalization>,
-) -> Needs<Option<&'static str>> {
+    verified_benign: bool,
+) -> Option<&'static str> {
     let recognized = payload.is_some_and(GuardActionNormalization::recognized);
     if !recognized
         || inputs.canonical_harness != "copilot"
         || copilot_stage(inputs).as_deref() != Some("pretooluse")
     {
-        return Ok(None);
+        return None;
     }
-    Ok(fact(inputs, "benign_tool_action")?.then_some(COPILOT_BENIGN_HINT_REASON))
+    verified_benign.then_some(COPILOT_BENIGN_HINT_REASON)
 }
 
 fn copilot_stage(inputs: &HookCompositionInputsV1) -> Option<String> {
@@ -227,10 +263,10 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// The edge verdict as a floor on the composed action. A present but
-/// unrecognized action fails closed to `block`.
-fn edge_floor(edge: Option<&HookNativeEdgeV1>, event: Option<&str>) -> Option<GuardAction> {
-    let edge = edge?;
+/// The edge's own action: `policy_action`, else `minimum_action`, else
+/// `block` for a bare deny. A present but unrecognized action fails closed
+/// to `block`.
+pub(crate) fn edge_action(edge: &HookNativeEdgeV1) -> Option<GuardAction> {
     let raw = if truthy(&edge.policy_action) {
         Some(&edge.policy_action)
     } else if truthy(&edge.minimum_action) {
@@ -238,15 +274,27 @@ fn edge_floor(edge: Option<&HookNativeEdgeV1>, event: Option<&str>) -> Option<Gu
     } else {
         None
     };
-    let mut action = match raw {
+    match raw {
         Some(value) => Some(normalize_guard_action(value, GuardAction::Block)),
         None if edge.decision.as_str() == Some("deny") => Some(GuardAction::Block),
         None => None,
-    };
-    let hard = matches!(
+    }
+}
+
+pub(crate) fn is_hard(action: Option<GuardAction>) -> bool {
+    matches!(
         action,
         Some(GuardAction::Block | GuardAction::SandboxRequired)
-    );
+    )
+}
+
+/// The edge verdict as a floor on the composed action.
+pub(crate) fn edge_floor(
+    edge: Option<&HookNativeEdgeV1>,
+    event: Option<&str>,
+) -> Option<GuardAction> {
+    let mut action = edge_action(edge?);
+    let hard = is_hard(action);
     if event == Some("PostToolUse") {
         // PostToolUse cannot undo the finished action; the edge deny masks the
         // emitted output while the policy surface stays reviewable.
@@ -256,8 +304,15 @@ fn edge_floor(edge: Option<&HookNativeEdgeV1>, event: Option<&str>) -> Option<Gu
     } else if !hard {
         // Before execution, the edge's review-tier "unproven" verdict is
         // provenance: grants and configured policy settle reviewability. Only
-        // a hard native enforcement verdict floors the emitted decision.
-        action = None;
+        // a hard native enforcement verdict floors the emitted decision, and a
+        // network protection or known-vulnerable runtime review, which matched
+        // a synced bundle.
+        let network_review = edge?.reason_code.as_str().is_some_and(|code| {
+            crate::network_protection::is_review_finding(code)
+                || crate::runtime_known_vulnerable::is_review_finding(code)
+        });
+        action = network_review
+            .then(|| action.map_or(GuardAction::Review, |a| a.max(GuardAction::Review)));
     }
     action
 }

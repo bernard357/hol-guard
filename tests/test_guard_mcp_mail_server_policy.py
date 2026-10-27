@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.config import GuardConfig
-from codex_plugin_scanner.guard.local_cli_trust import apply_local_mcp_extension_decision, utc_now
+from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.mcp_tool_calls import (
     build_tool_call_artifact,
     build_tool_call_hash,
@@ -32,10 +32,15 @@ from codex_plugin_scanner.guard.runtime.extension_control_contract import (
 from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity
 from codex_plugin_scanner.guard.runtime.mcp_protection import build_mcp_server_identity
-from codex_plugin_scanner.guard.runtime.mcp_server_contribution import mcp_payload_for_catalog_id, mcp_tool_state
 from codex_plugin_scanner.guard.store import GuardStore
 
-from .local_cli_native_fixture import native_local_cli_grant_resident, native_test_guard_home  # noqa: F401
+from .local_cli_native_fixture import (  # noqa: F401
+    ensure_keyed_home,
+    native_local_cli_grant_resident,
+    native_test_guard_home,
+)
+from .mcp_extension_driver import apply_local_mcp_extension_decision
+from .mcp_policy_catalog_fixture import admit_mcp_layers
 
 _CATALOG_ID = "command.mcp-mail-server"
 _DELETE_TOOLS = ("delete_message", "delete_messages")
@@ -91,12 +96,15 @@ class _AuthorityStore:
         self.layers = layers
         self.guard_home = native_test_guard_home()
         self.path = self.guard_home / "guard.db"
+        admit_mcp_layers(self, layers)
 
     def has_local_cli_grant_rules(self) -> bool:
         """No device grant rows exist, so an unavailable resident cannot hide one."""
         return False
 
-    def read_extension_control_authority_for_registry(self, registry: object) -> ExtensionControlAuthorityView:
+    def read_extension_control_authority_for_registry(
+        self, registry: object, **_kwargs
+    ) -> ExtensionControlAuthorityView:
         assert registry is BUILT_IN_COMMAND_EXTENSION_REGISTRY
         return ExtensionControlAuthorityView(
             health=AuthorityHealth.PROTECTED,
@@ -293,20 +301,13 @@ def test_profile_preserves_stronger_requirements(tool: str, base_action: GuardAc
 
 @pytest.mark.parametrize("tool", _READ_TOOLS)
 def test_lockdown_suppresses_read_allow_defaults(tool: str) -> None:
-    assert (
-        apply_local_mcp_extension_decision(_AuthorityStore((_layer(lockdown=True),)), _artifact(tool), "review") is None
+    decision = apply_local_mcp_extension_decision(_AuthorityStore((_layer(lockdown=True),)), _artifact(tool), "review")
+    assert decision is not None
+    assert decision == (
+        "block",
+        "catalog-mcp-extension",
+        "This MCP tool is blocked by its authenticated extension authority.",
     )
-
-
-@pytest.mark.parametrize(
-    "tool",
-    ["get_message", "get_messages", "move_message", "move_messages", "send_email", "save_attachment", "future_tool"],
-)
-def test_unreviewed_authority_is_not_allowlisted(tool: str) -> None:
-    payload = mcp_payload_for_catalog_id(_CATALOG_ID)
-    assert payload is not None
-    assert mcp_tool_state(payload, tool) == "inherit"
-    assert apply_local_mcp_extension_decision(_AuthorityStore((_layer(),)), _artifact(tool), "review") is None
 
 
 def test_package_identity_matches_versions_but_not_server_display_names() -> None:
@@ -381,12 +382,13 @@ def test_this_device_custom_grant_wins_over_enabled_delete_review(
 def test_offline_tool_call_evaluation_uses_enabled_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str, arguments: dict[str, object], expected: str
 ) -> None:
-    config = GuardConfig(guard_home=tmp_path / "guard-home", workspace=tmp_path / "workspace", mode="prompt")
+    authority = _AuthorityStore((_layer(),))
+    config = GuardConfig(guard_home=authority.guard_home, workspace=tmp_path / "workspace", mode="prompt")
     store = GuardStore(config.guard_home)
     monkeypatch.setattr(
         store,
         "read_extension_control_authority_for_registry",
-        _AuthorityStore((_layer(),)).read_extension_control_authority_for_registry,
+        authority.read_extension_control_authority_for_registry,
     )
     artifact = _artifact(tool)
     decision = evaluate_tool_call(
@@ -423,14 +425,8 @@ def test_offline_unreviewed_launch_retains_host_policy(
     arguments: dict[str, object],
 ) -> None:
     """Exercise native identity and final tool evaluation without invoking mail."""
-    # No grants are enrolled here; an unkeyed home must not trip the shared resident.
-    from codex_plugin_scanner.guard import local_mcp_grant_decision
-    from codex_plugin_scanner.guard.native_local_mcp_grant import NativeLocalMcpGrant
-
-    monkeypatch.setattr(
-        local_mcp_grant_decision, "native_local_mcp_grant", lambda **_: NativeLocalMcpGrant("none", None, None)
-    )
     config = GuardConfig(guard_home=tmp_path / "guard-home", workspace=tmp_path / "workspace", mode="prompt")
+    ensure_keyed_home(config.guard_home)
     store = GuardStore(config.guard_home)
     artifact = _artifact(tool, command=command, args=args, env=env)
     artifact_hash = build_tool_call_hash(artifact, arguments, workspace=config.workspace, config=config)
@@ -442,10 +438,13 @@ def test_offline_unreviewed_launch_retains_host_policy(
         arguments=arguments,
         claim_saved_approval=False,
     )
+    authority = _AuthorityStore((_layer(),))
+    store = GuardStore(authority.guard_home)
+    config = replace(config, guard_home=authority.guard_home)
     monkeypatch.setattr(
         store,
         "read_extension_control_authority_for_registry",
-        _AuthorityStore((_layer(),)).read_extension_control_authority_for_registry,
+        authority.read_extension_control_authority_for_registry,
     )
     decision = evaluate_tool_call(
         store=store,

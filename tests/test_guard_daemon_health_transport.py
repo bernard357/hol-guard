@@ -266,11 +266,7 @@ def test_live_identity_accepts_alias_markers_only_after_matching_refresh(
     guard_home = tmp_path / "guard-home"
     guard_home.mkdir()
     original = _authenticated_state(guard_home)
-    refreshed = {
-        key: value
-        for key, value in original.items()
-        if key not in {"generation", "user", "start_marker"}
-    }
+    refreshed = {key: value for key, value in original.items() if key not in {"generation", "user", "start_marker"}}
     refreshed.update(
         {
             "runtime": original["runtime_fingerprint"],

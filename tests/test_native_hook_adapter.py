@@ -39,52 +39,6 @@ def _good(request: dict[str, object], **overrides: object) -> dict[str, object]:
     return reply
 
 
-def test_bound_answer_is_returned(monkeypatch: pytest.MonkeyPatch) -> None:
-    _resident_returning(monkeypatch, lambda request: _good(request))
-    assert adapter.native_command_detail("echo hi", home_dir=None) == "echo hi"
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"request_sha256": "sha256:" + "0" * 64},
-        {"request_id": "someone-else"},
-        {"schema": "wrong"},
-    ],
-)
-def test_unbound_answers_fail_closed(monkeypatch: pytest.MonkeyPatch, overrides: dict[str, object]) -> None:
-    _resident_returning(monkeypatch, lambda request: _good(request, **overrides))
-    with pytest.raises(adapter.NativeHookAdapterError) as error:
-        adapter.native_command_detail("echo hi", home_dir=None)
-    assert error.value.code == "native_hook_adapter_unavailable"
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"status": "ok", "code": "other"},
-        {"payload": None},
-        {"payload": {"text": 1}},
-        {"payload": {"text": "x", "extra": 1}},
-        {"status": "error", "code": "arbitrary text", "payload": None},
-    ],
-)
-def test_malformed_answers_raise(monkeypatch: pytest.MonkeyPatch, overrides: dict[str, object]) -> None:
-    _resident_returning(monkeypatch, lambda request: _good(request, **overrides))
-    with pytest.raises(adapter.NativeHookAdapterError):
-        adapter.native_command_detail("echo hi", home_dir=None)
-
-
-def test_missing_resident_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    _resident_returning(monkeypatch, lambda request: None)
-    with pytest.raises(adapter.NativeHookAdapterError) as error:
-        adapter.native_command_detail("echo hi", home_dir=None)
-    assert error.value.code == "native_hook_adapter_unavailable"
-    monkeypatch.setattr(adapter, "ensure_resident_prerequisite", lambda _home: False)
-    with pytest.raises(adapter.NativeHookAdapterError):
-        adapter.native_command_detail("echo hi", home_dir=None)
-
-
 def test_cline_rejection_maps_to_cline_payload_error(monkeypatch: pytest.MonkeyPatch) -> None:
     reply = {"status": "error", "code": "native_hook_adapter_cline_payload", "payload": {"message": "no hook"}}
     _resident_returning(monkeypatch, lambda request: _good(request, **reply))
@@ -97,6 +51,37 @@ def test_unsupported_harness_maps_to_value_error(monkeypatch: pytest.MonkeyPatch
     _resident_returning(monkeypatch, lambda request: _good(request, **reply))
     with pytest.raises(ValueError, match="Unsupported Guard harness for action normalization: nope"):
         normalize_harness_payload("nope", "PreToolUse", {})
+
+
+def test_unsupported_harness_is_distinguishable_from_other_bad_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hook path skips the envelope on this rejection alone, so it needs its own type."""
+
+    reply = {"status": "error", "code": "native_hook_adapter_unsupported_harness", "payload": {"harness": "nope"}}
+    _resident_returning(monkeypatch, lambda request: _good(request, **reply))
+    with pytest.raises(adapter.UnsupportedHarnessError):
+        normalize_harness_payload("nope", "PreToolUse", {})
+
+
+def test_hook_action_envelope_skips_a_harness_the_adapter_does_not_know(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No second harness list in the CLI: the adapter's rejection is the gate."""
+
+    from codex_plugin_scanner.guard.cli.commands_support_hook_payload import _hook_action_envelope
+
+    reply = {"status": "error", "code": "native_hook_adapter_unsupported_harness", "payload": {"harness": "nope"}}
+    _resident_returning(monkeypatch, lambda request: _good(request, **reply))
+    assert (
+        _hook_action_envelope(
+            harness="nope",
+            payload={"event": "PreToolUse", "tool_name": "Bash"},
+            home_dir=Path("/tmp"),
+            workspace=None,
+        )
+        is None
+    )
 
 
 def test_unrepresentable_payload_fails_before_the_resident(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,15 +213,6 @@ def test_shapes_the_resident_cannot_parse_fail_with_the_size_code(
     assert error.value.code == "native_hook_adapter_request_too_large"
 
 
-def test_plain_text_over_the_string_slot_fails_with_the_size_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter, "_resident_request", lambda **_kwargs: pytest.fail("must not reach the resident"))
-    monkeypatch.setattr(adapter, "_resolve_digest_home", lambda _home: Path("/tmp/hook-adapter-home"))
-    monkeypatch.setattr(adapter, "ensure_resident_prerequisite", lambda _home: True)
-    with pytest.raises(adapter.NativeHookAdapterError) as error:
-        adapter.native_command_detail("x" * (1024 * 1024 + 1), home_dir=None)
-    assert error.value.code == "native_hook_adapter_request_too_large"
-
-
 def test_oversize_policy_input_fails_closed_with_an_explicit_code(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(adapter, "_resident_request", lambda **_kwargs: pytest.fail("must not reach the resident"))
     monkeypatch.setattr(adapter, "_resolve_digest_home", lambda _home: Path("/tmp/hook-adapter-home"))
@@ -342,7 +318,8 @@ def test_one_hook_invocation_asks_each_query_once(monkeypatch: pytest.MonkeyPatc
 
 
 def test_failures_are_not_memoized(monkeypatch: pytest.MonkeyPatch) -> None:
-    answers = iter([None, "echo hi"])
+    # One dropped round trip is retried, so the first call misses twice.
+    answers = iter([None, None, "echo hi"])
 
     def reply(request: dict[str, object]) -> dict[str, object] | None:
         answer = next(answers)

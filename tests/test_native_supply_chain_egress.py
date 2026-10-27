@@ -1,10 +1,9 @@
 """Brokered network egress for resident package evaluation.
 
-The resident cannot dial out, so Python performs the exchanges it asks for under
-the managed network policy. These tests pin that policy: a managed host that
-disallows public registries must never reach them, and an unmanaged host behind
-an environment proxy must keep working. The resident side is covered by the
-Rust crate; here the resident is replaced by a scripted fake.
+The retained metadata exchanger performs managed HTTP exchanges; archives use
+native acquisition. These tests pin registry refusal and environment-proxy
+behavior. Package evaluation uses a scripted fake, while archive refusal runs
+through the actual resident.
 """
 
 from __future__ import annotations
@@ -21,13 +20,22 @@ from typing import ClassVar
 
 import pytest
 
+from codex_plugin_scanner.guard import native_supply_chain_archive as archive_module
 from codex_plugin_scanner.guard import native_supply_chain_egress as egress
 from codex_plugin_scanner.guard import native_supply_chain_eval as transport
-from codex_plugin_scanner.guard.mdm import network_transport
+from codex_plugin_scanner.guard.mdm import network_transport, network_trust
 from codex_plugin_scanner.guard.mdm.contracts import ManagedNetworkPolicy
-from codex_plugin_scanner.guard.native_context import _canonical_request_sha256
+from codex_plugin_scanner.guard.native_context import _canonical_request_sha256, bound_context_digest_home
 from codex_plugin_scanner.guard.native_package_authority import _RESULT_SCHEMA
+from codex_plugin_scanner.guard.native_policy_snapshot import provision_native_policy_verifier_key
+from codex_plugin_scanner.guard.native_resident_client import close_native_residents
 from codex_plugin_scanner.guard.runtime.restricted_archive_contract import RestrictedArchiveFailure
+
+
+def _exchanger(tmp_path: Path) -> egress.EgressExchanger:
+    return egress.EgressExchanger(
+        tmp_path, archive_module.ArchiveFulfilment(guard_home=tmp_path, scratch_dir=tmp_path, retain=False)
+    )
 
 
 def _need(url: str, *, klass: str = "registry", **overrides: object) -> dict[str, object]:
@@ -81,7 +89,7 @@ def test_managed_host_without_public_registries_never_reaches_them(
 ) -> None:
     _managed(monkeypatch, allow_public_registries=False)
     reached = _forbid_network(monkeypatch)
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need(url)]})
     outcome = exchanger.supplied[0]["outcome"]
     assert outcome == {"kind": "blocked", "code": "managed_public_registry_disabled"}
@@ -89,17 +97,20 @@ def test_managed_host_without_public_registries_never_reaches_them(
 
 
 def test_managed_host_without_public_registries_refuses_the_archive_download(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_hook_force: Path
 ) -> None:
     _managed(monkeypatch, allow_public_registries=False)
     reached = _forbid_network(monkeypatch)
-    monkeypatch.setattr(
-        egress,
-        "download_restricted_archive",
-        lambda *_a, **_k: pytest.fail("the archive must not be fetched"),
-    )
-    exchanger = egress.EgressExchanger(tmp_path)
-    exchanger.fulfil({"needs": [_need("https://files.pythonhosted.org/a.tgz", klass="archive")]})
+    provision_native_policy_verifier_key(tmp_path, b"\x0d" * 32)
+    # Use synthetic trust; native managed refusal happens before DNS or TLS.
+    monkeypatch.setattr(network_transport, "managed_ssl_context", lambda _policy: SimpleNamespace())
+    monkeypatch.setattr(network_trust, "export_managed_trust_roots", lambda _context: [b"synthetic root"])
+    exchanger = _exchanger(tmp_path)
+    try:
+        with bound_context_digest_home(tmp_path):
+            exchanger.fulfil({"needs": [_need("https://files.pythonhosted.org/a.tgz", klass="archive")]})
+    finally:
+        close_native_residents()
     outcome = exchanger.supplied[0]["outcome"]
     assert isinstance(outcome, dict)
     assert outcome["kind"] == "archive_failure"
@@ -137,7 +148,7 @@ def test_unmanaged_host_behind_an_environment_proxy_still_works(
     monkeypatch.setenv("http_proxy", proxy)
     monkeypatch.setenv("HTTP_PROXY", proxy)
     try:
-        exchanger = egress.EgressExchanger(tmp_path)
+        exchanger = _exchanger(tmp_path)
         exchanger.fulfil({"needs": [_need("http://registry.example.test/left-pad")]})
     finally:
         server.shutdown()
@@ -157,7 +168,7 @@ def test_unreachable_host_is_an_error_outcome_not_an_exception(monkeypatch: pyte
     _unmanaged(monkeypatch)
     for name in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY"):
         monkeypatch.delenv(name, raising=False)
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("http://127.0.0.1:1/x", timeout_seconds=1.0)]})
     assert exchanger.supplied[0]["outcome"]["kind"] in {"error", "timeout"}  # type: ignore[index]
 
@@ -167,7 +178,7 @@ def test_large_bodies_are_spooled_with_private_file_and_small_ones_inline(
 ) -> None:
     _unmanaged(monkeypatch)
     big = b"x" * (egress.INLINE_BODY_MAX_BYTES + 1)
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     small_outcome = exchanger._response_outcome(200, [("A", "b")], b"{}", 1024)
     big_outcome = exchanger._response_outcome(200, [], big, 1 << 20)
     assert small_outcome["body"] == "{}"
@@ -182,7 +193,7 @@ def test_large_bodies_are_spooled_with_private_file_and_small_ones_inline(
 
 
 def test_inline_budget_keeps_the_request_under_the_transport_cap(tmp_path: Path) -> None:
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     body = b"z" * egress.INLINE_BODY_MAX_BYTES
     outcomes = [exchanger._response_outcome(200, [], body, 1 << 20) for _ in range(8)]
     inline = sum(len(str(o.get("body", ""))) for o in outcomes)
@@ -194,7 +205,7 @@ def test_a_command_with_many_ranged_packages_is_not_capped_at_sixty_four_exchang
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _unmanaged(monkeypatch)
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     monkeypatch.setattr(exchanger, "_answer", lambda need: {"url": need["url"], "outcome": {"kind": "timeout"}})
     for start in range(0, 100, egress.MAX_NEEDS):
         exchanger.fulfil({"needs": [_need(f"https://registry.npmjs.org/p{n}") for n in range(start, start + 16)]})
@@ -207,7 +218,7 @@ def test_a_command_with_many_ranged_packages_is_not_capped_at_sixty_four_exchang
 
 
 def test_a_full_set_of_replayed_registry_outcomes_fits_the_request_cap(tmp_path: Path) -> None:
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     headers = [(f"X-Registry-Header-{index}", "v" * 40) for index in range(12)]
     body = b"{" + b" " * (egress.INLINE_BODY_MAX_BYTES + 1) + b"}"
     for index in range(egress.MAX_SUPPLIED):
@@ -253,7 +264,7 @@ def test_a_peer_that_keeps_every_read_inside_the_timeout_still_hits_the_exchange
 
 
 def test_registry_documents_above_the_ten_megabyte_library_default_are_spooled_whole(tmp_path: Path) -> None:
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     limit = 32 * 1024 * 1024
     body = b'{"versions":{}}' + b" " * (26 * 1024 * 1024)  # about the size of the abbreviated npm document for `next`
 
@@ -293,12 +304,12 @@ def test_registry_documents_above_the_ten_megabyte_library_default_are_spooled_w
 )
 def test_malformed_needs_are_rejected(payload: object, tmp_path: Path) -> None:
     with pytest.raises(egress.EgressProtocolError):
-        egress.EgressExchanger(tmp_path).fulfil(payload)
+        _exchanger(tmp_path).fulfil(payload)
 
 
 def test_non_http_scheme_is_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _unmanaged(monkeypatch)
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("file:///etc/passwd")]})
     assert exchanger.supplied[0]["outcome"] == {"kind": "blocked", "code": "egress_scheme_not_allowed"}
 
@@ -330,7 +341,7 @@ def test_a_redirect_to_a_disallowed_host_is_blocked_before_it_is_requested(
     start = "https://mirror.example.com/pkg"
     routes = {start: "https://registry.npmjs.org/pkg"}
     monkeypatch.setattr(egress, "managed_urlopen", _redirecting_urlopen(performed, routes))
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need(start, max_redirects=3)]})
     assert performed == [start]
     assert exchanger.supplied[0]["outcome"] == {"kind": "blocked", "code": "managed_public_registry_disabled"}
@@ -341,7 +352,7 @@ def test_redirects_are_counted_against_the_exact_limit(monkeypatch: pytest.Monke
     performed: list[str] = []
     routes = {f"https://example.com/{i}": f"https://example.com/{i + 1}" for i in range(5)}
     monkeypatch.setattr(egress, "managed_urlopen", _redirecting_urlopen(performed, routes))
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("https://example.com/0", max_redirects=2)]})
     assert performed == ["https://example.com/0", "https://example.com/1", "https://example.com/2"]
     assert exchanger.supplied[0]["outcome"] == {"kind": "error", "message": "too many redirects"}
@@ -352,7 +363,7 @@ def test_a_redirect_within_the_limit_is_followed(monkeypatch: pytest.MonkeyPatch
     performed: list[str] = []
     routes = {"https://example.com/a": "/final"}
     monkeypatch.setattr(egress, "managed_urlopen", _redirecting_urlopen(performed, routes))
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("https://example.com/a", max_redirects=1)]})
     assert performed == ["https://example.com/a", "https://example.com/final"]
     assert exchanger.supplied[0]["outcome"]["kind"] == "response"  # type: ignore[index]
@@ -365,7 +376,7 @@ def test_a_redirect_that_downgrades_or_leaves_http_is_refused(
     _unmanaged(monkeypatch)
     performed: list[str] = []
     monkeypatch.setattr(egress, "managed_urlopen", _redirecting_urlopen(performed, {"https://example.com/a": target}))
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("https://example.com/a", max_redirects=3)]})
     assert performed == ["https://example.com/a"]
     assert exchanger.supplied[0]["outcome"] == {"kind": "blocked", "code": "egress_redirect_not_allowed"}
@@ -376,7 +387,7 @@ def test_a_credentialed_request_never_follows_a_redirect(monkeypatch: pytest.Mon
     performed: list[str] = []
     routes = {"https://example.com/a": "https://example.com/final"}
     monkeypatch.setattr(egress, "managed_urlopen", _redirecting_urlopen(performed, routes))
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     need = _need("https://example.com/a", max_redirects=3, headers={"Authorization": "Bearer t"})
     exchanger.fulfil({"needs": [need]})
     assert performed == ["https://example.com/a"]
@@ -388,11 +399,11 @@ def test_archive_failure_from_the_restricted_downloader_is_carried_back(
 ) -> None:
     _unmanaged(monkeypatch)
     monkeypatch.setattr(
-        egress,
+        archive_module,
         "download_restricted_archive",
         lambda *_a, **_k: RestrictedArchiveFailure(code="external_archive_http_error", message="nope"),
     )
-    exchanger = egress.EgressExchanger(tmp_path)
+    exchanger = _exchanger(tmp_path)
     exchanger.fulfil({"needs": [_need("https://example.com/a.tgz", klass="archive", max_redirects=3)]})
     assert exchanger.supplied[0]["outcome"] == {
         "kind": "archive_failure",

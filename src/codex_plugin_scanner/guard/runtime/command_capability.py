@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -10,8 +11,13 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from ..portable_command import portable_command_argument, render_portable_command
+from ..native_command_capability import (
+    CommandCapabilityUnavailableError,
+    native_command_capability,
+)
+from ..portable_command import render_portable_command
 from ..review_contracts import GuardReviewContractError, guard_review_oauth_metadata
 from ..stable_digest import sha256_content_digest
 from ..store import GuardStore
@@ -19,7 +25,6 @@ from .command_operation_classification import (
     LOCAL_CONFIRMATION_COMMAND_OPERATIONS,
     POLICY_MEMORY_COMMAND_OPERATIONS,
     READ_ONLY_COMMAND_OPERATIONS,
-    REMOTE_STEP_UP_COMMAND_OPERATIONS,
     STATE_CHANGING_COMMAND_OPERATIONS,
 )
 from .time_support import parse_utc_timestamp
@@ -197,57 +202,91 @@ def issue_command_capability(
     return command_capability_status(store, now=issued_at.isoformat())
 
 
-def _verified_capability(store: GuardStore, *, now: str | None = None) -> dict[str, object]:
-    capability = _verify_signed_payload(store, store.get_sync_payload(COMMAND_CAPABILITY_STATE_KEY))
-    if capability.get("version") != COMMAND_CAPABILITY_VERSION:
-        raise CommandCapabilityError("capability_version_unsupported")
-    issuer = capability.get("issuer")
-    if not isinstance(issuer, str) or not issuer.strip():
-        raise CommandCapabilityError("capability_issuer_invalid")
-    issued_at = _parse_timestamp(capability.get("issuedAt"))
-    if issued_at is None:
-        raise CommandCapabilityError("capability_issued_at_invalid")
-    expires_at = _parse_timestamp(capability.get("expiresAt"))
-    if expires_at is None:
-        raise CommandCapabilityError("capability_expiry_invalid")
-    current = _now_datetime(now)
-    if issued_at > current + timedelta(minutes=5):
-        raise CommandCapabilityError("capability_issued_in_future")
-    if expires_at <= issued_at:
-        raise CommandCapabilityError("capability_expiry_invalid")
-    if expires_at - issued_at > timedelta(seconds=COMMAND_CAPABILITY_MAX_TTL_SECONDS):
-        raise CommandCapabilityError("capability_ttl_exceeded")
-    if expires_at <= current:
-        raise CommandCapabilityError("capability_expired")
-    nonce = capability.get("nonce")
-    if not isinstance(nonce, str) or not nonce.strip():
-        raise CommandCapabilityError("capability_nonce_invalid")
-    device_id, workspace_id = _oauth_target(store)
-    if capability.get("deviceId") != device_id:
-        raise CommandCapabilityError("capability_device_mismatch")
-    if capability.get("workspaceId") != workspace_id:
-        raise CommandCapabilityError("capability_workspace_mismatch")
-    operations = capability.get("operations")
-    if not isinstance(operations, list) or not operations:
-        raise CommandCapabilityError("capability_operations_invalid")
-    validated_operations: list[str] = []
-    for operation in operations:
-        if not isinstance(operation, str) or not operation:
-            raise CommandCapabilityError("capability_operations_invalid")
-        validated_operations.append(operation)
-    if len(validated_operations) != len(set(validated_operations)):
-        raise CommandCapabilityError("capability_operations_invalid")
-    classified_operations = (
-        set(READ_ONLY_COMMAND_OPERATIONS)
-        | set(LOCAL_CONFIRMATION_COMMAND_OPERATIONS)
-        | set(STATE_CHANGING_COMMAND_OPERATIONS)
+def _resident_home(store: GuardStore) -> Path:
+    """The Guard home the resident answers for, or no answer at all."""
+
+    guard_home = getattr(store, "guard_home", None)
+    if not isinstance(guard_home, Path):
+        raise CommandCapabilityUnavailableError
+    return guard_home
+
+
+def _signing_material_for_resident(store: GuardStore) -> tuple[str | None, str | None]:
+    """The local signing secret as the resident takes it, or a missing pair.
+
+    A store with no key is not an error here: the resident answers
+    ``local_signing_key_unavailable`` itself, in the same place it would have
+    refused a key that does not match the envelope.
+    """
+
+    key, key_id = store._policy_integrity_secret_material(create=False)
+    if not isinstance(key, bytes) or not isinstance(key_id, str):
+        return None, None
+    return base64.urlsafe_b64encode(key).rstrip(b"=").decode("ascii"), key_id
+
+
+def _binding_for_resident(store: GuardStore) -> tuple[str | None, str | None, str | None]:
+    """The device binding the capability must name, or the code that blocked it."""
+
+    try:
+        device_id, workspace_id = _oauth_target(store)
+    except CommandCapabilityError as error:
+        return None, None, error.code
+    return device_id, workspace_id, None
+
+
+def _capability_verdict(
+    store: GuardStore,
+    *,
+    now: str | None = None,
+    job: Mapping[str, object] | None = None,
+    schema_versions: Mapping[str, int] | None = None,
+    replay_identity: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """The resident's verdict on the stored capability and what it was asked.
+
+    Every comparison - the envelope's signature, its clock and binding checks,
+    the job's identity and the replay rows - happens in the runtime. This side
+    only reads the inputs out of the store.
+    """
+
+    home = _resident_home(store)
+    key_b64, key_id = _signing_material_for_resident(store)
+    device_id, workspace_id, oauth_error = _binding_for_resident(store)
+    return native_command_capability(
+        capability=store.get_sync_payload(COMMAND_CAPABILITY_STATE_KEY),
+        integrity_key_b64=key_b64,
+        integrity_key_id=key_id,
+        device_id=device_id,
+        workspace_id=workspace_id,
+        oauth_error=oauth_error,
+        now=now if now is not None else datetime.now(timezone.utc).isoformat(),
+        job=job,
+        schema_versions=dict(schema_versions or {}),
+        replay_items=_state_items(store.get_sync_payload(COMMAND_REPLAY_STATE_KEY)),
+        replay_identity=replay_identity,
+        guard_home=home,
     )
-    # Project signed grants onto the current runtime operation set.
-    active_operations = set(validated_operations) & classified_operations
+
+
+def _granted(verdict: Mapping[str, object]) -> dict[str, object]:
+    """The verified capability's own fields, or its refusal code raised."""
+
+    if not verdict.get("capability_valid"):
+        raise CommandCapabilityError(str(verdict.get("reason") or "signed_payload_missing"))
+    operations = verdict.get("operations")
     return {
-        **capability,
-        "operations": sorted(active_operations),
+        "issuer": verdict.get("issuer"),
+        "issuedAt": verdict.get("issued_at"),
+        "expiresAt": verdict.get("expires_at"),
+        "deviceId": verdict.get("device_id"),
+        "workspaceId": verdict.get("workspace_id"),
+        "operations": [str(operation) for operation in operations] if isinstance(operations, list) else [],
     }
+
+
+def _verified_capability(store: GuardStore, *, now: str | None = None) -> dict[str, object]:
+    return _granted(_capability_verdict(store, now=now))
 
 
 def command_capability_status(store: GuardStore, *, now: str | None = None) -> dict[str, object]:
@@ -257,11 +296,14 @@ def command_capability_status(store: GuardStore, *, now: str | None = None) -> d
     ]
     try:
         capability = _verified_capability(store, now=now)
-    except CommandCapabilityError as error:
+    except (CommandCapabilityError, CommandCapabilityUnavailableError) as error:
+        # A runtime that gave no verdict reports as plainly as a refused
+        # capability: status shows what is enabled, and nothing is.
+        reason = error.code if isinstance(error, CommandCapabilityError) else CommandCapabilityUnavailableError.reason
         return {
             "enabled": False,
             "capability_valid": False,
-            "reason": error.code,
+            "reason": reason,
             "issuer": None,
             "expires_at": None,
             "operations": [],
@@ -290,7 +332,7 @@ def command_capability_status(store: GuardStore, *, now: str | None = None) -> d
 def command_capability_operations(store: GuardStore, *, now: str | None = None) -> tuple[str, ...]:
     try:
         capability = _verified_capability(store, now=now)
-    except CommandCapabilityError:
+    except (CommandCapabilityError, CommandCapabilityUnavailableError):
         return ()
     operations = capability.get("operations")
     return tuple(str(operation) for operation in operations) if isinstance(operations, list) else ()
@@ -318,41 +360,6 @@ def revoke_command_capability(
     return command_capability_status(store, now=revoked_at)
 
 
-def command_job_identity(
-    job: Mapping[str, object],
-    *,
-    schema_versions: Mapping[str, int],
-) -> dict[str, object]:
-    operation = job.get("operation")
-    if not isinstance(operation, str) or operation not in schema_versions:
-        raise CommandCapabilityError("command_operation_unsupported")
-    required_strings = {
-        "id": "command_id_missing",
-        "deviceId": "command_device_missing",
-        "workspaceId": "command_workspace_missing",
-        "nonce": "command_nonce_missing",
-        "expiresAt": "command_expiry_missing",
-        "idempotencyKey": "command_idempotency_key_missing",
-    }
-    identity: dict[str, object] = {"operation": operation}
-    for field, error_code in required_strings.items():
-        value = job.get(field)
-        if not isinstance(value, str) or not value.strip():
-            raise CommandCapabilityError(error_code)
-        if field == "id" and not portable_command_argument(value.strip()):
-            raise CommandCapabilityError("command_id_invalid")
-        identity[field] = value.strip()
-    schema_version = job.get("schemaVersion")
-    if schema_version != schema_versions[operation]:
-        raise CommandCapabilityError("command_schema_version_mismatch")
-    identity["schemaVersion"] = schema_version
-    payload = job.get("payload")
-    if not isinstance(payload, dict):
-        raise CommandCapabilityError("command_payload_invalid")
-    identity["payloadDigest"] = sha256_content_digest(_canonical_bytes(payload))
-    return identity
-
-
 def authorize_command_job(
     store: GuardStore,
     job: Mapping[str, object],
@@ -362,32 +369,21 @@ def authorize_command_job(
 ) -> AuthorizedCommandJob:
     """Validate capability and complete source-to-target lease bindings."""
 
-    capability = _verified_capability(store, now=now)
-    identity = command_job_identity(job, schema_versions=schema_versions)
-    operation = str(identity["operation"])
-    operations = capability.get("operations")
-    if not isinstance(operations, list) or operation not in operations:
-        raise CommandCapabilityError("command_operation_not_granted")
-    if identity["deviceId"] != capability.get("deviceId"):
-        raise CommandCapabilityError("command_device_mismatch")
-    if identity["workspaceId"] != capability.get("workspaceId"):
-        raise CommandCapabilityError("command_workspace_mismatch")
-    expires_at = _parse_timestamp(identity["expiresAt"])
-    if expires_at is None:
-        raise CommandCapabilityError("command_expiry_invalid")
-    current = _now_datetime(now)
-    if expires_at <= current:
-        raise CommandCapabilityError("command_expired")
-    if expires_at > current + timedelta(hours=24):
-        raise CommandCapabilityError("command_expiry_too_distant")
-    if _command_job_seen(store, identity, now=current.isoformat()):
-        raise CommandCapabilityError("command_replayed")
+    verdict = _capability_verdict(store, now=now, job=job, schema_versions=schema_versions)
+    _granted(verdict)
+    authorization = verdict.get("authorization")
+    if not isinstance(authorization, dict):
+        raise CommandCapabilityUnavailableError
+    if not authorization.get("authorized"):
+        raise CommandCapabilityError(str(authorization.get("reason") or "command_operation_unsupported"))
+    identity = authorization.get("identity")
+    operation = authorization.get("operation")
+    if not isinstance(identity, dict) or not isinstance(operation, str):
+        raise CommandCapabilityUnavailableError
     return AuthorizedCommandJob(
-        identity=identity,
+        identity={str(key): value for key, value in identity.items()},
         operation=operation,
-        requires_local_approval=(
-            operation in STATE_CHANGING_COMMAND_OPERATIONS and operation not in REMOTE_STEP_UP_COMMAND_OPERATIONS
-        ),
+        requires_local_approval=bool(authorization.get("requires_local_approval")),
     )
 
 
@@ -552,19 +548,15 @@ def mark_command_job_consumed(
 
 
 def _command_job_seen(store: GuardStore, identity: Mapping[str, object], *, now: str | None = None) -> bool:
-    current = _now_datetime(now)
-    items = _state_items(store.get_sync_payload(COMMAND_REPLAY_STATE_KEY))
-    identity_digest = _identity_digest(identity)
-    return any(
-        (
-            item.get("identityDigest") == identity_digest
-            or item.get("jobId") == identity["id"]
-            or item.get("idempotencyKey") == identity["idempotencyKey"]
-        )
-        and (expires_at := _parse_timestamp(item.get("expiresAt"))) is not None
-        and expires_at > current
-        for item in items
-    )
+    """Whether the replay rows already hold ``identity``, per the runtime.
+
+    A caller that authorized its own operation still asks the runtime this
+    question, so one evaluator decides replay for every leased job.
+    """
+
+    verdict = _capability_verdict(store, now=now, replay_identity=identity)
+    replayed = verdict.get("replayed")
+    return replayed if isinstance(replayed, bool) else True
 
 
 def audit_command_decision(
@@ -613,7 +605,6 @@ __all__ = [
     "command_capability_operations",
     "command_capability_status",
     "command_environment_allows_queue",
-    "command_job_identity",
     "consume_local_command_approval",
     "issue_command_capability",
     "mark_command_job_consumed",

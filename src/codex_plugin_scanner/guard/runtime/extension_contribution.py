@@ -46,6 +46,11 @@ def contributions_dir() -> Path:
 def load_contribution_payloads(root: Path | None = None) -> tuple[dict[str, object], ...]:
     if root is not None:
         return _load_from_directory(root)
+    from ..catalog_delivery.installed_bundle import compatibility_payloads
+
+    bundled = compatibility_payloads("commands")
+    if bundled is not None:
+        return bundled
     packaged = _load_packaged_payloads()
     if packaged:
         return packaged
@@ -99,23 +104,6 @@ def contribution_ids(root: Path | None = None) -> frozenset[str]:
     return frozenset(ids)
 
 
-def contribution_catalog_overlay(extension_id: str) -> dict[str, object] | None:
-    payload = _contribution_index().get(extension_id)
-    if payload is None:
-        return None
-    publisher = payload.get("publisher")
-    icon = payload.get("icon")
-    if not isinstance(publisher, dict) or not isinstance(icon, dict):
-        return None
-    return {"publisher": dict(publisher), "icon": dict(icon)}
-
-
-def reset_contribution_cache() -> None:
-    _contribution_index.cache_clear()
-    _validator.cache_clear()
-    _trust_classes.cache_clear()
-
-
 def _validated_payload(payload: object, filename: str) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError(f"{filename} must contain an object")
@@ -152,16 +140,6 @@ def _load_packaged_payloads() -> tuple[dict[str, object], ...]:
     for item in sorted(names, key=lambda entry: entry.name):
         payloads.append(_validated_payload(json.loads(item.read_text(encoding="utf-8")), item.name))
     return tuple(payloads)
-
-
-@lru_cache(maxsize=1)
-def _contribution_index() -> dict[str, dict[str, object]]:
-    index: dict[str, dict[str, object]] = {}
-    for payload in load_contribution_payloads():
-        extension_id = payload.get("id")
-        if isinstance(extension_id, str):
-            index[extension_id] = payload
-    return index
 
 
 @lru_cache(maxsize=1)

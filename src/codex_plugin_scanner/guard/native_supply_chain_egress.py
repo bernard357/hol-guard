@@ -6,7 +6,7 @@ Cloud, the OAuth endpoint, a public registry or an external archive it answers
 performs them under the managed network policy (destination allow-list,
 policy proxy, CA bundle, proxy credentials, system proxies) through the same
 transports Python used before: ``managed_urlopen`` for HTTP and
-``download_restricted_archive`` for archives. It only moves bytes; the resident
+``native_supply_chain_archive`` for archives. It only moves bytes; the resident
 parses every response and owns every decision.
 """
 
@@ -20,11 +20,13 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from .mdm.network_transport import ManagedNetworkError, managed_urlopen, resolved_network_policy, validate_destination
-from .runtime.restricted_archive_download import RestrictedArchiveFailure, download_restricted_archive
+from .mdm.network_transport import ManagedNetworkError, managed_urlopen, resolved_network_policy
+from .native_supply_chain_archive import ArchiveFulfilment
+from .native_supply_chain_registry_cache import REGISTRY_CACHE, CacheKey, RawResponse, RegistryCache
 
 EGRESS_REQUIRED_CODE = "supply_chain_egress_required"
 # Resident-side limits (``EGRESS_MAX_*`` in guard-contracts supply_chain_egress.rs).
@@ -63,8 +65,10 @@ _NEED_KEYS = frozenset(
         "max_redirects",
         "max_response_bytes",
         "delay_seconds",
+        "inspect",
     }
 )
+_INSPECT_KEYS = frozenset({"timeout_seconds", "aggregate_timeout_seconds", "max_files", "max_package_json_bytes"})
 _CLASSES = frozenset({"oauth", "cloud", "registry", "archive"})
 _MAX_RESPONSE_BYTES_CEILING = 64 * 1024 * 1024
 _MAX_TIMEOUT_SECONDS = 60.0
@@ -100,11 +104,49 @@ class EgressProtocolError(ValueError):
     """The resident's egress request is malformed; the evaluation cannot proceed."""
 
 
+OFFLINE_REFUSED_CODE = "egress_offline_assessment"
+
+
+class OfflineEgress:
+    """Counts the exchanges an offline evaluation refused."""
+
+    def __init__(self) -> None:
+        self.refused = 0
+
+
+_OFFLINE: ContextVar[OfflineEgress | None] = ContextVar("guard_egress_offline", default=None)
+
+
+@contextmanager
+def offline_egress() -> Iterator[OfflineEgress]:
+    """Evaluate without the network in this context.
+
+    A background assessment runs with no one waiting and without consent to
+    contact anything, so every exchange the resident asks for is answered from
+    the in-process registry cache or refused as blocked. The caller reads
+    ``refused`` to report the evaluation as incomplete.
+    """
+
+    state = OfflineEgress()
+    token = _OFFLINE.set(state)
+    try:
+        yield state
+    finally:
+        _OFFLINE.reset(token)
+
+
 class EgressExchanger:
     """Performs needs and keeps what the next request must carry."""
 
-    def __init__(self, spool_dir: Path) -> None:
+    def __init__(
+        self,
+        spool_dir: Path,
+        archives: ArchiveFulfilment,
+        registry_cache: RegistryCache = REGISTRY_CACHE,
+    ) -> None:
         self.spool_dir = spool_dir
+        self.archives = archives
+        self.registry_cache = registry_cache
         self.supplied: list[dict[str, object]] = []
         self._inline_used = 0
         self._spool_count = 0
@@ -116,10 +158,14 @@ class EgressExchanger:
             self.supplied.append(self._answer(need))
 
     def _answer(self, need: Mapping[str, Any]) -> dict[str, object]:
-        delay = min(max(float(need["delay_seconds"]), 0.0), MAX_DELAY_SECONDS)
-        if delay > 0:
-            time.sleep(delay)
-        outcome = self._archive(need) if need["class"] == "archive" else self._http(need)
+        offline = _OFFLINE.get()
+        if offline is not None:
+            outcome = self._offline(need, offline)
+        else:
+            delay = min(max(float(need["delay_seconds"]), 0.0), MAX_DELAY_SECONDS)
+            if delay > 0:
+                time.sleep(delay)
+            outcome = self.archives.fulfil(need) if need["class"] == "archive" else self._http(need)
         return {
             "class": need["class"],
             "method": need["method"],
@@ -129,66 +175,22 @@ class EgressExchanger:
             "outcome": outcome,
         }
 
+    def _offline(self, need: Mapping[str, Any], offline: OfflineEgress) -> dict[str, object]:
+        key = _registry_cache_key(need) if need["class"] == "registry" else None
+        cached = self.registry_cache.cached(key) if key is not None else None
+        if cached is not None:
+            status, header_items, body = cached
+            return self._response_outcome(status, header_items, body, int(need["max_response_bytes"]))
+        offline.refused += 1
+        return {"kind": "blocked", "code": OFFLINE_REFUSED_CODE}
+
     def _http(self, need: Mapping[str, Any]) -> dict[str, object]:
-        url = str(need["url"])
-        if urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
-            return {"kind": "blocked", "code": "egress_scheme_not_allowed"}
-        body = need.get("body")
-        data = body.encode("utf-8") if isinstance(body, str) else None
-        headers = {str(k): str(v) for k, v in dict(need["headers"]).items()}
-        method = str(need["method"])
-        limit = int(need["max_response_bytes"])
-        deadline = time.monotonic() + MAX_EXCHANGE_SECONDS
-        max_redirects = _redirect_budget(method, data, headers, int(need["max_redirects"]))
-        hops = 0
-        while True:
-            request = urllib.request.Request(url, data=data, headers=headers, method=method)
-            try:
-                # Redirects are never followed by the transport: each hop is a fresh
-                # request, so the managed policy validates every destination and the
-                # exact hop limit the resident asked for is enforced here.
-                with managed_urlopen(
-                    request,
-                    timeout=float(need["timeout_seconds"]),
-                    allow_redirects=False,
-                ) as response:
-                    return self._response_outcome(
-                        int(response.status),
-                        response.headers.items(),
-                        _read_bounded(response, limit, deadline),
-                        limit,
-                    )
-            except urllib.error.HTTPError as error:
-                try:
-                    location = error.headers.get("Location") if error.code in _REDIRECT_STATUSES else None
-                    if location is not None and max_redirects > 0:
-                        if hops >= max_redirects:
-                            return {"kind": "error", "message": "too many redirects"}
-                        target = _redirect_target(url, location)
-                        if target is None:
-                            return {"kind": "blocked", "code": "egress_redirect_not_allowed"}
-                        url = target
-                        hops += 1
-                        continue
-                    return self._response_outcome(
-                        int(error.code), error.headers.items(), _read_bounded(error, limit, deadline), limit
-                    )
-                except (TimeoutError, OSError) as read_error:
-                    if isinstance(read_error, TimeoutError):
-                        return {"kind": "timeout"}
-                    return {"kind": "error", "message": type(read_error).__name__}
-                finally:
-                    error.close()
-            except ManagedNetworkError as error:
-                return {"kind": "blocked", "code": str(error)[:128]}
-            except TimeoutError:
-                return {"kind": "timeout"}
-            except urllib.error.URLError as error:
-                if isinstance(error.reason, TimeoutError):
-                    return {"kind": "timeout"}
-                return {"kind": "error", "message": type(error.reason).__name__}
-            except (OSError, ValueError) as error:
-                return {"kind": "error", "message": type(error).__name__}
+        key = _registry_cache_key(need)
+        result = _fetch_raw(need) if key is None else self.registry_cache.fetch(key, lambda: _fetch_raw(need))
+        if isinstance(result, dict):
+            return result
+        status, header_items, body = result
+        return self._response_outcome(status, header_items, body, int(need["max_response_bytes"]))
 
     def _response_outcome(
         self,
@@ -217,27 +219,96 @@ class EgressExchanger:
         outcome["body_file"] = name
         return outcome
 
-    def _archive(self, need: Mapping[str, Any]) -> dict[str, object]:
-        url = str(need["url"])
+
+def _fetch_raw(need: Mapping[str, Any]) -> RawResponse | dict[str, object]:
+    """Perform one HTTP exchange: the final response, or the outcome that replaces it."""
+    url = str(need["url"])
+    if urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
+        return {"kind": "blocked", "code": "egress_scheme_not_allowed"}
+    body = need.get("body")
+    data = body.encode("utf-8") if isinstance(body, str) else None
+    headers = {str(k): str(v) for k, v in dict(need["headers"]).items()}
+    method = str(need["method"])
+    limit = int(need["max_response_bytes"])
+    deadline = time.monotonic() + MAX_EXCHANGE_SECONDS
+    max_redirects = _redirect_budget(method, data, headers, int(need["max_redirects"]))
+    hops = 0
+    while True:
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            policy, _managed = resolved_network_policy(None)
-            validate_destination(url, policy)
-        except ManagedNetworkError as error:
-            return {"kind": "archive_failure", "code": str(error)[:128], "message": "Managed network policy refused"}
-        with tempfile.TemporaryDirectory(prefix="archive-", dir=self.spool_dir) as scratch:
-            result = download_restricted_archive(
-                url,
-                max_bytes=int(need["max_response_bytes"]),
-                max_redirects=int(need["max_redirects"]),
-                timeout_seconds=float(need["timeout_seconds"]),
-                temp_dir=Path(scratch),
-            )
-            if isinstance(result, RestrictedArchiveFailure):
-                return {"kind": "archive_failure", "code": result.code, "message": result.message}
+            # Redirects are never followed by the transport: each hop is a fresh
+            # request, so the managed policy validates every destination and the
+            # exact hop limit the resident asked for is enforced here.
+            with managed_urlopen(
+                request,
+                timeout=float(need["timeout_seconds"]),
+                allow_redirects=False,
+            ) as response:
+                return (
+                    int(response.status),
+                    tuple((str(k), str(v)) for k, v in response.headers.items()),
+                    _read_bounded(response, limit, deadline),
+                )
+        except urllib.error.HTTPError as error:
             try:
-                return {"kind": "archive", "sha256": result.sha256, "size": result.size, "final_url": result.final_url}
+                location = error.headers.get("Location") if error.code in _REDIRECT_STATUSES else None
+                if location is not None and max_redirects > 0:
+                    if hops >= max_redirects:
+                        return {"kind": "error", "message": "too many redirects"}
+                    target = _redirect_target(url, location)
+                    if target is None:
+                        return {"kind": "blocked", "code": "egress_redirect_not_allowed"}
+                    url = target
+                    hops += 1
+                    continue
+                return (
+                    int(error.code),
+                    tuple((str(k), str(v)) for k, v in error.headers.items()),
+                    _read_bounded(error, limit, deadline),
+                )
+            except (TimeoutError, OSError) as read_error:
+                if isinstance(read_error, TimeoutError):
+                    return {"kind": "timeout"}
+                return {"kind": "error", "message": type(read_error).__name__}
             finally:
-                result.cleanup()
+                error.close()
+        except ManagedNetworkError as error:
+            return {"kind": "blocked", "code": str(error)[:128]}
+        except TimeoutError:
+            return {"kind": "timeout"}
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                return {"kind": "timeout"}
+            return {"kind": "error", "message": type(error.reason).__name__}
+        except (OSError, ValueError) as error:
+            return {"kind": "error", "message": type(error).__name__}
+
+
+def _registry_cache_key(need: Mapping[str, Any]) -> CacheKey | None:
+    """The cache key of a public registry read, or ``None`` when it must not be reused.
+
+    Only a body-less GET of public metadata qualifies: no credential or cookie
+    rides along, and no retry pause was asked for (a pause means the resident
+    wants a new answer, not the one it already has). The managed network
+    policy is part of the key, so a policy change never serves a response the
+    new policy would not have fetched.
+    """
+
+    headers = {str(k): str(v) for k, v in dict(need["headers"]).items()}
+    if (
+        need["class"] != "registry"
+        or str(need["method"]).upper() != "GET"
+        or need.get("body") is not None
+        or float(need["delay_seconds"]) > 0
+        or any(name.lower() in _CREDENTIAL_HEADERS for name in headers)
+    ):
+        return None
+    try:
+        policy, _managed = resolved_network_policy(None)
+    except Exception:
+        return None
+    ordered = tuple(sorted((name.lower(), value) for name, value in headers.items()))
+    return (str(need["url"]), ordered, int(need["max_response_bytes"]), int(need["max_redirects"]), policy)
 
 
 def _read_bounded(stream: Any, limit: int, deadline: float) -> bytes:
@@ -277,7 +348,7 @@ def parse_needs(payload: object) -> list[Mapping[str, Any]]:
 def _checked_need(need: object) -> Mapping[str, Any]:
     if not isinstance(need, dict) or not set(need) <= _NEED_KEYS:
         raise EgressProtocolError("egress need invalid")
-    required = _NEED_KEYS - {"body"}
+    required = _NEED_KEYS - {"body", "inspect"}
     if not required <= set(need):
         raise EgressProtocolError("egress need incomplete")
     headers = need["headers"]
@@ -297,10 +368,25 @@ def _checked_need(need: object) -> Mapping[str, Any]:
         and _is_count(need["max_response_bytes"], 1, _MAX_RESPONSE_BYTES_CEILING)
         and _is_number(need["delay_seconds"], 0.0, 3600.0)
         and (need.get("body") is None or isinstance(need["body"], str))
+        and _inspect_is_valid(need.get("inspect"), need["class"])
     )
     if not valid:
         raise EgressProtocolError("egress need invalid")
     return need
+
+
+def _inspect_is_valid(spec: object, need_class: str) -> bool:
+    if spec is None:
+        return True
+    return (
+        need_class == "archive"
+        and isinstance(spec, dict)
+        and set(spec) == _INSPECT_KEYS
+        and _is_number(spec["timeout_seconds"], 0.0, _MAX_TIMEOUT_SECONDS, exclusive_low=True)
+        and _is_number(spec["aggregate_timeout_seconds"], 0.0, _MAX_TIMEOUT_SECONDS, exclusive_low=True)
+        and _is_count(spec["max_files"], 1, 1 << 20)
+        and _is_count(spec["max_package_json_bytes"], 1, 1 << 30)
+    )
 
 
 def _is_count(value: object, low: int, high: int) -> bool:

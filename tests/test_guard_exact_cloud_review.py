@@ -17,6 +17,7 @@ from codex_plugin_scanner.guard.cli import commands_dispatch_cloud_review as clo
 from codex_plugin_scanner.guard.daemon import command_queue_worker as queue_worker_module
 from codex_plugin_scanner.guard.daemon import server as daemon_server_module
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
+from codex_plugin_scanner.guard.native_command_capability import CommandCapabilityUnavailableError
 from codex_plugin_scanner.guard.review_contracts import (
     GuardReviewContractError,
     _anchored_review_verification_keys,
@@ -135,7 +136,7 @@ def test_exact_cloud_review_resolves_one_request_without_policy_or_memory(tmp_pa
     assert authority["source"] == "approval-gate-once"
     assert authority["authority_kind"] == "exact-cloud"
     assert isinstance(authority["approval_id"], str)
-    assert store.claim_local_once_approval(authority["approval_id"], claimed_at=resolved_at) is False
+    assert store.claim_approval_reuse_decision(authority, now=resolved_at, consume_local_once=True) is False
     assert (
         store.peek_local_once_approval(
             harness=target.harness,
@@ -538,6 +539,52 @@ def test_cloud_review_enable_reports_retained_capability_when_requeue_retry_fail
     assert payload["retained_existing_capability"] is True
     assert payload["activation_status"] == "enabled_requeue_retry_required"
     assert exact_cloud_review_operations(store) == (EXACT_CLOUD_REVIEW_OPERATION,)
+
+
+def test_unavailable_replay_check_rejects_the_exact_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    job = {
+        "operation": EXACT_CLOUD_REVIEW_OPERATION,
+        "protocolVersion": 2,
+        "id": "exact-job-1",
+        "deviceId": "device-1",
+        "workspaceId": "workspace-1",
+        "nonce": "nonce-1",
+        "expiresAt": "2026-10-26T18:00:00+00:00",
+        "idempotencyKey": "idem-1",
+        "payload": {"remoteApproval": {"grantId": "grant-1", "capabilityId": "cap-1"}},
+    }
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.native_workspace_review_queue.native_workspace_review_payload",
+        lambda _payload: None,
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review.remote_approval_uses_workspace_admin_mfa",
+        lambda _approval: False,
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review._verified_capability",
+        lambda _store, now=None: {
+            "deviceId": "device-1",
+            "workspaceId": "workspace-1",
+            "grantId": "grant-1",
+        },
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.exact_cloud_review._capability_digest",
+        lambda _capability: "cap-1",
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.runtime.command_capability._command_job_seen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(CommandCapabilityUnavailableError()),
+    )
+
+    with pytest.raises(CommandCapabilityError, match="native_command_capability_unavailable"):
+        authorize_command_queue_job(
+            object(),
+            job,
+            schema_versions=COMMAND_OPERATION_SCHEMA_VERSIONS,
+            now="2026-10-26T12:00:00+00:00",
+        )
 
 
 def test_exact_cloud_review_queue_job_requires_no_generic_capability_or_local_approval(tmp_path: Path) -> None:

@@ -99,9 +99,74 @@ fn decide(request: &SkillDirectoryIdentityRequestV1) -> Result<Value, &'static s
             );
             serde_json::to_value(discovery).map_err(|_| PAYLOAD_INVALID)
         }
+        SkillDirectoryCommandV1::InspectEncoded {
+            skill_document_hex,
+            scope_root_hex,
+            path_encoding,
+            limits,
+        } => {
+            let document =
+                crate::skill_identity_platform::decode_path_hex(skill_document_hex, path_encoding)?;
+            let scope =
+                crate::skill_identity_platform::decode_path_hex(scope_root_hex, path_encoding)?;
+            let identity = crate::skill_identity_inspect::inspect_skill_directory(
+                &document,
+                &scope,
+                &clamp_limits(limits),
+            );
+            serde_json::to_value(identity).map_err(|_| PAYLOAD_INVALID)
+        }
+        SkillDirectoryCommandV1::DiscoverEncoded {
+            skill_root_hex,
+            path_encoding,
+            limits,
+        } => {
+            let root =
+                crate::skill_identity_platform::decode_path_hex(skill_root_hex, path_encoding)?;
+            let discovery = crate::skill_identity_discovery::discover_skill_documents(
+                &root,
+                &clamp_limits(limits),
+            );
+            serde_json::to_value(discovery).map_err(|_| PAYLOAD_INVALID)
+        }
+        SkillDirectoryCommandV1::DocumentEvidence {
+            skill_document_hex,
+            process_directory_hex,
+            safe_roots_hex,
+            path_encoding,
+        } => {
+            // The document's own path stays exactly as the caller holds it:
+            // its name and `skills` ancestor are read from those components,
+            // and only a filesystem call anchors it to the caller's directory.
+            let document = crate::skill_identity_platform::decode_relative_path_hex(
+                skill_document_hex,
+                path_encoding,
+            )?;
+            let process_directory = crate::skill_identity_platform::decode_path_hex(
+                process_directory_hex,
+                path_encoding,
+            )?;
+            let mut safe_roots = Vec::with_capacity(safe_roots_hex.len());
+            for root in safe_roots_hex {
+                safe_roots.push(crate::skill_identity_platform::decode_path_hex(
+                    root,
+                    path_encoding,
+                )?);
+            }
+            let evidence = crate::skill_document_evidence::read_skill_document_evidence(
+                &document,
+                &process_directory,
+                &safe_roots,
+            );
+            serde_json::to_value(evidence).map_err(|_| PAYLOAD_INVALID)
+        }
+        SkillDirectoryCommandV1::Incomplete { reason } => serde_json::to_value(
+            crate::skill_identity_inspect::incomplete_identity(*reason, None, 0, 0),
+        )
+        .map_err(|_| PAYLOAD_INVALID),
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "skill_directory_identity_op_tests.rs"]
 mod tests;

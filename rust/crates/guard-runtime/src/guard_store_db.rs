@@ -15,6 +15,8 @@ pub(crate) enum StoreError {
     Value(String),
     /// Python `sqlite3.IntegrityError` raised by the method itself.
     Integrity(String),
+    /// Python `RuntimeError` with its exact message.
+    Runtime(String),
     /// A request or stored value outside the contract; fail closed.
     Invalid(&'static str),
     Sqlite(rusqlite::Error),
@@ -32,17 +34,26 @@ pub(crate) fn value_error<T>(message: &str) -> StoreResult<T> {
     Err(StoreError::Value(message.to_owned()))
 }
 
+pub(crate) fn runtime_error<T>(message: &str) -> StoreResult<T> {
+    Err(StoreError::Runtime(message.to_owned()))
+}
+
 impl StoreError {
     /// Stable failure code in the `native_guard_store_*` namespace.
     pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::Value(_) => "native_guard_store_value_error",
             Self::Integrity(_) => "native_guard_store_integrity_error",
+            Self::Runtime(_) => "native_guard_store_runtime_error",
             Self::Invalid(_) => "native_guard_store_invalid",
             Self::Sqlite(error) => match error.sqlite_error_code() {
-                Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => {
-                    "native_guard_store_busy"
-                }
+                // A WAL reader that keeps losing the wal-index race gives up
+                // with PROTOCOL; SQLite documents it as transient contention.
+                Some(
+                    ErrorCode::DatabaseBusy
+                    | ErrorCode::DatabaseLocked
+                    | ErrorCode::FileLockingProtocolFailed,
+                ) => "native_guard_store_busy",
                 Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => {
                     "native_guard_store_sqlite_corrupt"
                 }
@@ -55,7 +66,9 @@ impl StoreError {
 
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::Value(message) | Self::Integrity(message) => message.clone(),
+            Self::Value(message) | Self::Integrity(message) | Self::Runtime(message) => {
+                message.clone()
+            }
             Self::Invalid(reason) => (*reason).to_owned(),
             Self::Sqlite(error) => error.to_string(),
         }
@@ -173,5 +186,14 @@ mod tests {
         assert_eq!(row["a"], Value::from(1));
         assert_eq!(row["b"], Value::from("x"));
         assert_eq!(row["c"], Value::Null);
+    }
+
+    #[test]
+    fn a_lost_wal_index_race_is_reported_as_busy() {
+        let error = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_PROTOCOL),
+            None,
+        ));
+        assert_eq!(error.code(), "native_guard_store_busy");
     }
 }

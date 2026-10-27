@@ -336,24 +336,17 @@ to assemble that temporary envelope and run it with a freshly rebuilt compiler.
 The [validation reference](VALIDATION.md) also covers native runtime tests,
 source-bound decision evidence, and the installed-wheel matrix.
 
-## Existing Python detector migration
+## Legacy Python detector proposals
 
-Python detector modules under `src/codex_plugin_scanner/guard/runtime/` are
-legacy inputs, not a supported way to author a new extension. The structural
-diagnostic in `scripts/command_source_backlog.py` reads pinned source
-blobs without importing or executing them. It converts only allowlisted
-literal matcher construction and reports precise blockers such as
-`dynamic_import_rejected`, `custom_code_rejected`, and
-`native_operation_required`. Treat a converted source as a proposal: review
-the upstream behavior, write portable cases, run native admission, and inspect
-the generated diff.
+Historical Python detectors are not runtime or extension-authoring inputs.
+The one-time Python backlog and baseline conversion tools have been retired
+after the native JSON-source migration. To salvage an old proposal, inspect
+its reviewed behavior without importing or executing untrusted Python.
+Manually author a `guard.command-extension-source.v1` document and a portable
+native fixture, then use the Rust `guard-command-source` compiler and the
+normal Extension Builder review/handoff process above. An unsupported
+matcher must become a reviewed Rust operation, never a Python fallback.
 
-The one-time reviewed-baseline utility in
-`scripts/migrate_command_extension_sources.py` requires a pinned baseline
-identity and an explicit compiler. It is dry-run by default; `--write` is only
-for a reviewed migration publication and it is not a release or hook-path
-dependency. A migration blocker is resolved in JSON or by adding a reviewed
-Rust operation, never by restoring a Python fallback.
 
 ## Add a Rust operation only for a real semantic gap
 
@@ -389,9 +382,11 @@ descriptions and review input are publishable author input; inspect them for
 secrets before submission.
 
 The bounded contracts reject excessive input rather than truncating it. The
-current limits include 8 MiB source/compiler input, 4 MiB compiled program,
-32 matcher depth, 16,384 matcher nodes, 512 extensions, 1,024 rules, 64 safe
-variants per rule, and the adapter limits in `contracts/extensions/`.
+current limits include 8 MiB source/compiler input (the pack lifecycle
+subcommand is read by the runtime's own stdin reader instead, at 6 MiB),
+4 MiB compiled program, 32 matcher depth, 16,384 matcher nodes, 512
+extensions, 1,024 rules, 64 safe variants per rule, and the adapter limits in
+`contracts/extensions/`.
 
 ## Exit statuses
 

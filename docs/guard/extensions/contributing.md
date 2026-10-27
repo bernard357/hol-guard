@@ -51,9 +51,11 @@ Here, `<slug>` is the extension ID without the `command.` prefix. For example,
 `command.cloud.aws` uses `command-source-cloud.aws.v1.json`.
 
 Use `--check` with the preparation command to verify an already prepared change. Optional public
-credit, upstream, and claim-readiness metadata belongs in
+credit, upstream, and explicit authority overrides belong in
 `contributions/extension-listings/command.<name>.json`; it is documented in
-[publisher metadata](publisher-metadata.md). Contributor credit never grants claim authority.
+[publisher metadata](publisher-metadata.md). A credit may also carry a public profile: a short
+description, an organization name, and website, LinkedIn, and X links. Contributor credit and that
+profile never grant claim authority.
 
 Required CI verifies public descriptors against the committed source before generating runtime
 files, so a missing or stale record fails the original contribution PR. After merges, the existing
@@ -234,8 +236,10 @@ Community command extensions remain **external** and off until a local administr
 them on a device. A source merge is followed by the normal release and installed-platform
 qualification; local compilation or an offline fixture pass does not establish release availability.
 
-For a public publisher profile, follow [publisher metadata](publisher-metadata.md). Optional
-listing sidecars carry the separately reviewed `maintainerGithubIds` mapping. The post-merge
-claim notice can direct newly accepted claimants to Extension Studio, but PR authorship and
-opening an onboarding link do not grant a claim. Profile management never promotes runtime
-trust, activates protection, or implies upstream ownership.
+For a public publisher profile, follow [publisher metadata](publisher-metadata.md). The
+verified PR that first introduces an external contribution establishes its initial
+claimant automatically. The post-merge claim notice links that contributor to Extension
+Studio; no separate listing PR is required. Optional listing sidecars carry public
+presentation and reviewed authority overrides. Later fixes and onboarding links cannot
+grant ownership. Profile management never promotes runtime trust, activates protection,
+or implies upstream ownership.

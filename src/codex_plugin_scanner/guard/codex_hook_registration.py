@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
@@ -13,10 +14,12 @@ from .codex_hook_command_line import (
     hook_token_name,
     plain_json_hook_argv,
 )
+from .codex_hook_compatibility import NATIVE_CODEX_HOOK_COMMAND
+from .codex_hook_events import MANAGED_CODEX_HOOK_EVENTS
 from .codex_hook_file_integrity import split_hook_command
-from .codex_hook_foreign_groups import is_foreign_guard_codex_hook_group, prune_foreign_guard_codex_hook_groups
-from .codex_hook_manifest import MANAGED_CODEX_HOOK_EVENTS
 from .codex_hook_owner_commands import has_codex_harness_tokens, python_codex_hook_command
+from .codex_hook_owner_message import owner_conflict_message
+from .codex_hook_self_binding import codex_hook_binds_guard_home
 from .frozen_runtime_commands import frozen_codex_bridge_tokens_are_live
 
 
@@ -153,10 +156,23 @@ _LIVE_OWNED_FALLBACK_REASONS = frozenset(
 )
 
 
+def _native_bridge_payload(tokens: Sequence[str]) -> Sequence[str] | None:
+    """The Python bridge argv a native ``codex-hook-bridge`` launcher delegates to."""
+    if len(tokens) > 2 and tokens[1] == NATIVE_CODEX_HOOK_COMMAND:
+        return tokens[2:]
+    return None
+
+
 def _is_live_guard_codex_hook_command(command: str, *, windows: bool | None = None) -> bool:
-    tokens = hook_command_tokens(command, windows=windows)
+    return _live_guard_codex_hook_tokens(hook_command_tokens(command, windows=windows), windows=windows)
+
+
+def _live_guard_codex_hook_tokens(tokens: Sequence[str], *, windows: bool | None) -> bool:
     if not tokens:
         return False
+    native_payload = _native_bridge_payload(tokens)
+    if native_payload is not None:
+        return _live_guard_codex_hook_tokens(native_payload, windows=windows)
     first_name = hook_token_name(tokens[0], windows=windows)
     first = first_name.lower()
     rest = tokens[1:]
@@ -181,10 +197,51 @@ def _is_live_guard_codex_hook_command(command: str, *, windows: bool | None = No
     return False
 
 
-def require_codex_hook_owner(command: str, *, ownership: str, windows: bool | None = None) -> None:
+def _hook_program_candidates(tokens: Sequence[str], *, windows: bool | None) -> list[str]:
+    candidates = [tokens[0]]
+    native_payload = _native_bridge_payload(tokens)
+    if native_payload is not None:
+        return [*candidates, *_hook_program_candidates(native_payload, windows=windows)]
+    payload = _skip_leading_flags(tokens[1:])
+    if payload and hook_token_name(payload[0], windows=windows) == "codex_daemon_hook_bridge.py":
+        candidates.append(payload[0])
+    return candidates
+
+
+def missing_guard_hook_program(command: str, *, windows: bool | None = None) -> str | None:
+    """Return the absolute launcher or bridge path a Guard hook needs that no longer exists.
+
+    Codex cannot start such a handler, so it gives no protection. Bare names
+    resolve through PATH at launch time and are not checked here.
+    """
+    if hook_commands_use_windows_syntax(windows) != (os.name == "nt"):
+        return None
+    if not _is_live_guard_codex_hook_command(command, windows=windows):
+        return None
+    for candidate in _hook_program_candidates(hook_command_tokens(command, windows=windows), windows=windows):
+        path = Path(candidate)
+        if path.is_absolute() and not path.exists():
+            return candidate
+    return None
+
+
+def require_codex_hook_owner(
+    command: str,
+    *,
+    ownership: str,
+    windows: bool | None = None,
+    coordinate: str | None = None,
+    source_path: str | None = None,
+) -> None:
     """Reject competing Guard handlers without silently adopting or deleting them.
 
     Launcher syntax is conflict evidence, never proof of a live managed bridge.
+    A handler whose program sits inside a root this install owns is claimed
+    before it ever reaches here; see :mod:`.codex_hook_self_binding`. What is
+    left is a handler Guard genuinely cannot speak for, so the message has to
+    carry everything the person needs to settle it themselves: where the
+    handler is, what it runs, that Guard changed nothing, and the one edit
+    that clears it.
     """
     tokens = hook_command_tokens(command, windows=windows)
     python_launcher = bool(tokens and hook_token_name(tokens[0], windows=windows).lower().startswith("python"))
@@ -195,8 +252,12 @@ def require_codex_hook_owner(command: str, *, ownership: str, windows: bool | No
     )
     if ownership == "unmanaged" and guard_hook:
         raise RuntimeError(
-            "codex_hook_owner_conflict: An existing Codex Guard handler has no verified ownership binding. "
-            "Resolve its installation owner before retrying install; existing hooks have been preserved."
+            owner_conflict_message(
+                command,
+                missing=missing_guard_hook_program(command, windows=windows),
+                coordinate=coordinate,
+                source_path=source_path,
+            )
         )
 
 
@@ -229,7 +290,13 @@ def _group_has_active_guard_handler(
         return (
             isinstance(command, str)
             and _is_live_guard_codex_hook_command(command, windows=windows)
-            and (not require_launchable or hook_command_launchable(command, windows=windows))
+            and (
+                not require_launchable
+                or (
+                    hook_command_launchable(command, windows=windows)
+                    and missing_guard_hook_program(command, windows=windows) is None
+                )
+            )
         )
 
     handlers = group.get("hooks")
@@ -294,25 +361,39 @@ def install_managed_codex_hook_groups(
     managed_groups: Mapping[str, dict[str, object]],
     *,
     current_guard_home: Path,
+    current_package_root: Path | None = None,
 ) -> None:
-    """Append after authenticated and explicitly adopted bindings are removed.
+    """Append after authenticated, adopted and self-bound bindings are removed.
 
-    Remaining Guard handlers have no proven owner; matching command syntax
-    alone cannot authorize their replacement or duplication.
+    A remaining Guard handler bound to ``current_guard_home`` - naming it, and
+    running a program inside a root this install controls - is an earlier
+    generation of this same installation, which a reinstall may replace. Any
+    other Guard handler has no proven owner, and matching command syntax alone
+    cannot authorize replacing or duplicating it.
     """
     for event_name in managed_groups:
         existing = hooks.get(event_name)
-        for group in existing if isinstance(existing, list) else []:
+        for group_index, group in enumerate(existing if isinstance(existing, list) else []):
             if not isinstance(group, Mapping) or not _hook_entry_is_active(group):
                 continue
             handlers = group.get("hooks")
-            for handler in handlers if isinstance(handlers, list) else [group]:
+            for handler_index, handler in enumerate(handlers if isinstance(handlers, list) else [group]):
                 if (
                     isinstance(handler, Mapping)
                     and _hook_entry_is_active(handler)
                     and isinstance((command := handler.get("command")), str)
                 ):
-                    require_codex_hook_owner(command, ownership="unmanaged")
+                    require_codex_hook_owner(
+                        command,
+                        ownership=(
+                            "self_install_binding"
+                            if codex_hook_binds_guard_home(
+                                command, current_guard_home, package_root=current_package_root
+                            )
+                            else "unmanaged"
+                        ),
+                        coordinate=f"{event_name}/group[{group_index}]/handler[{handler_index}]",
+                    )
     for event_name, managed_group in managed_groups.items():
         existing = hooks.get(event_name)
         hooks[event_name] = [
@@ -402,11 +483,10 @@ __all__ = [
     "finalize_codex_doctor_setup_status",
     "finalize_codex_doctor_warnings",
     "install_managed_codex_hook_groups",
-    "is_foreign_guard_codex_hook_group",
     "live_guard_codex_hooks_intercept",
     "live_owned_codex_event_matches",
+    "missing_guard_hook_program",
     "overlay_live_owned_event_matches",
-    "prune_foreign_guard_codex_hook_groups",
     "remove_manifest_bound_hook_events",
     "require_codex_hook_owner",
 ]

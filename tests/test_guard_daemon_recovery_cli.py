@@ -62,11 +62,7 @@ def _snapshot(operation_id: uuid.UUID, *, phase: str = "complete") -> dict[str, 
         "service": "ready" if terminal else "unknown",
         "protection": "verified" if terminal else "unknown",
         "requiresHumanAction": not terminal,
-        "checks": (
-            [{"id": "protection_health", "result": "pass", "reasonCode": "healthy"}]
-            if terminal
-            else []
-        ),
+        "checks": ([{"id": "protection_health", "result": "pass", "reasonCode": "healthy"}] if terminal else []),
     }
 
 
@@ -335,9 +331,7 @@ def test_restart_cli_requires_verified_protection_for_success(
         custom_hooks = replace(
             hooks,
             load_state=lambda _home: {"state": "fixture"},
-            inspect_service=lambda _home, _state: ServiceInspection(
-                "ready", "healthy", identity, True, True, True
-            ),
+            inspect_service=lambda _home, _state: ServiceInspection("ready", "healthy", identity, True, True, True),
             protection_posture=lambda _home: "on",
             update_busy=lambda _home: False,
             recovery_lock=lambda *_args: nullcontext(),
@@ -345,9 +339,7 @@ def test_restart_cli_requires_verified_protection_for_success(
             stop_process=lambda *_args: mutations.append("stop"),
             start_process=lambda *_args: mutations.append("start"),
             verify_ready=lambda _home, _identity, _remaining: ReadyResult(True, identity),
-            protection_health=lambda _home, _identity, _remaining: ProtectionResult(
-                protection_state, "unknown"
-            ),
+            protection_health=lambda _home, _identity, _remaining: ProtectionResult(protection_state, "unknown"),
         )
         return UserRecoveryCoordinator(recovery_home, home_dir=home_dir, hooks=custom_hooks)
 
@@ -450,9 +442,7 @@ def test_tampered_receipt_fails_closed_before_a_replayed_mutation(
     assert counts[str(home.resolve())] == 0
 
 
-def test_receipt_copied_to_another_guard_home_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_receipt_copied_to_another_guard_home_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     counts: dict[str, int] = {}
     _install_counting_recovery_coordinator(monkeypatch, counts)
     home_a = tmp_path / "home-a"
@@ -680,9 +670,7 @@ def test_concurrent_cli_requests_share_one_home_mutation(
     request_b = request_a if same_request else uuid.UUID("37373737-3737-4737-8737-373737373737")
     results: dict[str, int] = {}
 
-    first = threading.Thread(
-        target=lambda: results.setdefault("first", _dispatch_authorized_restart(home, request_a))
-    )
+    first = threading.Thread(target=lambda: results.setdefault("first", _dispatch_authorized_restart(home, request_a)))
     second = threading.Thread(
         target=lambda: results.setdefault("second", _dispatch_authorized_restart(home, request_b))
     )
@@ -899,9 +887,7 @@ def test_concurrent_cli_processes_do_not_replay_a_home_mutation(tmp_path: Path) 
                 process.wait(timeout=5)
 
 
-def test_completed_replay_wins_over_a_different_active_request(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_completed_replay_wins_over_a_different_active_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     counts: dict[str, int] = {}
     entered = threading.Event()
     release = threading.Event()
@@ -1007,9 +993,7 @@ def test_recovery_stdin_rejects_conflicting_or_unbounded_proof(monkeypatch: obje
 
 
 @pytest.mark.parametrize("payload", [b"", b"not-json", b"{}", b'{"password":null,"totpCode":null}'])
-def test_recovery_stdin_rejects_missing_or_malformed_proof(
-    monkeypatch: object, payload: bytes
-) -> None:
+def test_recovery_stdin_rejects_missing_or_malformed_proof(monkeypatch: object, payload: bytes) -> None:
     _proof_stdin(monkeypatch, payload)
     with pytest.raises(ApprovalGateError):
         consume_desktop_lifecycle_stdin(totp_enabled=False)

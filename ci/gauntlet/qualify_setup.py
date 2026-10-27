@@ -21,14 +21,26 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
+from scripts.release.workspace_opt_profile import render_profile, workspace_member_names
+
 from .fixtures import digest_file, mkdir_private
 
 REQUIRED_TOOLS = ("git", "uv", "bun", "npm", "rg", "curl")
+DEV_WHEEL_MARKER = "HOL_GUARD_DEV_WHEEL"
+SIZE_CHECK_MARKER = "check_wheel_size.py"
+DEV_WHEEL_ENV = {
+    "CARGO_PROFILE_RELEASE_LTO": "false",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    DEV_WHEEL_MARKER: "1",
+}
+WHEEL_BUILD_SCRIPT = "scripts/ci/build-native-wheel-macos.sh"
 GNU_SED_DIRS = (
     Path("/opt/homebrew/opt/gnu-sed/libexec/gnubin"),
     Path("/usr/local/opt/gnu-sed/libexec/gnubin"),
 )
 LOCK_DIR = "ci/pi-exact-continuation"
+# The local Linux wheel is never published.
+LINUX_LOCAL_TAG = "linux_x86_64"
 
 
 def _reap_group(process: subprocess.Popen[Any]) -> None:
@@ -230,20 +242,81 @@ def ensure_sdk(cache_root: Path, repo: Path, sha: str, log: Path) -> dict[str, A
     return {"root": str(root), "lock_sha256": lock_digest, "omp_version": pinned}
 
 
-def macos_platform() -> tuple[str, str, str]:
-    """Map this host to the CI wheel's platform tag, cargo target and deployment target."""
-    if sys.platform != "darwin":
-        raise RuntimeError("in-place wheel builds are macOS-only; pass --wheel on this platform")
+def host_platform() -> tuple[str, str, str]:
+    """Map this host to its wheel platform tag, cargo target and macOS deployment target.
+
+    Linux builds the host's glibc wheel for local runs; the published Linux
+    wheel is the static musl build from the nightly workflow, not this one.
+    """
     arch = platform.machine()
-    if arch == "arm64":
-        return "macosx_11_0_arm64", "aarch64-apple-darwin", "11.0"
-    if arch == "x86_64":
-        return "macosx_13_0_x86_64", "x86_64-apple-darwin", "13.0"
-    raise RuntimeError(f"unsupported macOS architecture: {arch}")
+    if sys.platform == "darwin":
+        if arch == "arm64":
+            return "macosx_11_0_arm64", "aarch64-apple-darwin", "11.0"
+        if arch == "x86_64":
+            return "macosx_13_0_x86_64", "x86_64-apple-darwin", "13.0"
+        raise RuntimeError(f"unsupported macOS architecture: {arch}")
+    if sys.platform.startswith("linux") and arch == "x86_64":
+        return LINUX_LOCAL_TAG, "x86_64-unknown-linux-gnu", ""
+    raise RuntimeError("in-place wheel builds support macOS and Linux x86_64; pass --wheel on this platform")
 
 
-def _cached_wheel(store: Path) -> dict[str, Any] | None:
-    """Reuse a cached wheel only when its recorded digest matches its bytes."""
+def _dev_profile_supported(worktree: Path) -> bool:
+    """Whether the checked-out candidate's wheel script accepts the dev-wheel marker."""
+    return DEV_WHEEL_MARKER in (worktree / WHEEL_BUILD_SCRIPT).read_text(encoding="utf-8", errors="replace")
+
+
+def _write_dev_cargo_config(worktree: Path, *, env: dict[str, str] | None = None, runner=subprocess.run) -> None:
+    """Pin workspace crates to opt-level 0; dependencies keep their optimization level."""
+    result = runner(
+        [
+            "cargo",
+            "metadata",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "--no-deps",
+            "--format-version",
+            "1",
+        ],
+        cwd=worktree,
+        env=env or os.environ,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode:
+        raise RuntimeError("cargo metadata failed: " + result.stderr.strip()[:400])
+    metadata = json.loads(result.stdout)
+    try:
+        names = workspace_member_names(metadata)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    config = worktree / ".cargo" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(render_profile(names, "0"), encoding="utf-8")
+
+
+RELEASE_ASSETS_DIRECTORY = "release-assets"
+ASSET_OUTPUT_MARKER = "HOL_GUARD_BUNDLE_ASSET_OUTPUT"
+PACK_BUNDLE_SCRIPT = "scripts/command_pack_bundle_build.py"
+
+
+def _exported_assets(store: Path) -> Path | None:
+    """The cached pack export, when the build actually wrote one."""
+    assets = store / RELEASE_ASSETS_DIRECTORY
+    return assets if assets.is_dir() else None
+
+
+def _exports_release_assets(repo: Path, sha: str) -> bool:
+    """Whether this candidate's pack build can export its assets for us."""
+    try:
+        return ASSET_OUTPUT_MARKER.encode() in git_show(repo, sha, PACK_BUNDLE_SCRIPT)
+    except subprocess.SubprocessError:
+        # A candidate from before the pack bundler has nothing to export.
+        return False
+
+
+def _cached_wheel(store: Path, *, assets_required: bool) -> dict[str, Any] | None:
+    """Reuse a cached wheel only when its digest matches and its packs are present."""
     wheels = list(store.glob("*.whl"))
     digest_record = store / "wheel.sha256"
     if len(wheels) != 1 or not digest_record.is_file():
@@ -251,10 +324,31 @@ def _cached_wheel(store: Path) -> dict[str, Any] | None:
     digest = digest_file(wheels[0])
     if digest_record.read_text(encoding="utf-8").strip() != digest:
         return None
-    return {"path": str(wheels[0]), "sha256": digest, "cached": True}
+    assets = _exported_assets(store)
+    if assets_required and assets is None:
+        # A cache filled before the export existed would otherwise send the
+        # extension-control cases to GitHub for an unreleased candidate.
+        return None
+    return {
+        "path": str(wheels[0]),
+        "sha256": digest,
+        "cached": True,
+        "release_assets": str(assets) if assets is not None else None,
+    }
 
 
-def _build_wheel(store: Path, repo: Path, sha: str, tag: str, target: str, deployment: str, run_root: Path) -> None:
+def _build_wheel(
+    store: Path,
+    repo: Path,
+    sha: str,
+    tag: str,
+    target: str,
+    deployment: str,
+    run_root: Path,
+    profile: str,
+    *,
+    assets_required: bool,
+) -> None:
     """Build the tested commit's wheel in the persistent warm worktree."""
     cargo = Path.home() / ".cargo" / "bin"
     if shutil.which("cargo") is None and not (cargo / "cargo").is_file():
@@ -265,7 +359,7 @@ def _build_wheel(store: Path, repo: Path, sha: str, tag: str, target: str, deplo
     setup_log = run_root / "logs" / "setup.log"
     git_env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1"}
     with file_lock(cache_root / "locks" / "build.lock"):
-        cached = _cached_wheel(store)
+        cached = _cached_wheel(store, assets_required=assets_required)
         if cached is not None:
             return
         print("qualify: building wheel (cold builds take several minutes)", file=sys.stderr, flush=True)
@@ -292,16 +386,35 @@ def _build_wheel(store: Path, repo: Path, sha: str, tag: str, target: str, deplo
             env=env,
             log=setup_log,
         )
+        if profile == "dev":
+            if not _dev_profile_supported(worktree):
+                raise RuntimeError("candidate wheel build script does not support the development profile")
+        else:
+            for name in DEV_WHEEL_ENV:
+                env.pop(name, None)
+            stale_config = worktree / ".cargo" / "config.toml"
+            if stale_config.exists():
+                stale_config.unlink()
+        # The candidate's optional packs, served to extension-control cases
+        # before their extension-data release exists.
+        assets = store / RELEASE_ASSETS_DIRECTORY
+        shutil.rmtree(assets, ignore_errors=True)
         build_env = {
             **env,
+            "HOL_GUARD_BUNDLE_ASSET_OUTPUT": str(assets),
             "HOL_GUARD_BUILD_SHA": sha,
             "PLATFORM_TAG": tag,
             "TARGET": target,
-            "MACOSX_DEPLOYMENT_TARGET": deployment,
             "PATH": os.pathsep.join(
                 [str(worktree / ".venv" / "bin"), str(cargo) if cargo.is_dir() else "", env.get("PATH", "")]
             ).strip(os.pathsep),
         }
+        if deployment:
+            build_env["MACOSX_DEPLOYMENT_TARGET"] = deployment
+        if profile == "dev":
+            build_env.update(DEV_WHEEL_ENV)
+            # Same PATH as the build, so a cargo that lives only under ~/.cargo/bin is found.
+            _write_dev_cargo_config(worktree, env=build_env)
         # nice keeps a cold Rust build from starving live Gauntlet cases on this host.
         run_logged(
             ["nice", "-n", "10", "bash", "scripts/ci/build-native-wheel-macos.sh"],
@@ -320,20 +433,57 @@ def _build_wheel(store: Path, repo: Path, sha: str, tag: str, target: str, deplo
 
 
 def ensure_wheel(
-    cache_root: Path, repo: Path, sha: str, run_root: Path, *, wheel: Path | None = None
+    cache_root: Path,
+    repo: Path,
+    sha: str,
+    run_root: Path,
+    *,
+    wheel: Path | None = None,
+    release_assets: Path | None = None,
+    release_profile: bool = False,
 ) -> dict[str, Any]:
     """The tested commit's platform wheel: supplied, cache-hit, or built under one host lock."""
+    assets_required = _exports_release_assets(repo, sha)
     if wheel is not None:
-        return {"path": str(wheel), "sha256": digest_file(wheel), "cached": False}
-    tag, target, deployment = macos_platform()
+        if release_assets is None:
+            if assets_required:
+                raise RuntimeError(
+                    "this candidate exports its optional command packs, so --wheel also needs "
+                    "--wheel-release-assets naming the directory that build exported"
+                )
+        elif not release_assets.is_dir():
+            raise RuntimeError(f"--wheel-release-assets is not a directory: {release_assets}")
+        return {
+            "path": str(wheel),
+            "sha256": digest_file(wheel),
+            "cached": False,
+            "profile": "supplied",
+            "release_assets": str(release_assets) if release_assets is not None else None,
+        }
+    tag, target, deployment = host_platform()
+    profile = "release" if release_profile else "dev"
+    if profile == "dev" and DEV_WHEEL_MARKER.encode() not in git_show(repo, sha, WHEEL_BUILD_SCRIPT):
+        # Candidates older than the dev-profile switch build the release profile.
+        profile = "release"
+    if (
+        profile == "release"
+        and tag == LINUX_LOCAL_TAG
+        and SIZE_CHECK_MARKER.encode() in git_show(repo, sha, WHEEL_BUILD_SCRIPT)
+    ):
+        # A candidate from before the size check was removed still runs it, and
+        # its budgets have no local Linux entry. Refuse before the build, not after.
+        raise RuntimeError(
+            "this candidate's wheel script runs the published size check, which has no budget for the "
+            "local linux_x86_64 wheel; build the development profile or pass --wheel"
+        )
     private_dir(cache_root / "wheels", tighten=driver_owned(cache_root / "wheels"))
-    store = cache_root / "wheels" / f"{sha}-{tag}"
+    store = cache_root / "wheels" / f"{sha}-{tag}{'-dev' if profile == 'dev' else ''}"
     store.mkdir(parents=True, exist_ok=True)
-    cached = _cached_wheel(store)
+    cached = _cached_wheel(store, assets_required=assets_required)
     if cached is not None:
-        return cached
-    _build_wheel(store, repo, sha, tag, target, deployment, run_root)
-    cached = _cached_wheel(store)
+        return {**cached, "profile": profile}
+    _build_wheel(store, repo, sha, tag, target, deployment, run_root, profile, assets_required=assets_required)
+    cached = _cached_wheel(store, assets_required=assets_required)
     if cached is None:
         raise RuntimeError("native wheel build produced no verifiable wheel")
-    return {**cached, "cached": False}
+    return {**cached, "cached": False, "profile": profile}

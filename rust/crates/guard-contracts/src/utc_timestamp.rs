@@ -106,9 +106,13 @@ fn parse_iso8601(raw: &str) -> Option<Parsed> {
             if s.get(at) == Some(&b'.') {
                 at += 1;
                 let frac_start = at;
+                // Only the first nine digits (nanoseconds) matter; later digits
+                // are validated but never accumulated, so any length is safe.
                 let mut frac: u64 = 0;
                 while at < s.len() && s[at].is_ascii_digit() {
-                    frac = frac * 10 + u64::from(s[at] - b'0');
+                    if at - frac_start < 9 {
+                        frac = frac * 10 + u64::from(s[at] - b'0');
+                    }
                     at += 1;
                 }
                 let digits = at - frac_start;
@@ -116,12 +120,11 @@ fn parse_iso8601(raw: &str) -> Option<Parsed> {
                     return None;
                 }
                 // Truncate/pad to nanoseconds (9 digits).
-                let ns = if digits >= 9 {
-                    (frac / 10u64.pow(digits as u32 - 9)) as u32
+                fraction_ns = if digits >= 9 {
+                    frac as u32
                 } else {
                     (frac * 10u64.pow(9 - digits as u32)) as u32
                 };
-                fraction_ns = ns;
             }
         }
         // Timezone.
@@ -189,6 +192,12 @@ pub fn sqlite_julianday(value: &str) -> Option<f64> {
 pub fn utc_timestamp_micros(value: &str) -> Option<i64> {
     let parsed = parse_iso8601(value)?;
     let days = days_from_civil(parsed.year, parsed.month, parsed.day);
+    // `days_from_civil` normalizes impossible dates (31 February becomes
+    // early March). A lease expiry must not gain that extra time: the
+    // previous parser rejected a civil date that does not round-trip.
+    if parsed.year == 0 || civil_from_days(days) != (parsed.year, parsed.month, parsed.day) {
+        return None;
+    }
     let mut micros = days
         .checked_mul(86_400)?
         .checked_add(

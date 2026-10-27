@@ -12,10 +12,15 @@ if TYPE_CHECKING:
     from .commands_support_workspace import _resolve_guard_workspace
 
 
-from ..native_runtime import native_mode
 from ._commands_shared import *
-from .commands_lifecycle_gate import enforce_lifecycle_gate
+from .approval_gate_prompt import print_approval_gate_error
+from .commands_lifecycle_gate import (
+    enforce_lifecycle_gate,
+    explain_missing_native_runtime,
+    restore_missing_native_runtime,
+)
 from .commands_parser_helpers import *
+from .inventory_list_commands import is_inventory_list_command, run_inventory_list_command
 
 _EARLY_HANDLERS = {
     "mdm": "_run_guard_mdm_command",
@@ -26,6 +31,13 @@ _EARLY_HANDLERS = {
     "preflight": "_run_guard_safe_preflight_command",
     "mcp": "_run_guard_mcp_command",
 }
+
+# Commands that stand up, repair or report this machine's protection. Each is
+# a user-invoked one-shot, so it values arriving at an answer over arriving
+# quickly; see `bind_context_digest_lifecycle_budget`.
+_NATIVE_LIFECYCLE_COMMANDS = frozenset(
+    {"apps", "bootstrap", "doctor", "init", "install", "repair", "uninstall", "update"}
+)
 
 _PRESTORE_HANDLERS = {
     "daemon": "_run_guard_daemon_command",
@@ -56,6 +68,8 @@ _COMMON_HANDLERS = {
     "package-shims": "_run_guard_package_shims_command",
     "contained-write": "_run_guard_contained_write_command",
     "execute-contained-test": "_run_guard_execute_contained_test_command",
+    "execute-bound-bash": "_run_guard_execute_bound_bash_command",
+    "ack-bound-bash": "_run_guard_ack_bound_bash_command",
     "run": "_run_guard_run_command",
     "run-shim": "_run_guard_run_command",
     "diff": "_run_guard_diff_command",
@@ -91,6 +105,8 @@ _COMMON_HANDLERS = {
     "cloud-review": "_run_guard_cloud_review_command",
     "daemon": "_run_guard_daemon_command",
     "hook": "_run_guard_hook_command",
+    "hooks": "_run_guard_hooks_command",
+    "repair": "_run_guard_repair_command",
 }
 
 
@@ -148,13 +164,64 @@ def run_guard_command(
     output_stream: TextIO | None = None,
     error_stream: TextIO | None = None,
 ) -> int:
-    "Execute a Guard subcommand."
+    """Execute a Guard subcommand under the digest budget it is entitled to.
 
-    if args.guard_command == "extensions":
+    Lifecycle commands install, repair or report protection: each runs once at
+    a keystroke, each pays for a cold native runtime nothing else pays for, and
+    none of them has a fallback when the answer does not arrive in time.  A
+    slow first install has to stay an install.  The floor is bound here, ahead
+    of every dispatch below, because an install reaches native authority long
+    before it resolves a guard home, and it is released here, because a process
+    that dispatches more than one command must not run enforcement on it.
+    """
+
+    if args.guard_command not in _NATIVE_LIFECYCLE_COMMANDS:
+        return _dispatch_guard_command(
+            args,
+            input_text=input_text,
+            output_stream=output_stream,
+            error_stream=error_stream,
+        )
+    from ..native_context_budget import bind_context_digest_lifecycle_budget, reset_context_digest_budget
+
+    token = bind_context_digest_lifecycle_budget()
+    try:
+        return _dispatch_guard_command(
+            args,
+            input_text=input_text,
+            output_stream=output_stream,
+            error_stream=error_stream,
+        )
+    finally:
+        reset_context_digest_budget(token)
+
+
+def _dispatch_guard_command(
+    args: argparse.Namespace,
+    *,
+    input_text: str | None = None,
+    output_stream: TextIO | None = None,
+    error_stream: TextIO | None = None,
+) -> int:
+    "Route one Guard subcommand to its handler."
+
+    inventory_list = is_inventory_list_command(args)
+    if args.guard_command == "extensions" and not inventory_list:
         from .extension_builder_commands import run_extension_builder_command
 
         return run_extension_builder_command(args, output_stream=output_stream)
-    handler = _resolve_guard_handler(_EARLY_HANDLERS, args.guard_command)
+    if args.guard_command == "policy":
+        from .commands_dispatch_policy_dx import FILE_COMMANDS, run_policy_file_command
+
+        if args.policy_command in FILE_COMMANDS:
+            # These read one policy file and need neither a Guard home nor a store, so they run in CI.
+            return _invoke_guard_handler(
+                run_policy_file_command,
+                args,
+                input_text=input_text,
+                output_stream=output_stream,
+            )
+    handler = None if inventory_list else _resolve_guard_handler(_EARLY_HANDLERS, args.guard_command)
     if callable(handler):
         return _invoke_guard_handler(
             handler,
@@ -192,27 +259,38 @@ def run_guard_command(
         home_override_explicit=home_override_explicit,
         workspace_override_explicit=bool(getattr(args, "workspace", None)),
     )
+    if args.guard_command == "runtime":
+        # Read-only: describes executables without starting them and decides nothing.
+        from .runtime_posture_command import run_runtime_posture_command
+
+        return run_runtime_posture_command(args, context=context, output_stream=output_stream)
     if args.guard_command == "doctor" and bool(getattr(args, "incident", False)):
         from .doctor_incident import run_codex_incident_export
 
         return run_codex_incident_export(args, context, output_stream=output_stream)
     try:
-        lifecycle_gate_context = enforce_lifecycle_gate(
-            args,
-            guard_home=guard_home,
-            error_stream=error_stream,
-        )
+        try:
+            lifecycle_gate_context = enforce_lifecycle_gate(
+                args,
+                guard_home=guard_home,
+                error_stream=error_stream,
+            )
+        except ApprovalGateError as error:
+            if not restore_missing_native_runtime(error, context=context, guard_home=guard_home):
+                raise
+            # The authority can answer now; the command still needs the gate's approval.
+            lifecycle_gate_context = enforce_lifecycle_gate(
+                args,
+                guard_home=guard_home,
+                error_stream=error_stream,
+            )
         args._lifecycle_gate_context = lifecycle_gate_context
     except ApprovalGateError as error:
-        payload = approval_gate_cli_payload(error)
-        if bool(getattr(args, "json", False)):
-            print(json.dumps(payload, sort_keys=True), file=output_stream or sys.stdout)
-        else:
-            print(
-                f"Error: {error}",
-                file=error_stream if error_stream is not None else sys.stderr,
-            )
-        return 4
+        return print_approval_gate_error(
+            explain_missing_native_runtime(error),
+            as_json=bool(getattr(args, "json", False)),
+            output_stream=output_stream,
+        )
 
     handler = _resolve_guard_handler(_PRESTORE_HANDLERS, args.guard_command)
     if callable(handler):
@@ -246,7 +324,7 @@ def run_guard_command(
             file=error_stream if error_stream is not None else sys.stderr,
         )
         return 2
-    if args.guard_command == "hook" and native_mode() in {"auto", "force"}:
+    if args.guard_command == "hook":
         # Native hooks receive the raw envelope before any request-time
         # configuration or policy-file read.  HookWorker's startup publisher
         # owns the cached ACKed snapshot; a barrier miss returns fail-safe.
@@ -255,6 +333,10 @@ def run_guard_command(
         config = load_guard_config(guard_home, workspace=workspace)
         config = overlay_synced_guard_policy(config, _synced_policy_payload(store))
 
+    if inventory_list:
+        return _invoke_guard_handler(
+            run_inventory_list_command, args, store=store, context=context, output_stream=output_stream
+        )
     handler = _resolve_guard_handler(_COMMON_HANDLERS, args.guard_command)
     if callable(handler):
         return _invoke_guard_handler(

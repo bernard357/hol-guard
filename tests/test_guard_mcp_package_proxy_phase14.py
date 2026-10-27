@@ -19,18 +19,17 @@ from codex_plugin_scanner.guard.adapters.base import HarnessContext
 from codex_plugin_scanner.guard.approval_scope_support import package_request_runtime_workspace_scope
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.consumer.service import artifact_hash
-from codex_plugin_scanner.guard.local_supply_chain import package_request_policy_hash
+from codex_plugin_scanner.guard.local_supply_chain import evaluate_package_request_artifact, package_request_policy_hash
 from codex_plugin_scanner.guard.mcp_tool_calls import ToolCallDecision
 from codex_plugin_scanner.guard.models import GuardAction, GuardArtifact, PolicyDecision
+from codex_plugin_scanner.guard.native_mcp_proxy_decision import NativeMcpProxyDecisionError, native_package_answer
 from codex_plugin_scanner.guard.package_execution_context import build_package_execution_context
 from codex_plugin_scanner.guard.proxy import runtime_mcp as runtime_mcp_module
 from codex_plugin_scanner.guard.proxy.runtime_mcp import CodexMcpGuardProxy, RuntimeMcpGuardProxy
-from codex_plugin_scanner.guard.runtime.package_intent import (
-    build_package_request_artifact,
-    extract_package_intent_request,
-)
-from codex_plugin_scanner.guard.runtime.supply_chain_package_eval import evaluate_package_request_artifact
+from codex_plugin_scanner.guard.runtime.package_intent_common import build_package_request_artifact
+from codex_plugin_scanner.guard.runtime.package_intent_parser import extract_package_intent_request
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.policy_store_support import resolve_policy
 
 pytestmark = [
     pytest.mark.usefixtures("approval_questionnaire_mode"),
@@ -44,19 +43,39 @@ def _native_package_proxy_home(tmp_path: Path, native_mcp_probe) -> None:
     native_mcp_probe(tmp_path / "guard-home")
 
 
-def test_package_decision_v2_ignores_malformed_reason_items() -> None:
-    evaluation = SimpleNamespace(
-        reasons=("malformed", {"code": "cloud_timeout", "message": "Cloud timed out."}),
-        user_copy=SimpleNamespace(
-            title="Review package request",
-            summary="Current package safety data was unavailable.",
-            harness_message="Review the package request.",
-        ),
+def test_package_decision_v2_ignores_malformed_reason_items(tmp_path: Path) -> None:
+    answer = native_package_answer(
+        "queue_package",
+        tool_name="install_package",
+        server_name="registry",
+        guard_home=tmp_path / "guard-home",
+        policy_action="require-reapproval",
+        evaluation={
+            "reasons": ["malformed", {"code": "cloud_timeout", "message": "Cloud timed out."}],
+            "risk_summary": "Current package safety data was unavailable.",
+            "user_copy": {
+                "title": "Review package request",
+                "summary": "Current package safety data was unavailable.",
+                "harness_message": "Review the package request.",
+            },
+        },
     )
 
-    decision = RuntimeMcpGuardProxy._package_decision_v2(evaluation, "require-reapproval")
-
+    decision = answer["decision_v2"]
     assert [signal["signal_id"] for signal in decision["signals"]] == ["supply-chain.cloud_timeout"]
+    assert decision["user_title"] == "Review package request"
+    assert answer["risk_signals"] == ["", "Cloud timed out."]
+
+
+def test_a_package_answer_the_resident_does_not_render_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(NativeMcpProxyDecisionError):
+        native_package_answer(
+            "terminal_tool",
+            tool_name="install_package",
+            server_name="registry",
+            guard_home=tmp_path / "guard-home",
+            policy_action="allow",
+        )
 
 
 def test_package_resolution_helpers_ignore_malformed_reason_items() -> None:
@@ -320,6 +339,7 @@ def _allow_mcp_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
         "evaluate_tool_call",
         lambda **_kwargs: ToolCallDecision(
             action="allow",
+            policy_action="allow",
             source="heuristic",
             signals=(),
             summary="tool call allowed",
@@ -709,6 +729,7 @@ def test_phase14_runtime_mcp_proxy_rejects_stored_allow_without_workspace_when_c
         "evaluate_tool_call",
         lambda **_kwargs: ToolCallDecision(
             action="allow",
+            policy_action="allow",
             source="policy",
             signals=("tool review",),
             summary="provisionally accepted saved tool approval",
@@ -879,6 +900,7 @@ def test_phase14_runtime_mcp_proxy_preserves_tool_policy_for_package_calls(
         "evaluate_tool_call",
         lambda **_kwargs: ToolCallDecision(
             action="block",
+            policy_action="block",
             source="policy",
             signals=("command_execution",),
             summary="blocked by explicit tool policy",
@@ -937,6 +959,7 @@ def test_phase14_runtime_mcp_proxy_enforces_tool_policy_review_before_package_ro
         "evaluate_tool_call",
         lambda **_kwargs: ToolCallDecision(
             action="review",
+            policy_action="review",
             source="policy",
             signals=("command_execution",),
             summary="review before execution",
@@ -991,6 +1014,7 @@ def test_phase14_runtime_mcp_proxy_enforces_non_policy_review_before_package_rou
         "evaluate_tool_call",
         lambda **_kwargs: ToolCallDecision(
             action="review",
+            policy_action="review",
             source="risk-policy",
             signals=("command_execution",),
             summary="review before execution",
@@ -1112,7 +1136,8 @@ def test_phase14_codex_package_inline_approval_is_remembered(
     assert "error" not in second_result["responses"][2]
     assert len(approvals) == 1
     assert (
-        store.resolve_policy(
+        resolve_policy(
+            store,
             package_artifact.harness,
             package_artifact.artifact_id,
             artifact_hash=package_digest,

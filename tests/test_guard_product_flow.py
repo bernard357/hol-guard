@@ -158,7 +158,7 @@ args = ["workspace-skill.js", "--changed"]
         )
         monkeypatch.setattr(
             store,
-            "resolve_policy",
+            "resolve_policy_decision_lookup_with_memory_pattern",
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("status should not resolve policy")),
         )
 
@@ -744,9 +744,7 @@ args = ["workspace-skill.js", "--changed"]
         assert f"'{guard_home}'" in shim_text
         assert "'--home'" not in shim_text
 
-    def test_guard_status_reports_managed_launch_and_review_queue(
-        self, tmp_path, capsys, native_context_digest: Path
-    ):
+    def test_guard_status_reports_managed_launch_and_review_queue(self, tmp_path, capsys, native_context_digest: Path):
         home_dir = tmp_path / "home"
         workspace_dir = tmp_path / "workspace"
         _build_guard_fixture(home_dir, workspace_dir)
@@ -938,6 +936,7 @@ args = ["workspace-skill.js", "--changed"]
                     "PYTHONPATH": str(runtime_pythonpath),
                     "HOL_GUARD_NATIVE": "force",
                     "HOL_GUARD_NATIVE_BINARY": os.environ["HOL_GUARD_NATIVE_BINARY"],
+                    "HOL_GUARD_CODEX_HOOK_BRIDGE": os.environ["HOL_GUARD_CODEX_HOOK_BRIDGE"],
                 },
                 check=False,
                 timeout=15,

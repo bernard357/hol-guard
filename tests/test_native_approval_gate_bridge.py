@@ -10,6 +10,7 @@ import pytest
 
 from codex_plugin_scanner.guard import native_approval_gate as bridge
 from codex_plugin_scanner.guard.approval_gate import ApprovalGateError
+from codex_plugin_scanner.guard.native_approval_errors import resident_refusal_code
 from codex_plugin_scanner.guard.native_context import _canonical_request_sha256
 
 
@@ -21,7 +22,7 @@ def _provision(monkeypatch: pytest.MonkeyPatch, answer, *, failure_code: str | N
         identity=SimpleNamespace(path=Path("/native"), sha256="sha"),
         capabilities=SimpleNamespace(features=("resident-protocol-v2", "approval-gate-v2")),
     )
-    monkeypatch.setattr(bridge, "native_runtime_status", lambda: status)
+    monkeypatch.setattr(bridge, "native_runtime_status", lambda **_kw: status)
 
     def respond(**kwargs: object) -> bytes | None:
         # A callable answer is built from the request, as the resident binds it.
@@ -121,6 +122,63 @@ def test_provisioned_resident_that_does_not_answer_fails_closed(
     assert caught.value.code == "native_approval_gate_unavailable"
 
 
+class _HostileDiagnosticCode:
+    def __str__(self):
+        raise AssertionError("PRIVATE_PAYLOAD")
+
+    def __hash__(self):
+        raise AssertionError("PRIVATE_PAYLOAD")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize(
+    "code",
+    ["native_client_connect_failed", "native_client_timed_out", "PRIVATE_PAYLOAD", None, _HostileDiagnosticCode()],
+)
+def test_transport_diagnostic_is_opt_in_and_uses_finite_codes(monkeypatch, tmp_path, capsys, enabled, code):
+    _provision(monkeypatch, None)
+    monkeypatch.setattr(bridge, "native_resident_client_failure_code", lambda: code)
+    monkeypatch.setenv("HOL_GUARD_NATIVE_DIAGNOSTIC", "1" if enabled else "0")
+    with pytest.raises(ApprovalGateError) as caught:
+        bridge.approval_gate_native("public_config", tmp_path)
+    assert caught.value.code == "native_approval_gate_unavailable"
+    assert caught.value.status == 503
+    assert str(caught.value) == "The native approval authority did not answer. Retry the approval."
+    expected = (
+        code if type(code) is str and code in {"native_client_connect_failed", "native_client_timed_out"} else "unknown"
+    )
+    assert capsys.readouterr().err == (
+        f"native_approval_gate_transport_unavailable stage=request code={expected}\n" if enabled else ""
+    )
+
+
+def test_python_diagnostic_code_does_not_expand_native_refusal_vocabulary():
+    assert resident_refusal_code({"error": "native_client_timed_out", "retryable": False}) is None
+
+
+@pytest.mark.parametrize(
+    "target", ["native_resident_client_failure_code", "non_production_diagnostic_enabled", "print"]
+)
+def test_transport_diagnostic_errors_preserve_original_failure(monkeypatch, tmp_path, capsys, target):
+    _provision(monkeypatch, None, failure_code="native_client_connect_failed")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_DIAGNOSTIC", "1")
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("PRIVATE_EXCEPTION")
+
+    monkeypatch.setattr(bridge, target, broken, raising=False)
+    with pytest.raises(ApprovalGateError) as caught:
+        bridge.approval_gate_native("public_config", tmp_path)
+    assert caught.value.code == "native_approval_gate_unavailable"
+    assert caught.value.status == 503
+    assert str(caught.value) == "The native approval authority did not answer. Retry the approval."
+    assert capsys.readouterr().err == (
+        "native_approval_gate_transport_unavailable stage=request code=unknown\n"
+        if target == "native_resident_client_failure_code"
+        else ""
+    )
+
+
 def test_envelope_bound_to_another_request_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _provision(
         monkeypatch,
@@ -166,5 +224,28 @@ def test_runtime_without_the_current_approval_gate_capability_is_not_asked(
         identity=SimpleNamespace(path=Path("/native"), sha256="sha"),
         capabilities=SimpleNamespace(features=("resident-protocol-v2", "approval-gate-v1")),
     )
-    monkeypatch.setattr(bridge, "native_runtime_status", lambda: stale)
+    monkeypatch.setattr(bridge, "native_runtime_status", lambda **_kw: stale)
     assert bridge.approval_gate_native("require_approval_decision", tmp_path) is None
+
+
+@pytest.mark.parametrize(("warm", "minimum", "maximum"), [(True, 3.0, 5.5), (False, 13.0, 15.5)])
+def test_cold_resident_gets_a_spawn_allowance_and_a_warm_one_keeps_the_tight_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    warm: bool,
+    minimum: float,
+    maximum: float,
+) -> None:
+    budgets: list[float] = []
+    _provision(monkeypatch, _ok({"grant": None}))
+    answer = _ok({"grant": None})
+
+    def respond(**kwargs: object) -> bytes | None:
+        budgets.append(float(kwargs["deadline_monotonic"]) - bridge.time.monotonic())  # type: ignore[arg-type]
+        return answer(json.loads(kwargs["payload"])["request"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(bridge, "native_resident_client_request", respond)
+    monkeypatch.setattr(bridge, "native_resident_client_ready", lambda *_args, **_kwargs: warm)
+
+    assert bridge.approval_gate_native("require_approval_decision", tmp_path) == {"grant": None}
+    assert minimum <= budgets[0] <= maximum

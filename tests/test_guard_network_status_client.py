@@ -84,8 +84,7 @@ def test_dashboard_session_capabilities_uses_scoped_initialize_then_read(
     assert all(0.0 < value <= 0.5 for value in timeouts)
     assert timeouts[1] <= timeouts[0]
     assert any(
-        isinstance(handler, urllib.request.ProxyHandler) and handler.proxies == {}
-        for handler in opener_handlers
+        isinstance(handler, urllib.request.ProxyHandler) and handler.proxies == {} for handler in opener_handlers
     )
     assert any(
         isinstance(handler, type) and issubclass(handler, urllib.request.HTTPRedirectHandler)

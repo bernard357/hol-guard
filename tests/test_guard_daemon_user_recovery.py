@@ -114,9 +114,7 @@ def _coordinator(
         recovery_lock=recovery_lock or (lambda *_args: nullcontext()),
         start_lock=start_lock or (lambda *_args: nullcontext()),
         stop_process=(
-            None
-            if use_default_stop_process
-            else (stop_process or (lambda _identity, _remaining: StopResult(True)))
+            None if use_default_stop_process else (stop_process or (lambda _identity, _remaining: StopResult(True)))
         ),
         process_dead=process_dead or (lambda _identity: True),
         start_process=start_process or (lambda _home, _remaining: StartResult(True)),
@@ -282,9 +280,7 @@ def test_public_inspection_default_inspector_fails_closed_by_identity_boundary(
             return case != "pid_missing"
 
         @staticmethod
-        def _guard_daemon_pid_command_identity(
-            _pid: int, *, expected_guard_home: Path
-        ) -> bool | None:
+        def _guard_daemon_pid_command_identity(_pid: int, *, expected_guard_home: Path) -> bool | None:
             assert expected_guard_home == guard_home
             if case == "endpoint_conflict":
                 return False
@@ -400,10 +396,10 @@ def test_public_inspection_accepts_validated_mapping_and_check_shapes(tmp_path: 
             "process_running": True,
             "authenticated": True,
             "dashboard_ready": True,
-                "protection": "verified",
-                "checks": [
-                    {"id": "process_identity", "result": "pass", "reasonCode": "healthy"},
-                    {"id": "process_identity", "result": "fail", "reasonCode": "identity_unverified"},
+            "protection": "verified",
+            "checks": [
+                {"id": "process_identity", "result": "pass", "reasonCode": "healthy"},
+                {"id": "process_identity", "result": "fail", "reasonCode": "identity_unverified"},
                 {"id": "not_a_check", "result": "pass", "reasonCode": "healthy"},
                 "malformed",
             ],
@@ -810,9 +806,7 @@ def test_diagnostics_reads_validated_durable_receipt_when_operation_is_not_in_me
 
 
 @pytest.mark.parametrize("receipt_kind", ("non_mapping", "invalid_snapshot", "mismatched_operation"))
-def test_restart_rejects_untrusted_durable_receipt_before_mutation(
-    tmp_path: Path, receipt_kind: str
-) -> None:
+def test_restart_rejects_untrusted_durable_receipt_before_mutation(tmp_path: Path, receipt_kind: str) -> None:
     request_id = "95959595-9595-4595-8595-959595959595"
     if receipt_kind == "non_mapping":
         raw_receipt: object = "corrupt-receipt"
@@ -1366,8 +1360,9 @@ def test_same_generation_session_reconnect_uses_remaining_budget(tmp_path: Path)
         tmp_path,
         ServiceInspection("ready", "healthy", identity, True, True, True),
         active_budget_seconds=0.5,
-        verify_ready=lambda _home, _identity, remaining: observed_remaining.append(remaining)
-        or ReadyResult(True, identity),
+        verify_ready=lambda _home, _identity, remaining: (
+            observed_remaining.append(remaining) or ReadyResult(True, identity)
+        ),
     )
 
     result = coordinator.restart("19191919-1919-4919-8919-191919191919")
@@ -1489,9 +1484,7 @@ def test_default_inspector_session_failure_preserves_healthy_identity(
         guard_home,
         hooks=RecoveryHooks(
             clock=lambda: 100.0,
-            wall_clock=lambda: __import__("datetime").datetime(
-                2026, 9, 20, tzinfo=__import__("datetime").timezone.utc
-            ),
+            wall_clock=lambda: __import__("datetime").datetime(2026, 9, 20, tzinfo=__import__("datetime").timezone.utc),
             load_state=lambda _home: state,
             protection_posture=lambda _home: "on",
             authorize=lambda _home: True,
@@ -1702,9 +1695,7 @@ def test_wrong_process_owner_refuses_stop_at_mutation_boundary(tmp_path: Path) -
     assert "start" not in calls
 
 
-def test_missing_authenticated_os_token_does_not_adopt_reused_pid_generation(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_missing_authenticated_os_token_does_not_adopt_reused_pid_generation(tmp_path: Path, monkeypatch) -> None:
     guard_home = tmp_path / "guard-home"
     identity = ProcessIdentity(43, "generation-state", "runtime-1", guard_home, _current_owner_marker(), None)
     retire_calls: list[dict[str, object]] = []
@@ -1728,9 +1719,7 @@ def test_missing_authenticated_os_token_does_not_adopt_reused_pid_generation(
     assert retire_calls == []
 
 
-def test_target_process_owner_marker_must_match_authenticated_state(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_target_process_owner_marker_must_match_authenticated_state(tmp_path: Path, monkeypatch) -> None:
     identity = _identity(tmp_path / "guard-home", pid=43)
     retire_calls: list[dict[str, object]] = []
 
@@ -1789,9 +1778,7 @@ def test_wrong_runtime_and_home_refuse_stop_before_signal(tmp_path: Path) -> Non
     assert "start" not in calls
 
 
-def test_generation_change_before_escalation_is_rejected_by_stop_boundary(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_generation_change_before_escalation_is_rejected_by_stop_boundary(tmp_path: Path, monkeypatch) -> None:
     guard_home = tmp_path / "guard-home"
     identity = ProcessIdentity(45, "generation-1", "runtime-1", guard_home, _current_owner_marker(), "start-1")
     observed: dict[str, object] = {}
@@ -2156,13 +2143,13 @@ def test_unexpected_mutation_exception_retains_recovery_ownership(
         stop_process=(
             (lambda *_args: fail_after_mutation("stop"))
             if mutation == "stop"
-            else stop_after_mutation if mutation == "start_after_stop" else None
+            else stop_after_mutation
+            if mutation == "start_after_stop"
+            else None
         ),
         process_dead=lambda _identity: False,
         start_process=(
-            (lambda *_args: fail_after_mutation("start"))
-            if mutation in {"start", "start_after_stop"}
-            else None
+            (lambda *_args: fail_after_mutation("start")) if mutation in {"start", "start_after_stop"} else None
         ),
     )
 
@@ -2455,14 +2442,13 @@ def test_stale_read_only_receipt_reconnects_fresh_ready_service(tmp_path: Path) 
             process_dead=lambda _identity: False,
             load_snapshot=lambda _home, phase=phase: _pending_snapshot(phase),
             stop_process=lambda *_args, calls=calls: calls.append("stop") or StopResult(True),
-            start_process=lambda *_args, calls=calls, identity=identity: calls.append("start")
-            or StartResult(True, identity),
+            start_process=lambda *_args, calls=calls, identity=identity: (
+                calls.append("start") or StartResult(True, identity)
+            ),
         )
 
         request_id = (
-            "15151515-1515-4515-8515-151515151515"
-            if phase == "checking"
-            else "16161616-1616-4616-8616-161616161616"
+            "15151515-1515-4515-8515-151515151515" if phase == "checking" else "16161616-1616-4616-8616-161616161616"
         )
         result = coordinator.restart(request_id)
 
@@ -2869,9 +2855,7 @@ def test_unverified_default_start_retains_owner_and_blocks_duplicate_start(tmp_p
 
     hooks = RecoveryHooks(
         clock=lambda: 100.0,
-        wall_clock=lambda: __import__("datetime").datetime(
-            2026, 9, 20, tzinfo=__import__("datetime").timezone.utc
-        ),
+        wall_clock=lambda: __import__("datetime").datetime(2026, 9, 20, tzinfo=__import__("datetime").timezone.utc),
         load_state=lambda _home: None,
         inspect_service=inspect,
         protection_posture=lambda _home: "on",

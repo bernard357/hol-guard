@@ -12,10 +12,14 @@ use std::time::{Duration, Instant};
 
 #[path = "managed_resident_client_stream.rs"]
 mod client_stream;
+#[path = "managed_resident_client_timeout.rs"]
+mod client_timeout_policy;
+pub(crate) use client_timeout_policy::{client_timeout, DAEMON_LIFECYCLE_TIMEOUT_CEILING_MS};
 #[path = "managed_resident_containment.rs"]
 mod containment;
 #[path = "managed_resident_handoff.rs"]
 mod handoff;
+pub(crate) use handoff::answer_shutdown;
 #[path = "managed_resident_lease.rs"]
 mod lease;
 pub(crate) use lease::client_request;
@@ -30,6 +34,14 @@ mod managed_resident_windows;
 #[path = "managed_resident_owner_lock.rs"]
 mod owner_lock;
 pub(crate) use owner_lock::ManagedOwnerLock;
+#[path = "managed_resident_exit.rs"]
+mod exit_record;
+#[path = "resident_private_file.rs"]
+mod private_file;
+#[path = "resident_requested_stop.rs"]
+mod requested_stop;
+#[path = "resident_failure_log.rs"]
+mod resident_failure_log;
 #[path = "resident_state_retirement.rs"]
 mod resident_state_retirement;
 #[path = "resident_restart_budget.rs"]
@@ -144,13 +156,11 @@ fn combine_liveness(
 }
 
 pub(crate) fn stop_managed(state_base: &Path, retire_clients: bool) -> Result<(), String> {
-    // Materialize the current runtime scope even when no resident state is
-    // present.  This keeps the stop command's authenticated, private-home
-    // contract deterministic for callers that use it to initialize a fresh
-    // scope before publishing test or recovery state.
+    // Materialize the private runtime scope even without resident state, so
+    // stop can initialize it before publishing test or recovery state.
     let digest = runtime_digest()?;
-    let _ = state_scope(state_base, &digest)?;
-    let request = br#"{"operation":"shutdown","request":{}}"#;
+    let runtime_scope = state_scope(state_base, &digest)?;
+    let request = handoff::STOP_SHUTDOWN_REQUEST;
     let deadline = Instant::now() + MANAGED_STOP_TIMEOUT;
     let Some((scope, digest, state)) = discover_home_states_prefer(state_base, Some(&digest))?
         .into_iter()
@@ -159,6 +169,7 @@ pub(crate) fn stop_managed(state_base: &Path, retire_clients: bool) -> Result<()
         if retire_clients {
             lease::retire_clients_for_update(state_base, &digest, deadline)?;
         }
+        exit_record::wait_for_scope_quiesce(&runtime_scope, deadline);
         return Err("native_resident_stop_unavailable".to_owned());
     };
     if retire_clients {
@@ -169,7 +180,7 @@ pub(crate) fn stop_managed(state_base: &Path, retire_clients: bool) -> Result<()
     let identity = crate::resident_client::ExpectedProcessIdentity {
         process_id: state.process_id,
         start_marker: &state.process_start_marker,
-        digest: Some(&state.runtime_sha256),
+        runtime: crate::resident_client::ExpectedRuntime::Digest(&state.runtime_sha256),
     };
     if crate::resident_client::send_request_for_digest(
         &state.transport,
@@ -182,13 +193,31 @@ pub(crate) fn stop_managed(state_base: &Path, retire_clients: bool) -> Result<()
     .is_ok()
     {
         containment::wait_for_stop_containment(&scope, &digest, deadline, &process_ids)?;
-        let _ = restart_budget::clear(&scope);
+        // The children are gone; clear the budget only under the startup
+        // lock, since a start that got there first has already charged it.
+        let startup =
+            exit_record::quiesce_under_startup_lock(state_base, &digest, &scope, deadline)?;
+        if startup.is_some() {
+            let _ = restart_budget::clear(&scope);
+        }
         return Ok(());
     }
     // Clean up after a resident that died without a shutdown request, so
     // the next stop reports an empty scope instead of a stale generation.
     containment::retire_exited_states(&scope, &digest)?;
+    // A resident that already exited on its own can leave its supervisor
+    // still writing in the scope; "nothing to stop" must not race it.
+    exit_record::wait_for_scope_quiesce(&scope, deadline);
     Err("native_resident_stop_unavailable".to_owned())
+}
+
+/// Forget the crash-loop history of this runtime's resident so the next
+/// request may start it immediately.  This only lifts the restart pacing; the
+/// resident itself is still started by the normal authenticated client path.
+pub(crate) fn reset_restart_budget(state_base: &Path) -> Result<(), String> {
+    let digest = runtime_digest()?;
+    let scope = state_scope(state_base, &digest)?;
+    restart_budget::clear(&scope)
 }
 
 pub(crate) fn serve_managed(
@@ -199,17 +228,19 @@ pub(crate) fn serve_managed(
 ) -> Result<(), String> {
     MANAGED_SHUTDOWN_REQUESTED.store(false, Ordering::Release);
     let startup_started = crate::resident_diagnostics::enabled().then(Instant::now);
+    // Decode the packaged command program while the executable self-check
+    // runs. Policy admission waits on the same OnceLock, so nothing uses the
+    // program before the identity check below has passed.
+    thread::spawn(|| {
+        let _ = guard_command::native_command_program::packaged_command_program();
+    });
     if generation == 0 || owner_process_id == 0 || runtime_digest()? != expected_digest {
         return Err("native_resident_runtime_identity_mismatch".to_owned());
     }
     let owner_start_marker = process_start_marker(owner_process_id)?;
     let scope = state_scope(state_base, expected_digest)?;
     let owner_lock = acquire_managed_owner_lock(state_base)?;
-    // Build the immutable catalog read snapshot off the request path so the
-    // first catalog_read does not pay for it; failures surface on that read.
-    thread::spawn(|| {
-        let _ = guard_command::catalog_read_model::packaged_catalog_read_snapshot();
-    });
+    // Discovery metadata is loaded in bounded pages only when requested.
     // Initialize before fallible policy startup so every client can see a
     // resident still starting. This guard drops before owner_lock on all exits.
     let _diagnostic_lifetime =
@@ -244,7 +275,7 @@ pub(crate) fn serve_managed(
         );
     }
     let (policy_store, token, owner_alive) = startup?;
-    if cfg!(unix) {
+    let served = if cfg!(unix) {
         managed_resident_transport::serve_unix_managed(
             (&scope, &owner_lock),
             policy_store,
@@ -264,7 +295,17 @@ pub(crate) fn serve_managed(
             token,
             owner_alive,
         )
+    };
+    // The serve loops end on a `shutdown` operation by returning, so a
+    // requested stop reaches the supervisor as a clean exit and nothing else.
+    // Leave the note here, where the reason is still known, named after this
+    // process so the supervisor that reaps it reads this run's note and no
+    // other, and does not charge a stop it was asked for to the crash-loop
+    // budget.
+    if served.is_ok() && shutdown_requested() {
+        let _ = requested_stop::record(&scope, std::process::id());
     }
+    served
 }
 
 pub(crate) fn supervise_managed(
@@ -299,6 +340,10 @@ pub(crate) fn supervise_managed_for_owner(
     {
         let executable = std::env::current_exe()
             .map_err(|_| "native_resident_runtime_path_failed".to_owned())?;
+        // Resolve the scope and claim it first: a failure here must leave
+        // no serving child, and a stop must see this supervisor inside the
+        // scope from before the spawn until its exit record is written.
+        let supervised = exit_record::supervised_scope(state_base, expected_digest)?;
         let mut child = Command::new(&executable);
         child
             .arg("serve-managed")
@@ -312,11 +357,19 @@ pub(crate) fn supervise_managed_for_owner(
             .arg(expected_digest)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            // Keep the stderr of a resident whose one-shot client is already
+            // gone, so a denied tool call leaves its cause in the scope.
+            .stderr(Stdio::piped());
         // Keep the serving child in the supervisor's group for joint containment.
+        let started = Instant::now();
         let mut child = child
             .spawn()
             .map_err(|_| "native_resident_spawn_failed".to_owned())?;
+        // Held across the wait: it is how the exit record tells this child's
+        // requested-stop note from one left by a run this supervisor did not
+        // start.
+        let child_process_id = child.id();
+        let stderr_record = exit_record::capture_resident_stderr(&mut child);
         let mut liveness_writer = child
             .stdin
             .take()
@@ -326,46 +379,76 @@ pub(crate) fn supervise_managed_for_owner(
             .and_then(|()| liveness_writer.write_all(b"\n"))
             .and_then(|()| liveness_writer.flush())
             .map_err(|_| "native_resident_spawn_auth_failed".to_owned())?;
-        let owner_start_marker = process_start_marker(owner_process_id).ok();
         let child_done = Arc::new(AtomicBool::new(false));
-        let watcher_done = Arc::clone(&child_done);
-        let watcher_base = state_base.to_owned();
-        let watcher_digest = expected_digest.to_owned();
-        let watcher = thread::spawn(move || {
-            let mut no_lease_since = None;
-            loop {
-                if watcher_done.load(Ordering::Acquire) {
-                    break;
-                }
-                if crate::resident_process_identity::executable_missing(&executable) {
-                    break;
-                }
-                let owner_alive = owner_start_marker.as_deref().is_some_and(|expected| {
-                    process_start_marker(owner_process_id).is_ok_and(|actual| actual == expected)
-                });
-                if owner_alive || lease::any_live(&watcher_base, &watcher_digest) {
-                    no_lease_since = None;
-                } else {
-                    let started = no_lease_since.get_or_insert_with(Instant::now);
-                    if started.elapsed() >= lease::LEASE_EXPIRY {
-                        drop(liveness_writer);
-                        break;
-                    }
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-        });
+        let watcher = spawn_owner_lease_watcher(
+            executable,
+            state_base,
+            expected_digest,
+            owner_process_id,
+            liveness_writer,
+            Arc::clone(&child_done),
+        );
         let status = child
             .wait()
             .map_err(|_| "native_resident_supervisor_wait_failed".to_owned())?;
+        let ran_for = started.elapsed();
         child_done.store(true, Ordering::Release);
         let _ = watcher.join();
+        exit_record::record_supervised_run(
+            supervised,
+            stderr_record,
+            status,
+            ran_for,
+            child_process_id,
+        );
         if status.success() {
             Ok(())
         } else {
             Err("native_resident_managed_exit_failed".to_owned())
         }
     }
+}
+
+/// Hold the serving child's stdin until its owner has exited and no client of
+/// this runtime has held a lease for `LEASE_EXPIRY`, then close it so the child
+/// sees EOF and shuts down. Without this an ownerless resident lingers until
+/// its idle timeout.
+fn spawn_owner_lease_watcher<W: Send + 'static>(
+    executable: std::path::PathBuf,
+    state_base: &Path,
+    expected_digest: &str,
+    owner_process_id: u32,
+    liveness_writer: W,
+    child_done: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    let owner_start_marker = process_start_marker(owner_process_id).ok();
+    let watcher_base = state_base.to_owned();
+    let watcher_digest = expected_digest.to_owned();
+    thread::spawn(move || {
+        let mut no_lease_since = None;
+        loop {
+            if child_done.load(Ordering::Acquire) {
+                break;
+            }
+            if crate::resident_process_identity::executable_missing(&executable) {
+                break;
+            }
+            let owner_alive = owner_start_marker.as_deref().is_some_and(|expected| {
+                crate::resident_process_identity::running_process_start_marker(owner_process_id)
+                    .is_ok_and(|actual| actual == expected)
+            });
+            if owner_alive || lease::any_live(&watcher_base, &watcher_digest) {
+                no_lease_since = None;
+            } else {
+                let started = no_lease_since.get_or_insert_with(Instant::now);
+                if started.elapsed() >= lease::LEASE_EXPIRY {
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        drop(liveness_writer);
+    })
 }
 
 pub(crate) fn parse_generation(value: &str) -> Result<u64, String> {
@@ -384,29 +467,6 @@ pub(crate) fn parse_process_id(value: &str) -> Result<u32, String> {
         .ok_or_else(|| "native_resident_owner_process_invalid".to_owned())
 }
 
-/// Upper bound on a caller-supplied deadline. Every operation is capped at nine
-/// seconds except the skill-directory scan, whose bounded tree walk may
-/// legitimately read hundreds of megabytes and is granted a longer ceiling.
-const CLIENT_TIMEOUT_CEILING_MS: u64 = 9_000;
-const SKILL_SCAN_TIMEOUT_CEILING_MS: u64 = 60_000;
-
-pub(crate) fn client_timeout(payload: &[u8]) -> Duration {
-    let value = crate::strict_json_value(payload).ok();
-    let ceiling = match value
-        .as_ref()
-        .and_then(|value| value.get("operation")?.as_str())
-    {
-        Some("skill_directory_identity") => SKILL_SCAN_TIMEOUT_CEILING_MS,
-        _ => CLIENT_TIMEOUT_CEILING_MS,
-    };
-    let budget = value
-        .as_ref()
-        .and_then(|value| value.get("deadline_budget_ms")?.as_u64())
-        .unwrap_or(750)
-        .clamp(1, ceiling);
-    Duration::from_millis(budget)
-}
-
 #[cfg(test)]
 use client_stream::{
     read_frame as read_client_stream_frame, write_frame as write_client_stream_frame,
@@ -414,3 +474,7 @@ use client_stream::{
 #[cfg(test)]
 #[path = "managed_resident_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "managed_resident_client_timeout_tests.rs"]
+mod client_timeout_tests;

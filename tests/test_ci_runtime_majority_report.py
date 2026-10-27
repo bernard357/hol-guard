@@ -178,6 +178,23 @@ def test_missing_root_is_an_error(tmp_path: Path) -> None:
         build_report(repo, scope_path)
 
 
+def test_reviewed_entry_naming_a_deleted_module_is_an_error(tmp_path: Path) -> None:
+    repo, scope_path = _synthetic_repo(tmp_path)
+    scope = _scope()
+    scope["python"]["reviewed_runtime"] = [{"path": ["pkg/gone.py"], "reason": "reviewed"}]
+    scope_path.write_text(json.dumps(scope), encoding="utf-8")
+    with pytest.raises(ScopeError, match="no longer exist"):
+        build_report(repo, scope_path)
+
+
+def test_reviewed_glob_is_not_required_to_match_a_file(tmp_path: Path) -> None:
+    repo, scope_path = _synthetic_repo(tmp_path)
+    scope = _scope()
+    scope["python"]["reviewed_runtime"] = [{"path": ["pkg/gone_*.py"], "reason": "reviewed"}]
+    scope_path.write_text(json.dumps(scope), encoding="utf-8")
+    build_report(repo, scope_path)
+
+
 def test_min_share_exit_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo, scope_path = _synthetic_repo(tmp_path)
     base = ["--repo", str(repo), "--scope", str(scope_path)]
@@ -198,6 +215,8 @@ def test_shipped_scope_is_valid_and_has_no_stale_entries(shipped_report: dict) -
     assert result["metric"]["rust_runtime_loc"] > 0
     assert 0 < result["metric"]["share"] < 1
     assert len(result["retirement_worklist"]) == 40
+    assert result["python"]["pending_unclassified_loc"] == 0
+    assert result["python"]["pending_unclassified_modules"] == []
     assert result["exclusions"], "every exclusion must be reported"
 
 
@@ -384,6 +403,9 @@ def test_eager_audit_considers_every_in_scope_importer(tmp_path: Path) -> None:
     scope_path = tmp_path / DEFAULT_SCOPE
     scope = _scope()
     scope["python"]["roots"] = [{"module": "pkg.root", "surface": "test"}]
+    # This package has no lazy_dep.py, and the report refuses a scope that
+    # names a path which does not exist.
+    scope["python"]["reviewed_runtime"] = []
     _write(scope_path, json.dumps(scope))
     result = build_report(tmp_path, scope_path)
     [record] = [item for item in result["exclusions"] if item["path"] == "src/pkg/skipped.py"]
@@ -397,17 +419,20 @@ def test_shipped_scope_keeps_synchronous_hook_path_modules_in_scope(shipped_repo
     result = shipped_report
     in_scope = {item["path"] for item in result["python"]["files"]}
     guard = "src/codex_plugin_scanner/guard/"
+    # evaluation_json left with the Python capture modules; duplicate keys are
+    # rejected in the native capture parser. inventory_contract_fingerprints left
+    # when AIBOM hashing moved into the resident. custom_extension_suggestion left
+    # when the resident took over ranking the local CLI inventory.
+    # package_json_scripts left when the hook path stopped asking Python for
+    # package-script command ids.
     required = [
-        "runtime/package_json_scripts.py",
-        "runtime/custom_extension_suggestion.py",
-        "runtime/mcp_server_contribution.py",
         "cli/render.py",
         "aibom_detection.py",
-        "inventory_contract.py",
-        "evaluation_json.py",
-        "store_command_activity_rollups.py",
-        "store_receipt_rollups.py",
-        "store_review_event_outbox_writes.py",
+        "store_receipt_rollup_schema.py",
         "store_storage_maintenance.py",
     ]
     assert [name for name in required if guard + name not in in_scope] == []
+    # Synchronous continuation outbox writes moved into the native transaction.
+    wired = {item["path"] for item in result["rust"]["files"]}
+    assert "rust/crates/guard-runtime/src/continuation_store.rs" in wired
+    assert "rust/crates/guard-runtime/src/guard_store_outbox_append.rs" in wired

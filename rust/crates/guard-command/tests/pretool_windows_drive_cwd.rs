@@ -2,8 +2,7 @@
 use serde_json::json;
 use std::path::Path;
 
-#[path = "support/git_helper_fixture.rs"]
-pub mod fixture;
+use crate::git_helper_fixture as fixture;
 
 #[test]
 fn windows_drive_cwd_targets_bind_only_the_exact_workspace_spelling() {
@@ -12,10 +11,7 @@ fn windows_drive_cwd_targets_bind_only_the_exact_workspace_spelling() {
         .join(format!(
             "{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            crate::unique_nanos::unique_nanos()
         ));
     let _cleanup = fixture::FixtureCleanup(root.clone());
     std::fs::create_dir_all(&root).unwrap();

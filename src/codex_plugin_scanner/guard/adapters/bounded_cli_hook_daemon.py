@@ -12,12 +12,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..action_lattice import is_guard_action
+from ..blocked_request_mode import is_unlinked_connector_setup_reason
+from ..daemon.auth_token import load_guard_daemon_auth_token as _read_daemon_auth_token
 from ..daemon.hook_availability_policy import hook_event_pauses_when_unavailable, hook_reason_continues_session
 from ..private_file_io import read_private_regular_text
+from ._modules.zcode.zcode_hooks import zcode_authority_block_reason, zcode_hook_process_exit
 from .bounded_cli_hook_envelope import _canonical_event_token, _event_name, _json_object
 from .bounded_cli_hook_failure import grok_observe_event
 from .bounded_hook_http import post_hook_json, prepare_grok_prompt
-from .zcode_hooks import zcode_authority_block_reason, zcode_hook_process_exit
 
 _MAX_HOOK_RESPONSE_BYTES = 1_000_000
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -45,15 +47,6 @@ class _LoopbackOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
         _assert_loopback_http_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-def _read_daemon_auth_token(guard_home: Path) -> str | None:
-    token = read_private_regular_text(
-        guard_home / "daemon-auth-token",
-        max_bytes=4096,
-        require_private_parent=True,
-    )
-    return token or None
 
 
 def _daemon_hook_endpoint(guard_home: Path, harness: str) -> str | None:
@@ -232,8 +225,13 @@ def _daemon_response_to_native(
     *,
     harness: str,
     event_name: str,
+    guard_home: Path | None = None,
 ) -> tuple[str, str, int]:
-    """Transform daemon policy data into harness-native output."""
+    """Transform daemon policy data into harness-native output.
+
+    ``guard_home`` is the home this hook read the decision from, which an
+    authority block names in the recovery command it offers.
+    """
     event_name = _canonical_event_token(event_name) or event_name
     canonical = harness.strip().lower().replace("_", "-")
     if canonical == "grok" and not daemon_response:
@@ -260,7 +258,7 @@ def _daemon_response_to_native(
             # missing reason falls back to a human-readable default.
             if not isinstance(reason, str) or not reason:
                 reason = f"HOL Guard blocked this action ({policy_action_for_exit})"
-            stderr = zcode_authority_block_reason(reason) if canonical == "zcode" else reason
+            stderr = zcode_authority_block_reason(reason, guard_home) if canonical == "zcode" else reason
         if exit_code == 2 and canonical == "devin":
             native_response["decision"] = "block"
             if not native_response.get("reason"):
@@ -312,7 +310,8 @@ def _daemon_response_to_native(
                 "approval_requests",
             ):
                 value = daemon_response.get(key)
-                if value is not None:
+                # A default-mode connector setup reason carries no approval link.
+                if value is not None and (key == "reason_code" or not is_unlinked_connector_setup_reason(reason)):
                     payload[key] = value
 
     exit_code = 2 if _should_exit_block(harness, event_name, policy_action) else 0
@@ -322,7 +321,10 @@ def _daemon_response_to_native(
             payload["reason"] = reason or f"HOL Guard blocked this action ({policy_action})"
     stdout = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
     if exit_code == 2 and canonical == "zcode":
-        stderr = zcode_authority_block_reason(reason or f"HOL Guard blocked this action ({policy_action})")
+        stderr = zcode_authority_block_reason(
+            reason or f"HOL Guard blocked this action ({policy_action})",
+            guard_home,
+        )
     else:
         stderr = reason if exit_code == 2 and canonical in {"kimi", "devin"} else ""
     return stdout, stderr, exit_code
@@ -438,8 +440,9 @@ def try_daemon_hook(
     if harness.strip().lower().replace("_", "-") == "hermes":
         from .hermes_runtime_hooks import hermes_bridge_response
 
-        return hermes_bridge_response(parsed, event_name=event_name)
-    return _daemon_response_to_native(parsed, harness=harness, event_name=event_name)
+        # Render within what is left of the hook's own budget, not a fresh timeout.
+        return hermes_bridge_response(parsed, event_name=event_name, guard_home=guard_home, deadline=deadline)
+    return _daemon_response_to_native(parsed, harness=harness, event_name=event_name, guard_home=guard_home)
 
 
 __all__ = ["try_daemon_hook"]

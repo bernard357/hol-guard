@@ -8,6 +8,7 @@ import pytest
 
 import codex_plugin_scanner.guard.native_policy_snapshot_publisher as publisher_module
 from codex_plugin_scanner.guard.native_policy_snapshot import NativePolicySnapshotPublisher
+from codex_plugin_scanner.guard.native_policy_snapshot_constants import NativePolicySnapshotError
 from codex_plugin_scanner.guard.store import GuardStore
 
 from .native_policy_snapshot_test_fixtures import _DeterministicClock
@@ -55,6 +56,61 @@ def test_resident_fingerprint_mismatch_enters_bounded_retry_backoff(
         assert not publisher.is_ready()
         assert publisher._failure_count == 1
         assert retry_deadline is not None and retry_deadline > clock.monotonic
+    finally:
+        publisher.close()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "native_policy_snapshot_resident_changed",
+        "native_command_control_binding_changed",
+        "native_command_pack_projection_changed",
+        "native_business_source_binding_changed",
+        "native_local_cli_revision_changed",
+        "native_provider_catalog_changed",
+    ],
+)
+def test_concurrent_change_retries_stay_inside_a_hook_deadline(
+    tmp_path: Path,
+    error: str,
+) -> None:
+    clock = _DeterministicClock()
+    publisher = NativePolicySnapshotPublisher(
+        store=GuardStore(tmp_path / "guard-home"),
+        client_request=lambda **_kwargs: b"unused",
+        poll_interval_seconds=0.25,
+        wall_clock=clock.wall_time,
+        monotonic_clock=clock.monotonic_time,
+    )
+    try:
+        for _attempt in range(8):
+            publisher._record_error(error)
+            retry_at = publisher._retry_not_before_monotonic
+            assert retry_at is not None
+            # The cap plus its 0.1 s jitter leaves several attempts inside a 3 s hook deadline.
+            assert retry_at - clock.monotonic <= 0.5 + 0.1
+    finally:
+        publisher.close()
+
+
+def test_other_publication_failures_keep_the_exponential_backoff(
+    tmp_path: Path,
+) -> None:
+    clock = _DeterministicClock()
+    publisher = NativePolicySnapshotPublisher(
+        store=GuardStore(tmp_path / "guard-home"),
+        client_request=lambda **_kwargs: b"unused",
+        poll_interval_seconds=0.25,
+        wall_clock=clock.wall_time,
+        monotonic_clock=clock.monotonic_time,
+    )
+    try:
+        for _attempt in range(8):
+            publisher._record_error("native_policy_snapshot_runtime_unavailable")
+        retry_at = publisher._retry_not_before_monotonic
+        assert retry_at is not None
+        assert retry_at - clock.monotonic >= 4.0
     finally:
         publisher.close()
 
@@ -189,6 +245,37 @@ def test_run_loop_preserves_failed_retry_backoff_across_stable_database_writes(
         assert attempts[0] is not None and attempts[0] > clock.monotonic
         assert publisher._retry_not_before_monotonic == attempts[0]
         assert publisher._failure_count == 1
+    finally:
+        publisher.close()
+
+
+def test_unavailable_composer_on_a_database_hint_withdraws_the_ack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _DeterministicClock()
+    publisher = NativePolicySnapshotPublisher(
+        store=GuardStore(tmp_path / "guard-home"),
+        client_request=lambda **_kwargs: b"unused",
+        wall_clock=clock.wall_time,
+        monotonic_clock=clock.monotonic_time,
+    )
+    publisher._snapshot = {"expires_at_ms": int(clock.wall * 1_000) + 60_000, "generation": 1}
+    publisher._acked = True
+    publisher._observed_policy_fingerprint = ("digest", "enforce", "controls")
+
+    def compile_policy(**_: object) -> dict[str, object]:
+        raise NativePolicySnapshotError("native_policy_effective_unavailable")
+
+    monkeypatch.setattr(publisher, "_compiled_effective_policy", compile_policy)
+    database_change = {str(publisher.guard_home / "guard.db-wal")}
+    try:
+        assert publisher.is_ready()
+        assert publisher._policy_input_changed(database_change)
+        assert publisher._acked is False
+        assert not publisher.is_ready()
+        assert not publisher._policy_input_changed(database_change)
+        assert publisher._acked is False
     finally:
         publisher.close()
 

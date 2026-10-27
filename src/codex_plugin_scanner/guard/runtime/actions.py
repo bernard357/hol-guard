@@ -17,7 +17,6 @@ from ..action_lattice import is_action_bearing_key
 from ..native_hook_adapter import (
     native_action_envelope,
     native_apply_patch_paths,
-    native_command_detail,
     native_command_text,
     native_workspace_label,
 )
@@ -265,12 +264,6 @@ def command_text_from_tool_payload(tool_name: object, tool_input: object) -> str
     return native_command_text(tool_name, tool_input)
 
 
-def _command_detail(command: str | None, *, home_dir: Path | str | None) -> str | None:
-    if command is None:
-        return None
-    return native_command_detail(command, home_dir=home_dir)
-
-
 def apply_patch_target_paths(tool_input: Mapping[str, object]) -> tuple[str, ...]:
     """Return the target paths named by an apply-patch tool input."""
 
@@ -300,12 +293,6 @@ _HARNESS_NAMES = (
     "cline-cli",
     "cline-vscode",
 )
-
-
-def action_envelope_harnesses() -> tuple[str, ...]:
-    """Return every harness name accepted by the shared action-envelope boundary."""
-
-    return _HARNESS_NAMES
 
 
 def _envelope_from_native(payload: Mapping[str, object]) -> GuardActionEnvelope:
@@ -416,7 +403,6 @@ normalize_kimi_payload = _harness_normalizer("kimi", "Normalize a Kimi Code nati
 __all__ = [
     "GuardActionEnvelope",
     "GuardActionType",
-    "action_envelope_harnesses",
     "normalize_claude_hook_payload",
     "normalize_codex_hook_payload",
     "normalize_copilot_payload",

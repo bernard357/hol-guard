@@ -30,7 +30,7 @@ export function extension(id = "command.git", alias = "command.scm") {
     required: false,
     trust_class: "first-party",
     activation: "default-on",
-    publisher: { id: "hol", displayName: "Hashgraph Online" },
+    publisher: { id: "hol", displayName: "HOL" },
     icon: { kind: "none" },
     source: "built-in",
     aliases: alias ? [alias] : [],
@@ -240,4 +240,11 @@ export async function mount(page: Page, options: {
 export async function initialize(page: Page) {
   await page.goto(`/extensions?guardDaemon=${DAEMON_ORIGIN}`);
   await expect(page.getByRole("heading", { name: "Extensions", exact: true })).toBeVisible();
+}
+
+/** Flips the Extensions list switch to the connectors and tools added on this device. */
+export async function showCustomExtensions(page: Page) {
+  const toggle = page.getByTestId("extension-list-switch").getByRole("button", { name: /^Custom extensions/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
 }

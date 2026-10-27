@@ -59,7 +59,7 @@ def test_native_review_displays_eval_input() -> None:
         "omp",
         {"tool_name": "eval", "tool_input": {"code": "1 + 1"}},
     )
-    assert envelope["action_type"] == "config_change"
+    assert envelope["action_type"] == "shell_command"
     assert "1 + 1" in json.dumps(envelope["raw_payload_redacted"])
 
 
@@ -70,6 +70,28 @@ def test_native_review_preserves_configuration_classification() -> None:
     )
     assert envelope["action_type"] == "config_change"
     assert "example" in json.dumps(envelope["raw_payload_redacted"])
+
+
+def test_native_review_sets_command_category_from_command_extension_observations() -> None:
+    envelope = _native_review_action_envelope(
+        harness="omp",
+        payload={"tool_name": "Bash", "tool_input": {"command": "docker version --format '{{.Server.Version}}'"}},
+        workspace=None,
+        home_dir=None,
+        native_result={
+            "command_extensions": {
+                "observations": [
+                    {
+                        "extension_id": "command.container-runtime",
+                        "rule_id": "command.container-runtime.docker-sensitive",
+                        "effective_segment_indexes": [0],
+                    }
+                ]
+            }
+        },
+    )
+    assert envelope is not None
+    assert envelope["command_category"] == "command.container-runtime"
 
 
 def _recorded_answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[dict[str, object], dict[str, object]]]:

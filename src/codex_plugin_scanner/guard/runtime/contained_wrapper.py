@@ -1,164 +1,194 @@
-"""Peel the cd prefix and bounded output filter that native authority classified."""
+"""Carry native authority's peel to the execution sink, and apply its output handling.
+
+The cd prefix, output filter chain and status echo are classified once, by the
+pre-tool pass. This module used to peel them a second time from its own lexer,
+its own sibling-repository rule and its own filter grammar; that copy could not
+read a Windows owner SID, so it accepted checkouts the classifier had refused
+and handed the sandbox a core no receipt covered. The questions below are now
+asked of the classifier. What stays here is the sink's own work: holding the
+answer, and filtering the captured output in process.
+"""
 
 from __future__ import annotations
 
 import contextlib
 import io
-import re
-import shlex
 import sys
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
-from .restricted_pytest_validation import _path_is_within
-
-_COUNT = re.compile(r"[0-9]{1,6}")
-_MERGE = re.compile(r"2>&1(?=[ \t|]|\Z)")
-_OPERATOR = frozenset("();<>|&\n")
-# Characters the shell would expand; native authority only upgrades exact parses.
-_UNQUOTED_EXPANSION = frozenset("$`*?[{")
-_DOUBLE_QUOTED_ESCAPES = frozenset('$`"\\')
-_ARGUMENT_REJECT = frozenset("<>|&;")
+from ..native_contained_wrapper_plan import (
+    ContainedWrapperPlanUnavailableError,
+    native_contained_wrapper_plan,
+)
+from .contained_output_filters import Stage, apply_filters, keep_lines
 
 
 @dataclass(frozen=True)
 class OutputFilter:
-    """A trailing `| head|tail -N`, applied in-process to the contained output."""
+    """A trailing `2>&1`, output filter chain or `; echo "<label>$?"`.
+
+    `kind` is "head" or "tail" for one bounded filter, "pipe" for any other
+    chain in `stages` (see `contained_output_filters`), else "all".
+    """
 
     kind: str
     count: int
     merge_stderr: bool
+    status_label: str | None = None
+    stages: tuple[Stage, ...] = ()
+    pipe_status: list[int] = field(default_factory=list, init=False, compare=False, repr=False)
+
+    def status_line(self, exit_code: int) -> str | None:
+        """The echo's output; after a pipe, `$?` is the last filter's own status."""
+        if self.status_label is None:
+            return None
+        if self.kind == "pipe":
+            exit_code = self.pipe_status[-1] if self.pipe_status else 0
+        elif self.kind in {"head", "tail"}:
+            exit_code = 0
+        return f"{self.status_label}{exit_code}\n"
 
 
-def _lex(command: str) -> tuple[list[tuple[str, bool]], bool]:
-    """Split like a POSIX shell into (value, is_operator) pairs; also report exactness.
-
-    Quoted text is never an operator, so `'|'` or `'print(1)'` stay plain words.
-    """
-    tokens: list[tuple[str, bool]] = []
-    word: list[str] | None = None
-    exact = True
-    index = 0
-
-    def finish() -> None:
-        nonlocal word
-        if word is not None:
-            tokens.append(("".join(word), False))
-            word = None
-
-    while index < len(command):
-        character = command[index]
-        if character in " \t":
-            finish()
-            index += 1
-        elif word is None and _MERGE.match(command, index):
-            tokens.append(("2>&1", True))
-            index += 4
-        elif character in _OPERATOR:
-            finish()
-            end = index
-            while end < len(command) and command[end] in _OPERATOR:
-                end += 1
-            tokens.append((command[index:end], True))
-            index = end
-        elif character == "'":
-            end = command.find("'", index + 1)
-            if end < 0:
-                raise ValueError("unterminated quote")
-            word = [*(word or []), command[index + 1 : end]]
-            index = end + 1
-        elif character == '"':
-            word = word or []
-            index += 1
-            while True:
-                if index >= len(command):
-                    raise ValueError("unterminated quote")
-                character = command[index]
-                if character == '"':
-                    index += 1
-                    break
-                if character == "\\" and index + 1 < len(command) and command[index + 1] in _DOUBLE_QUOTED_ESCAPES:
-                    index += 1
-                    character = command[index]
-                elif character == "\\" and command[index + 1 : index + 2] == "\n":
-                    raise ValueError("line continuation")
-                elif character in "$`":
-                    exact = False
-                word.append(character)
-                index += 1
-        elif character == "\\":
-            if index + 1 >= len(command) or command[index + 1] == "\n":
-                raise ValueError("unsupported escape")
-            word = [*(word or []), command[index + 1]]
-            index += 2
-        else:
-            if ord(character) < 32 or character in _UNQUOTED_EXPANSION or (word is None and character in "~#"):
-                exact = False
-            word = [*(word or []), character]
-            index += 1
-    finish()
-    return tokens, exact
+def _answer(
+    command: str,
+    *,
+    workspace: Path,
+    cwd: Path | None,
+    home: Path | None,
+    project_root_query: Path | None = None,
+) -> Mapping[str, object]:
+    """Ask native authority about one command, or raise when it cannot answer."""
+    return native_contained_wrapper_plan(
+        command,
+        workspace=workspace,
+        cwd=cwd,
+        home=home,
+        project_root_query=project_root_query,
+    )
 
 
-def _bounded_filter(arguments: list[tuple[str, bool]]) -> int | None:
-    if any(operator for _value, operator in arguments):
+def _root(answer: Mapping[str, object], key: str) -> Path | None:
+    value = answer.get(key)
+    return Path(value) if isinstance(value, str) and value else None
+
+
+def _output_filter(encoded: object) -> OutputFilter | None:
+    """The sink's output handling, as native authority described it."""
+    if encoded is None:
         return None
-    values = [value for value, _operator in arguments]
-    if len(values) == 1 and values[0].startswith("-") and _COUNT.fullmatch(values[0][1:]):
-        return int(values[0][1:])
-    if len(values) == 2 and values[0] == "-n" and _COUNT.fullmatch(values[1]):
-        return int(values[1])
-    return None
+    if not isinstance(encoded, Mapping):
+        raise ValueError("unsupported wrapper shape")
+    fields = cast(Mapping[str, object], encoded)
+    count = fields["count"]
+    stages = fields.get("stages") or ()
+    if not isinstance(count, int) or not isinstance(stages, Sequence):
+        raise ValueError("unsupported wrapper shape")
+    label = fields.get("status_label")
+    return OutputFilter(
+        str(fields["kind"]),
+        count,
+        bool(fields["merge_stderr"]),
+        status_label=None if label is None else str(label),
+        stages=tuple(tuple(str(word) for word in _words(stage)) for stage in stages),
+    )
 
 
-def peel_contained_wrapper(command: str, *, workspace: Path) -> tuple[str, Path, OutputFilter | None] | None:
+def _words(stage: object) -> Sequence[object]:
+    if not isinstance(stage, Sequence) or isinstance(stage, (str, bytes)):
+        raise ValueError("unsupported wrapper shape")
+    return stage
+
+
+def sibling_project_root(directory: Path, *, home: Path | None) -> Path | None:
+    """The repository holding a directory outside the hook workspace, as native authority finds it.
+
+    The nearest ancestor with a `.git` entry, strictly below home - or the
+    system temporary directory, on POSIX - and owned by this user, which only
+    the native runtime can establish on Windows. The sink rebases its approved
+    root there, so the run is contained to that repository exactly as it would
+    be from a session started in it. An unreachable runtime proves no root.
+    """
+    if home is None:
+        return None
+    try:
+        answer = _answer(
+            "",
+            workspace=directory,
+            cwd=directory,
+            home=home,
+            project_root_query=directory,
+        )
+    except ContainedWrapperPlanUnavailableError:
+        return None
+    return _root(answer, "project_root")
+
+
+def anchored_sibling_root(command: str, *, workspace: Path, cwd: Path, home: Path | None) -> Path | None:
+    """The sibling repository an absolute script or tool names, as native authority anchors it.
+
+    One plain command whose executed path lies in a repository outside the
+    workspace roots the sandbox there, as after `cd <root> &&`. A relative word
+    naming a file from `cwd`, the workspace's own repository, or an untrusted
+    temporary root keeps None, as does an unreachable runtime.
+    """
+    try:
+        answer = _answer(command, workspace=workspace, cwd=cwd, home=home)
+    except ContainedWrapperPlanUnavailableError:
+        return None
+    return _root(answer, "anchored_sibling_root")
+
+
+def peel_contained_wrapper(
+    command: str, *, workspace: Path, home: Path | None = None, cwd: Path | None = None
+) -> tuple[str, Path, OutputFilter | None] | None:
     """Return the core command, its directory, and output filter, or None when nothing is wrapped.
 
-    Raises ValueError (or OSError for a missing cd target) for shapes native authority never upgrades.
+    A cd target must lie in the workspace or, given `home`, in a sibling
+    repository (see `sibling_project_root`). A relative target is accepted only
+    when it names a sibling repository's root from `cwd`, such as a linked
+    worktree beside the checkout, or, on Windows, a workspace directory joined
+    by `&&`; after a cd into a sibling root, the core may be an `&&` list of
+    plain commands, which is re-authorized there. Only a cd into a sibling
+    repository may end in `;` or carry `2>/dev/null`: the directory is resolved
+    by native authority and nothing is peeled when it is gone, so the core
+    never falls back to the session directory the way the shell would after a
+    failed cd.
+
+    Raises ValueError for a wrapped shape native authority does not peel, which
+    the sink answers by running the text whole in the sandbox native authority
+    chose for it, and ContainedWrapperPlanUnavailableError when no classifier
+    is reachable to ask.
     """
-    tokens, exact = _lex(command)
-    directory = workspace
-    wrapped = False
-    output = None
-    if tokens[:1] == [("cd", False)]:
-        if len(tokens) < 4 or tokens[1][1] or tokens[2] != ("&&", True):
-            raise ValueError("unsupported cd prefix")
-        target = Path(tokens[1][0])
-        if not exact or not target.is_absolute():
-            raise ValueError("relative cd target")
-        directory = target.resolve(strict=True)
-        if not directory.is_dir() or not _path_is_within(directory, workspace.resolve(strict=True)):
-            raise ValueError("cd target outside the workspace")
-        tokens, wrapped = tokens[3:], True
-    if ("|", True) in tokens:
-        index = tokens.index(("|", True))
-        program = tokens[index + 1 : index + 2]
-        count = _bounded_filter(tokens[index + 2 :])
-        if program not in ([("tail", False)], [("head", False)]) or count is None:
-            raise ValueError("unsupported output filter")
-        tokens = tokens[:index]
-        merge = tokens[-1:] == [("2>&1", True)]
-        if merge:
-            tokens = tokens[:-1]
-        output = OutputFilter(program[0][0], count, merge)
-        wrapped = True
-    if not wrapped:
+    answer = _answer(command, workspace=workspace, cwd=cwd, home=home)
+    refusal = answer.get("refusal")
+    if refusal is not None:
+        raise ValueError(str(refusal))
+    plan = answer.get("plan")
+    if plan is None:
         return None
-    if not exact or not tokens or any(operator or set(value) & _ARGUMENT_REJECT for value, operator in tokens):
+    if not isinstance(plan, Mapping):
         raise ValueError("unsupported wrapper shape")
-    return shlex.join(value for value, _operator in tokens), directory, output
+    return str(plan["core"]), Path(str(plan["directory"])), _output_filter(plan.get("output"))
 
 
 @contextlib.contextmanager
 def bounded_output(output: OutputFilter | None) -> Iterator[None]:
-    """Apply head/tail in-process; no external filter runs outside containment.
+    """Apply the output filters to the contained core's captured output.
 
-    The sandbox captures stdout and stderr separately, so with `2>&1` the merged
-    stream is the run's stdout followed by its stderr, not their interleaving.
+    A bare `2>&1` is one file descriptor in the sandbox, so this wrapper does
+    not buffer that full stream. Head and tail keep only the requested lines
+    in-process; a grep stage runs the system grep on the captured text alone,
+    with arguments that name no file (see `contained_output_filters`).
     """
-    if output is None:
+    if output is None or (output.kind == "all" and not output.merge_stderr):
         yield
+        return
+    if output.kind == "all":
+        with contextlib.redirect_stderr(sys.stdout):
+            yield
         return
     destination = sys.stdout
     captured = io.StringIO()
@@ -167,10 +197,13 @@ def bounded_output(output: OutputFilter | None) -> Iterator[None]:
         with contextlib.redirect_stdout(captured), errors:
             yield
     finally:
-        lines = captured.getvalue().splitlines(keepends=True)
-        if output.kind == "head":
-            kept = lines[: output.count]
+        if output.kind == "pipe":
+            text, diagnostics, status = apply_filters(captured.getvalue(), output.stages)
+            output.pipe_status.append(status)
+            if diagnostics:
+                sys.stderr.write(diagnostics)
+                sys.stderr.flush()
         else:
-            kept = lines[len(lines) - output.count :] if output.count else []
-        destination.write("".join(kept))
+            text = "".join(keep_lines(captured.getvalue().splitlines(keepends=True), output.kind, output.count))
+        destination.write(text)
         destination.flush()

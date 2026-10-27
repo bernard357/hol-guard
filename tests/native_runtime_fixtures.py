@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+from codex_plugin_scanner.guard.native_hook_artifact_compose import native_hook_compose
+
+from .mcp_policy_catalog_fixture import (  # noqa: F401
+    mcp_policy_delivery,
+    mcp_policy_inventory,
+    native_mcp_catalog_admission,
+)
+from .mcp_policy_native_fixture import native_mcp_policy_admission  # noqa: F401
 
 
 def _resolve_native_hook_runtime() -> Path:
@@ -48,12 +59,6 @@ def native_hook_force(monkeypatch: pytest.MonkeyPatch) -> Path:
     return runtime
 
 
-@pytest.fixture
-def native_approval_reuse_runtime(native_hook_force: Path) -> Path:
-    """Run approval reuse assertions with the caller-pinned native authority."""
-    return native_hook_force
-
-
 @pytest.fixture(scope="session")
 def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Session-shared guard home so the resident is spawned once per run."""
@@ -61,17 +66,18 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
     from codex_plugin_scanner.guard.native_policy_snapshot import (
         provision_native_policy_verifier_key,
     )
+    from codex_plugin_scanner.guard.native_policy_snapshot_constants import NativePolicySnapshotError
     from codex_plugin_scanner.guard.native_resident_client import close_native_residents
 
     guard_home = tmp_path_factory.mktemp("native-context-guard-home")
     (guard_home / "native-runtime").mkdir(mode=0o700, parents=True)
-    # The managed resident refuses to serve until the policy verifier key the
-    # publisher would normally provision exists; seed a test key once.
-    provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
-    # Pre-warm the capabilities cache and the persistent resident client pool
-    # at session scope.  Tests that patch subprocess.Popen globally would
-    # otherwise intercept the first probe/pool spawn mid-test and break the
-    # digest path (the pool spawns once and is then reused).
+    from .mcp_policy_native_fixture import _FIXTURE_KEYS
+
+    # Seed the verifier key and pre-warm the capabilities cache and the
+    # persistent resident client pool at session scope.  Tests that patch
+    # subprocess.Popen globally would otherwise intercept the first probe/pool
+    # spawn mid-test and break the digest path (the pool spawns once and is
+    # then reused).
     binary = _context_digest_runtime_binary()
     if binary is not None:
         from codex_plugin_scanner.guard import native_context
@@ -88,11 +94,26 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
         os.environ["HOL_GUARD_NATIVE_DIAGNOSTIC"] = "1"
         os.environ["HOL_GUARD_RESIDENT_TEST_SEAMS"] = "1"
         try:
-            native_context.native_context_digest(
-                "launch_argv_digest",
-                {"argv": ["guard-context-warmup"]},
-                guard_home=guard_home,
-            )
+            # The managed resident refuses to serve until the policy verifier
+            # key exists, and only the runtime can write it. With no runtime
+            # there is no resident to key, so the no-binary suite is unchanged.
+            try:
+                provision_native_policy_verifier_key(guard_home, b"\x07" * 32)
+            except NativePolicySnapshotError as error:
+                # A configured binary that is missing, stale, or built without
+                # the provisioning feature is the same situation as no binary
+                # at all, so leave ambient digests unavailable instead of
+                # failing every test in the session. Any other code is a real
+                # provisioning failure and must not be swallowed.
+                if str(error) != "native_policy_verifier_runtime_unavailable":
+                    raise
+            else:
+                _FIXTURE_KEYS[guard_home] = b"\x07" * 32
+                native_context.native_context_digest(
+                    "launch_argv_digest",
+                    {"argv": ["guard-context-warmup"]},
+                    guard_home=guard_home,
+                )
         finally:
             if previous_native is None:
                 os.environ.pop("HOL_GUARD_NATIVE", None)
@@ -116,6 +137,33 @@ def _native_context_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
                 os.environ["HOL_GUARD_RESIDENT_TEST_SEAMS"] = previous_seams
     yield guard_home
     close_native_residents(guard_home)
+
+
+@pytest.fixture
+def native_signal_composition(
+    native_hook_force: Path,
+    _native_context_home: Path,
+) -> Callable[[Sequence[object], object], SimpleNamespace]:
+    """Calibrate a base action against detector signals in the resident.
+
+    The composition rules live in the Rust runtime; this side only carries the
+    signals the detector registry emitted and reads back the composed action,
+    so tests that need a composition assert on the authority's answer rather
+    than on a second copy of the rules.
+    """
+
+    def compose(signals: Sequence[object], base_action: object) -> SimpleNamespace:
+        payload = native_hook_compose(
+            "signal_composition",
+            {
+                "signals": [signal.to_dict() for signal in signals],
+                "base_action": base_action,
+            },
+            guard_home=_native_context_home,
+        )
+        return SimpleNamespace(**payload)
+
+    return compose
 
 
 @pytest.fixture
@@ -180,6 +228,39 @@ def _context_digest_runtime_binary() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def patch_popen_past_native_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement: Callable[..., object],
+) -> None:
+    """Stand ``replacement`` in for ``Popen`` while Guard's own runtime calls still run.
+
+    ``subprocess.Popen`` is shared by every in-process spawn, so a fake meant
+    for one spawn also intercepts the bounded runtime invocations Guard makes
+    itself -- provisioning the resident verifier key, for instance -- and hands
+    the hook launcher a stand-in with no pipes. Invocations of the native
+    runtime binary keep reaching the real ``Popen``; everything else goes to
+    ``replacement``. The runtime is probed first, because the probe spawns too.
+    """
+
+    from codex_plugin_scanner.guard.native_runtime import native_runtime_status
+
+    real_popen = subprocess.Popen
+    identity = native_runtime_status().identity
+    native_argv0 = None if identity is None else str(identity.path)
+
+    def popen(command: object, *args: object, **kwargs: object) -> object:
+        if (
+            native_argv0 is not None
+            and isinstance(command, (list, tuple))
+            and command
+            and str(command[0]) == native_argv0
+        ):
+            return real_popen(command, *args, **kwargs)  # type: ignore[call-overload]
+        return replacement(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+
 @pytest.fixture(autouse=True)
 def _ambient_context_digest_home(
     _native_context_home: Path,
@@ -189,7 +270,8 @@ def _ambient_context_digest_home(
 
     ``context_digest`` calls resolve their guard home either from the bound
     flow context or the default user home; both are pointed at the keyed
-    session home.  Unit tests default to ``HOL_GUARD_NATIVE=off`` so the
+    session home.  Unit tests default
+    to ``HOL_GUARD_NATIVE=off`` so the
     adapter's status probe is additionally re-evaluated under ``force`` —
     scoped to the ``native_context`` module only, leaving every other
     off-mode surface (hook eval, fail-safe denials) untouched.  With no
@@ -249,7 +331,7 @@ def native_prompt_runtime(
     from codex_plugin_scanner.guard.native_policy_snapshot import provision_native_policy_verifier_key
     from codex_plugin_scanner.guard.native_policy_snapshot_constants import NATIVE_POLICY_VERIFIER_KEY_NAME
     from codex_plugin_scanner.guard.native_resident_client import close_native_residents
-    from codex_plugin_scanner.guard.runtime import runner
+    from codex_plugin_scanner.guard.runtime import guard_run_evaluation as runner
 
     runtime: Path | None = None
     analyze = native_prompt.analyze
@@ -304,6 +386,36 @@ def native_context_digest(
         pytest.skip("native context digest tests require the compiled Rust runtime")
     monkeypatch.setenv("HOL_GUARD_NATIVE", "force")
     monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(binary.resolve()))
+    return _native_context_home
+
+
+@pytest.fixture
+def native_command_capability_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    _native_context_home: Path,
+) -> Path:
+    """Answer remote-command capability requests from the shared resident.
+
+    The ``command_capability`` op reads every input off the wire, so the Guard
+    home it is asked about only has to name a resident that is already keyed
+    and warm.  Tests keep their own store home for Guard's Python persistence
+    and borrow the session home for the runtime call, which avoids spawning a
+    resident per store.  Jobs that build no Rust artifact skip, like the other
+    compiled-runtime fixtures.
+    """
+
+    from codex_plugin_scanner.guard import native_command_capability
+
+    binary = _context_digest_runtime_binary()
+    if binary is None:
+        pytest.skip("command capability tests require the compiled Rust runtime")
+    monkeypatch.setenv("HOL_GUARD_NATIVE", "force")
+    monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(binary.resolve()))
+    monkeypatch.setattr(
+        native_command_capability,
+        "_resolve_digest_home",
+        lambda guard_home=None: _native_context_home,
+    )
     return _native_context_home
 
 
@@ -402,53 +514,95 @@ def native_command_artifact_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(commands_support_runtime_artifacts, "review_command_native", review)
 
 
-@pytest.fixture(autouse=True)
-def _close_native_policy_publishers_before_monkeypatch_restore(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[None]:
-    """Join native snapshot publishers created by test-owned workers."""
-    del monkeypatch
-    from codex_plugin_scanner.guard import native_policy_snapshot
+@pytest.fixture
+def native_contained_wrapper_runtime(
+    native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Serve the contained wrapper peel from the real resident.
 
-    with native_policy_snapshot._PUBLISHER_LOCK:
-        existing_publishers = {
-            id(publisher) for registered in native_policy_snapshot._PUBLISHERS.values() for publisher in registered
-        }
-    yield
+    The sink's peel is the classifier's own answer now: the grammar lives in
+    `contained_wrapper.rs` alone and this side only carries what it returns.
+    There is no Python peel left to fall back to, so these suites ask the
+    session resident rather than a second copy of the rules.
+    """
 
-    with native_policy_snapshot._PUBLISHER_LOCK:
-        publishers = tuple(
-            publisher
-            for registered in native_policy_snapshot._PUBLISHERS.values()
-            for publisher in registered
-            if id(publisher) not in existing_publishers
-        )
-    live_publishers: list[str] = []
-    for publisher in publishers:
-        publisher.close(timeout_seconds=5.0)
-        thread = getattr(publisher, "_thread", None)
-        if isinstance(thread, threading.Thread) and thread.is_alive():
-            with native_policy_snapshot._PUBLISHER_LOCK:
-                native_policy_snapshot._PUBLISHERS.setdefault(
-                    native_policy_snapshot._publisher_key(Path(publisher.guard_home)),
-                    set(),
-                ).add(publisher)
-            live_publishers.append(f"{publisher.guard_home}:{thread.name}")
-    if live_publishers:
-        raise AssertionError("native policy publisher thread(s) survived test teardown: " + ", ".join(live_publishers))
+    from codex_plugin_scanner.guard import native_contained_wrapper_plan
+
+    monkeypatch.setattr(native_contained_wrapper_plan, "_resolve_digest_home", lambda _guard_home: _native_context_home)
+    return _native_context_home
 
 
 @pytest.fixture
-def native_data_flow_runtime(
+def native_runtime_detectors_runtime(
     native_hook_force: Path, _native_context_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
-    """Serve data-flow analysis from the real resident; there is no Python fallback."""
+    """Serve the runtime detector run from the real resident; there is no Python fallback."""
 
-    from codex_plugin_scanner.guard import native_data_flow
+    from codex_plugin_scanner.guard import native_runtime_detectors
 
-    monkeypatch.setattr(
-        native_data_flow,
-        "_resolve_digest_home",
-        lambda guard_home: guard_home if guard_home is not None else _native_context_home,
-    )
+    monkeypatch.setattr(native_runtime_detectors, "_resolve_digest_home", lambda _guard_home: _native_context_home)
     return _native_context_home
+
+
+@pytest.fixture
+def native_route_policy_with_hooks_off(monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep daemon route/origin policy native while hook handling stays ``off``.
+
+    The daemon's route and origin policy is owned by the resident and has no
+    Python answer, so a test that sets ``HOL_GUARD_NATIVE=off`` to exercise
+    the Python hook fallback would otherwise see every request fail closed.
+    Only the route-policy transport call runs with the runtime pinned; hook
+    handling in the same test still observes ``off``.
+    """
+
+    from codex_plugin_scanner.guard import (
+        native_daemon_route,
+        native_policy_snapshot_publisher,
+        native_runtime,
+    )
+
+    runtime = _resolve_native_hook_runtime()
+    real_request = native_daemon_route._resident_request
+    real_mode = native_runtime.native_mode
+    real_provision = native_policy_snapshot_publisher.provision_native_verifier_key_for_store
+    pinned = threading.local()
+
+    def pinned_mode():
+        # Only the thread currently inside a route request sees ``force``;
+        # concurrent hook workers keep reading the configured mode.
+        return "force" if getattr(pinned, "active", False) else real_mode()
+
+    def pinned_request(**kwargs):
+        # The caller resolved its status before the pin applied; resolve it again
+        # inside the pin so the request sees the pinned runtime.
+        kwargs.pop("status", None)
+        previous = getattr(pinned, "active", False)
+        pinned.active = True
+        try:
+            return real_request(**kwargs)
+        finally:
+            pinned.active = previous
+
+    def pinned_provision(store):
+        # The resident's verifier key is derived by the native runtime, so this
+        # prerequisite needs the same pinned runtime the route call gets. Without
+        # the pin the override binary is invisible in ``auto``/``off`` mode and
+        # the daemon answers every route request with a fail-closed 503.
+        previous = getattr(pinned, "active", False)
+        pinned.active = True
+        try:
+            return real_provision(store)
+        finally:
+            pinned.active = previous
+
+    # The runtime path is only honoured for shadow/force, so naming it is
+    # inert for hook handling that observes ``off``.
+    monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(runtime))
+    monkeypatch.setattr(native_runtime, "native_mode", pinned_mode)
+    monkeypatch.setattr(native_daemon_route, "_resident_request", pinned_request)
+    monkeypatch.setattr(
+        native_policy_snapshot_publisher,
+        "provision_native_verifier_key_for_store",
+        pinned_provision,
+    )
+    return runtime

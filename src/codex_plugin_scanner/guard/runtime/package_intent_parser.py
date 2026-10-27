@@ -21,7 +21,6 @@ from .package_intent_common import (
     PackageIntent,
     PackageIntentTarget,
 )
-from .secret_file_requests import _SHELL_TOOL_NAMES, _candidate_command_texts, _normalize_tool_name
 
 __all__ = [
     "IntentKind",
@@ -120,15 +119,35 @@ def extract_package_intent_request(
     workspace: Path | None = None,
     home_dir: Path | None = None,
     guard_home: Path | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> PackageIntent | None:
-    normalized_tool_name = _normalize_tool_name(tool_name)
-    if normalized_tool_name in _SHELL_TOOL_NAMES:
-        for command_text in _candidate_command_texts(arguments):
-            intent = parse_package_intent(command_text, workspace=workspace, home_dir=home_dir, guard_home=guard_home)
-            if intent is not None:
-                return intent
-    if action_envelope_command:
-        return parse_package_intent(
-            action_envelope_command, workspace=workspace, home_dir=home_dir, guard_home=guard_home
+    """Parse the call's commands for package intent.
+
+    The resident reads a shell tool's arguments for command texts and parses
+    each until one names a package intent, then falls back to the action
+    envelope's command, all in one request. ``None`` is its "no intent" answer
+    or an unreachable resident; there is no Python parse to fall back to.
+
+    ``environment`` is the environment the commands are resolved in, for a
+    caller parsing on behalf of another process: the relay evidence drain runs
+    in the daemon and parses a proxy's call, and the manager a command names
+    depends on the ``PATH`` it was issued under. A caller parsing its own call
+    passes none, and the resident binds the ambient one.
+    """
+
+    try:
+        from ..config import resolve_guard_home
+        from ..native_package_authority import package_intent_extract_native
+
+        intent = package_intent_extract_native(
+            tool_name,
+            arguments,
+            action_envelope_command=action_envelope_command,
+            workspace=workspace,
+            home_dir=home_dir,
+            environment=environment,
+            guard_home=guard_home if guard_home is not None else resolve_guard_home(),
         )
-    return None
+    except Exception:
+        return None
+    return intent if isinstance(intent, PackageIntent) else None

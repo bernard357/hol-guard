@@ -5,10 +5,7 @@ use serde_json::json;
 
 #[test]
 fn cwd_compounds_validate_reads_and_one_bounded_write() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/cwd-compound-fixtures")
         .join(format!("fixture-{}-{nonce}", std::process::id()));
@@ -25,11 +22,21 @@ fn cwd_compounds_validate_reads_and_one_bounded_write() {
             ("&& wc -l one.txt", true),
             ("&& cat one.txt | sort -u", true),
             ("&& cat one.txt && head -1 one.txt", true),
-            ("&& cat one.txt; cat one.txt", false),
-            ("&& cat one.txt || cat one.txt", false),
+            // After `;` the read runs in the new directory when `cd` succeeded
+            // and in the original one when it failed, and is proven in both.
+            ("&& cat one.txt; cat one.txt", true),
+            // `||` forks the same way: the alternative runs in the new
+            // directory after a failed read, or in the original one after a
+            // failed `cd`, and is proven in both.
+            ("&& cat one.txt || cat one.txt", true),
+            ("&& cat one.txt; cat alias.txt", false),
+            ("&& cat one.txt; cat .env", false),
+            ("&& cat one.txt; rm one.txt", false),
+            ("&& cat one.txt || cat alias.txt", false),
+            ("&& cat one.txt || rm one.txt", false),
             ("&& cat alias.txt", false),
             ("&& cat .env", false),
-            ("; cat one.txt", false),
+            ("; cat one.txt", true),
             ("|| cat one.txt", false),
             ("| cat one.txt", false),
             ("&& cd .. && cat one.txt", false),
@@ -53,6 +60,32 @@ fn cwd_compounds_validate_reads_and_one_bounded_write() {
             ("&& cat one.txt &", false),
             ("&& cat $(echo one.txt)", false),
             ("&& cat one.txt && gh auth token", false),
+            // A reader the standalone proof admits in the verified directory
+            // keeps that proof behind the `cd`. Each of these allows on its
+            // own from inside `project`, so reviewing the compound only taught
+            // callers to split it in two. Readers whose proof also needs a
+            // stamped home - `pip`, `npm`, `brew`, `kubectl` - cannot be
+            // proven from this harness, which declares a fixture home the
+            // process does not run with; the benign gate covers those.
+            ("&& awk 'NR<2' one.txt", true),
+            ("&& file one.txt", true),
+            ("&& basename one.txt", true),
+            ("&& realpath one.txt", true),
+            // Programs whose own proof can authorize an effect stay out of the
+            // generic branch: a write belongs to the bounded two-segment form
+            // above, and a process stop has no bounded form at all.
+            ("&& pkill -f server", false),
+            ("&& rustfmt one.txt", false),
+            // The same holds for an effect a program's own proof authorizes
+            // while its other shapes read: `docker start` runs an existing
+            // container again, `curl` writes what it fetched into the
+            // directory the `cd` named, and `hol-guard dashboard` starts
+            // Guard's daemon.
+            ("&& docker start web", false),
+            ("&& docker container start web", false),
+            ("&& curl -o out.json https://example.com/data", false),
+            ("&& curl --output out.json https://example.com/data", false),
+            ("&& hol-guard dashboard", false),
         ] {
             let command = format!("cd {} {suffix}", project.display());
             let result = evaluate_pre_tool_envelope_with_context(
@@ -88,10 +121,21 @@ fn cwd_compounds_validate_reads_and_one_bounded_write() {
         );
     }
 
-    for target in [root.join("missing"), project.join(".."), root.join("alias")] {
-        if target == root.join("alias") {
-            std::os::unix::fs::symlink(&project, &target).unwrap();
-        }
+    // A link this user keeps in a directory only they can write names its
+    // target; missing and `..` spellings never do.
+    let alias = root.join("alias");
+    std::os::unix::fs::symlink(&project, &alias).unwrap();
+    let result = evaluate_pre_tool_envelope_with_context(
+        "omp",
+        "PreToolUse",
+        &json!({"tool_name":"bash", "tool_input":{"command":format!("cd {} && cat one.txt", alias.display())}}),
+        None,
+        None,
+        root.to_str(),
+        root.to_str(),
+    );
+    assert_eq!(result.minimum_action, "allow", "private alias");
+    for target in [root.join("missing"), project.join("..")] {
         let command = format!("cd {} && cat one.txt", target.display());
         let result = evaluate_pre_tool_envelope_with_context(
             "omp",
@@ -123,10 +167,7 @@ fn cwd_compound_extension_deny_overrides_safe_neighbor() {
     use guard_command::native_command_program::packaged_command_program;
     use guard_contracts::NativeCommandControlBindingV1;
 
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    let nonce = crate::unique_nanos::unique_nanos();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/cwd-compound-control-fixtures")
         .join(format!("fixture-{}-{nonce}", std::process::id()));

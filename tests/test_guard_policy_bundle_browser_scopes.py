@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from codex_plugin_scanner.guard.policy_bundle_parser import (
     POLICY_BUNDLE_RULE_MATCHER_FAMILIES,
     computed_policy_bundle_hash,
@@ -15,6 +17,7 @@ from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_verification_key,
     sign_policy_bundle,
 )
+from tests.policy_store_support import replace_remote_policies, resolve_policy
 
 
 def _valid_base_rule() -> dict[str, object]:
@@ -207,9 +210,6 @@ class TestBrowserScopeDecisionNarrowing:
 
     def test_exact_command_rule_does_not_create_family_decision(self) -> None:
         """An exact command rule must not broaden into all tool actions."""
-        from codex_plugin_scanner.guard.memory_pattern_fingerprint import (
-            build_exact_shell_command_memory_artifact_id,
-        )
         from codex_plugin_scanner.guard.runtime.runner import (
             _build_policy_bundle_decisions,
         )
@@ -224,7 +224,10 @@ class TestBrowserScopeDecisionNarrowing:
         decisions = _build_policy_bundle_decisions(bundle, device_id="device-1", device_name="dev")
         assert len(decisions) == 1
         assert decisions[0].scope == "artifact"
-        assert decisions[0].artifact_id == build_exact_shell_command_memory_artifact_id(command)
+        assert (
+            decisions[0].artifact_id
+            == "memory:exact-shell-command:" + hashlib.sha256(command.encode("utf-8")).hexdigest()
+        )
 
     def test_exact_artifact_rule_does_not_create_family_decision(self) -> None:
         """An exact artifact grant stays exact even when a family is advertised."""
@@ -300,9 +303,9 @@ class TestBrowserScopeDecisionNarrowing:
             "2026-01-01T00:00:00Z",
         )
         store.set_sync_payload("policy_bundle", bundle, "2026-01-01T00:00:00Z")
-        store.replace_remote_policies(decisions, "2026-01-01T00:00:00Z", remote_write_authorized=True)
+        replace_remote_policies(store, decisions, "2026-01-01T00:00:00Z", remote_write_authorized=True)
 
-        assert store.resolve_policy("codex", "codex:project:package-request:pypi-evil", "sha256:evil") is None
+        assert resolve_policy(store, "codex", "codex:project:package-request:pypi-evil", "sha256:evil") is None
 
     def test_explicit_unconstrained_package_artifact_type_can_create_family_rule(self) -> None:
         """An explicitly package-wide rule remains representable at family scope."""

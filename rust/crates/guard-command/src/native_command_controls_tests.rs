@@ -25,7 +25,7 @@ fn test_containment_requirement_cannot_override_lockdown() {
     binding.effective_digest = binding.compute_effective_digest().unwrap();
     assert_eq!(
         evaluate(&binding, "python3 -m pytest -q").minimum_action,
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", windows)) {
             "sandbox-required"
         } else {
             "review"
@@ -189,10 +189,23 @@ fn vitest_containment_never_overrides_disabled_package_permission() {
 
 #[test]
 fn timeout_wrapper_parsing_is_bounded_and_preserves_inner_commands() {
+    let action = |command: &str| {
+        crate::pretool::evaluate_pre_tool(&crate::CommandModelRequestV1 {
+            command: command.into(),
+            dialect: "posix".into(),
+            transport: "shell_string".into(),
+            extraction_provenance: "guard-shell".into(),
+        })
+        .unwrap()
+        .minimum_action
+    };
     for command in [
         "timeout 120 pwd",
         "timeout -- 120 pwd",
         "/usr/bin/timeout 120 pwd",
+        "timeout 5s pwd",
+        "timeout 1.5m pwd",
+        "timeout 2h pwd",
     ] {
         let model = crate::parse_command(&crate::CommandModelRequestV1 {
             command: command.into(),
@@ -202,22 +215,80 @@ fn timeout_wrapper_parsing_is_bounded_and_preserves_inner_commands() {
         })
         .unwrap();
         assert_eq!(model.confidence, "exact", "{command}");
-        assert_eq!(model.wrapper_chain, ["timeout"]);
+        // The clock bounds how long `pwd` runs, not what it may do, so what
+        // is left to judge is `pwd` itself.
+        assert!(model.wrapper_chain.is_empty(), "{command}");
         assert_eq!(model.segments[0].executable.as_deref(), Some("pwd"));
-        let result = crate::pretool::evaluate_pre_tool(&crate::CommandModelRequestV1 {
+        assert_eq!(action(command), action("pwd"), "{command}");
+    }
+    // `sudo` changes who runs the program, so it is still a wrapper, and a
+    // clock in front of it does not hide it.
+    let elevated = crate::parse_command(&crate::CommandModelRequestV1 {
+        command: "timeout 30 sudo pwd".into(),
+        dialect: "posix".into(),
+        transport: "shell_string".into(),
+        extraction_provenance: "guard-shell".into(),
+    })
+    .unwrap();
+    assert_eq!(elevated.wrapper_chain, ["sudo"]);
+    assert_eq!(action("timeout 30 sudo pwd"), action("sudo pwd"));
+    // A `timeout` spelled as a path is whatever that file holds, so it stays
+    // a wrapper and the command it carries keeps its approval. The duration
+    // is still the clock's operand: the executable is the program it names.
+    for command in [
+        "./timeout 30 pwd",
+        "./timeout -- 30 pwd",
+        "bin/timeout 30 pwd",
+        "/tmp/timeout 30 pwd",
+    ] {
+        let model = crate::parse_command(&crate::CommandModelRequestV1 {
             command: command.into(),
             dialect: "posix".into(),
             transport: "shell_string".into(),
             extraction_provenance: "guard-shell".into(),
         })
         .unwrap();
-        assert_eq!(result.minimum_action, "review", "{command}");
+        assert_eq!(model.confidence, "exact", "{command}");
+        assert_eq!(model.wrapper_chain, ["timeout"], "{command}");
+        assert_eq!(
+            model.segments[0].executable.as_deref(),
+            Some("pwd"),
+            "{command}"
+        );
+        assert!(model.segments[0].arguments.is_empty(), "{command}");
+        assert_ne!(action(command), action("pwd"), "{command}");
     }
+    let removed = "./timeout 30 rm -rf /var/lib/data";
+    let model = crate::parse_command(&crate::CommandModelRequestV1 {
+        command: removed.into(),
+        dialect: "posix".into(),
+        transport: "shell_string".into(),
+        extraction_provenance: "guard-shell".into(),
+    })
+    .unwrap();
+    assert_eq!(model.wrapper_chain, ["timeout"]);
+    assert_eq!(model.segments[0].executable.as_deref(), Some("rm"));
+    assert_eq!(
+        model.segments[0].arguments,
+        ["-rf".to_owned(), "/var/lib/data".to_owned()]
+    );
+    let factors = crate::command_critical_floors::command_critical_floor_factors(
+        &crate::canonical_command::CanonicalCommand::from_v1(&model),
+        None,
+        &[],
+    );
+    assert!(
+        factors
+            .iter()
+            .any(|factor| factor.reason_code == "critical.destructive-filesystem"),
+        "{factors:?}"
+    );
     for command in [
         "timeout --kill-after=1 5 pwd",
         "timeout -s KILL 5 pwd",
-        "timeout 5s pwd",
         "timeout 5",
+        "timeout 5m5s pwd",
+        "timeout .5 pwd",
         "timeout 5 sh -c 'shutdown -h now'",
         "timeout 1 timeout 1 timeout 1 timeout 1 timeout 1 pwd",
     ] {
@@ -404,10 +475,7 @@ fn delegated_deadline_failure_is_not_an_administrator_disable() {
         result.reason_code,
         "native_command_extension_evaluation_failed"
     );
-    assert_eq!(
-        result.reason,
-        "HOL Guard could not evaluate the extension controls for this command. Check Guard diagnostics before retrying."
-    );
+    assert_eq!(result.reason, super::floor::EXPIRED_DEADLINE_REASON);
 }
 
 #[test]
@@ -448,8 +516,85 @@ fn expired_extension_deadline_fail_closes_a_proven_benign_command() {
         result.reason_code,
         "native_command_extension_evaluation_failed"
     );
-    assert_eq!(
-        result.reason,
-        "HOL Guard could not evaluate the extension controls for this command. Check Guard diagnostics before retrying."
+    assert_eq!(result.reason, super::floor::EXPIRED_DEADLINE_REASON);
+}
+
+#[test]
+fn only_an_expired_deadline_gets_the_try_again_reason() {
+    let intrinsic = crate::pretool::evaluate_pre_tool_envelope(
+        "claude-code",
+        "PreToolUse",
+        &serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "pwd"}}),
     );
+    let failed = |deadline| {
+        let mut result = intrinsic.clone();
+        strengthen(
+            &mut result,
+            "block",
+            "native_command_extension_evaluation_failed",
+        );
+        super::floor::explain_expired_deadline(&mut result, deadline);
+        result.reason
+    };
+    let unmatched = failed(None);
+    assert!(unmatched.contains("cannot be matched"), "{unmatched}");
+    let pending = failed(Some(Instant::now() + std::time::Duration::from_secs(60)));
+    assert_eq!(pending, unmatched);
+    assert_eq!(
+        failed(Some(Instant::now() - std::time::Duration::from_secs(1))),
+        super::floor::EXPIRED_DEADLINE_REASON
+    );
+}
+
+#[test]
+fn recursive_removal_floor_asks_unless_it_removes_a_root() {
+    let floor = |command: &str| {
+        crate::command_critical_floors::command_critical_floor_factors(
+            &crate::critical_floor_context::parse_floor_command(command, None, None),
+            None,
+            &[],
+        )
+        .into_iter()
+        .find(|factor| factor.reason_code == "critical.destructive-filesystem")
+        .map(|factor| factor.basis.action_floor)
+    };
+    for command in [
+        "rm -rf ./stale-lab-dir",
+        "rm -rf build node_modules",
+        "rm -rf /srv/app/releases/old",
+        "rm -rf dist/*",
+    ] {
+        assert_eq!(
+            floor(command),
+            Some(crate::effect_decision::GuardAction::Review),
+            "{command}"
+        );
+    }
+    for command in [
+        "rm -rf /",
+        "rm -rf /*",
+        "rm -rf ~",
+        "rm -rf ~/*",
+        "rm -rf /etc",
+        "rm -rf ~/Documents",
+        "rm -rf $HOME",
+        "rm -rf \"$TARGET\"",
+        // From the session's directory these can reach the home or a root.
+        "rm -rf {/,/etc}",
+        "rm -rf .",
+        "rm -rf ./",
+        "rm -rf ..",
+        "rm -rf ../*",
+        "rm -rf *",
+        "rm -rf ./*",
+        // xargs appends the paths it reads after the visible operands.
+        "echo / | xargs rm -rf x",
+        "xargs rm -rf BUILD",
+    ] {
+        assert_eq!(
+            floor(command),
+            Some(crate::effect_decision::GuardAction::Block),
+            "{command}"
+        );
+    }
 }

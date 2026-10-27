@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::sync::mpsc::Sender;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime};
 
 thread_local! {
     static LOCK_BUSY_NOTIFICATION: RefCell<Option<Sender<()>>> = const { RefCell::new(None) };
@@ -62,10 +62,7 @@ fn test_directory(label: &str) -> PathBuf {
     let directory = std::env::temp_dir().join(format!(
         "hol-guard-managed-lease-lock-{label}-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
     fixture_directory(&directory);
     #[cfg(unix)]
@@ -187,6 +184,10 @@ fn uninspectable_lease_path_retains_the_resident() {
 fn removed_state_base_releases_the_resident() {
     let home = test_directory("removed-state-base");
     let state_base = home.join("native-runtime");
+    // Guard provisions the state base before the resident runs. On Windows
+    // the resident only binds it and never creates it, so provision it here.
+    #[cfg(windows)]
+    fixture_directory(&state_base);
     lease_directory(&state_base).expect("lease directory should be available");
     fs::remove_dir_all(&home).expect("test directory should be removable");
 

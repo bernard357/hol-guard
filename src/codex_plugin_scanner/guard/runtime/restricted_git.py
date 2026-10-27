@@ -70,7 +70,9 @@ def _repository_read_roots(workspace: Path, cwd: Path) -> tuple[Path, ...]:
         ) from error
 
 
-def prepare_restricted_git(command: Sequence[str], *, workspace: Path, cwd: Path | None = None) -> RestrictedPytestPlan:
+def prepare_restricted_git(
+    command: Sequence[str], *, workspace: Path, cwd: Path | None = None, home_dir: Path | None = None
+) -> RestrictedPytestPlan:
     argv = _normalized_command(command)
     # Native authority validates the complete original command. This local gate
     # independently excludes mutation, helper selection, and shell operators.
@@ -85,7 +87,7 @@ def prepare_restricted_git(command: Sequence[str], *, workspace: Path, cwd: Path
         )
     ):
         raise RestrictedPytestError("git_restricted_invalid_command", "Protected Git requires direct read-only argv.")
-    root = _resolve_workspace(workspace)
+    root = _resolve_workspace(workspace, home_dir=home_dir)
     directory = _resolve_cwd(cwd or root, workspace=root)
     backend, backend_path = _select_backend(platform=sys.platform, backend_executable=None)
     if backend not in {"macos-seatbelt", "linux-bubblewrap"}:
@@ -127,7 +129,11 @@ def prepare_restricted_git(command: Sequence[str], *, workspace: Path, cwd: Path
 
 
 def run_restricted_git(
-    plan: RestrictedPytestPlan, *, timeout_seconds: int, env: Mapping[str, str] | None = None
+    plan: RestrictedPytestPlan,
+    *,
+    timeout_seconds: int,
+    env: Mapping[str, str] | None = None,
+    merge_stderr: bool = False,
 ) -> int:
     if (
         plan.profile_version != GIT_READ_ONLY_PROFILE_VERSION
@@ -165,5 +171,9 @@ def run_restricted_git(
             }
         )
         return _run_backend_process(
-            _backend_argv(plan, private_root=root), env=launch_env, timeout_seconds=timeout_seconds, cwd=plan.cwd
+            _backend_argv(plan, private_root=root),
+            env=launch_env,
+            timeout_seconds=timeout_seconds,
+            cwd=plan.cwd,
+            merge_stderr=merge_stderr,
         )

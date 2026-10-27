@@ -149,9 +149,7 @@ def test_compaction_oserror_is_optional_at_cli_boundary(
     original_write = diagnostics.write_private_state
     compaction_attempted = False
 
-    def fail_compaction(
-        guard_home: Path, name: str, payload: bytes, maximum_bytes: int
-    ) -> None:
+    def fail_compaction(guard_home: Path, name: str, payload: bytes, maximum_bytes: int) -> None:
         nonlocal compaction_attempted
         if name == DIAGNOSTICS_STATE_NAME:
             decoded = json.loads(payload)
@@ -243,9 +241,7 @@ def test_diagnostics_writer_serializes_read_modify_write_transactions(
     }
 
 
-def test_diagnostics_writer_serializes_separate_processes(
-    tmp_path: Path, fixed_diagnostics_clock: datetime
-) -> None:
+def test_diagnostics_writer_serializes_separate_processes(tmp_path: Path, fixed_diagnostics_clock: datetime) -> None:
     home = tmp_path / "guard-home"
     home.mkdir()
     marker = tmp_path / "first-write-started"
@@ -355,9 +351,7 @@ def test_uppercase_recovery_snapshot_is_persisted_with_canonical_id(tmp_path: Pa
 
 
 @pytest.mark.parametrize("command", ["status", "diagnostics"])
-def test_cli_accepts_legacy_snapshot_with_uppercase_operation_id(
-    tmp_path: Path, command: str
-) -> None:
+def test_cli_accepts_legacy_snapshot_with_uppercase_operation_id(tmp_path: Path, command: str) -> None:
     snapshot = _snapshot()
     operation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     snapshot["operationId"] = operation_id.upper()
@@ -467,9 +461,7 @@ def test_diagnostics_dispatch_uses_caller_output_stream(tmp_path: Path) -> None:
     assert output.getvalue().startswith("{")
 
 
-def test_router_passes_recovery_stdout_and_stderr_to_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_router_passes_recovery_stdout_and_stderr_to_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output = io.StringIO()
     error = io.StringIO()
     captured: dict[str, object] = {}
@@ -542,9 +534,7 @@ def test_diagnostics_dispatch_keeps_a_falsey_caller_output_stream(tmp_path: Path
     ],
     ids=["unhashable-capability", "unhashable-phase", "unhashable-check-id"],
 )
-def test_malformed_enum_values_are_classified_contract_errors_before_membership(
-    field: str, value: object
-) -> None:
+def test_malformed_enum_values_are_classified_contract_errors_before_membership(field: str, value: object) -> None:
     payload = _snapshot("valid_timeout.json")
     payload[field] = value
 

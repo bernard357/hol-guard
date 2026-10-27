@@ -108,9 +108,7 @@ def test_diagnostics_are_bounded_and_retain_latest_event() -> None:
         ("latest", {"password": "malformed-secret"}, "recovery_diagnostics_snapshot_invalid"),
     ),
 )
-def test_encode_rejects_malformed_public_reports_without_leaking_fields(
-    field: str, value: object, reason: str
-) -> None:
+def test_encode_rejects_malformed_public_reports_without_leaking_fields(field: str, value: object, reason: str) -> None:
     report = build_recovery_diagnostics(_source())
     report[field] = value
 
@@ -449,9 +447,7 @@ def test_stale_archive_read_remains_usable_when_optional_compaction_fails(
 ) -> None:
     now = _freeze_retention_now(monkeypatch)
     stale_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-    stale_report = build_recovery_diagnostics(
-        _source(), generated_at=now - timedelta(days=8)
-    )
+    stale_report = build_recovery_diagnostics(_source(), generated_at=now - timedelta(days=8))
     stale_report["operationId"] = stale_id
     stale_report["latest"] = {**stale_report["latest"], "operationId": stale_id}  # type: ignore[index]
     stale_report["events"] = [{**stale_report["events"][0], "operationId": stale_id}]  # type: ignore[index]

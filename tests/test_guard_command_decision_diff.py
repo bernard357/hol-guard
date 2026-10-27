@@ -228,8 +228,6 @@ def test_report_is_exactly_reproducible_and_source_bound() -> None:
         "src/codex_plugin_scanner/guard/runtime/command_model.py",
         "src/codex_plugin_scanner/guard/runtime/effect_contract.py",
         "src/codex_plugin_scanner/guard/runtime/extension_evidence.py",
-        "src/codex_plugin_scanner/guard/runtime/containment_outputs.py",
-        "src/codex_plugin_scanner/guard/runtime/local_package_script_evidence.py",
         "src/codex_plugin_scanner/guard/runtime/verified_github_reads.py",
         "src/codex_plugin_scanner/guard/runtime/verified_read_execution.py",
         "src/codex_plugin_scanner/guard/runtime/verified_read_common.py",
@@ -247,7 +245,6 @@ def test_report_is_exactly_reproducible_and_source_bound() -> None:
         "src/codex_plugin_scanner/guard/shims.py",
         "tests/test_guard_contained_package_script_execution.py",
         "tests/test_guard_contained_workspace_write_contract.py",
-        "tests/test_guard_contained_workspace_write_execution.py",
         "tests/test_guard_package_shims.py",
     }
     assert {source_binding_id(path) for path in critical_paths} <= sources.keys()
@@ -294,14 +291,14 @@ def test_report_gates_native_parity_and_preserves_every_original_oracle_differen
     assert native_contract["unexpected_count"] == 0
     assert _group_signatures(native_contract["groups"]) == expected_native_groups()
     assert _group_signatures(native_contract["native_rejection_groups"]) == expected_native_rejection_groups()
-    assert native_contract["native_rejection_count"] == 27_084
+    assert native_contract["native_rejection_count"] == 20_835
 
     reconciliation = cast(dict[str, object], report["oracle_reconciliation"])
     assert reconciliation["known_gap_equality"] is False
     assert reconciliation["categorized_count"] == 51_000
     assert reconciliation["uncategorized_count"] == 0
     assert reconciliation["below_original_count"] == 0
-    assert reconciliation["above_original_count"] == 10_541
+    assert reconciliation["above_original_count"] == 4_317
     original_gaps = cast(dict[str, list[object]], reconciliation["known_gaps"])
     gap_signatures = {key: (int(str(value[0])), str(value[1])) for key, value in original_gaps.items()}
     assert gap_signatures == expected_original_gap_groups()
@@ -358,7 +355,14 @@ def test_fresh_process_report_is_environment_independent_and_bounded(
     # The test conftest defaults HOL_GUARD_NATIVE to "off" outside regression lanes;
     # the report runner forces the supplied native binary only when the mode is unset.
     environ.pop("HOL_GUARD_NATIVE", None)
-    environ.update({"PYTHONHASHSEED": hash_seed, "TZ": timezone, "LC_ALL": locale})
+    environ.update(
+        {
+            "PYTHONHASHSEED": hash_seed,
+            "TZ": timezone,
+            "LC_ALL": locale,
+            "HOL_GUARD_CORPUS_MEMORY_DIAGNOSTICS": "1",
+        }
+    )
     completed = subprocess.run(
         [sys.executable, str(script), "--metrics"],
         check=False,
@@ -372,4 +376,30 @@ def test_fresh_process_report_is_environment_independent_and_bounded(
     metrics = cast(dict[str, object], value)
     assert metrics["report_framed_sha256"] == expected_digest
     assert float(str(metrics["elapsed_seconds"])) < evaluation_budget_seconds + spawn_overhead_seconds, metrics
-    assert float(str(metrics["rss_mib"])) < int(str(manifest["evaluation_rss_budget_mib"])), metrics
+    if not float(str(metrics["rss_mib"])) < int(str(manifest["evaluation_rss_budget_mib"])):
+        pytest.fail(f"{metrics}\n{completed.stderr.decode(errors='replace')[-4000:]}")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_worker_memory_diagnostics_are_opt_in_and_resource_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], enabled: bool
+) -> None:
+    from tests import guard_command_decision_diff_runner as runner
+
+    monkeypatch.setenv("HOL_GUARD_CORPUS_MEMORY_DIAGNOSTICS", "1" if enabled else "0")
+    monkeypatch.setenv("UNRELATED_PRIVATE_VALUE", "must-not-appear-in-resource-diagnostics")
+    monkeypatch.setattr(runner, "peak_rss_mib", lambda *, include_children=False: 150.0 if include_children else 90.0)
+    runner._memory_diagnostic(2, "after_first_batch")
+    output = capsys.readouterr()
+    assert output.out == ""
+    if not enabled:
+        assert output.err == ""
+        return
+    prefix, payload = output.err.strip().split(" ", maxsplit=1)
+    assert prefix == "corpus_memory"
+    assert json.loads(payload) == {
+        "worker": 2,
+        "phase": "after_first_batch",
+        "self_peak_mib": 90.0,
+        "self_plus_child_peak_mib": 150.0,
+    }

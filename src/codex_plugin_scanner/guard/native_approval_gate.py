@@ -18,14 +18,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .native_approval_errors import FINITE_FAILURE_CODES
 from .native_context import _canonical_request_sha256, ensure_resident_prerequisite
-from .native_resident_client import native_resident_client_failure_code, native_resident_client_request
+from .native_mode import non_production_diagnostic_enabled
+from .native_resident_client import (
+    native_resident_client_failure_code,
+    native_resident_client_ready,
+    native_resident_client_request,
+)
 from .native_runtime import _isolated_environment, _native_error, native_runtime_status
 from .native_runtime_resilience import (
     native_record_overload,
@@ -52,10 +59,31 @@ _TOTP_SESSION_ENV_KEYS = (
     "SSH_TTY",
 )
 _UNAVAILABLE_CODE = "native_approval_gate_unavailable"
+_COLD_START_ALLOWANCE_SECONDS = 10.0
 # Resident errors meaning this guard home was never provisioned for a resident
 # (no verifier key, no private state directory). They are the same answer as
 # "runtime off"; every other failure of a provisioned resident fails closed.
 _UNPROVISIONED_ERRORS = frozenset({"native_policy_verifier_key_missing", "native_resident_state_dir_create_failed"})
+# Existing Python client classifications, accepted only for diagnostic output.
+# This must not extend the native refusal or approval authority vocabulary.
+_PYTHON_CLIENT_DIAGNOSTIC_CODES = frozenset(
+    {
+        "native_client_containment_failed",
+        "native_client_timed_out",
+        "native_client_output_limit_exceeded",
+        "native_client_status_missing",
+        "native_client_exit_nonzero",
+        "native_client_output_missing",
+        "native_client_process_failed",
+        "native_client_pool_exhausted",
+        "native_client_request_invalid",
+        "native_client_launcher_failed",
+        "native_client_stdin_unavailable",
+        "native_client_stream_failed",
+        "native_client_start_failed",
+    }
+)
+_TRANSPORT_DIAGNOSTIC_CODES = FINITE_FAILURE_CODES | _PYTHON_CLIENT_DIAGNOSTIC_CODES
 _CONFIG_KEYS = frozenset(
     {
         "enabled",
@@ -221,10 +249,13 @@ def approval_gate_native(
     native runtime is provisioned for this process.
     """
     global _request_counter
-    status = native_runtime_status()
+    # The first probe of a cold runtime may spend the cold-start allowance, but never more than this
+    # request's own total budget.
+    status = native_runtime_status(
+        deadline_monotonic=time.monotonic() + timeout_seconds + _COLD_START_ALLOWANCE_SECONDS
+    )
     if (
-        status.mode == "off"
-        or not status.available
+        not status.available
         or not status.compatible
         or status.identity is None
         or status.capabilities is None
@@ -268,6 +299,11 @@ def approval_gate_native(
     if device_label is not None:
         request["device_label"] = device_label
 
+    if not native_resident_client_ready(status.identity.path, guard_home):
+        # No warm client in this process, so this request pays a resident spawn and its first answer. A
+        # one-shot CLI step on a cold runner exceeds the warm budget and would fail closed on a healthy
+        # resident. The allowance is a ceiling for that one request; a warm resident still answers at once.
+        timeout_seconds += _COLD_START_ALLOWANCE_SECONDS
     deadline_monotonic = time.monotonic() + timeout_seconds
     deadline_budget_ms = max(1, min(9_000, int(timeout_seconds * 1_000)))
     resident = json.dumps(
@@ -290,8 +326,19 @@ def approval_gate_native(
         deadline_monotonic=deadline_monotonic,
     )
     if output is None:
-        if native_resident_client_failure_code() in _UNPROVISIONED_ERRORS:
+        failure_code = None
+        with suppress(Exception):
+            failure_code = native_resident_client_failure_code()
+        if type(failure_code) is str and failure_code in _UNPROVISIONED_ERRORS:
             return None
+        with suppress(Exception):
+            if non_production_diagnostic_enabled():
+                code = (
+                    failure_code
+                    if type(failure_code) is str and failure_code in _TRANSPORT_DIAGNOSTIC_CODES
+                    else "unknown"
+                )
+                print(f"native_approval_gate_transport_unavailable stage=request code={code}", file=sys.stderr)
         native_record_resident_failure(status.identity.sha256, guard_home, reason="native_approval_gate_unavailable")
         raise _unavailable_error()
     try:

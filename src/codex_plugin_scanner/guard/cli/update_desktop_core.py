@@ -113,8 +113,6 @@ def desktop_core_updates_supported() -> bool:
 
 def desktop_core_uses_alpha_channel(current_version: str, *, requested_alpha: bool) -> bool:
     _ = current_version
-    if platform_target() == "x86_64-unknown-linux-gnu":
-        return False
     return requested_alpha
 
 
@@ -145,10 +143,6 @@ def pypi_desktop_core_versions(payload: object, *, include_alpha: bool) -> list[
         if _release_files_are_available(files):
             versions.append(version_text.strip())
     return versions
-
-
-def pypi_alpha_versions(payload: object) -> list[str]:
-    return pypi_desktop_core_versions(payload, include_alpha=True)
 
 
 def _release_files_are_available(files: object) -> bool:
@@ -859,7 +853,6 @@ __all__ = [
     "is_desktop_managed_runtime",
     "is_frozen_runtime",
     "platform_target",
-    "pypi_alpha_versions",
     "pypi_desktop_core_versions",
     "select_desktop_core_latest",
 ]

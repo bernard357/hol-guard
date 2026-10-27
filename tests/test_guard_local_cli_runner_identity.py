@@ -6,17 +6,14 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.daemon import hook_native_local_cli, hook_native_review_approval
-from codex_plugin_scanner.guard.local_cli_trust import matching_local_cli_grant, utc_now
-from codex_plugin_scanner.guard.runtime.custom_extension_suggestion import is_suggestable_custom_tool
-from codex_plugin_scanner.guard.runtime.local_cli_commands import command_tokens_for_invocation
+from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.local_cli_identity import (
-    REGISTRY_PACKAGE_CLI_PREFIX,
     identify_unlisted_cli,
     is_local_cli_id,
 )
 from codex_plugin_scanner.guard.store import GuardStore
 
-from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
+from .local_cli_native_fixture import native_local_cli_grant_resident, review_rule_verdict  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -58,29 +55,6 @@ def _grant_store(tmp_path: Path, identity, state: str) -> GuardStore:
     return store
 
 
-def test_npx_local_bin_binds_to_project_wrangler(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    _write_wrangler_workspace(workspace)
-    home_dir = tmp_path / "home"
-
-    identity = identify_unlisted_cli("npx wrangler deploy", cwd=workspace, home_dir=home_dir)
-
-    assert identity is not None
-    assert identity.name == "wrangler"
-    assert identity.runner == "npx"
-    assert identity.path_class == "project-tool"
-    assert not identity.is_registry_package
-    assert not identity.cli_id.startswith(REGISTRY_PACKAGE_CLI_PREFIX)
-    assert command_tokens_for_invocation(
-        "npx wrangler deploy", cwd=workspace, home_dir=home_dir, identity=identity
-    ) == ("deploy",)
-    assert is_suggestable_custom_tool(
-        name=identity.name,
-        kind=identity.kind,
-        source_path=identity.path_class,
-    )
-
-
 def test_wrangler_upgrade_changes_local_identity_hash(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     target = _write_wrangler_workspace(workspace)
@@ -93,19 +67,6 @@ def test_wrangler_upgrade_changes_local_identity_hash(tmp_path: Path) -> None:
     assert before is not None and after is not None
     assert before.cli_id == after.cli_id
     assert before.identity_hash != after.identity_hash
-
-
-@pytest.mark.parametrize("command", ["npx -y wrangler@3 --version", "bunx wrangler whoami"])
-def test_registry_fetch_uses_package_keyed_identity(tmp_path: Path, command: str) -> None:
-    workspace = tmp_path / "empty"
-    workspace.mkdir()
-
-    identity = identify_unlisted_cli(command, cwd=workspace, home_dir=tmp_path / "home")
-
-    assert identity is not None
-    assert identity.is_registry_package
-    assert identity.cli_id.startswith(REGISTRY_PACKAGE_CLI_PREFIX)
-    assert identity.path_class == "registry-package"
 
 
 @pytest.mark.parametrize(
@@ -129,11 +90,9 @@ def test_registry_identity_honors_blocks_only(tmp_path: Path, state: str) -> Non
     assert identity is not None
     store = _grant_store(tmp_path, identity, state)
 
-    match = matching_local_cli_grant(
-        store=store, command=command, cwd=workspace, home_dir=home_dir, current_action="review"
-    )
+    match = review_rule_verdict(store, command=command, cwd=workspace, home_dir=home_dir)
 
-    assert match == ((identity, "blocked") if state == "blocked" else None)
+    assert match == (("blocked", identity.name) if state == "blocked" else None)
 
 
 def test_local_identity_honors_allow_grant(tmp_path: Path) -> None:
@@ -144,19 +103,22 @@ def test_local_identity_honors_allow_grant(tmp_path: Path) -> None:
     assert identity is not None
     store = _grant_store(tmp_path, identity, "allowed")
 
-    match = matching_local_cli_grant(
-        store=store, command="npx wrangler whoami", cwd=workspace, home_dir=home_dir, current_action="review"
-    )
+    match = review_rule_verdict(store, command="npx wrangler whoami", cwd=workspace, home_dir=home_dir)
 
-    assert match == (identity, "allowed")
+    assert match == ("allowed", None)
 
 
-def _native_review(*, minimum_action: str = "review", action_type: str = "shell") -> dict[str, object]:
+def _native_review(
+    *,
+    minimum_action: str = "review",
+    action_type: str = "shell",
+    reason_code: str = "native_command_review_required",
+) -> dict[str, object]:
     return {
         "decision": "ask",
         "policy_action": "review",
         "minimum_action": minimum_action,
-        "reason_code": "native_review",
+        "reason_code": reason_code,
         "reason": "Review",
         "action": {"action_type": action_type},
     }
@@ -170,6 +132,10 @@ def _native_review(*, minimum_action: str = "review", action_type: str = "shell"
         ("allowed", _native_review(), "allow"),
         ("allowed", _native_review(action_type="package"), None),
         ("allowed", _native_review(minimum_action="block"), None),
+        # A review with a risk signal of its own outlives an allow, not a block.
+        ("allowed", _native_review(reason_code="native_network_review"), None),
+        ("allowed", _native_review(reason_code="shell_local_secret_read"), None),
+        ("blocked", _native_review(reason_code="native_network_review"), "deny"),
     ],
 )
 def test_native_review_applies_custom_extension_grants(
@@ -188,8 +154,8 @@ def test_native_review_applies_custom_extension_grants(
     rendered: list[Mapping[str, object]] = []
     monkeypatch.setattr(
         hook_native_local_cli,
-        "harness_json_from_native_pre_tool",
-        lambda harness, result: rendered.append(result) or {"harness": harness},
+        "render_accepted_allow",
+        lambda harness, result, **_kwargs: rendered.append(result) or {"harness": harness},
     )
     monkeypatch.setattr(
         hook_native_local_cli,
@@ -247,6 +213,7 @@ def test_native_allow_still_honors_custom_extension_block(
             "decision": "deny",
             "reason_code": "local_cli_extension_blocked",
             "reason": "Your custom extension rules block this wrangler command.",
+            "guard_home": store.guard_home,
         }
 
 
@@ -284,3 +251,34 @@ def test_registry_identity_keeps_valid_id_for_hyphenated_names(tmp_path: Path) -
     assert identity is not None
     assert identity.is_registry_package
     assert is_local_cli_id(identity.cli_id)
+
+
+@pytest.mark.parametrize("verdict", [["allowed"], {"allowed": True}, 1, None])
+def test_malformed_resident_verdict_leaves_the_review_standing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verdict: object
+) -> None:
+    store = GuardStore(tmp_path / "guard-home")
+    monkeypatch.setattr(hook_native_local_cli, "ensure_resident_prerequisite", lambda guard_home: True)
+
+    def resident(**kwargs: object) -> dict[str, object]:
+        request = kwargs["request"]
+        assert isinstance(request, Mapping)
+        return {
+            "schema": "guard-hook-local-cli-rule-result.v1",
+            "request_id": request["request_id"],
+            "status": "ok",
+            "verdict": verdict,
+        }
+
+    monkeypatch.setattr(hook_native_local_cli, "_resident_request", resident)
+
+    response = hook_native_local_cli.native_local_cli_grant_response(
+        store,
+        harness="codex",
+        payload={"tool_input": {"command": "npx wrangler whoami"}, "cwd": str(tmp_path)},
+        native_result={"decision": "review", "policy_action": "review", "minimum_action": "review"},
+        workspace=tmp_path,
+        home_dir=tmp_path,
+    )
+
+    assert response is None

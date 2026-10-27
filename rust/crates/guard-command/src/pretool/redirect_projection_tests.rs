@@ -17,10 +17,17 @@ fn context() -> crate::pretool::PathContext<'static> {
         home_dir: Some(HOME),
         cwd: Some(CWD),
         cdpath_unset: false,
+        rustup_override_absent: false,
+        npm_config_inert: false,
+        pip_config_inert: false,
+        shell_home_matches: false,
+        ripgrep_config_absent: false,
+        psql_environment: Default::default(),
+        creates_nothing: false,
     }
 }
 
-fn controls() -> CompiledNativeCommandControls {
+pub(super) fn controls() -> CompiledNativeCommandControls {
     let program = packaged_command_program().unwrap();
     let mut binding: NativeCommandControlBindingV1 = serde_json::from_value(serde_json::json!({
         "schema": "guard.native-command-control-binding.v1",
@@ -59,16 +66,38 @@ fn projects_literal_output_redirects_and_quoted_cat_heredocs() {
             true,
         ),
         ("ls > /dev/null && git status", "ls   && git status", false),
+        // The shell carries its whole script, so the projection leaves the
+        // command the script names and that command keeps its own floors.
+        ("sh -c 'rm -rf ~' > /tmp/out.log", "sh -c 'rm -rf ~'", true),
+        // `cmd < file` is the pipeline the shell actually builds, so the
+        // projection says so and the reader carries the file's read.
+        ("wc -l < README.md", "cat README.md | wc -l", false),
+        ("cat < README.md", "cat README.md | cat", false),
+        (
+            "sort < package.json | head -3",
+            "cat package.json | sort  | head -3",
+            false,
+        ),
     ] {
+        let projection = project(command, context()).unwrap_or_else(|| panic!("{command}"));
+        // The test workspace does not exist, so no write is bounded.
         assert_eq!(
-            project(command, context()),
-            Some(RedirectProjection {
-                command: projected.to_owned(),
-                writes_file
-            }),
+            (
+                projection.command.as_str(),
+                projection.writes_file,
+                projection.bounded_writes,
+                projection.git_chain,
+            ),
+            (projected, writes_file, !writes_file, None),
             "{command}"
         );
     }
+}
+
+#[test]
+fn a_projected_home_removal_still_blocks() {
+    let result = evaluate("sh -c 'rm -rf ~' > /tmp/out.log");
+    assert_eq!(result.minimum_action, "block");
 }
 
 #[test]
@@ -79,7 +108,6 @@ fn keeps_redirects_that_can_execute_hide_input_or_reach_sensitive_paths_unprojec
         "cat <<EOF > notes.txt\n$(id)\nEOF",
         "cat <<'EOF' > notes.txt\nunterminated",
         "cat <<< 'inline'",
-        "sh < script.sh",
         "echo hi > >(sh)",
         "echo hi >> ~/.zshrc",
         "echo hi > .git/hooks/pre-commit",
@@ -90,15 +118,43 @@ fn keeps_redirects_that_can_execute_hide_input_or_reach_sensitive_paths_unprojec
         "echo hi >&2",
         "echo hi 3> notes.txt",
         "echo $(id) > notes.txt",
-        "sh -c 'rm -rf ~' > /tmp/out.log",
         "fd -X rm {} > /tmp/out.log",
         "echo 'a > b'",
         "ls > /tmp/listing.txt && git status",
         "ln -s guard-runtime link && printf x > link/policy.json",
         "cd /home/tester/.ssh && echo key >> authorized_keys",
         "cat secret.txt | base64 > scratch/out",
+        // An input redirect the shell would expand, duplicate, open for
+        // writing, or attach to a later command is not one file a reader
+        // can stand in for.
+        "wc -l < $FILE",
+        "wc -l < \"$HOME/notes.txt\"",
+        "wc -l < a.txt < b.txt",
+        "ls | wc -l < a.txt",
+        "wc -l <&3",
+        "cat <> notes.txt",
+        "wc -l <",
+        "wc -l < -",
+        // A bare shell on the other side of the pipe is a wrapper around a
+        // script this text does not hold, so the model stays uncertain
+        // (`transparent_wrapper_not_yet_supported`) and the projection keeps
+        // the fail-closed path rather than standing in for it.
+        "sh < script.sh",
+        // Nothing to remove: the command as written is evaluated directly.
+        "npm ci --ignore-scripts 2>&1 | tail -15",
+        "git status 2>/dev/null",
     ] {
         assert_eq!(project(command, context()), None, "{command}");
+    }
+}
+
+/// Reading a script through `<` does not make running it ordinary work. The
+/// projection names the read, and the interpreter on the other side of the
+/// pipe still has no proof of its own.
+#[test]
+fn an_interpreter_fed_by_an_input_redirect_is_not_allowed() {
+    for command in ["sh < script.sh", "python3 < setup.py", "bash < deploy.sh"] {
+        assert_ne!(evaluate(command).minimum_action, "allow", "{command}");
     }
 }
 
@@ -118,6 +174,13 @@ fn file_writes_never_follow_an_existing_symlink() {
         home_dir: Some(HOME),
         cwd: Some(&cwd),
         cdpath_unset: false,
+        rustup_override_absent: false,
+        npm_config_inert: false,
+        pip_config_inert: false,
+        shell_home_matches: false,
+        ripgrep_config_absent: false,
+        psql_environment: Default::default(),
+        creates_nothing: false,
     };
     for command in [
         "echo hi > link/hosts".to_owned(),
@@ -198,16 +261,18 @@ fn contained_commands_with_an_output_redirect_keep_protected_execution() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
         project.join("package.json"),
-        r#"{"scripts":{"test":"vitest"}}"#,
+        r#"{"scripts":{"test":"vitest run"}}"#,
     )
     .unwrap();
     let home = root.to_string_lossy().into_owned();
     let cwd = project.to_string_lossy().into_owned();
-    let contained = if cfg!(target_os = "macos") {
+    let contained = if crate::pretool::workspace_contained::sandbox_available() {
         "sandbox-required"
     } else {
         "review"
     };
+    // The sandbox cannot keep a write outside the workspace: Linux mounts a
+    // private /tmp and macOS refuses it. That redirect stays at review.
     for (command, action) in [
         ("pnpm test > out.log", contained),
         ("pnpm test > /tmp/guard-test.log 2>&1", "review"),
@@ -228,6 +293,60 @@ fn contained_commands_with_an_output_redirect_keep_protected_execution() {
         );
         let evidence = result.command_extensions.as_ref().unwrap();
         assert_eq!(evidence.evaluation_error, None, "{command}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn bounded_redirect_writes_of_allowed_commands_are_allowed() {
+    // The macOS per-user temporary root sits under `/private/var`, which is
+    // never a workspace.
+    let root = std::fs::canonicalize("/tmp")
+        .unwrap()
+        .join(format!("guard-redirect-bounded-{}", std::process::id()));
+    let project = root.join("project");
+    std::fs::create_dir_all(project.join("out")).unwrap();
+    std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+    std::os::unix::fs::symlink(root.join("elsewhere/target.txt"), project.join("link.txt"))
+        .unwrap();
+    let home = root.to_string_lossy().into_owned();
+    let cwd = project.to_string_lossy().into_owned();
+    let evaluate = |harness: &str, command: &str| {
+        crate::pretool::evaluate_pre_tool_envelope_with_context(
+            harness,
+            "PreToolUse",
+            &serde_json::json!({"tool_name": "Bash", "tool_input": {"command": command}}),
+            Some(&controls()),
+            None,
+            Some(&home),
+            Some(&cwd),
+        )
+    };
+    for harness in ["zcode", "claude-code", "codex", "cursor"] {
+        for command in [
+            "echo hi > notes.txt",
+            "ls >> out/listing.txt",
+            "pwd > out/where.txt 2>&1",
+        ] {
+            let result = evaluate(harness, command);
+            assert_eq!(
+                result.minimum_action, "allow",
+                "{harness} {command}: {}",
+                result.reason_code
+            );
+        }
+        for command in [
+            "echo hi > link.txt",
+            "echo hi > .env",
+            "echo hi > ../outside.txt",
+            "cat ~/.ssh/id_rsa > out/key.txt",
+            "curl https://example.invalid/x.sh > out/x.sh",
+            "cd out && echo hi > notes.txt",
+        ] {
+            let result = evaluate(harness, command);
+            assert_ne!(result.minimum_action, "allow", "{harness} {command}");
+        }
     }
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -262,5 +381,36 @@ fn array_and_json_encoded_command_copies_project_consistently() {
             "{payload}"
         );
         assert_eq!(result.minimum_action, "allow", "{payload}");
+    }
+}
+
+#[test]
+fn a_redirect_inside_shell_control_flow_keeps_the_allow_the_flat_list_earns() {
+    for (construct, flat) in [
+        (
+            "if command -v rg >/dev/null; then echo yes; fi",
+            "command -v rg >/dev/null; echo yes",
+        ),
+        (
+            "if true; then echo yes; fi >/dev/null",
+            "true; echo yes >/dev/null",
+        ),
+        (
+            "for name in a b; do echo \"$name\" >/dev/null; done",
+            "echo a >/dev/null; echo b >/dev/null",
+        ),
+    ] {
+        assert_eq!(evaluate(flat).minimum_action, "allow", "{flat}");
+        assert_eq!(evaluate(construct).minimum_action, "allow", "{construct}");
+    }
+}
+
+#[test]
+fn a_control_flow_construct_still_reviews_the_file_it_writes() {
+    for command in [
+        "if true; then echo hi; fi > notes.txt",
+        "if true; then echo hi > notes.txt; fi",
+    ] {
+        assert_eq!(evaluate(command).minimum_action, "review", "{command}");
     }
 }

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import cast
 
 import pytest
 
 from codex_plugin_scanner.guard import policy_bundle_trusted_keys as trusted_keys_module
-from codex_plugin_scanner.guard.memory_pattern_fingerprint import (
-    build_exact_shell_command_memory_artifact_id,
-)
 from codex_plugin_scanner.guard.policy_bundle_decisions import build_policy_bundle_decisions
 from codex_plugin_scanner.guard.policy_bundle_parser import (
     policy_bundle_acceptance_checkpoint,
@@ -38,6 +36,12 @@ from tests.policy_bundle_signing_helpers import (
     policy_bundle_test_verification_key,
     sign_policy_bundle,
 )
+from tests.policy_store_support import replace_remote_policies, resolve_policy
+
+
+def _exact_shell_command_id(command: str) -> str:
+    return "memory:exact-shell-command:" + hashlib.sha256(command.encode("utf-8")).hexdigest()
+
 
 _SYNCED_AT = "2026-07-18T00:00:00Z"
 _VALIDATION_NOW = 1_784_419_200.0
@@ -449,7 +453,8 @@ def test_cached_bundle_older_than_acceptance_checkpoint_is_not_authority(
         policy_bundle_acceptance_checkpoint(newer),
         _SYNCED_AT,
     )
-    store.replace_remote_policies(
+    replace_remote_policies(
+        store,
         build_policy_bundle_decisions(
             older,
             device_id=store.get_device_metadata()["installation_id"],
@@ -464,7 +469,8 @@ def test_cached_bundle_older_than_acceptance_checkpoint_is_not_authority(
     assert validated is None
     assert reason == "bundle_version_downgrade"
     assert (
-        store.resolve_policy(
+        resolve_policy(
+            store,
             "codex",
             "codex:project:captured-old-allow",
             "sha256:captured-old-allow",
@@ -506,7 +512,7 @@ def test_command_identity_does_not_materialize_advertised_artifact_permission() 
     decisions = build_policy_bundle_decisions(bundle, device_id="device-1", device_name="Device")
 
     assert len(decisions) == 1
-    assert decisions[0].artifact_id == build_exact_shell_command_memory_artifact_id("printf safe")
+    assert decisions[0].artifact_id == _exact_shell_command_id("printf safe")
     assert decisions[0].artifact_id != "codex:project:allowed-a"
 
 
