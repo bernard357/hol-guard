@@ -38,20 +38,45 @@ fn field<'a>(map: &'a Value, key: &str) -> &'a Value {
     map.get(key).unwrap_or(&Value::Null)
 }
 
+/// Where the request reached the op from, which decides whether it may carry a
+/// resolved policy view of its own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PolicySource {
+    /// `evaluate_package_approval_hash`: bytes any client can put on the
+    /// resident socket.
+    Wire,
+    /// `package_current_action_and_hash`: the resident calling itself, with a
+    /// view it built in process.
+    InProcess,
+}
+
+/// The marker a caller sends when it has no configuration to hydrate a view
+/// from. It is the only `config_policy` a wire request may carry.
+fn is_unavailable_marker(policy: &Map<String, Value>) -> bool {
+    policy.len() == 1 && policy.get("available") == Some(&Value::Bool(false))
+}
+
 /// The policy view the composed action and the approval context are bound to.
 ///
 /// A caller that holds the loaded configuration sends the fields and the view
 /// is hydrated here, so the `package_script` action and the override folded
 /// into the composed action are resolved by the runtime and never by the
-/// caller. A caller with no configuration to hydrate it from — the relay,
-/// which holds the harness view the publisher bound, and a request with no
-/// config bound at all — sends the view itself.
-fn resolve_config_policy(request: &PackageApprovalHashRequestV1) -> Result<Value, String> {
+/// caller. A wire caller with nothing to hydrate the view from sends
+/// `{"available": false}` and nothing else: a resolved view on the wire would
+/// put `effective_package_script_action` and `resolved_override` back in the
+/// caller's hands, so it is refused. The relay is the one caller that still
+/// sends a view, and it does so in process, from the harness view the
+/// publisher bound rather than from a request.
+fn resolve_config_policy(
+    request: &PackageApprovalHashRequestV1,
+    source: PolicySource,
+) -> Result<Value, String> {
     let Some(facts) = request.config_facts.as_ref() else {
-        return match request.config_policy.is_object() {
-            true => Ok(request.config_policy.clone()),
-            false => Err(invalid()),
-        };
+        let policy = request.config_policy.as_object().ok_or_else(invalid)?;
+        if source == PolicySource::Wire && !is_unavailable_marker(policy) {
+            return Err(invalid());
+        }
+        return Ok(request.config_policy.clone());
     };
     if !request.config_policy.is_null() {
         return Err(invalid());
@@ -384,7 +409,7 @@ pub(crate) fn package_current_action_and_hash(
     if !request.evaluation.is_object() || !request.artifact.is_object() {
         return Err(invalid());
     }
-    let config_policy = resolve_config_policy(request)?;
+    let config_policy = resolve_config_policy(request, PolicySource::InProcess)?;
     let current_action = compose_current_action(request, &config_policy);
     let artifact_hash = artifact_hash(request, &config_policy, current_action)?;
     Ok((current_action, artifact_hash))
@@ -404,7 +429,7 @@ pub(crate) fn evaluate_package_approval_hash(
     {
         return Err(invalid());
     }
-    let config_policy = resolve_config_policy(request)?;
+    let config_policy = resolve_config_policy(request, PolicySource::Wire)?;
     let current_action = compose_current_action(request, &config_policy);
     let mut payload = Map::new();
     payload.insert("current_action".to_owned(), json!(current_action.as_str()));

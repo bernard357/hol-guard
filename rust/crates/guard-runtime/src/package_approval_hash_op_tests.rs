@@ -93,6 +93,14 @@ fn recorded_python_vectors_match() {
     assert!(vectors.len() >= 10);
     for vector in &vectors {
         let name = vector["name"].as_str().unwrap();
+        // A recorded view is replayed through the fields it hydrates from:
+        // the wire path no longer takes a resolved view. The in-process form
+        // is covered by `the_relay_may_send_a_view_the_wire_may_not`.
+        let replayed = match vector["config_facts"].is_null() {
+            true => (*vector).clone(),
+            false => with_config_facts(vector),
+        };
+        let vector = &replayed;
         let workspace = Workspace::new(name);
         let hashed = run(&request(vector, &workspace, "artifact_hash")).unwrap();
         assert_eq!(
@@ -229,6 +237,47 @@ fn an_unreadable_or_doubled_configuration_defers() {
             "a missing {key} should defer"
         );
     }
+}
+
+/// `evaluate_package_approval_hash` is the resident's wire entry point, so a
+/// request that carried a resolved view would let whoever sent those bytes
+/// pick the `package_script` action and the override folded into the composed
+/// action. Only the "no configuration bound" marker is accepted there. The
+/// relay reaches the same resolution in process and still sends its view.
+#[test]
+fn the_relay_may_send_a_view_the_wire_may_not() {
+    let vectors: Vec<Value> = serde_json::from_str(VECTORS).unwrap();
+    let vector = vectors
+        .iter()
+        .find(|vector| vector["name"] == "config_harness_block_managed")
+        .unwrap();
+
+    let workspace = Workspace::new("wire-view");
+    let wire = request(vector, &workspace, "artifact_hash");
+    assert_eq!(
+        run(&wire).unwrap_err(),
+        "native_package_approval_hash_invalid"
+    );
+    let (action, hash) = package_current_action_and_hash(&wire).unwrap();
+    assert_eq!(json!(action.as_str()), vector["expected"]["current_action"]);
+    assert_eq!(json!(hash), vector["expected"]["artifact_hash"]);
+
+    let workspace = Workspace::new("wire-marker");
+    let mut marker = request(vector, &workspace, "current_action");
+    marker.config_policy = json!({"available": false});
+    assert!(run(&marker).is_ok());
+
+    // The marker with a resolved action smuggled beside it is still a view.
+    let workspace = Workspace::new("wire-marker-plus");
+    let mut smuggled = request(vector, &workspace, "current_action");
+    smuggled.config_policy = json!({
+        "available": false,
+        "effective_package_script_action": "allow",
+    });
+    assert_eq!(
+        run(&smuggled).unwrap_err(),
+        "native_package_approval_hash_invalid"
+    );
 }
 
 fn advisory_vector() -> Value {
