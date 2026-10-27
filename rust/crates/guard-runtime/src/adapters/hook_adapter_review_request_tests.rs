@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 
 const TOKEN: &str = "guard-approval-context:v1:abc";
 const RECEIPTS: &str = include_str!("../../testdata/guard_store/native_receipt_vectors.json");
+const DAEMON_REQUESTS: &str =
+    include_str!("../../testdata/hook_direct_review/review_request_vectors.json");
 
 fn tagged(value: &Value) -> Value {
     crate::hook_direct::saved_decision::review_request::tagged(value)
@@ -218,5 +220,48 @@ fn a_malformed_review_is_a_typed_rejection() {
         let reply = answer(query(shell("npm test"), Some("/work"), review));
         assert_eq!(reply["status"], "error");
         assert_eq!(reply["code"], "native_hook_adapter_review_invalid");
+    }
+}
+
+/// The fields `ReviewRequest` sets, against the requests the retired daemon
+/// builder persisted for the same pause. The recorder accepted any receipt,
+/// while the resident authenticates it (pinned above), so the synthetic
+/// receipt's envelope copy is left out of the comparison. The vectors were
+/// recorded where `os.path.expanduser` reads `HOME`.
+#[cfg(unix)]
+#[test]
+fn requests_match_the_retired_daemon_builder() {
+    let document: Value = serde_json::from_str(DAEMON_REQUESTS).unwrap();
+    for vector in document["vectors"].as_array().unwrap() {
+        let name = vector["name"].as_str().unwrap();
+        let mut envelope = vector["query"].clone();
+        envelope["payload"] = tagged(&vector["payload"]);
+        let query = json!({
+            "kind": "review_request",
+            "envelope": envelope,
+            "result": vector["result"],
+            "native_receipt": vector["receipt"],
+            "request_id": vector["request_id"],
+            "approval_center_url": vector["approval_center_url"],
+            "guard_home": "/home/agent/.hol-guard",
+            "review_binding": vector["review_binding"],
+            "exact_token": vector["exact"]["token"],
+            "once_only_reason": vector["exact"]["once_only"],
+            "queue_group_id": null,
+            "bound_bash": null,
+        });
+        let mut built = request(query);
+        let mut expected = vector["request"].clone();
+        for request in [&mut built, &mut expected] {
+            request["action_envelope_json"]
+                .as_object_mut()
+                .unwrap()
+                .remove("native_origin_receipt");
+        }
+        let fields = built.as_object().unwrap();
+        assert_eq!(fields.len(), 19, "{name}");
+        for (key, value) in fields {
+            assert_eq!(value, &expected[key], "{name}: {key}");
+        }
     }
 }
