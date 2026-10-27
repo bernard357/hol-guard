@@ -256,6 +256,7 @@ pub(in crate::pretool) fn cwd_read_executable(executable: Option<&str>) -> bool 
                 | "du"
                 | "df"
                 | "diff"
+                | "cmp"
         )
     )
 }
