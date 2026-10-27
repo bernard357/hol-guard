@@ -349,6 +349,8 @@ def project_supply_chain_findings(
 
     A finding carries package coordinates, reason codes and advisory
     identifiers. It never carries file content, commands or local paths.
+    Its identity is the package coordinate alone: new rule data adds reasons
+    to the same finding instead of replacing it with another one.
     """
 
     findings: dict[str, dict[str, object]] = {}
@@ -369,23 +371,31 @@ def project_supply_chain_findings(
         advisories = {value for item in reasons if (value := _text(item.get("advisoryId")))}
         advisories.update(_strings(package.get("relatedAdvisoryIds")))
         advisories.update(_strings(package.get("advisoryAliases")))
-        rule_list = sorted(rule_ids)[:_MAX_LIST_ITEMS]
         finding_id = hashlib.sha256(
             "\0".join(
-                ("guard.workspace-finding.v1", worktree_key, "supply_chain", ecosystem, name, version or "", *rule_list)
+                ("guard.workspace-finding.v1", worktree_key, "supply_chain", ecosystem, name, version or "")
             ).encode("utf-8")
         ).hexdigest()[:32]
+        severity = _max_severity(reasons)
+        fix_version = _text(package.get("recommendedFixVersion"))
+        if (earlier := findings.get(finding_id)) is not None:
+            # The same package listed twice is more evidence for one finding.
+            rule_ids.update(earlier["rule_ids"])
+            advisories.update(earlier["advisory_ids"])
+            severity = min(severity, earlier["severity"], key=_SEVERITY_ORDER.index)
+            decision = min(decision, earlier["decision"], key=("block", "ask", "warn").index)
+            fix_version = earlier["fix_version"] or fix_version
         findings[finding_id] = {
             "finding_id": finding_id,
             "source_kind": "supply_chain",
             "detector": DETECTOR_SET[0],
-            "severity": _max_severity(reasons),
+            "severity": severity,
             "decision": decision,
             "ecosystem": ecosystem,
             "package_name": name,
             "package_version": version,
-            "fix_version": _text(package.get("recommendedFixVersion")),
-            "rule_ids": rule_list,
+            "fix_version": fix_version,
+            "rule_ids": sorted(rule_ids)[:_MAX_LIST_ITEMS],
             "advisory_ids": sorted(advisories)[:_MAX_LIST_ITEMS],
             "validation_state": "confirmed",
             "lifecycle_state": "open",

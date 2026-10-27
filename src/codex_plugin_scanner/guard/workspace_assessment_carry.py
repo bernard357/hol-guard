@@ -10,7 +10,9 @@ settles every earlier finding of its own: one it no longer reports is gone.
 
 The supply chain audit can read every dependency file and still miss some
 advisory lookups. A package it no longer lists has left the worktree, so that
-package's earlier finding is settled rather than carried.
+package's earlier finding is settled rather than carried. A package the new
+run reports again is settled too: its new finding replaces the earlier one,
+even when the earlier one was recorded under an older finding identity.
 
 Carried findings come after the run's own findings and stop at the same
 count and byte bounds. A finding that does not fit adds the
@@ -51,11 +53,12 @@ def carry_unchecked_findings(outcome: RunOutcome, previous: Mapping[str, object]
     run_id = previous.get("run_id") if previous is not None else None
     findings = [dict(item) for item in outcome.findings]
     seen = {item.get("finding_id") for item in findings}
+    reported = {_coordinate(item) for item in findings if item.get("source_kind") == "supply_chain"}
     used = sum(_size(item) for item in findings)
     carried = 0
     truncated = False
     for item in earlier:
-        if not isinstance(item, Mapping) or item.get("finding_id") in seen or _package_gone(item, outcome):
+        if not isinstance(item, Mapping) or item.get("finding_id") in seen or _package_settled(item, outcome, reported):
             continue
         detector = item.get("detector")
         status = detectors.get(_COVERAGE_KEYS.get(detector, detector)) if isinstance(detector, str) else None
@@ -106,12 +109,16 @@ def listed_packages(payload: Mapping[str, object]) -> frozenset[tuple[str, str, 
     )
 
 
-def _package_gone(item: Mapping[str, object], outcome: RunOutcome) -> bool:
-    listed = outcome.listed_packages
-    if listed is None or item.get("source_kind") != "supply_chain":
+def _package_settled(item: Mapping[str, object], outcome: RunOutcome, reported: set[tuple[object, ...]]) -> bool:
+    if item.get("source_kind") != "supply_chain":
         return False
-    coordinate = (item.get("ecosystem"), item.get("package_name"), item.get("package_version") or "")
-    return coordinate not in listed
+    coordinate = _coordinate(item)
+    listed = outcome.listed_packages
+    return coordinate in reported or (listed is not None and coordinate not in listed)
+
+
+def _coordinate(item: Mapping[str, object]) -> tuple[object, ...]:
+    return (item.get("ecosystem"), item.get("package_name"), item.get("package_version") or "")
 
 
 def _text(value: object) -> str | None:
