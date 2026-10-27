@@ -57,6 +57,7 @@ fn signed_in_user_shorthand_is_a_read_not_a_file() {
     for command in [
         "gh pr list @me",
         "gh pr list --search @me",
+        "gh pr list -- --author @me",
         "gh api repos/example-org/example-repo/issues/1/comments -F body=@me",
     ] {
         assert_ne!(action(&controls, command), "allow", "{command}");

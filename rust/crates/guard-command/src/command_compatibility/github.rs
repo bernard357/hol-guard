@@ -28,12 +28,14 @@ const USER_OPTIONS: &[&str] = &[
 
 /// `@me` as the separate value of a user option. The `--author=@me` spelling
 /// never starts with `@`, and the `-F key=@path` file form stays with `api`.
+/// After a bare `--` every token is positional, so no option precedes it.
 fn names_signed_in_user(original: &[String], index: usize) -> bool {
     original[index] == "@me"
         && index
             .checked_sub(1)
             .and_then(|option| original.get(option))
             .is_some_and(|option| USER_OPTIONS.contains(&option.as_str()))
+        && !original[..index].iter().any(|value| value == "--")
 }
 
 /// `probe` is where native proofs run the segment (after a verified leading
