@@ -135,6 +135,7 @@ pub mod evidence_hash;
 mod evidence_hash_tests;
 mod executable_flag_contract;
 pub mod extension_control;
+pub mod extension_control_terminal;
 pub mod extension_evidence;
 pub mod extension_trust;
 mod github_additional_commands;

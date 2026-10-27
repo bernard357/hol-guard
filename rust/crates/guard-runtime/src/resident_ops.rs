@@ -352,6 +352,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
+            ResidentOperationV1::ExtensionControlTerminal(request) => {
+                crate::extension_control_terminal_op::evaluate_extension_control_terminal_request(
+                    &request,
+                )
+            }
             ResidentOperationV1::HookRender(request) => {
                 crate::hook_render_op::evaluate_hook_render_request(&request)
             }

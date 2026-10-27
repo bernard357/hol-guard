@@ -27,6 +27,8 @@ mod extension_control_prepared;
 pub use extension_control_prepared::*;
 mod extension_control_preview;
 pub use extension_control_preview::*;
+mod extension_control_terminal;
+pub use extension_control_terminal::*;
 mod github_cli_classify;
 pub use github_cli_classify::*;
 mod github_workflow_prepare;

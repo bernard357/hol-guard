@@ -232,6 +232,7 @@ pub(crate) enum ResidentOperationV1 {
     ApprovalBulkEligibility(ApprovalBulkEligibilityRequestV1),
     CodexRequestResume(CodexRequestResumeRequestV1),
     ApprovalQueueIdentity(ApprovalQueueIdentityRequestV1),
+    ExtensionControlTerminal(guard_contracts::ExtensionControlTerminalRequestV1),
     ApprovalResolutionPlan(ApprovalResolutionPlanRequestV1),
     ApprovalScope(ApprovalScopeRequestV1),
     ApprovalScopeSelect(guard_contracts::ApprovalScopeSelectRequestV1),
