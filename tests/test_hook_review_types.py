@@ -7,79 +7,8 @@ from pathlib import Path
 from codex_plugin_scanner.guard.runtime.hook_review_types import (
     HookOutputSummary,
     HookReviewRequest,
-    HookReviewResponse,
     HookSourceFileRef,
 )
-
-
-def _response(**overrides: object) -> HookReviewResponse:
-    defaults: dict[str, object] = {
-        "decision": "allow",
-        "reason": None,
-        "model_output_action": "allow_original",
-    }
-    defaults.update(overrides)
-    return HookReviewResponse(**defaults)  # type: ignore[arg-type]
-
-
-class TestHookReviewResponseToHarnessJson:
-    def test_decision_and_model_output_action_always_present(self) -> None:
-        payload = _response().to_harness_json()
-        assert payload["decision"] == "allow"
-        assert payload["model_output_action"] == "allow_original"
-
-    def test_omits_none_reason(self) -> None:
-        payload = _response(reason=None).to_harness_json()
-        assert "reason" not in payload
-
-    def test_includes_non_empty_reason(self) -> None:
-        payload = _response(reason="blocked by policy").to_harness_json()
-        assert payload["reason"] == "blocked by policy"
-
-    def test_omits_empty_reviewed_output_sha256(self) -> None:
-        payload = _response(reviewed_output_sha256=None).to_harness_json()
-        assert "reviewed_output_sha256" not in payload
-
-    def test_includes_non_empty_reviewed_output_sha256(self) -> None:
-        payload = _response(reviewed_output_sha256="abc123").to_harness_json()
-        assert payload["reviewed_output_sha256"] == "abc123"
-
-    def test_omits_none_reviewed_excerpt(self) -> None:
-        payload = _response(reviewed_excerpt=None).to_harness_json()
-        assert "reviewed_excerpt" not in payload
-
-    def test_includes_reviewed_excerpt_when_set(self) -> None:
-        payload = _response(reviewed_excerpt="safe excerpt").to_harness_json()
-        assert payload["reviewed_excerpt"] == "safe excerpt"
-
-    def test_omits_none_policy_action(self) -> None:
-        payload = _response(policy_action=None).to_harness_json()
-        assert "policy_action" not in payload
-
-    def test_includes_policy_action_when_set(self) -> None:
-        payload = _response(policy_action="allow").to_harness_json()
-        assert payload["policy_action"] == "allow"
-
-    def test_notice_and_reason_code_always_present(self) -> None:
-        payload = _response().to_harness_json()
-        assert payload["notice"] == "none"
-        assert payload["reason_code"] == "unknown"
-
-    def test_block_response_omits_optional_fields(self) -> None:
-        payload = _response(
-            decision="deny",
-            reason="HOL Guard blocked this output.",
-            model_output_action="block",
-            notice="warning",
-            reason_code="secret_detected",
-        ).to_harness_json()
-        assert payload["decision"] == "deny"
-        assert payload["model_output_action"] == "block"
-        assert payload["notice"] == "warning"
-        assert payload["reason_code"] == "secret_detected"
-        assert "reviewed_output_sha256" not in payload
-        assert "reviewed_excerpt" not in payload
-        assert "policy_action" not in payload
 
 
 class TestHookReviewRequestImmutability:

@@ -908,11 +908,10 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/runtime/direct_vitest.py",
           "src/codex_plugin_scanner/guard/runtime/package_evidence_common.py",
           "src/codex_plugin_scanner/guard/runtime/jsonc.py"
         ],
-        "reason": "Reviewed and retained in runtime scope: the retired Python literal-cd parser imported these at load, so they counted as eager. They are now reached lazily: direct_vitest presents the resident's direct local tool context to the support-artifact command, and package_evidence_common with its bounded JSONC decoder reads lockfile integrity for the contained Node tool lane. They run while Guard prepares a contained run, so they stay counted as runtime."
+        "reason": "Reviewed and retained in runtime scope: the retired Python literal-cd parser imported these at load, so they counted as eager. They are now reached lazily: package_evidence_common with its bounded JSONC decoder reads lockfile integrity for the contained Node tool lane. They run while Guard prepares a contained run, so they stay counted as runtime."
       }
     ],
     "tests": {

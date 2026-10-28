@@ -21,6 +21,7 @@ from codex_plugin_scanner.guard.daemon import hook_contained_grant as routing
 from codex_plugin_scanner.guard.runtime import restricted_workspace as workspace_sink
 from codex_plugin_scanner.guard.runtime import restricted_workspace_grant_lookup as lookup
 from codex_plugin_scanner.guard.runtime.restricted_pytest import RestrictedPytestError
+from tests import runtime_wrapper_support
 from tests.test_guard_restricted_workspace import COMMAND, payload, plan, receipt
 
 HASH = "ab" * 32
@@ -96,7 +97,7 @@ def test_client_sends_the_reason_and_presents_the_contained_grant(
     assert "current_reason_code" not in requests[-1]
     assert CONTAINED.prepare_input() == {"identity_hash": HASH, "name": "lanectl", "capabilities": ["loopback-network"]}
     # Callers of the plain action keep the sandbox-bound action, never `allow`.
-    action = client.native_local_cli_hook(
+    action = runtime_wrapper_support.native_local_cli_hook(
         _store(tmp_path),  # type: ignore[arg-type]
         command="lanectl status",
         cwd=tmp_path,

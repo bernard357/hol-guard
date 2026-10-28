@@ -8,6 +8,7 @@ import pytest
 
 from codex_plugin_scanner.guard.daemon.runtime_hook_scheduler import RuntimeHookScheduler
 from tests.coverage_ci import UNDER_COVERAGE_TRACING, under_coverage_scale
+from tests.runtime_hook_scheduler_support import set_active_limit
 
 
 def test_scheduler_waits_for_capacity_instead_of_rejecting() -> None:
@@ -55,7 +56,7 @@ def test_scheduler_dynamic_capacity_wakes_waiter() -> None:
         )
         time.sleep(0.02)
         assert not waiting.done()
-        scheduler.set_active_limit(1)
+        set_active_limit(scheduler, 1)
         admitted = waiting.result(timeout=1)
 
     assert admitted.permit is not None
@@ -558,7 +559,7 @@ def test_queue_notification_exception_cannot_leave_unowned_payload(reserved: boo
 
     def failed_notification() -> None:
         if callback_admits:
-            scheduler.set_active_limit(1)
+            set_active_limit(scheduler, 1)
         raise failure
 
     scheduler = RuntimeHookScheduler(active_limit=0, retained_bytes_limit=10, queue_listener=failed_notification)
@@ -583,7 +584,7 @@ def test_queue_notification_exception_cannot_leave_unowned_payload(reserved: boo
     stats = scheduler.stats()
     assert stats["active"] == stats["queued"] == stats["retained_bytes"] == 0
     assert not stats["per_harness_queued"]
-    scheduler.set_active_limit(1)
+    set_active_limit(scheduler, 1)
     following = scheduler.acquire(
         harness="pi",
         client_key="following",
@@ -608,7 +609,7 @@ def test_interrupted_scheduler_wait_returns_ownership_before_propagating(
     def interrupted_wait(timeout: float | None = None) -> bool:
         del timeout
         if admitted_before_interrupt:
-            scheduler.set_active_limit(1)
+            set_active_limit(scheduler, 1)
         raise interruption
 
     with monkeypatch.context() as waiter_patch:
@@ -625,7 +626,7 @@ def test_interrupted_scheduler_wait_returns_ownership_before_propagating(
     stats = scheduler.stats()
     assert stats["active"] == stats["queued"] == stats["retained_bytes"] == 0
     assert not stats["per_harness_active"] and not stats["per_harness_queued"]
-    scheduler.set_active_limit(1)
+    set_active_limit(scheduler, 1)
     following = scheduler.acquire(
         harness="pi",
         client_key="following",

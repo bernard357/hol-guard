@@ -106,32 +106,6 @@ class HookReviewResponse:
     observe_mode: bool = False
     metrics: dict[str, object] = field(default_factory=dict)
 
-    def to_harness_json(self) -> dict[str, object]:
-        """Serialize to the harness-facing JSON envelope.
-
-        Omits ``None`` / empty optional fields. ``decision`` and
-        ``model_output_action`` are always present. ``reviewed_output_sha256``
-        is included only when non-empty. ``reason`` is included only when
-        non-empty. ``policy_action`` is included only when set.
-        """
-        payload: dict[str, object] = {"decision": self.decision}
-        if self.reason:
-            payload["reason"] = self.reason
-        payload["model_output_action"] = self.model_output_action
-        if self.reviewed_output_sha256:
-            payload["reviewed_output_sha256"] = self.reviewed_output_sha256
-        if self.reviewed_excerpt is not None:
-            payload["reviewed_excerpt"] = self.reviewed_excerpt
-        payload["notice"] = self.notice
-        payload["reason_code"] = self.reason_code
-        if self.policy_action is not None:
-            payload["policy_action"] = self.policy_action
-        if self.observed_policy_action is not None:
-            payload["observed_policy_action"] = self.observed_policy_action
-        if self.observe_mode:
-            payload["observe_mode"] = True
-        return payload
-
 
 __all__ = [
     "HookDecision",

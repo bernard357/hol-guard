@@ -255,7 +255,7 @@ def inspect_command_native_test(command: str, **kwargs: object) -> dict[str, obj
     assert home_dir is None or isinstance(home_dir, Path)
     reviewed = real_native_command_evaluation(command, cwd=cwd, home_dir=home_dir)
     projected = reviewed
-    if reviewed.native_minimum_action == "block" and reviewed.evaluation.minimum_action != "block":
+    if reviewed.payload["minimum_action"] == "block" and reviewed.evaluation.minimum_action != "block":
         projected = None
     with patch(
         "codex_plugin_scanner.guard.runtime.command_inspection.review_command_native",

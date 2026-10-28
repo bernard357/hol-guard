@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_plugin_scanner.guard.local_cli_hook import native_local_cli_hook
 from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.custom_extension_suggestion import (
     common_utility_reject_message,
@@ -17,6 +16,7 @@ from codex_plugin_scanner.guard.runtime.local_cli_identity import (
     recognize_operator_cli,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.runtime_wrapper_support import native_local_cli_hook
 
 _SCREENSHOT_JUNK = ("script", "rg", "whoami", "vitest.mjs")
 

@@ -258,13 +258,6 @@ class RuntimeHookScheduler:
         with self._condition:
             self._retries += 1
 
-    def set_active_limit(self, active_limit: int) -> None:
-        if active_limit < 0:
-            raise ValueError("runtime hook scheduler active limit must not be negative")
-        with self._condition:
-            self._active_limit = active_limit
-            self._dispatch()
-
     def _reject(self, reason_code: RuntimeHookAdmissionReason) -> RuntimeHookAdmission:
         self._rejected[reason_code] = self._rejected.get(reason_code, 0) + 1
         return RuntimeHookAdmission(None, reason_code)
