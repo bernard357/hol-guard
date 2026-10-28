@@ -1,20 +1,16 @@
-"""Containment routing, answered by the native runtime.
+"""Containment rewriting, answered by the native runtime.
 
-Both hook paths ask the resident whether a native PreToolUse answer is
-rewritten into Guard's contained execution sink, so the CLI fallback and the
-daemon route a call identically. ``native_containment_route`` sends the
-native result's actions, reason and action type and returns ``none``,
-``sink`` or ``grant``. ``native_containment_sink`` sends the rendered receipt,
-the harness, the host and the shape of the call, and returns the profile the
-sink runs it under, or why the receipt stands. ``native_containment_rewrite``
-sends the same facts with the call itself and the argv that starts Guard's
-CLI; the resident writes the private request snapshot and returns the allow
-that runs the call in the sink.
+The resident stamps every PreToolUse edge answer with its containment route
+(``none``, ``sink`` or ``grant``), so neither hook path asks for one or picks
+one. ``native_containment_rewrite`` sends a routed receipt's facts with the
+call itself and the argv that starts Guard's CLI; the resident decides
+whether the sink takes the call, writes the private request snapshot and
+returns the allow that runs the call in the sink.
 
-The transport only gathers those facts; the routing table, the host table and
-the harness table are the resident's. A reply that is not a bound, strictly
-decoded ``ok`` with a well-formed answer raises ``NativeHookDecisionError`` and
-the caller answers with the host outage response, so a route is never guessed.
+The transport only gathers those facts; the host table and the harness table
+are the resident's. A reply that is not a bound, strictly decoded ``ok`` with
+a well-formed answer raises ``NativeHookDecisionError`` and the caller answers
+with the host outage response, so a route is never guessed.
 """
 
 from __future__ import annotations
@@ -40,7 +36,6 @@ from .native_resident_decision import resident_decide
 HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE = "hook-decision-containment-route-v1"
 HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE = "hook-decision-containment-rewrite-v1"
 _ROUTED_REASON = "native_contained_execution_routed"
-_ROUTES = frozenset({"none", "sink", "grant"})
 _KEPT_BECAUSE = frozenset(
     {
         "receipt_only",
@@ -53,13 +48,6 @@ _KEPT_BECAUSE = frozenset(
     }
 )
 _RECEIPT_ONLY_FIELD = "guard_containment_receipt_only"
-
-
-class ContainmentSink(NamedTuple):
-    """The profile the sink runs a call under, or why its receipt stands."""
-
-    profile: str | None
-    kept_because: str | None
 
 
 class ContainmentRewrite(NamedTuple):
@@ -109,85 +97,6 @@ def _ask(
         guard_home,
         validate,
     )
-
-
-def native_containment_route(
-    result: Mapping[str, object],
-    *,
-    event_name: object,
-    recording_only: bool,
-    guard_home: Path | None,
-    deadline: float | None = None,
-) -> str:
-    """Which containment step a native PreToolUse ``result`` takes: ``none``, ``sink`` or ``grant``."""
-
-    action = result.get("action")
-    action_type = action.get("action_type") if isinstance(action, Mapping) else None
-    inputs = {
-        "event_name": _text(event_name),
-        "recording_only": bool(recording_only),
-        "minimum_action": _text(result.get("minimum_action")),
-        "policy_action": _text(result.get("policy_action")),
-        "reason_code": _text(result.get("reason_code")),
-        "action_type": action_type,
-    }
-
-    def validate(payload: dict[str, Any]) -> None:
-        route = payload.get("route")
-        if set(payload) != {"kind", "route"} or not isinstance(route, str) or route not in _ROUTES:
-            raise NativeHookDecisionError(_INVALID)
-
-    return str(_ask("containment_route", inputs, guard_home, validate, deadline)["route"])
-
-
-def edge_containment_route(
-    edge: Mapping[str, object],
-    result: Mapping[str, object],
-    *,
-    event_name: object,
-    recording_only: bool,
-    guard_home: Path | None,
-    deadline: float | None = None,
-) -> str:
-    """The route the resident stamped on its edge answer, or its ``containment_route`` answer.
-
-    The resident computes the route when it produces a PreToolUse edge, so a
-    hook routes the call without a second round trip. An edge that does not
-    carry one is asked about; Python never picks a route itself.
-    """
-
-    stamped = edge.get("containment_route")
-    if isinstance(stamped, str) and stamped in _ROUTES:
-        return stamped
-    return native_containment_route(
-        result, event_name=event_name, recording_only=recording_only, guard_home=guard_home, deadline=deadline
-    )
-
-
-def native_containment_sink(
-    response: Mapping[str, object],
-    *,
-    harness: str,
-    bridge: bool,
-    payload: Mapping[str, object],
-    guard_home: Path | None,
-    deadline: float | None = None,
-) -> ContainmentSink:
-    """Whether the rendered receipt ``response`` for ``payload`` is rewritten into the sink."""
-
-    tool_input = _tool_input(payload)
-    inputs = {
-        **_receipt_facts(response, harness=harness, bridge=bridge, payload=payload),
-        "command_is_text": isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str),
-    }
-
-    def validate(answer: dict[str, Any]) -> None:
-        if set(answer) != {"kind", "profile", "kept_because"}:
-            raise NativeHookDecisionError(_INVALID)
-        _validate_sink(answer, inputs)
-
-    answer = _ask("containment_sink", inputs, guard_home, validate, deadline)
-    return ContainmentSink(answer["profile"], answer["kept_because"])
 
 
 def native_containment_rewrite(
@@ -298,10 +207,6 @@ __all__ = [
     "HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE",
     "HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE",
     "ContainmentRewrite",
-    "ContainmentSink",
-    "edge_containment_route",
     "host_platform",
     "native_containment_rewrite",
-    "native_containment_route",
-    "native_containment_sink",
 ]
