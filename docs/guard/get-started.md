@@ -328,9 +328,8 @@ worker that the daemon runs. To turn that worker off for the whole device, set t
 workspace_assessment_enabled = false
 ```
 
-Turning it off stops the worker from checking or queueing anything; a running daemon notices within about
-half a minute, and a daemon that started with it off does not start the worker until it restarts with it on. It
-never deletes stored runs, findings, fix proposals or admissions, so turning it back on resumes where it left off. Removing
+Turning it off stops the worker from checking or queueing anything, and turning it on again resumes it; a
+running daemon notices either change within about half a minute, without a restart. It never deletes stored runs, findings, fix proposals or admissions, so turning it back on resumes where it left off. Removing
 a harness install ends the automatic admission of its workspace the same way: the worktree stops being
 checked, and its run history and fix proposals stay.
 

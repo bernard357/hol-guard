@@ -37,16 +37,20 @@ def test_the_setting_is_on_by_default() -> None:
     assert GuardConfig(guard_home=Path("home"), workspace=None).workspace_assessment_enabled is True
 
 
-def test_worker_does_not_start_while_the_setting_is_off(tmp_path: Path, monkeypatch) -> None:
+def test_worker_does_not_poll_while_the_setting_is_off_and_resumes_when_it_is_on(tmp_path: Path, monkeypatch) -> None:
     store = GuardStore(tmp_path / "home")
-    _settings(monkeypatch, tmp_path, enabled=False)
+    setting = _settings(monkeypatch, tmp_path, enabled=False)
     polled = _polls(monkeypatch)
     stop = threading.Event()
 
     thread = worker.start_workspace_assessment_worker(store, stop=stop, on_error=pytest.fail, interval=0.01)
-
-    assert thread is None
-    assert not polled.acquire(timeout=0.2)
+    try:
+        assert not polled.acquire(timeout=0.2)
+        setting["enabled"] = True
+        assert polled.acquire(timeout=5)
+    finally:
+        stop.set()
+        thread.join(timeout=5)
 
 
 def test_worker_starts_and_polls_while_the_setting_is_on(tmp_path: Path, monkeypatch) -> None:
@@ -57,12 +61,11 @@ def test_worker_starts_and_polls_while_the_setting_is_on(tmp_path: Path, monkeyp
 
     thread = worker.start_workspace_assessment_worker(store, stop=stop, on_error=pytest.fail, interval=0.01)
     try:
-        assert thread is not None and thread.is_alive()
+        assert thread.is_alive()
         assert polled.acquire(timeout=5)
     finally:
         stop.set()
-        if thread is not None:
-            thread.join(timeout=5)
+        thread.join(timeout=5)
 
 
 def test_turning_the_setting_off_stops_a_running_worker_without_deleting_anything(tmp_path: Path, monkeypatch) -> None:
@@ -82,8 +85,7 @@ def test_turning_the_setting_off_stops_a_running_worker_without_deleting_anythin
         assert not polled.acquire(timeout=0.2)
     finally:
         stop.set()
-        if thread is not None:
-            thread.join(timeout=5)
+        thread.join(timeout=5)
 
     assert [item["worktree_key"] for item in assessments.list_worktrees(store)] == [KEYS.worktree_key]
     assert len(assessments.recent_runs(store)) == 1
@@ -98,9 +100,10 @@ def test_an_unreadable_configuration_leaves_the_worker_on(tmp_path: Path, monkey
     assert worker.workspace_assessment_enabled(tmp_path) is True
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_the_daemon_starts_the_worker_only_while_the_setting_is_on(tmp_path: Path, monkeypatch, enabled: bool) -> None:
-    _settings(monkeypatch, tmp_path, enabled=enabled)
+def test_the_daemon_starts_the_worker_while_the_setting_is_off_so_turning_it_on_needs_no_restart(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _settings(monkeypatch, tmp_path, enabled=False)
     _polls(monkeypatch)
     daemon = SimpleNamespace(
         _workspace_assessment_thread=None,
@@ -110,9 +113,7 @@ def test_the_daemon_starts_the_worker_only_while_the_setting_is_on(tmp_path: Pat
     )
     try:
         GuardDaemonServer._start_workspace_assessment_worker(daemon)  # type: ignore[arg-type]
-        thread = daemon._workspace_assessment_thread
-        assert (thread is not None and thread.is_alive()) is enabled
+        assert daemon._workspace_assessment_thread.is_alive()
     finally:
         daemon._shutdown_started.set()
-        if daemon._workspace_assessment_thread is not None:
-            daemon._workspace_assessment_thread.join(timeout=5)
+        daemon._workspace_assessment_thread.join(timeout=5)

@@ -251,16 +251,13 @@ def start_workspace_assessment_worker(
     stop: threading.Event,
     on_error: Callable[[str], object],
     interval: float = POLL_INTERVAL_SECONDS,
-) -> threading.Thread | None:
+) -> threading.Thread:
     """Poll admitted worktrees on a daemon thread until ``stop`` is set.
 
-    The thread is not started while ``workspace_assessment_enabled`` is off, and
-    a running one skips its poll while the setting is off, so switching it off
-    takes effect within one interval and keeps everything already stored.
+    The thread skips each poll while ``workspace_assessment_enabled`` is off, so
+    switching the setting either way takes effect within one interval, without
+    a restart, and keeps everything already stored.
     """
-
-    if not workspace_assessment_enabled(store.guard_home):
-        return None
 
     owner = f"daemon:{os.getpid()}:{uuid.uuid4().hex[:12]}"
     attempted: dict[str, int] = {}
