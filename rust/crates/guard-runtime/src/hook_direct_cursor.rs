@@ -25,7 +25,7 @@ use super::{reviewed_edge, HookDirectDefer, CURSOR, PRE_TOOL_USE};
 use crate::hook_decision_containment_rewrite::containment_rewrite;
 use crate::hook_decision_containment_route::{edge_route, host_platform};
 use guard_command::hook_responses::pre_tool;
-use guard_contracts::ContainmentRewriteInputsV1;
+use guard_contracts::{ContainmentRewriteInputsV1, GuardHookSourceMetadataV2};
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
@@ -145,8 +145,42 @@ pub(super) fn unreviewed_probe(
 /// a plain allow for anything else, since `beforeShellExecution` still
 /// reviews the call that runs.
 pub(super) fn probe_answer(edge: &[u8], payload: &Map<String, Value>, scope: &Scope) -> Value {
+    serde_json::from_slice(edge).map_or_else(
+        |_| allow(),
+        |parsed| reviewed_probe(&parsed, payload, scope),
+    )
+}
+
+/// `probe_answer` for an edge answer already read.
+fn reviewed_probe(edge: &Value, payload: &Map<String, Value>, scope: &Scope) -> Value {
     routed(edge, payload, scope)
         .map_or_else(allow, |response| json!({ "harness_response": response }))
+}
+
+/// The edge's own answer to Cursor's route probe, when the daemon sent the
+/// argv that starts Guard's CLI: the response `daemon_answer` gives for the
+/// edge just produced, so the daemon makes one resident call instead of two.
+/// `None` for any call that is not the probe.
+pub(crate) fn edge_probe_answer(
+    payload: &Map<String, Value>,
+    edge: &Value,
+    source: &GuardHookSourceMetadataV2,
+    sink_command: &[String],
+    recording_only: bool,
+) -> Option<Value> {
+    if !matches!(route(payload), Ok(Route::Probe)) {
+        return None;
+    }
+    let scope = Scope::new(
+        source.cwd.as_deref()?,
+        &source.home_dir,
+        &source.guard_home,
+        Some(sink_command),
+    )
+    .ok()?;
+    let answer = unreviewed_probe(payload, &scope, recording_only)
+        .unwrap_or_else(|| reviewed_probe(edge, payload, &scope));
+    answer.get("harness_response").cloned()
 }
 
 /// The sink's admission: the allow the daemon returns for the exact argv
@@ -199,10 +233,9 @@ pub(crate) fn daemon_answer(params: &Map<String, Value>) -> Result<Option<Value>
     .map_err(|_| INVALID)?;
     let answer = match route(payload) {
         Ok(Route::Probe) => {
-            let edge =
-                serde_json::to_vec(params.get("edge").ok_or(INVALID)?).map_err(|_| INVALID)?;
+            let edge = params.get("edge").ok_or(INVALID)?;
             unreviewed_probe(payload, &scope, false)
-                .unwrap_or_else(|| probe_answer(&edge, payload, &scope))
+                .unwrap_or_else(|| reviewed_probe(edge, payload, &scope))
         }
         Ok(Route::Sink) => match admit_sink(payload, &scope) {
             Ok(admitted) => admitted,
@@ -230,8 +263,7 @@ fn first<'a>(payload: &'a Map<String, Value>, names: &[&str]) -> Option<&'a Valu
     names.iter().find_map(|name| payload.get(*name))
 }
 
-fn routed(edge: &[u8], payload: &Map<String, Value>, scope: &Scope) -> Option<Value> {
-    let parsed: Value = serde_json::from_slice(edge).ok()?;
+fn routed(parsed: &Value, payload: &Map<String, Value>, scope: &Scope) -> Option<Value> {
     let edge_text = |name: &str| parsed.get(name).and_then(Value::as_str);
     if edge_text("harness") != Some(CURSOR) || edge_text("event_name") != Some(PRE_TOOL_USE) {
         return None;
