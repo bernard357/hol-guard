@@ -149,6 +149,31 @@ fn workspace_source(root: &Path) -> GuardHookSourceMetadataV2 {
 }
 
 #[cfg(windows)]
+/// A `PreToolUse` envelope bound to generation 1 of `snapshot`.
+fn pre_tool_envelope(
+    request_id: &str,
+    raw_payload: Value,
+    snapshot: &PolicySnapshotV3,
+    root: &Path,
+) -> GuardHookEnvelopeV2 {
+    GuardHookEnvelopeV2 {
+        schema: GUARD_HOOK_ENVELOPE_V2_SCHEMA.to_owned(),
+        request_id: Some(request_id.into()),
+        harness: "claude-code".into(),
+        event: "PreToolUse".into(),
+        raw_payload,
+        deadline_budget_ms: Some(750),
+        policy_generation: 1,
+        policy_snapshot: serde_json::to_value(snapshot).unwrap(),
+        source: workspace_source(root),
+        recording_only: false,
+        local_cli_rules: None,
+        observe_local_cli: false,
+        record_receipt: false,
+        structured_output_config: None,
+    }
+}
+
 #[test]
 fn windows_scope_aliases_share_one_digest_identity() {
     let normal = normalize_scope_text(r"C:\Users\Guard\State");
@@ -337,25 +362,16 @@ fn restarted_resident_applies_installed_policy_without_request_time_io() {
         }))
         .unwrap();
     let restarted = PolicySnapshotStore::new(&root, &"a".repeat(64)).unwrap();
-    let envelope = GuardHookEnvelopeV2 {
-        schema: GUARD_HOOK_ENVELOPE_V2_SCHEMA.to_owned(),
-        request_id: Some("resident-policy-test".into()),
-        harness: "claude-code".into(),
-        event: "PreToolUse".into(),
-        raw_payload: serde_json::json!({
+    let envelope = pre_tool_envelope(
+        "resident-policy-test",
+        serde_json::json!({
             "hook_event_name": "PreToolUse",
             "tool_name": "read_file",
             "tool_input": {"file_path": "README.md"}
         }),
-        deadline_budget_ms: Some(750),
-        policy_generation: 1,
-        policy_snapshot: serde_json::to_value(&snapshot).unwrap(),
-        source: workspace_source(&root),
-        recording_only: false,
-        local_cli_rules: None,
-        observe_local_cli: false,
-        structured_output_config: None,
-    };
+        &snapshot,
+        &root,
+    );
     let result = crate::edge::evaluate_envelope_with_store(envelope, &restarted).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
     assert_eq!(result.result["minimum_action"], "block");
@@ -377,24 +393,15 @@ fn authenticated_edge_preserves_clean_default_warning() {
             "snapshot": snapshot,
         }))
         .unwrap();
-    let envelope = GuardHookEnvelopeV2 {
-        schema: GUARD_HOOK_ENVELOPE_V2_SCHEMA.to_owned(),
-        request_id: Some("warning-edge-test".into()),
-        harness: "claude-code".into(),
-        event: "PreToolUse".into(),
-        raw_payload: serde_json::json!({
+    let envelope = pre_tool_envelope(
+        "warning-edge-test",
+        serde_json::json!({
             "hook_event_name": "PreToolUse",
             "tool_input": {"command": "pwd"}
         }),
-        deadline_budget_ms: Some(750),
-        policy_generation: 1,
-        policy_snapshot: serde_json::to_value(&snapshot).unwrap(),
-        source: workspace_source(&root),
-        recording_only: false,
-        local_cli_rules: None,
-        observe_local_cli: false,
-        structured_output_config: None,
-    };
+        &snapshot,
+        &root,
+    );
     let result = crate::edge::evaluate_envelope_with_store(envelope, &store).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
     assert_eq!(result.result["minimum_action"], "warn");
@@ -418,25 +425,16 @@ fn authenticated_observe_edge_preserves_intrinsic_pretool_floor() {
             "snapshot": snapshot,
         }))
         .unwrap();
-    let envelope = GuardHookEnvelopeV2 {
-        schema: GUARD_HOOK_ENVELOPE_V2_SCHEMA.to_owned(),
-        request_id: Some("observe-edge-test".into()),
-        harness: "claude-code".into(),
-        event: "PreToolUse".into(),
-        raw_payload: serde_json::json!({
+    let envelope = pre_tool_envelope(
+        "observe-edge-test",
+        serde_json::json!({
             "hook_event_name": "PreToolUse",
             "tool_name": "Bash",
             "tool_input": {"command": "rm -rf /"}
         }),
-        deadline_budget_ms: Some(750),
-        policy_generation: 1,
-        policy_snapshot: serde_json::to_value(&snapshot).unwrap(),
-        source: workspace_source(&root),
-        recording_only: false,
-        local_cli_rules: None,
-        observe_local_cli: false,
-        structured_output_config: None,
-    };
+        &snapshot,
+        &root,
+    );
     let result = crate::edge::evaluate_envelope_with_store(envelope, &store).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
     assert_eq!(result.result["minimum_action"], "block");

@@ -178,6 +178,12 @@ def test_edge_decoder_refuses_a_containment_route_it_does_not_know(route: object
     assert _decode_edge({**_edge_result(), "containment_route": route}) is None
 
 
+@pytest.mark.parametrize(("recorded", "accepted"), [(True, True), (False, True), ("yes", False), (1, False)])
+def test_edge_decoder_reads_whether_the_edge_recorded_its_receipt(recorded: object, accepted: bool) -> None:
+    edge = {**_edge_result(), "receipt_recorded": recorded}
+    assert _decode_edge(edge) == (edge if accepted else None)
+
+
 def test_edge_decoder_requires_a_receipt() -> None:
     # Whether the receipt records this result is the edge's own check now.
     missing_receipt = _edge_result()
@@ -426,10 +432,16 @@ def test_a_custom_rule_check_gets_its_own_allowance_past_the_review_deadline(
     assert captured["deadline_monotonic"] == deadline + (5.0 if rules else 0.0)
 
 
+@pytest.mark.parametrize(
+    ("feature", "option"),
+    [("edge-local-cli-observation-v1", "observe_local_cli"), ("edge-receipt-record-v1", "record_receipt")],
+)
 @pytest.mark.parametrize(("advertised", "asked"), [(True, True), (True, False), (False, True)])
-def test_the_envelope_asks_for_a_cli_observation_only_from_a_resident_that_records_it(
+def test_the_envelope_asks_for_an_edge_option_only_from_a_resident_that_supports_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    feature: str,
+    option: str,
     advertised: bool,
     asked: bool,
 ) -> None:
@@ -454,7 +466,7 @@ def test_the_envelope_asks_for_a_cli_observation_only_from_a_resident_that_recor
             "native-resident-client-v1",
             "pre-tool-generic-authority-v1",
             "git-execution-context-v1",
-            *(["edge-local-cli-observation-v1"] if advertised else []),
+            *([feature] if advertised else []),
         ),
     )
     monkeypatch.setattr(
@@ -487,14 +499,14 @@ def test_the_envelope_asks_for_a_cli_observation_only_from_a_resident_that_recor
             observe_mode=False,
             deadline=None,
             policy_snapshot={"generation": 1},
-            observe_local_cli=asked,
+            **{option: asked},
         )
         == _edge_result()
     )
     encoded = captured["payload"]
     assert isinstance(encoded, bytes)
     # An older resident would refuse the field, so it is sent only when advertised.
-    assert json.loads(encoded).get("observe_local_cli") is ((advertised and asked) or None)
+    assert json.loads(encoded).get(option) is ((advertised and asked) or None)
 
 
 @pytest.mark.parametrize(

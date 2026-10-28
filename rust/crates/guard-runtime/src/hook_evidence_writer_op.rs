@@ -58,6 +58,7 @@ use guard_command::hook_evidence_writer::{
     ComposioApi, EvidenceWriterDeps, NativeEvidenceJournal, NativeReceiptValidation,
     ReceiptValidationApi, RuntimeHookEvidenceWriter,
 };
+use guard_contracts::NativeHookDecisionReceiptV1;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -319,6 +320,30 @@ fn with_running<T>(guard_home: &Path, act: impl FnOnce(&ResidentWriter) -> T) ->
     let slot = slot(guard_home);
     let held = slot.writer.lock().unwrap_or_else(|e| e.into_inner());
     held.as_ref().map(act)
+}
+
+/// This Guard home's canonical spelling when a live writer runs for it. The
+/// edge records its receipt only into such a writer and never starts one: a
+/// writer that has exited or is draining would never write what it is given.
+pub(crate) fn running_home(guard_home: &Path) -> Option<PathBuf> {
+    let guard_home = canonical_home(guard_home);
+    let live = with_running(&guard_home, |resident| {
+        !resident.writer.has_exited() && !resident.writer.is_stopping()
+    })?;
+    live.then_some(guard_home)
+}
+
+/// Queue an edge's own receipt with the writer running for `guard_home` (as
+/// [`running_home`] spells it), as a `submit_native_decision_receipt` request
+/// would. The writer's signals stay put for the daemon's next request.
+pub(crate) fn queue_edge_receipt(guard_home: &Path, receipt: &NativeHookDecisionReceiptV1) -> bool {
+    let Ok(Value::Object(receipt)) = serde_json::to_value(receipt) else {
+        return false;
+    };
+    with_running(guard_home, |resident| {
+        resident.writer.submit_native_decision_receipt(&receipt)
+    })
+    .unwrap_or(false)
 }
 
 /// The widest drain a caller may ask for. `timeout_seconds` arrives as an

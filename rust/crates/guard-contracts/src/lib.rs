@@ -373,6 +373,12 @@ pub struct GuardHookEnvelopeV2 {
     /// verdict, receipt, or request identity.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub observe_local_cli: bool,
+    /// The daemon asks the edge to queue the answer's receipt with the hook
+    /// evidence writer already running for this Guard home, so it need not
+    /// submit the receipt in a second request. It never changes the verdict,
+    /// receipt, or request identity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub record_receipt: bool,
     /// The managed-policy view the daemon holds for a Pi or Oh My Pi
     /// `PostToolUse`: `managed_policy_status`, `managed_policy_hash`,
     /// `managed_locked_settings` and `managed_policy`, the shape the
@@ -440,6 +446,11 @@ pub struct GuardHookEdgeResultV2 {
     /// its `harness_response` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_cli_rule: Option<GuardHookLocalCliRuleV1>,
+    /// The edge queued `receipt` with the running hook evidence writer for
+    /// the request's Guard home, as the envelope's `record_receipt` asked, so
+    /// the daemon does not submit it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub receipt_recorded: bool,
     /// Rust-owned decision evidence.  The Python edge may only transport it
     /// to a non-authoritative asynchronous consumer.
     pub receipt: NativeHookDecisionReceiptV1,

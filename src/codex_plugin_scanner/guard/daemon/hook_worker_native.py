@@ -311,6 +311,7 @@ class HookWorkerNativeMixin:
                 **({"request_id": probe[1]} if probe is not None else {}),
                 local_cli_rules=True,
                 observe_local_cli=True,
+                record_receipt=callable(getattr(self.activity_writer, "submit_native_decision_receipt", None)),
                 **({"structured_output_config": structured_view} if structured_view is not None else {}),
             )
             refreshed = (
@@ -372,27 +373,15 @@ class HookWorkerNativeMixin:
             )
         native_event = str(edge["event_name"])
         native_harness = str(edge["harness"])
-        native_result = edge["result"]
-        if not isinstance(native_result, Mapping):
-            return (
-                self._apply_structured_unavailable_overlay(
-                    _record_unavailable_native(
-                        self,
-                        payload,
-                        harness=harness,
-                        event_name=event_name,
-                        reason_code="native_hook_edge_invalid_response",
-                        guard_home=guard_home,
-                    ),
-                    harness=harness,
-                    event_name=event_name,
-                    guard_home=guard_home,
-                    workspace=workspace,
-                ),
-                False,
-            )
+        # The edge's decoder admits only a mapping result.
+        native_result = cast("Mapping[str, object]", edge["result"])
         raw_receipt = edge.get("receipt")
         accepted_receipt = self._record_native_decision_receipt(raw_receipt)
+        submit = getattr(self.activity_writer, "submit_native_decision_receipt", None)
+        if accepted_receipt is not None and callable(submit) and edge.get("receipt_recorded") is not True:
+            # Ordered in front of this hook's activity row, which links to the
+            # receipt by its decision id. An edge that queued it says so.
+            run_hook_evidence(self, lambda receipt=accepted_receipt: submit(receipt=receipt))
         if accepted_receipt is not None and capture_receipts is not None and native_harness == "codex":
             capture_receipts.append(accepted_receipt)
         if native_event == "UserPromptSubmit":
@@ -527,17 +516,11 @@ class HookWorkerNativeMixin:
         return (response, True)
 
     def _record_native_decision_receipt(self: _HookWorkerNativeHost, receipt: object) -> Mapping[str, object] | None:
-        """Record the edge's receipt; the edge checked it before answering. Persistence is best-effort."""
+        """Hold the edge's receipt for this hook; the edge checked it before answering."""
 
         self._last_native_decision_receipt = None
         if not isinstance(receipt, dict):
             return None
         accepted: dict[str, object] = receipt
-        writer = self.activity_writer
-        submit = getattr(writer, "submit_native_decision_receipt", None)
-        if callable(submit):
-            # Ordered behind nothing and in front of this hook's activity row,
-            # which links to the receipt by its decision id.
-            run_hook_evidence(self, lambda: submit(receipt=accepted))
         self._last_native_decision_receipt = accepted
         return accepted

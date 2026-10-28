@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
 use crate::hook_decision_containment_route::edge_route;
+use crate::native_hook_receipt::{
+    receipt_from_post_tool, receipt_from_pre_tool, NativeReceiptIdentity,
+};
 use crate::policy_enforcement::AdmittedPolicySnapshot;
 use crate::runtime_known_vulnerable as runtime_risk;
 use guard_contracts::{
@@ -11,10 +14,6 @@ use guard_contracts::{
 use guard_hook_core::review_post_tool;
 use serde_json::Value;
 use std::time::{Duration, Instant};
-
-use crate::native_hook_receipt::{
-    receipt_from_post_tool, receipt_from_pre_tool, NativeReceiptIdentity,
-};
 
 #[path = "edge_identity.rs"]
 mod edge_identity;
@@ -454,6 +453,7 @@ fn evaluate_validated_envelope(
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),
         local_cli_rule,
+        receipt_recorded: false,
         schema: GUARD_HOOK_EDGE_RESULT_V2_SCHEMA.to_owned(),
         authority: "rust".to_owned(),
         request_id: Some(request_id),
@@ -465,7 +465,7 @@ fn evaluate_validated_envelope(
         receipt,
     };
     edge_result_check::check(&edge)?;
-    crate::encode_response(&crate::edge_structured::attached(&envelope, edge, started))
+    crate::edge_receipt::encode(&envelope, origin_store.is_some(), edge, started)
 }
 
 /// Evaluate a resident hook envelope against the already-installed in-memory
