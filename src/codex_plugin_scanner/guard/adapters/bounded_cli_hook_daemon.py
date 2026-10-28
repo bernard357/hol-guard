@@ -54,6 +54,15 @@ def _daemon_hook_endpoint(guard_home: Path, harness: str) -> str | None:
     )
     if raw_state is None:
         return None
+    origin = daemon_state_origin(raw_state)
+    return None if origin is None else f"{origin}/v1/hooks/{harness}"
+
+
+def daemon_state_origin(raw_state: str) -> str | None:
+    """The loopback origin a published daemon state names, or None.
+
+    A cleared (``{}``) or malformed state names no daemon.
+    """
     try:
         state = json.loads(raw_state)
     except json.JSONDecodeError:
@@ -71,7 +80,7 @@ def _daemon_hook_endpoint(guard_home: Path, harness: str) -> str | None:
     ):
         return None
     rendered_host = f"[{host}]" if host == "::1" else host
-    return f"http://{rendered_host}:{port}/v1/hooks/{harness}"
+    return f"http://{rendered_host}:{port}"
 
 
 def _rendered_bridge_answer(
@@ -233,4 +242,4 @@ def try_daemon_hook(
     )
 
 
-__all__ = ["try_daemon_hook"]
+__all__ = ["daemon_state_origin", "try_daemon_hook"]

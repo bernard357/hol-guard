@@ -256,6 +256,29 @@ def test_recovery_waits_for_the_started_daemon_to_come_up(tmp_path: Path, monkey
     assert (json.loads(output.getvalue())["permissionDecision"], returncode) == ("allow", 0)
 
 
+@pytest.mark.parametrize(
+    ("state", "named"),
+    [
+        ("{}", False),
+        ("not json", False),
+        ('{"host": "203.0.113.5", "port": 4100}', False),
+        ('{"host": "127.0.0.1", "port": true}', False),
+        ('{"host": "127.0.0.1", "port": 4100}', True),
+    ],
+)
+def test_only_a_published_daemon_state_names_a_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, named: bool
+) -> None:
+    # The start path clears the state to `{}` before a daemon comes up; the
+    # recovery poll must keep waiting rather than take it for a new daemon.
+    monkeypatch.setattr(bounded_cli_hook_recovery, "read_private_regular_text", lambda *_a, **_k: state)
+    monkeypatch.setattr(bounded_cli_hook_recovery, "load_guard_daemon_auth_token", lambda _home: "token")
+
+    identity = bounded_cli_hook_recovery.daemon_identity(tmp_path)
+
+    assert identity == ((state, "token") if named else None)
+
+
 def test_the_daemon_that_missed_the_hook_is_never_asked_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     asked: list[object] = []
     monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", lambda **kwargs: asked.append(kwargs))

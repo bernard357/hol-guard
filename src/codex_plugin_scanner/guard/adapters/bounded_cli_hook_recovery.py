@@ -31,14 +31,20 @@ DaemonIdentity = tuple[str, str]
 
 
 def daemon_identity(guard_home: Path) -> DaemonIdentity | None:
-    """The daemon state text and auth token that name the current daemon, or None."""
+    """The daemon state text and auth token that name the current daemon, or None.
+
+    A state that names no daemon, such as the ``{}`` the start path writes
+    before a daemon comes up, is no daemon yet.
+    """
+
+    from .bounded_cli_hook_daemon import daemon_state_origin
 
     state = read_private_regular_text(
         guard_home / "daemon-state.json",
         max_bytes=64 * 1024,
         require_private_parent=True,
     )
-    if state is None:
+    if state is None or daemon_state_origin(state) is None:
         return None
     token = load_guard_daemon_auth_token(guard_home)
     return None if token is None else (state, token)
