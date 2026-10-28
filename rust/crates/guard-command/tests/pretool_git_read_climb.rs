@@ -91,13 +91,23 @@ const SIBLING_READS: &[&str] = &[
     "cd ../api && git branch --show-current; git status --short",
 ];
 
+/// Climb proofs are Unix-only (`sibling::climbed` refuses every climb on
+/// Windows), so there the read keeps its review.
+fn assert_climb_proof(result: &guard_contracts::PreToolResultV1, label: &str) {
+    if cfg!(windows) {
+        assert_ne!(result.decision, "allow", "{label}");
+    } else {
+        assert_ne!(result.reason_code, FLOOR, "{label}");
+    }
+}
+
 #[test]
 fn a_git_read_after_climbing_to_a_sibling_checkout_keeps_its_proof() {
     let (home, org, _cleanup) = siblings("allow");
     for harness in ["omp", "zcode", "codex", "claude-code"] {
         for command in SIBLING_READS {
             let result = decide(&home, &org.join("app"), harness, command);
-            assert_ne!(result.reason_code, FLOOR, "{harness}: {command}");
+            assert_climb_proof(&result, &format!("{harness}: {command}"));
         }
     }
 }
@@ -139,5 +149,5 @@ fn a_read_after_cd_semicolon_is_also_proven_where_it_started() {
         "omp",
         "cd ../api && git status --short",
     );
-    assert_ne!(chained.reason_code, FLOOR);
+    assert_climb_proof(&chained, "cd ../api && git status --short");
 }
