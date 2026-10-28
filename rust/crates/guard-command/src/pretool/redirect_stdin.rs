@@ -109,8 +109,11 @@ pub(super) fn remove_here_string(chars: &[char], start: usize, out: &mut String)
 ///
 /// `$NAME` and `${NAME}` put a value on standard input, which is the common
 /// shape and runs nothing. A command substitution, a backtick, a process
-/// substitution and `$'...'` each evaluate inside the word, so the projected
-/// text would no longer name everything the shell runs.
+/// substitution, `$'...'` and an arithmetic expansion each evaluate inside the
+/// word, so the projected text would no longer name everything the shell runs.
+/// Arithmetic reaches furthest of those: it evaluates the values of the names
+/// it mentions, and a subscript inside one of those values substitutes a
+/// command, so `$[x]` runs whatever `x` holds.
 fn word_is_data(chars: &[char]) -> bool {
     let mut index = 0;
     let mut quote = Quote::None;
@@ -136,7 +139,7 @@ fn word_is_data(chars: &[char]) -> bool {
             '`' => return false,
             '<' | '>' if chars.get(index + 1) == Some(&'(') => return false,
             '$' => match chars.get(index + 1) {
-                Some(&('(' | '\'' | '"')) => return false,
+                Some(&('(' | '[' | '\'' | '"')) => return false,
                 Some(&'{') => match plain_expansion(chars, index + 2) {
                     Some(close) => index = close,
                     None => return false,

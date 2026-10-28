@@ -145,6 +145,10 @@ fn keeps_redirects_that_can_execute_hide_input_or_reach_sensitive_paths_unprojec
         "sort <<< \"${PATH@P}\"",
         "sort <<< `id`",
         "cat <<< $'\\x41'",
+        // Arithmetic evaluates the values of the names it mentions, and a
+        // subscript inside one of those values substitutes a command.
+        "sort <<< $[x]",
+        "sort <<< $((x))",
         // A glued operator may name a file descriptor instead.
         "cat<<<'inline'",
         "echo hi > >(sh)",
