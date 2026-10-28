@@ -103,10 +103,6 @@
               "-o",
               "--client-timeout",
               "-t"
-            ],
-            "forbidden_flags_before_delimiter": [
-              "--help",
-              "-h"
             ]
           }
         }

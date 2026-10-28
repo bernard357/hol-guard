@@ -108,10 +108,6 @@
                     "-o",
                     "--client-timeout",
                     "-t"
-                  ],
-                  "forbidden_flags_before_delimiter": [
-                    "--help",
-                    "-h"
                   ]
                 }
               }
@@ -568,7 +564,9 @@
         "command.upctl"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [],
+      "expected_effective_segments": [
+        0
+      ],
       "rule_id": "command.upctl.account-purge"
     },
     {
@@ -636,7 +634,9 @@
         "command.upctl"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [],
+      "expected_effective_segments": [
+        0
+      ],
       "rule_id": "command.upctl.account-purge"
     },
     {
@@ -648,8 +648,10 @@
       "enabled_extensions": [
         "command.upctl"
       ],
-      "expected_action": "review",
-      "expected_effective_segments": [],
+      "expected_action": "block",
+      "expected_effective_segments": [
+        0
+      ],
       "rule_id": "command.upctl.account-purge"
     }
   ],
