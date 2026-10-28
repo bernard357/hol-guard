@@ -1,8 +1,8 @@
 import { j as jsxRuntimeExports, r as reactExports, cx as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dC as HiMiniBugAnt, a6 as Badge, T as Tag, f as formatRelativeTime, A as ActionButton, dW as fetchReceipts, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, c as HiMiniChevronDown, d as HiMiniArrowPath } from "../guard-dashboard.js";
-import { m as missingBundleMessage, f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-DOb9yUgX.js";
-import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CKNAxTGr.js";
+import { m as missingBundleMessage, f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-C1DgQ8b4.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CqXuX07V.js";
 import { s as supplyChainEvidenceHref, d as deriveSupplyChainEvidenceRail } from "./supply-chain-protection-stats-D5t87g7g.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-yxVKJKqq.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-DDGhqepV.js";
 import "./home-protection-module-BWAkAvfY.js";
 function SupplyChainDetailSection({
   id,
