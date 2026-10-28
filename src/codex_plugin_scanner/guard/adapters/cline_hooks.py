@@ -222,6 +222,47 @@ def blocked(value):
     return False
 
 
+def explicitly_allows(value):
+    # The deny-list above names the tiers this client already knows how to
+    # place. An action outside it -- one a newer resident introduced, or a
+    # truncated or corrupted field -- is not evidence of permission, so the
+    # decision has to say "allow" in one of the shapes this client reads, and
+    # no present field may say anything else. The plugin transport of this same
+    # adapter applies the same rule.
+    if blocked(value):
+        return False
+    if "decision" in value and not isinstance(value.get("decision"), str):
+        return False
+    raw_decision = value.get("decision")
+    decision = raw_decision.lower() if isinstance(raw_decision, str) else None
+    raw_action = value.get("policy_action", value.get("policyAction"))
+    action = raw_action.lower() if isinstance(raw_action, str) else None
+    permission = None
+    nested_behavior = None
+    specific = value.get("hookSpecificOutput")
+    if isinstance(specific, dict):
+        raw_permission = specific.get("permissionDecision")
+        if isinstance(raw_permission, str):
+            permission = raw_permission.lower()
+        nested = specific.get("decision")
+        if isinstance(nested, dict) and isinstance(nested.get("behavior"), str):
+            nested_behavior = nested["behavior"].lower()
+    if decision is not None and decision != "allow":
+        return False
+    if action is not None and action not in {{"allow", "warn"}}:
+        return False
+    if permission is not None and permission != "allow":
+        return False
+    if nested_behavior is not None and nested_behavior != "allow":
+        return False
+    return (
+        decision == "allow"
+        or action in {{"allow", "warn"}}
+        or permission == "allow"
+        or nested_behavior == "allow"
+    )
+
+
 def command_payloads(value):
     if EVENT != "PreToolUse":
         return [value]
@@ -336,6 +377,10 @@ def main():
         if blocked(decision):
             denied = True
             why = reason(decision)
+            break
+        if not explicitly_allows(decision):
+            denied = True
+            why = "HOL Guard returned an ambiguous decision; this action was withheld."
             break
     if BLOCKING:
         outcome = "blocked" if denied else "allowed"

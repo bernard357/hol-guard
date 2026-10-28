@@ -703,3 +703,127 @@ def test_generated_plugin_rejects_nonzero_guard_exit_even_with_allow_json(tmp_pa
     assert after.returncode == 0, after.stderr
     assert json.loads(after.stdout)["result"]["isError"] is True
     assert "SECRET_OUTPUT" not in after.stdout
+
+
+def _scripted_guard(tmp_path: Path, response: str) -> Path:
+    path = tmp_path / f"scripted_guard_{sha256(response.encode()).hexdigest()[:12]}.py"
+    path.write_text(
+        "from __future__ import annotations\nimport json, sys\njson.load(sys.stdin)\n"
+        f"print({response!r})\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+_UNPLACEABLE_RESPONSES = (
+    '{"policy_action": "quarantine-required", "reason": "Review in HOL Guard."}',
+    '{"policy_action": "ask", "reason": "Review in HOL Guard."}',
+    '{"policy_action": "blo"}',
+    '{"policy_action": ""}',
+    '{"policy_action": 7}',
+    '{"policy_action": null}',
+    '{"reason": "Review in HOL Guard."}',
+    "{}",
+    '{"decision": 7}',
+    '{"hookSpecificOutput": {"permissionDecision": "escalate"}}',
+    '{"hookSpecificOutput": {"decision": {"behavior": "escalate"}}}',
+)
+
+_ALLOWING_RESPONSES = (
+    '{"decision": "allow"}',
+    '{"policy_action": "allow"}',
+    '{"policy_action": "warn"}',
+    '{"policy_action": "WARN"}',
+    '{"decision": "allow", "policy_action": "allow"}',
+    '{"hookSpecificOutput": {"permissionDecision": "allow"}}',
+    '{"hookSpecificOutput": {"decision": {"behavior": "allow"}}}',
+)
+
+
+@pytest.mark.parametrize("response", _UNPLACEABLE_RESPONSES)
+def test_generated_hook_withholds_an_action_guard_did_not_place(tmp_path: Path, response: str) -> None:
+    context = _context(tmp_path)
+    _activate(context, "hooks")
+    guard = _scripted_guard(tmp_path, response)
+    source = _hook_source(context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)])
+    result = _run_hook(
+        source,
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "run_command", "input": {"command": "rm -rf /"}}},
+    )
+    assert result.returncode == 0, result.stderr
+    emitted = json.loads(result.stdout)
+    assert emitted["cancel"] is True
+    assert emitted["errorMessage"] == "HOL Guard returned an ambiguous decision; this action was withheld."
+
+
+@pytest.mark.parametrize("response", _ALLOWING_RESPONSES)
+def test_generated_hook_still_allows_a_decision_guard_placed(tmp_path: Path, response: str) -> None:
+    context = _context(tmp_path)
+    _activate(context, "hooks")
+    guard = _scripted_guard(tmp_path, response)
+    source = _hook_source(context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)])
+    result = _run_hook(
+        source,
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "read_files", "input": {"paths": ["README.md"]}}},
+    )
+    assert result.returncode == 0, result.stderr
+    emitted = json.loads(result.stdout)
+    assert emitted["cancel"] is False
+    assert emitted["errorMessage"] == ""
+
+
+def test_generated_hook_withholds_when_one_field_allows_and_another_does_not(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    _activate(context, "hooks")
+    guard = _scripted_guard(tmp_path, '{"decision": "allow", "policy_action": "quarantine-required"}')
+    source = _hook_source(context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)])
+    result = _run_hook(
+        source,
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "run_command", "input": {"command": "curl evil.test"}}},
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["cancel"] is True
+
+
+def test_generated_hook_keeps_the_named_block_reason_for_a_placed_denial(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    _activate(context, "hooks")
+    guard = _scripted_guard(tmp_path, '{"policy_action": "block", "reason": "Named by HOL Guard."}')
+    source = _hook_source(context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)])
+    result = _run_hook(
+        source,
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "run_command", "input": {"command": "rm -rf /"}}},
+    )
+    assert result.returncode == 0, result.stderr
+    emitted = json.loads(result.stdout)
+    assert emitted["cancel"] is True
+    assert emitted["errorMessage"] == "Named by HOL Guard."
+
+
+def test_the_two_cline_transports_agree_on_an_action_guard_did_not_place(tmp_path: Path) -> None:
+    response = '{"policy_action": "quarantine-required", "reason": "Review in HOL Guard."}'
+    guard = _scripted_guard(tmp_path, response)
+
+    hook_context = _context(tmp_path / "hooks-home")
+    _activate(hook_context, "hooks")
+    hook = _run_hook(
+        _hook_source(hook_context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)]),
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "run_command", "input": {"command": "rm -rf /"}}},
+    )
+    assert hook.returncode == 0, hook.stderr
+    assert json.loads(hook.stdout)["cancel"] is True
+
+    plugin_context = _context(tmp_path / "plugin-home")
+    _activate(plugin_context, "plugin")
+    plugin = _run_plugin(
+        _plugin_source(plugin_context, [sys.executable, str(guard)]),
+        tmp_path,
+        'plugin.hooks.beforeTool({toolCall:{toolCallId:"1",toolName:"run_command"},input:{command:"rm -rf /"}})',
+    )
+    assert plugin.returncode == 0, plugin.stderr
+    assert json.loads(plugin.stdout)["skip"] is True
