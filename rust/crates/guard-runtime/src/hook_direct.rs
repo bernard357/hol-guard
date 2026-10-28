@@ -277,11 +277,11 @@ fn answer(
         // A probe carries a request identity only the daemon assigns.
         return Err(HookDirectDefer::TransitionProbe);
     }
-    if cursor_harness && pre_tool && cursor::daemon_only(&payload) {
-        // The daemon answers Cursor's silent route probe and admits the
-        // contained sink it rewrote a shell call into.
-        return Err(HookDirectDefer::PayloadUnsupported);
-    }
+    let cursor_route = if cursor_harness && pre_tool {
+        cursor::route(&payload)?
+    } else {
+        cursor::Route::Review
+    };
     // The edge refuses an encrypted payload reference and reviews a source
     // reference only after a tool ran, reading the file as the daemon does.
     if payload.contains_key(ENCRYPTED_PAYLOAD_FIELD)
@@ -383,6 +383,26 @@ fn answer(
     if binding.evidence_drain != Some(true) {
         return Err(HookDirectDefer::EvidenceUndrained);
     }
+    // Cursor's route probe and the sink it rewrote a call into are answered
+    // without evidence: the daemon records neither.
+    let cursor_probe = match cursor_route {
+        cursor::Route::Review => None,
+        route => {
+            let scope = cursor::Scope::new(
+                &workspace,
+                &request_home,
+                &request.guard_home,
+                binding.contained_sink_command.as_deref(),
+            )?;
+            if route == cursor::Route::Sink {
+                return cursor::admit_sink(&payload, &scope);
+            }
+            if let Some(allow) = cursor::unreviewed_probe(&payload, &scope, recording_only) {
+                return Ok(allow);
+            }
+            Some(scope)
+        }
+    };
 
     // Only a `PreToolUse` under custom rules reads its payload after the edge.
     let rule_payload = (pre_tool && custom_rules).then(|| payload.clone());
@@ -426,6 +446,9 @@ fn answer(
         structured_output_config: None,
     };
     let (edge, fence_wait) = fence::evaluate(envelope, policy_store)?;
+    if let Some(scope) = cursor_probe {
+        return Ok(cursor::probe_answer(&edge, &evidence_payload, &scope));
+    }
     // Removed again unless the answer that runs it is returned.
     let mut snapshot = None;
     let mut answered = match event {
