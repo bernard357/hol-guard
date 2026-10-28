@@ -181,3 +181,21 @@ def test_a_stable_release_cannot_build_without_a_green_audit() -> None:
     assert jobs["build"]["steps"].index(resolved) < next(
         index for index, step in enumerate(jobs["build"]["steps"]) if step.get("id") == "native_wheel_matrix"
     )
+
+
+def test_a_release_cut_before_the_gate_can_still_be_repaired() -> None:
+    publish = yaml.safe_load(PUBLISH_PATH.read_text(encoding="utf-8"))
+    name = "Require a green Cargo supply chain run for the resolved source"
+    run = next(step for step in publish["jobs"]["build"]["steps"] if step.get("name") == name)["run"]
+
+    # Re-running Security Gates on an old tag runs that tag's own copy of the
+    # workflow, so a release tagged before the job existed can never produce the
+    # check run. Reading the resolved source's workflow is what separates that
+    # from an audit that ran and did not pass, and it is the only thing that
+    # keeps a half-published release finishable.
+    assert 'git show "${SOURCE_SHA}:.github/workflows/security-gates.yml"' in run
+    assert 'grep -q "name: Cargo supply chain"' in run
+    # A conclusion that exists at all is a verdict, so only an absent one can be
+    # exempt, and only when that commit's Security Gates defines no such job.
+    assert '[[ -n "$conclusion" ]] ||' in run
+    assert run.index("refusing to build a stable release") < run.index("predates the audit")
