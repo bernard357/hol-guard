@@ -38,9 +38,9 @@ fn tool(root: &Path) -> PathBuf {
     root.join("tools").join("tool.exe")
 }
 
-/// What the reviewed program prints, read from the system copy directly.
-fn reviewed_output() -> String {
-    let output = std::process::Command::new(system_tool("hostname.exe"))
+/// What a system program prints, read from the system copy directly.
+fn system_output(name: &str) -> String {
+    let output = std::process::Command::new(system_tool(name))
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -74,11 +74,18 @@ fn run(command: PinnedCommand) -> std::io::Result<CapturedOutput> {
     )
 }
 
-fn ran_reviewed(output: &CapturedOutput) -> bool {
-    let reviewed = reviewed_output();
-    !reviewed.is_empty()
+fn printed(output: &CapturedOutput, expected: &str) -> bool {
+    !expected.is_empty()
         && output.exit_code == Some(0)
-        && String::from_utf8_lossy(&output.stdout).trim() == reviewed
+        && String::from_utf8_lossy(&output.stdout).trim() == expected
+}
+
+fn ran_reviewed(output: &CapturedOutput) -> bool {
+    printed(output, &system_output("hostname.exe"))
+}
+
+fn ran_swap(output: &CapturedOutput) -> bool {
+    printed(output, &system_output("whoami.exe"))
 }
 
 #[test]
@@ -89,6 +96,7 @@ fn the_unpinned_path_can_be_swapped_so_the_pinned_cases_are_not_vacuous() {
     fs::write(tool(&root), swap_bytes()).unwrap();
 
     let swapped = run(pin(&root)).unwrap();
+    assert!(ran_swap(&swapped), "{swapped:?}");
     assert!(!ran_reviewed(&swapped), "{swapped:?}");
 }
 
