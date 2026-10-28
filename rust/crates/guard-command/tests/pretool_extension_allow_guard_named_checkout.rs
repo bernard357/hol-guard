@@ -147,6 +147,8 @@ const NAMED_CHECKOUT_COMMANDS: &[&str] = &[
     "git checkout -- scripts/win/hol-guard.wxs",
     "git -C {root}/hol-guard worktree remove --force {root}/hol-guard-pr-12",
     "git -C {root}/hol-guard worktree move {root}/hol-guard-pr-12 {root}/moved",
+    "git fetch --quiet https://github.com/example-org/hol-guard.git feature",
+    "git -C {root}/hol-guard worktree remove {root}/hol-guard-pr-12 && git branch -D pr",
     "gh api repos/example-org/app-portal/commits/abc/check-runs -f check_name='hol-guard / required' -f filter=all --jq '.check_runs'",
 ];
 
