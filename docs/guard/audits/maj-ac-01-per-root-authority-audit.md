@@ -1,6 +1,6 @@
 # MAJ-AC-01: per-root authority audit
 
-Audited at `c2d1754375` (2026-10-27). Reproduce with
+Audited at `423f4a46dd` (2026-10-27). Reproduce with
 `python3 scripts/audit_python_verdict_sites.py`.
 
 MAJ-AC-01 asks for something the migration report does not measure. The report
@@ -41,12 +41,12 @@ small enough to read, it does not prove the set is everything.
 
 ## What it found
 
-Sixty-two functions across forty-four files, every one of them under
+Sixty-one functions across forty-four files, every one of them under
 `src/codex_plugin_scanner/guard/`. Nothing outside the guard package produces a
 verdict, so the console-script entry points (`hol-guard`, `hol-guard-eval`,
 `hol-guard-secrets` and the `plugin-*` aliases) hold no authority of their own.
 
-Twenty-six of the sixty-two can only ever produce a `block`, a `review` or a
+Twenty-five of the sixty-one can only ever produce a `block`, a `review` or a
 `require-reapproval`. A Python-produced verdict that is stricter than the
 resident's cannot authorize anything, and fail-closed behaviour when the
 resident is unreachable is the design, so these were cleared as a class rather
@@ -184,7 +184,7 @@ own.
 
 A point-in-time audit stops being evidence the moment someone adds a site.
 `docs/guard/audits/python-verdict-sites.json` records the reading and the action
-set for each of the sixty-two, plus the one template the scan cannot read, and
+set for each of the sixty-one, plus the one template the scan cannot read, and
 `scripts/audit_python_verdict_sites.py --check` fails when the package and the
 baseline disagree — on a new site, a removed site, a changed action set, or a
 change in which templates are unreadable. `tests/test_python_verdict_site_audit.py`
