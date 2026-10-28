@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -209,3 +210,43 @@ def test_a_review_without_a_live_waiting_bridge_stays_a_manual_retry(
     assert snapshot is not None
     assert snapshot["capability"] == "retry-only"
     assert store.get_guard_operation_for_approval_request(request_id) is None
+
+
+def test_the_waiting_operation_exists_before_the_request_can_be_approved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    from codex_plugin_scanner.guard.daemon import hook_native_review_approval
+
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+    persist_review = hook_native_review_approval._persist_review
+    linked_at_persist: list[bool] = []
+
+    def persist(persist_fn: Any, request: Any, now: str, claude_review: Any) -> Any:
+        linked_at_persist.append(store.get_guard_operation_for_approval_request(request.request_id) is not None)
+        return persist_review(persist_fn, request, now, claude_review)
+
+    monkeypatch.setattr(hook_native_review_approval, "_persist_review", persist)
+    _review(worker, tmp_path, workspace, _live_wait())
+
+    assert linked_at_persist == [True]
+
+
+def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+
+    def fail(**_kwargs: object) -> dict[str, object]:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "upsert_guard_operation", fail)
+    review = _review(worker, tmp_path, workspace, _live_wait())
+    request_id = review["approval_request_id"]
+    assert isinstance(request_id, str)
+    row = store.get_approval_request(request_id)
+    assert row is not None
+    snapshot = _snapshot(row)
+    assert snapshot is not None
+    assert snapshot["capability"] == "retry-only"

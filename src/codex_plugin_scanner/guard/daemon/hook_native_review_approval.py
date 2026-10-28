@@ -381,11 +381,9 @@ def queue_native_pre_tool_review(
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if live_wait is not None and isinstance(stored, dict):
-        from .hook_native_review_codex_live_wait import bind_codex_live_wait
+        from .hook_native_review_codex_live_wait import seed_codex_live_wait
 
-        bind_codex_live_wait(
-            store, request_id=request_id, metadata=live_wait[0], workspace=workspace, now=datetime.now(tz=timezone.utc)
-        )
+        seed_codex_live_wait(store, request_id=request_id, now=datetime.now(tz=timezone.utc))
     if connector is not None and isinstance(stored, dict):
         record_native_review_connector_context(
             store,
@@ -424,14 +422,21 @@ def _codex_live_wait(
     workspace: Path | None,
 ) -> tuple[dict[str, object], dict[str, object]] | None:
     """The waiting bridge's metadata and the snapshot it earns, when it can be resumed."""
-    from .hook_native_review_codex_live_wait import codex_live_wait_metadata, codex_live_wait_snapshot
+    from .hook_native_review_codex_live_wait import (
+        codex_live_wait_metadata,
+        codex_live_wait_snapshot,
+        link_codex_live_wait,
+    )
 
     now = datetime.now(tz=timezone.utc)
     metadata = codex_live_wait_metadata(payload=payload, guard_home=guard_home, workspace=workspace, now=now)
     if metadata is None:
         return None
     snapshot = codex_live_wait_snapshot(store, request_id=request_id, metadata=metadata, now=now)
-    return None if snapshot is None else (metadata, snapshot)
+    if snapshot is None:
+        return None
+    linked = link_codex_live_wait(store, request_id=request_id, metadata=metadata, workspace=workspace, now=now)
+    return (metadata, snapshot) if linked else None
 
 
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:

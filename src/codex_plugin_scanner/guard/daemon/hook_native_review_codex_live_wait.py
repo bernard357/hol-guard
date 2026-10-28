@@ -98,7 +98,7 @@ def codex_live_wait_snapshot(
     return snapshot
 
 
-def bind_codex_live_wait(
+def link_codex_live_wait(
     store: object,
     *,
     request_id: str,
@@ -106,7 +106,12 @@ def bind_codex_live_wait(
     workspace: Path | None,
     now: datetime,
 ) -> bool:
-    """Link the queued request to an operation that records the waiting hook."""
+    """Record the operation for the waiting hook before its request is queued.
+
+    The operation is written first so the request is never approvable without
+    it: an approval that lands as soon as the request is stored still finds the
+    waiting hook. When this fails the caller queues the request retry-only.
+    """
 
     upsert_session = getattr(store, "upsert_guard_session", None)
     upsert_operation = getattr(store, "upsert_guard_operation", None)
@@ -137,13 +142,21 @@ def bind_codex_live_wait(
             metadata=dict(metadata),
             now=timestamp,
         )
-        seed_request_resume_record(cast("GuardStore", store), request_id=request_id, now=timestamp)
     except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
-        # The request is already queued; without the operation the approval
-        # still finalizes as a manual retry instead of releasing the hook.
         _LOGGER.warning("Codex live wait was not linked to %s (%s)", request_id, type(error).__name__)
         return False
     return True
+
+
+def seed_codex_live_wait(store: object, *, request_id: str, now: datetime) -> None:
+    """Seed the resume record once the waiting hook's request is stored."""
+
+    try:
+        seed_request_resume_record(
+            cast("GuardStore", store), request_id=request_id, now=now.astimezone(timezone.utc).isoformat()
+        )
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
+        _LOGGER.warning("Codex live wait resume was not seeded for %s (%s)", request_id, type(error).__name__)
 
 
 def _waiting_operation(metadata: Mapping[str, object], timestamp: str) -> dict[str, object]:
@@ -156,4 +169,4 @@ def _waiting_operation(metadata: Mapping[str, object], timestamp: str) -> dict[s
     }
 
 
-__all__ = ["bind_codex_live_wait", "codex_live_wait_metadata", "codex_live_wait_snapshot"]
+__all__ = ["codex_live_wait_metadata", "codex_live_wait_snapshot", "link_codex_live_wait", "seed_codex_live_wait"]
