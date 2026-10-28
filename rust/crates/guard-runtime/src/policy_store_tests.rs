@@ -148,7 +148,6 @@ fn workspace_source(root: &Path) -> GuardHookSourceMetadataV2 {
     }
 }
 
-#[cfg(windows)]
 /// A `PreToolUse` envelope bound to generation 1 of `snapshot`.
 fn pre_tool_envelope(
     request_id: &str,
@@ -174,6 +173,7 @@ fn pre_tool_envelope(
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn windows_scope_aliases_share_one_digest_identity() {
     let normal = normalize_scope_text(r"C:\Users\Guard\State");
