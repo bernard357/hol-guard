@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -69,14 +68,55 @@ def test_a_runtime_that_validates_but_cannot_launch_is_still_diagnosed(
 ) -> None:
     _candidates(monkeypatch, _plant(tmp_path, "hol-guard-runtime", 0o644))
 
-    # Identity validation never tests the execute bit, so this install reports
-    # itself ready and then fails at every hook. No reason code describes it;
-    # only the files do, which is why the diagnosis reads them.
-    for reason in ("native_ready", "native_status_probe_skipped"):
-        result = native_runtime_diagnosis(reason, available=True)
-        assert result is not None, reason
-        assert "no execute permission" in result["summary"]
-        assert "noexec" in result["action"]
+    # Identity validation never tests the execute bit, so the passive answer
+    # calls this install available and it then fails at every hook. No reason
+    # code describes it; only the files do, which is why the diagnosis reads
+    # them.
+    result = native_runtime_diagnosis("native_status_probe_skipped", available=True)
+
+    assert result is not None
+    assert "no execute permission" in result["summary"]
+    assert "noexec" in result["action"]
+
+
+def test_a_runtime_that_answered_is_not_blamed_on_a_candidate_it_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _candidates(monkeypatch, _plant(tmp_path, "noexec", 0o644), _plant(tmp_path, "hol-guard-runtime", 0o755))
+
+    # ``native_ready`` comes back only after a candidate launched and answered,
+    # so an earlier one missing its execute bit is one the probe stepped over.
+    # Reporting it would tell a working install to repair a file nothing uses.
+    assert native_runtime_diagnosis("native_ready", available=True) is None
+
+
+def test_a_probe_that_failed_says_so_instead_of_blaming_the_installed_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _candidates(monkeypatch, _plant(tmp_path, "hol-guard-runtime", 0o755))
+
+    # The check itself raised, so ``available`` is false while the files are
+    # fine. Answering from the files alone would prescribe a reinstall for a
+    # runtime that was never asked anything.
+    result = native_runtime_diagnosis("native_status_probe_failed", available=False)
+
+    assert result is not None
+    assert "the check itself failed" in result["summary"]
+    assert "doctor --native" in result["action"]
+    assert result["candidates"] == [{"slot": "distribution", "state": "present"}]
+
+
+def test_a_shared_resident_is_not_handed_execute_bit_advice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _candidates(monkeypatch, _plant(tmp_path, "hol-guard-runtime", 0o644))
+
+    # Another install owns the resident, so nothing here needs repairing. A
+    # missing execute bit on this copy must not turn that into a repair
+    # instruction that contradicts the sentence above it.
+    result = native_runtime_diagnosis("native_resident_owner_busy", available=True)
+
+    assert result is not None
+    assert "Another Guard install" in result["summary"]
+    assert "No action is needed" in result["action"]
 
 
 def test_a_healthy_runtime_is_not_diagnosed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,17 +126,17 @@ def test_a_healthy_runtime_is_not_diagnosed(tmp_path: Path, monkeypatch: pytest.
     assert native_runtime_diagnosis("native_status_probe_skipped", available=True) is None
 
 
-def test_the_first_candidate_guard_would_use_decides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_candidate_the_passive_answer_measured_decides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     refused = _plant(tmp_path, "shared", 0o777)
     usable = _plant(tmp_path, "hol-guard-runtime", 0o755)
     _candidates(monkeypatch, refused, usable)
 
     # Validation skips the candidates it refuses, so one it would never reach
     # must not be reported as the reason this install is broken.
-    assert native_runtime_diagnosis("native_ready", available=True) is None
+    assert native_runtime_diagnosis("native_status_probe_skipped", available=True) is None
 
     _candidates(monkeypatch, refused, _plant(tmp_path, "noexec", 0o644), usable)
-    result = native_runtime_diagnosis("native_ready", available=True)
+    result = native_runtime_diagnosis("native_status_probe_skipped", available=True)
     assert result is not None and "no execute permission" in result["summary"]
 
 
@@ -200,19 +240,46 @@ def test_a_busy_resident_owner_is_explained_once_not_twice(tmp_path: Path, monke
 def test_an_unreadable_candidate_is_not_mistaken_for_an_absent_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    candidate = _plant(locked, "hol-guard-runtime", 0o755)
-    locked.chmod(0o000)
-    try:
-        _candidates(monkeypatch, candidate)
-        rows = native_runtime_candidates()
-    finally:
-        locked.chmod(stat.S_IRWXU)
+    candidate = _plant(tmp_path, "hol-guard-runtime", 0o755)
+    real_lstat = Path.lstat
 
-    # A directory the account cannot traverse raises PermissionError, not
-    # FileNotFoundError, and a reinstall is not the same repair as a chmod.
-    assert rows == [{"slot": "distribution", "state": "unreadable"}]
+    def refuse(self: Path) -> os.stat_result:
+        # A directory the account cannot traverse raises PermissionError rather
+        # than FileNotFoundError. Raising it here instead of removing the
+        # directory's permission bits keeps the case decided by the code under
+        # test rather than by whether this process can ignore those bits.
+        if self == candidate:
+            raise PermissionError(13, "Permission denied")
+        return real_lstat(self)
+
+    monkeypatch.setattr(Path, "lstat", refuse)
+    _candidates(monkeypatch, candidate)
+
+    # A reinstall is not the same repair as a chmod, so the two must not share
+    # a state.
+    assert native_runtime_candidates() == [{"slot": "distribution", "state": "unreadable"}]
+
+
+def test_a_binary_this_account_cannot_read_is_not_called_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _plant(tmp_path, "hol-guard-runtime", 0o111)
+    real_access = os.access
+
+    def refuse(path: object, mode: int, **kwargs: object) -> bool:
+        # Privileged accounts read a mode 0o111 file anyway; the state under
+        # test is the one validation meets when the read is actually refused.
+        if Path(str(path)) == candidate and mode == os.R_OK:
+            return False
+        return real_access(path, mode, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "access", refuse)
+    _candidates(monkeypatch, candidate)
+
+    # Identity validation hashes the bytes, so this candidate is refused before
+    # anything launches. Calling it present would report a runtime that "did
+    # not answer" when nothing ever asked it.
+    assert native_runtime_candidates() == [{"slot": "distribution", "state": "unreadable"}]
 
 
 def test_the_unavailable_table_answers_every_state_a_candidate_can_have() -> None:

@@ -152,8 +152,9 @@ _UNAVAILABLE: dict[CandidateState, tuple[str, str]] = {
         _REINSTALL,
     ),
     "unreadable": (
-        "Guard's native runtime is in place but could not be read, so its identity could not "
-        "be confirmed. A permission on the directory above it will do this.",
+        "Guard's native runtime is in place but this account cannot read it, so its identity "
+        "could not be confirmed and nothing was launched. A file with no read permission, or "
+        "a directory above it this account cannot enter, will do this.",
         _REINSTALL,
     ),
     "present": (
@@ -173,9 +174,9 @@ _UNAVAILABLE: dict[CandidateState, tuple[str, str]] = {
 # runtime better than an empty slot beside it does.
 _UNAVAILABLE_ORDER: tuple[CandidateState, ...] = (
     "untrusted_owner_or_mode",
+    "unreadable",
     "not_executable",
     "not_a_regular_file",
-    "unreadable",
     "present",
     "absent",
 )
@@ -187,6 +188,11 @@ _UNAVAILABLE_ORDER: tuple[CandidateState, ...] = (
 # diagnosis, which pairs it with the action that clears it; repeating it here
 # would print it twice and carry it twice in the JSON payload.
 _REPORTED_AS_MESSAGE = frozenset({"native_resident_owner_busy"})
+
+# What the passive callers report when they read the installed files without
+# running them. It describes the probe rather than the install, so it is the
+# one code the candidate files answer better than the table does.
+_PROBE_SKIPPED = "native_status_probe_skipped"
 
 
 def native_runtime_message(reason_code: str) -> str | None:
@@ -201,31 +207,40 @@ def _candidate_state(path: Path) -> CandidateState:
     """Classify one candidate by its metadata alone, matching what validation checks.
 
     The order follows ``validate_native_binary``: file kind, then ownership and
-    mode, so the state names the first check the file would fail. The execute
-    bit is checked after those because validation itself does not test it --
-    a non-executable binary validates and then fails to launch, which is a
-    different repair from a binary nobody trusts.
+    mode, then whether the bytes can be read at all, so the state names the
+    first check the file would fail. The execute bit is checked after those
+    because validation itself does not test it -- a non-executable binary
+    validates and then fails to launch, which is a different repair from a
+    binary nobody trusts and a different one again from a binary nobody can
+    read.
     """
 
     from ..group_write_trust import trusted_owner_and_mode
 
+    expanded = path.expanduser()
     try:
-        metadata = path.expanduser().lstat()
+        metadata = expanded.lstat()
     except FileNotFoundError:
         return "absent"
     except (OSError, RuntimeError, ValueError):
         return "unreadable"
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
         return "not_a_regular_file"
-    if os.name == "nt":
-        # Windows regular files carry no POSIX ownership or execute semantics
-        # Guard reads; identity validation accepts any regular file there.
-        return "present"
-    try:
-        if not trusted_owner_and_mode(metadata, path.expanduser()):
-            return "untrusted_owner_or_mode"
-    except (OSError, RuntimeError, ValueError):
+    if os.name != "nt":
+        # Windows regular files carry no POSIX ownership semantics Guard reads;
+        # identity validation accepts any regular file there.
+        try:
+            if not trusted_owner_and_mode(metadata, expanded):
+                return "untrusted_owner_or_mode"
+        except (OSError, RuntimeError, ValueError):
+            return "unreadable"
+    # Validation hashes the bytes before Guard will use a binary, so one this
+    # account cannot open is refused with nothing launched. A file carrying
+    # execute bits and no read bit passes every check above this one.
+    if not os.access(expanded, os.R_OK):
         return "unreadable"
+    if os.name == "nt":
+        return "present"
     if not stat.S_IMODE(metadata.st_mode) & stat.S_IXUSR:
         return "not_executable"
     return "present"
@@ -245,6 +260,18 @@ def _candidate_slot(path: Path, override: str | None) -> CandidateSlot:
     return "distribution"
 
 
+def _candidate_rows() -> list[tuple[Path, NativeRuntimeCandidate]]:
+    """Each place Guard looks, kept beside the row that describes it."""
+
+    from ..native_runtime import _NATIVE_BINARY_ENV, _runtime_candidates
+
+    override = os.environ.get(_NATIVE_BINARY_ENV)
+    return [
+        (path, {"slot": _candidate_slot(path, override), "state": _candidate_state(path)})
+        for path in _runtime_candidates()
+    ]
+
+
 def native_runtime_candidates() -> list[NativeRuntimeCandidate]:
     """Say what the files in each place Guard looks are, without naming the places.
 
@@ -254,24 +281,22 @@ def native_runtime_candidates() -> list[NativeRuntimeCandidate]:
     one. Nothing here is executed.
     """
 
-    from ..native_runtime import _NATIVE_BINARY_ENV, _runtime_candidates
-
-    override = os.environ.get(_NATIVE_BINARY_ENV)
-    return [
-        {"slot": _candidate_slot(path, override), "state": _candidate_state(path)} for path in _runtime_candidates()
-    ]
+    return [row for _, row in _candidate_rows()]
 
 
-def _selected_state(candidates: list[NativeRuntimeCandidate]) -> CandidateState | None:
-    """The state of the candidate Guard would actually use.
+def _measured_state(rows: list[tuple[Path, NativeRuntimeCandidate]]) -> CandidateState | None:
+    """The state of the candidate the passive availability answer measured.
 
-    ``_compute_runtime_status`` walks the candidates in order and skips every
-    one identity validation refuses, so the first candidate it does not refuse
-    is the one that decides the outcome.
+    ``_passive_runtime_sha256`` reports ``available`` from the first candidate
+    identity validation accepts, so that candidate, and only that one, is what
+    a passive ``available: yes`` is about. Asking the validator which one it is
+    keeps this from deciding admission a second time: a candidate Guard refuses
+    for a reason the file metadata does not show is skipped here too.
     """
 
-    refused = {"absent", "not_a_regular_file", "untrusted_owner_or_mode", "unreadable"}
-    return next((item["state"] for item in candidates if item["state"] not in refused), None)
+    from ..native_binary_identity import validate_native_binary
+
+    return next((row["state"] for path, row in rows if validate_native_binary(path) is not None), None)
 
 
 def native_runtime_diagnosis(
@@ -281,14 +306,21 @@ def native_runtime_diagnosis(
 ) -> NativeRuntimeDiagnosis | None:
     """Explain a runtime that is not ready, or return None when nothing is wrong.
 
-    An unavailable runtime is diagnosed from the candidate files rather than
-    from the reason code, because the passive callers report a code about the
-    probe they skipped while the files say what is actually missing. The files
-    also catch the one broken state no reason code describes: a runtime that
-    validates, is reported available, and still cannot be launched.
+    A reason code in the table is a decision the runtime layer reached that the
+    installed files cannot show -- a probe that failed, a manifest that
+    disagrees with its binary, a resident another install owns -- so it is
+    answered first. Everything else is diagnosed from the files, because the
+    passive callers report a code about the probe they skipped while the files
+    say what is actually missing. The files also catch the one broken state no
+    reason code describes: a runtime that validates, is reported available, and
+    still cannot be launched.
     """
 
-    candidates = native_runtime_candidates()
+    rows = _candidate_rows()
+    candidates = [row for _, row in rows]
+    diagnosis = _DIAGNOSES.get(reason_code)
+    if diagnosis is not None:
+        return {"summary": diagnosis[0], "action": diagnosis[1], "candidates": candidates}
     if available is False:
         states = {candidate["state"] for candidate in candidates}
         state: CandidateState = "absent"
@@ -299,14 +331,12 @@ def native_runtime_diagnosis(
         summary, action = _UNAVAILABLE[state]
         return {"summary": summary, "action": action, "candidates": candidates}
     # Identity validation never tests the execute bit, so a runtime missing it
-    # is reported available and then fails to launch. That gap is the whole
-    # reason to look at the files: the reason code cannot see it.
-    if _selected_state(candidates) == "not_executable":
+    # validates, is counted as available by the passive answer, and then fails
+    # to launch. Only the passive answer carries that gap: a reason code from
+    # the full probe either launched the runtime that produced it or is in the
+    # table above, and blaming a candidate the probe stepped over would report
+    # a healthy install as broken.
+    if reason_code == _PROBE_SKIPPED and _measured_state(rows) == "not_executable":
         summary, action = _UNAVAILABLE["not_executable"]
         return {"summary": summary, "action": action, "candidates": candidates}
-    if reason_code == "native_ready":
-        return None
-    diagnosis = _DIAGNOSES.get(reason_code)
-    if diagnosis is None:
-        return None
-    return {"summary": diagnosis[0], "action": diagnosis[1], "candidates": candidates}
+    return None

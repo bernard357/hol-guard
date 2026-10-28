@@ -245,7 +245,7 @@ def render_runtime_status(section: dict[str, object]) -> str:
     message = availability.get("message")
     if isinstance(message, str) and message:
         lines.append(f"  {message}")
-    lines.extend(_render_diagnosis(section.get("diagnosis"), reported=isinstance(message, str) and bool(message)))
+    lines.extend(_render_diagnosis(section.get("diagnosis"), reported=message if isinstance(message, str) else None))
     lines.extend(_render_resident(section.get("resident")))
     bundled = section.get("bundled")
     if isinstance(bundled, dict):
@@ -258,11 +258,12 @@ def render_runtime_status(section: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_diagnosis(diagnosis: object, *, reported: bool) -> list[str]:
+def _render_diagnosis(diagnosis: object, *, reported: str | None) -> list[str]:
     """Print the plain-language diagnosis under the reason code it explains.
 
-    The summary is skipped when the availability line already carried it as a
-    message, so a shared resident is explained once rather than twice; the
+    The summary is skipped only when the availability line above it already
+    carried that same text, so a shared resident is explained once rather than
+    twice while a diagnosis that says something else is still printed. The
     action and the per-slot evidence are printed either way.
     """
 
@@ -270,7 +271,7 @@ def _render_diagnosis(diagnosis: object, *, reported: bool) -> list[str]:
         return []
     lines: list[str] = []
     summary = diagnosis.get("summary")
-    if not reported and isinstance(summary, str) and summary:
+    if isinstance(summary, str) and summary and summary != reported:
         lines.append(f"  {summary}")
     action = diagnosis.get("action")
     if isinstance(action, str) and action:
