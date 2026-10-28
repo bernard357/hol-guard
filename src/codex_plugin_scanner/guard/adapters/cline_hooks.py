@@ -237,17 +237,22 @@ def explicitly_allows(value):
         return False
     raw_decision = value.get("decision")
     decision = raw_decision.lower() if isinstance(raw_decision, str) else None
-    if "policy_action" in value and not isinstance(value.get("policy_action"), str):
+    actions = []
+    for key in ("policy_action", "policyAction"):
+        if key not in value:
+            continue
         # A present action field that is not a word this client can read -- a
         # null, a number, a truncated object -- is unplaceable, so it is not
-        # evidence of permission and the alias does not stand in for it.
+        # evidence of permission and the other spelling does not stand in for
+        # it. Every present spelling is read, not just the first one: an
+        # allowing action beside an alias naming a tier this client cannot
+        # place still names no permission.
+        if not isinstance(value.get(key), str):
+            return False
+        actions.append(value[key].lower())
+    if any(item not in {{"allow", "warn"}} for item in actions):
         return False
-    raw_action = value.get("policy_action")
-    if not isinstance(raw_action, str):
-        raw_action = value.get("policyAction")
-    if "policyAction" in value and not isinstance(value.get("policyAction"), str):
-        return False
-    action = raw_action.lower() if isinstance(raw_action, str) else None
+    action = actions[0] if actions else None
     permission = None
     nested_behavior = None
     specific = value.get("hookSpecificOutput")
@@ -259,8 +264,6 @@ def explicitly_allows(value):
         if isinstance(nested, dict) and isinstance(nested.get("behavior"), str):
             nested_behavior = nested["behavior"].lower()
     if decision is not None and decision != "allow":
-        return False
-    if action is not None and action not in {{"allow", "warn"}}:
         return False
     if permission is not None and permission != "allow":
         return False

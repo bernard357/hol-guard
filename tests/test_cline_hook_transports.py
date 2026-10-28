@@ -730,13 +730,20 @@ _UNPLACEABLE_RESPONSES = (
 
 # The camelCase alias stands in for the snake_case action only when that field
 # is absent. A present field neither transport can read is unplaceable, so the
-# alias beside it never turns the response into permission.
+# alias beside it never turns the response into permission, and an allowing
+# action beside an alias naming a tier neither transport can place is not
+# permission either: every present spelling has to say allow or warn.
 _CONTRADICTORY_ALIAS_RESPONSES = (
     '{"policy_action": null, "policyAction": "allow"}',
     '{"policy_action": "allow", "policyAction": null}',
     '{"policy_action": null, "policyAction": "warn"}',
     '{"policyAction": 7}',
     '{"policyAction": null}',
+    '{"policy_action": "allow", "policyAction": "quarantine-required"}',
+    '{"policy_action": "warn", "policyAction": "blo"}',
+    '{"policy_action": "allow", "policyAction": "ask"}',
+    '{"policy_action": "allow", "policyAction": ""}',
+    '{"policy_action": "quarantine-required", "policyAction": "allow"}',
 )
 
 # A restrictive action under the alias is read by both transports, whichever

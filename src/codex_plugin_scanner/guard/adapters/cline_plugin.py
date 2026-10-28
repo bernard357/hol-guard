@@ -183,12 +183,18 @@ function guardExplicitlyAllows(payload) {{
   const decision = typeof payload.decision === "string" ? payload.decision.toLowerCase() : undefined;
   // A present action field that is not a word this transport can read -- a
   // null, a number, a truncated object -- is unplaceable, so it is not
-  // evidence of permission and the alias does not stand in for it.
+  // evidence of permission and the other spelling does not stand in for it.
+  // Every present spelling is read, not just the first one: an allowing
+  // action beside an alias naming a tier this transport cannot place still
+  // names no permission.
+  const actions = [];
   for (const key of ["policy_action", "policyAction"]) {{
-    if (Object.prototype.hasOwnProperty.call(payload, key) && typeof payload[key] !== "string") return false;
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+    if (typeof payload[key] !== "string") return false;
+    actions.push(payload[key].toLowerCase());
   }}
-  const actionValue = typeof payload.policy_action === "string" ? payload.policy_action : payload.policyAction;
-  const action = typeof actionValue === "string" ? actionValue.toLowerCase() : undefined;
+  if (actions.some((item) => !["allow", "warn"].includes(item))) return false;
+  const action = actions.length > 0 ? actions[0] : undefined;
   const specific = payload.hookSpecificOutput;
   const permission = specific && typeof specific === "object" && typeof specific.permissionDecision === "string"
     ? specific.permissionDecision.toLowerCase()
@@ -199,7 +205,6 @@ function guardExplicitlyAllows(payload) {{
     ? specific.decision.behavior.toLowerCase()
     : undefined;
   if (decision !== undefined && decision !== "allow") return false;
-  if (action !== undefined && !["allow", "warn"].includes(action)) return false;
   if (permission !== undefined && permission !== "allow") return false;
   if (nestedDecision !== undefined && nestedDecision !== "allow") return false;
   return decision === "allow" || action === "allow" || action === "warn"
