@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from codex_plugin_scanner.guard.runtime.extension_control_contract import ControlLayerKind, ControlState
+from codex_plugin_scanner.guard.runtime.mcp_protection import build_mcp_server_identity
+
+from .local_cli_native_fixture import native_local_cli_grant_resident  # noqa: F401
 from .mcp_contribution_client import mcp_tool_state
 from .mcp_contribution_loader import validate_mcp_contribution_file
+from .mcp_extension_driver import apply_contributed_mcp_decision
+from .test_guard_mcp_server_grants import _artifact, _AuthorityStore, _layer
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CONTRIBUTION = _ROOT / "contributions/mcp-servers/mcp.countly.json"
@@ -75,3 +83,18 @@ def test_countly_similarly_named_tools_do_not_expand_review_scope() -> None:
         "other_apps_delete",
     ):
         assert mcp_tool_state(contribution, name) == "inherit"
+
+@pytest.mark.parametrize("tool_name", sorted(_REVIEW_TOOLS))
+def test_countly_each_application_write_requires_native_review_when_enabled(tool_name: str) -> None:
+    """Pin all four Countly mutations against the native resident, not just the Python manifest."""
+    identity = build_mcp_server_identity(
+        config_path="", command="npx", args=("-y", "countly-mcp-server"), transport="stdio"
+    )
+    artifact = _artifact(identity, tool_name)
+    assert apply_contributed_mcp_decision(_AuthorityStore(), artifact, "allow") is None
+    enabled = _AuthorityStore(
+        (_layer(ControlLayerKind.LOCAL_ADMIN, "command.mcp-countly", ControlState.ENABLED),)
+    )
+    decision = apply_contributed_mcp_decision(enabled, artifact, "allow")
+    assert decision is not None
+    assert decision[:2] == ("review", "catalog-mcp-extension")
