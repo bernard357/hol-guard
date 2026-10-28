@@ -56,7 +56,7 @@ fn sandboxed_edge(containment_route: &str) -> Vec<u8> {
             "reason_code": "native_workspace_containment_required",
             "reason": "protected",
             "command_extensions": {
-                "binding": {"uncertainty_count": 0},
+                "binding": {"uncertainty_count": 0, "observations_digest": "0".repeat(64)},
                 "evaluation_error": null,
                 "observations": [],
                 "permission_observations": [{
