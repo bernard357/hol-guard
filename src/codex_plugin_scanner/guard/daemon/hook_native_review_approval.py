@@ -93,6 +93,7 @@ def pause_native_pre_tool_for_approval(
     # token. Missing evidence fails closed.
     evidence = review_evidence_parts(review_evidence)
     if evidence is None:
+        _LOGGER.warning("Native review for %s arrived without the edge's review evidence", harness)
         return _policy_binding_failed(harness, native_result, guard_home)
     valid, identity, exact_token, once_only_reason = evidence
     if not valid:
