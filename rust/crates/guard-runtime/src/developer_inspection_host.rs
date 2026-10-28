@@ -1,5 +1,5 @@
 //! Resident filesystem and sensitivity services for the fused shell kernels.
-use crate::codex_tool_output_op::ResidentInspectionHost;
+use crate::resident_inspection_host::ResidentInspectionHost;
 use guard_command::{GitCheck, GitProbe, GitRun, InspectionHost};
 use guard_contracts::CompoundGitSegmentV1;
 use serde_json::json;

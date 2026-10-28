@@ -1,38 +1,13 @@
-//! `CodexToolOutput` — wire contract for the resident op that reviews Codex
-//! tool-output commands: read-only source inspection, secret-like source
-//! names, git pathspec identities, local-content reads and focused pytest.
+//! Codex tool-output command scopes and the caller facts the resident's
+//! inspection host reads.
 //!
-//! Python sends the command text and observed facts (process working
+//! `CodexToolOutputFactsV1` carries the observed caller state (process working
 //! directory, home, account home, groups, a bounded environment snapshot and
-//! the `git` executable it resolved); Rust owns every verdict. Python must send
-//! every field explicitly (nulls included) so the request digest it binds
-//! matches the resident's.
+//! the `git` executable) that every resident command review answers git and
+//! environment questions from.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-/// Schema discriminator for the request.
-pub const CODEX_TOOL_OUTPUT_REQUEST_SCHEMA: &str = "guard-codex-tool-output-request.v1";
-/// Schema discriminator for the result.
-pub const CODEX_TOOL_OUTPUT_RESULT_SCHEMA: &str = "guard-codex-tool-output-result.v1";
-/// Capability advertised by the runtime when this operation is available.
-pub const CODEX_TOOL_OUTPUT_FEATURE: &str = "codex-tool-output-v1";
-/// Capability advertised when the post-tool reviews derive their command texts
-/// from the payload: `post_tool_read_only_payload`, and a `post_tool_output`
-/// body without `command_texts`.
-pub const CODEX_POST_TOOL_COMMANDS_FEATURE: &str = "codex-post-tool-commands-v1";
-/// Largest request the op accepts.
-pub const CODEX_TOOL_OUTPUT_MAX_BYTES: usize = 256 * 1024;
-/// Canonical request bound for a post-tool output review, which carries the
-/// collected tool response.
-///
-/// Held under [`MAX_NATIVE_REQUEST_BYTES`](crate::MAX_NATIVE_REQUEST_BYTES),
-/// which the transport enforces on the frame before this op ever sees it. The
-/// bound counts this request's canonical serialization and the limit counts
-/// the sender's own, so a bound equal to the limit leaves no room for the two
-/// to differ: a review at the edge would be refused as a malformed frame
-/// instead of being told its own size is why.
-pub const CODEX_POST_TOOL_OUTPUT_MAX_BYTES: usize = 6 * 1024 * 1024 - 64 * 1024;
 
 /// One command reviewed with a working directory and an optional home.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -128,31 +103,4 @@ pub struct CodexToolOutputFactsV1 {
     pub environment: BTreeMap<String, String>,
     /// `shutil.which("git")` of the caller.
     pub git_executable: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct CodexToolOutputRequestV1 {
-    pub schema: String,
-    #[serde(default)]
-    pub request_id: String,
-    pub action: CodexToolOutputActionV1,
-    pub facts: CodexToolOutputFactsV1,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct CodexToolOutputResultV1 {
-    pub schema: String,
-    pub request_id: String,
-    /// SHA-256 of the canonical request, binding the result to its request.
-    pub request_sha256: String,
-    /// `ok` or `error`.
-    pub status: String,
-    /// `ok`, or a `native_codex_tool_output_*` failure code.
-    pub code: String,
-    /// The verdict. Always false when `status` is `error`.
-    pub allowed: bool,
-    /// The identity string for `git_pathspec_identity`, when one exists.
-    pub value: Option<String>,
 }

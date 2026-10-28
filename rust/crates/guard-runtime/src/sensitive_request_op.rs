@@ -18,9 +18,9 @@ use guard_contracts::{
 };
 use serde_json::{json, Value};
 
-use crate::codex_tool_output_op::ResidentInspectionHost;
 use crate::direct_tool_context_op::{admit, Authority};
 use crate::request_context_op::Budget;
+use crate::resident_inspection_host::ResidentInspectionHost;
 
 const INVALID: &str = "native_sensitive_request_input_invalid";
 const MAX_INPUT_BYTES: usize = 6 * 1024 * 1024;
