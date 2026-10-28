@@ -66,6 +66,17 @@
     },
     {
       "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
+      "func": "BOUNDED_HOOK_NATIVE_TEMPLATE:_agreeing_native_response",
+      "root": "hook",
+      "reading": "fails-closed",
+      "actions": [
+        "block",
+        "review"
+      ],
+      "note": "Reconciles the decision fields the resident already put in its own response with the canonical action beside them, so a harness that reads the envelope and one that reads the exit code answer alike. It only ever tightens: a deny or block field lowers an allowing action to block, an ask field lowers it to review, and an unplaceable decision word reads as deny. It composes no permission, and the native bridge that answers for this client reconciles the same two fields the same way."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
       "func": "BOUNDED_HOOK_NATIVE_TEMPLATE:_failure_payload",
       "root": "hook",
       "reading": "acknowledges-observation",
