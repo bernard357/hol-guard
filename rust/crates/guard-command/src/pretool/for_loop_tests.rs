@@ -41,6 +41,11 @@ fn read_only_loops_match_their_unrolled_form() {
             "echo src/*.ts; echo tests/*.ts",
         ),
         ("for d in src/*/; do echo $d; done", "echo src/*/"),
+        // A pattern with no directory in it names the directory the loop
+        // runs in, which is the directory the written-out command names.
+        ("for f in *.ts; do echo $f; done", "echo *.ts"),
+        ("for f in build*; do echo $f; done", "echo build*"),
+        ("for d in */; do echo $d; done", "echo */"),
         // The body talks about the name without binding it, so the loop
         // variable still holds the header word.
         (
@@ -104,9 +109,11 @@ fn unsafe_loop_bodies_keep_their_unrolled_verdict() {
 fn unsupported_loops_fall_back_to_review() {
     for command in [
         "for f in $(ls); do echo $f; done",
-        "for f in *.ts; do echo $f; done",
+        // A bracket expression is a character set the text does not spell
+        // out, and the rest start at the root or reach above the directory
+        // the loop runs in.
         "for f in [ab]*.ts; do echo $f; done",
-        "for f in build*; do echo $f; done",
+        "for f in -*.ts; do echo $f; done",
         "for f in ../*.ts; do echo $f; done",
         "for f in /etc/*.conf; do echo $f; done",
         "for f in src/../../*.ts; do echo $f; done",

@@ -140,28 +140,35 @@ fn safe_value(value: &str) -> bool {
         })
 }
 
-/// A glob pattern that names paths under a directory the pattern itself spells
-/// out, such as `src/*.ts` or `packages/*/`.
+/// A glob pattern the shell expands against the directory the loop runs in,
+/// such as `*.ts`, `src/*.ts` or `packages/*/`.
 ///
-/// Every name such a pattern matches begins with that directory, so unrolling
-/// the loop over the pattern puts the same directory in front of the ordinary
-/// path proofs as the names it expands into, and a pattern that matches
-/// nothing is the word the shell passes on. A pattern with no directory in it
-/// is a bare word that need not be a path at all — `for id in PRRT_example*`
-/// walks identifiers the shell never expands — so it keeps its review. So does
-/// a pattern that starts with a metacharacter: it can match a name beginning
-/// with `-`, which the body's program reads as an option rather than as a path.
+/// Unrolling the loop over the pattern hands the body the same word the shell
+/// expands there, so the ordinary proofs decide the matches exactly as they
+/// decide them in the command the unrolled text spells out, and a pattern that
+/// matches nothing is the word the shell passes on. That parity is the point:
+/// `wc -l *.ts` and a loop that runs `wc -l` over `*.ts` are the same work, so
+/// the loop must not keep a review the written-out command does not get.
+///
+/// A pattern that starts at the root or reaches above the working directory
+/// names matches outside the directory the loop runs in, so it keeps its
+/// review. So does one that opens with `-`, which the body's program reads as
+/// an option when the pattern matches nothing and the shell passes the word
+/// on, and one that opens with `[`, whose bracket expression is a character
+/// set the text itself does not spell out.
 ///
 /// The body reads the loop variable unquoted, so each name the pattern matches
-/// has to be a single field once the shell splits it. The proof that expands
-/// the pattern owns that rule: `read_globs` admits a match only when its name
-/// holds no whitespace.
+/// has to be a single field once the shell splits it. The proofs that expand
+/// the pattern own that rule: `read_globs` admits a match only when its name
+/// holds no whitespace, and refuses a match of a directoryless pattern that
+/// begins with `-` or holds the `name=value` an operand would read as an
+/// assignment rather than as a file.
 fn pattern_value(value: &str) -> bool {
     value.len() <= MAX_WORD_BYTES
         && value.contains(['*', '?', '['])
-        && value.contains('/')
-        && value.starts_with(|c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.'))
-        // `..` reaches above that directory, so the matches would sit outside it.
+        && !value.starts_with(['/', '-', '['])
+        // `..` reaches above the working directory, so the matches would sit
+        // outside it.
         && !value.split('/').any(|segment| segment == "..")
         && value.chars().all(|c| {
             c.is_ascii_alphanumeric()
