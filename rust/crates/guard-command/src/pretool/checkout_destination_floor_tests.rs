@@ -112,6 +112,9 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         "git worktree add HOME/agents-link/wt origin/main",
         "git worktree add ab:c/wt origin/main",
         "git clone --separate-git-dir=ab:c/x https://github.com/example-org/x.git x",
+        // A separate option value is never taken for the repository.
+        "git clone --separate-git-dir ab:c/x https://github.com/example-org/x.git x",
+        "git clone --separate ab:c/x https://github.com/example-org/x.git x",
         // With no directory given, Git names the checkout after the repository.
         "git clone https://github.com/example-org/.claude.git",
         "git clone git@github.com:example-org/.codex",
@@ -166,6 +169,10 @@ fn ordinary_checkouts_are_not_a_floor() {
         "git init ../fresh",
         "git submodule add https://github.com/example-org/x.git vendor/x",
         "git clone -- https://github.com/example-org/x.git ../x",
+        "git clone --depth 1 https://github.com/example-org/x.git ../x",
+        "git clone -qb main https://github.com/example-org/x.git ../x",
+        "git clone --bare https://github.com/example-org/x.git ../x.git",
+        "git submodule add -b main https://github.com/example-org/x.git vendor/x",
         // Not a checkout: the floor never looks.
         "git worktree list",
         "git worktree remove ../hgp-a",

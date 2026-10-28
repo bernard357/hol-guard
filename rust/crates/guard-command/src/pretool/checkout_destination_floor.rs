@@ -13,6 +13,9 @@ use std::path::{Component, Path, PathBuf};
 
 use super::super::PathContext;
 
+#[path = "checkout_destination_options.rs"]
+mod options;
+
 /// Git subcommands that create a checkout or repository at a path.
 const CHECKOUT_SUBCOMMANDS: &[&str] = &["clone", "init", "submodule", "worktree"];
 /// `git worktree` actions that create or relocate a checkout.
@@ -205,15 +208,23 @@ fn step_words(
     // After `--` every word is an operand, even one that starts with `-`.
     let mut operands = Vec::new();
     let mut terminated = false;
+    let mut value_pending = false;
     for argument in arguments.iter().skip(index + 1) {
+        if value_pending {
+            // An option's separate value is screened, never an operand.
+            value_pending = false;
+            words.push(argument.clone());
+            continue;
+        }
         if !terminated && argument == "--" {
             terminated = true;
             continue;
         }
         if !terminated {
             if let Some(rest) = argument.strip_prefix('-') {
-                if let Some((_, value)) = rest.split_once('=') {
-                    words.push(value.to_owned());
+                match rest.split_once('=') {
+                    Some((_, value)) => words.push(value.to_owned()),
+                    None => value_pending = options::takes_separate_value(argument),
                 }
                 continue;
             }
