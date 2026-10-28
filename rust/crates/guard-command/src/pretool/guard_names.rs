@@ -187,7 +187,7 @@ fn guard_program(component: &str) -> bool {
 /// A path that resolves against the current directory.
 fn relative(lowered: &str) -> bool {
     !lowered.starts_with(['/', '~', '$'])
-        && !lowered.as_bytes().get(1).is_some_and(|byte| *byte == b':')
+        && lowered.as_bytes().get(1).is_none_or(|byte| *byte != b':')
 }
 
 /// Whether text names Guard's state directory or the variable that moves it.
