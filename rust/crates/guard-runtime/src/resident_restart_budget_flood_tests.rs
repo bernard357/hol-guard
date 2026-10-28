@@ -10,21 +10,22 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-/// Bring the open circuit's deadline into the past without moving the window,
-/// which is what waiting for the backoff does to a real caller. The window is
-/// left alone so the ladder is measured on its own rather than being reset
-/// partway through by a minute going by.
-fn elapse_circuit(scope: &Path) {
-    let private_root = crate::resident_state::private_root_for_scope(scope).unwrap();
-    let mut budget: RestartBudget =
-        serde_json::from_slice(&std::fs::read(scope.join("restart-budget.json")).unwrap()).unwrap();
-    budget.circuit_until_ms = now_ms().unwrap().saturating_sub(1);
-    write_private(
-        &scope.join("restart-budget.json"),
-        &serde_json::to_vec(&budget).unwrap(),
-        &private_root,
-    )
-    .unwrap();
+/// What a perfectly patient caller can take out of one window: the free
+/// restarts, plus one resident for every backoff step that still elapses
+/// inside the window. Past that the window rolls over and the count starts
+/// again, so the bound a crash loop runs into is this rate, not a total.
+fn grants_per_window() -> u64 {
+    let mut elapsed = 0u64;
+    let mut grants = u64::from(MAX_RESTARTS_PER_WINDOW);
+    let mut step = 0u32;
+    loop {
+        elapsed = elapsed.saturating_add(backoff_ms(step));
+        if elapsed >= RESTART_WINDOW_MS {
+            return grants;
+        }
+        grants += 1;
+        step += 1;
+    }
 }
 
 fn budget_of(scope: &Path) -> RestartBudget {
@@ -63,38 +64,45 @@ fn sixty_four_failures_in_a_row_start_three_residents() {
 }
 
 #[test]
-fn a_loop_patient_enough_to_wait_out_every_backoff_still_pays_for_each_resident() {
+fn a_loop_patient_enough_to_wait_out_every_backoff_is_held_to_a_rate() {
     let scope = flood_scope("patient");
 
+    // A caller that waits exactly as long as each refusal tells it to, and
+    // crashes again the moment it is served. Its clock is simulated so the
+    // minutes pass here the way they pass for it, window rollovers included.
+    let start = now_ms().unwrap();
+    let mut clock = start;
     let mut granted = 0usize;
-    let mut waited_ms = 0u64;
     for _ in 0..64 {
-        match consume(&scope) {
+        match consume_simulated(&scope, clock) {
             Ok(()) => granted += 1,
             Err(error) => {
                 assert_eq!(error, "native_resident_restart_circuit_open");
                 // The refusal names the moment the next spawn becomes
-                // possible. A caller cannot reach it any sooner than by
-                // waiting, so the step it just set is time this loop owes.
-                waited_ms = waited_ms.saturating_add(backoff_ms(
-                    budget_of(&scope).backoff_steps.saturating_sub(1),
-                ));
-                elapse_circuit(&scope);
+                // possible, and nothing the caller does brings it closer.
+                let next_spawn_ms = budget_of(&scope).circuit_until_ms;
+                assert!(next_spawn_ms > clock, "a refusal must name a later moment");
+                clock = next_spawn_ms;
             }
         }
     }
 
-    // Past the free restarts every resident costs one elapsed backoff, so the
-    // loop alternates and the sixty-four failures cannot all be served.
+    let elapsed_ms = clock - start;
+    // What holds a crash loop back is a rate, not a ceiling it hits once: the
+    // window does keep rolling over while the caller waits, and each one hands
+    // out the free restarts again. Sixty-four failures still cannot be served
+    // as sixty-four processes, and the ones that are served arrive over
+    // minutes instead of all at once.
     assert!(granted < 64, "granted {granted} residents for 64 failures");
-    // Those residents are spread over hours of enforced waiting rather than
-    // arriving at once, which is the property that keeps a crash loop from
-    // behaving like a fork bomb.
+    let windows = elapsed_ms / RESTART_WINDOW_MS + 1;
     assert!(
-        waited_ms >= 10 * 60_000,
-        "64 failures demanded only {waited_ms}ms of waiting"
+        granted as u64 <= windows * grants_per_window(),
+        "{granted} residents inside {windows} window(s) of {elapsed_ms}ms"
     );
-    assert_eq!(budget_of(&scope).backoff_steps as usize, 64 - granted);
+    assert!(
+        elapsed_ms >= 4 * RESTART_WINDOW_MS,
+        "64 failures demanded only {elapsed_ms}ms of waiting"
+    );
 
     std::fs::remove_dir_all(scope).unwrap();
 }
