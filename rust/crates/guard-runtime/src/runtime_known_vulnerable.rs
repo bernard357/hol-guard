@@ -388,8 +388,12 @@ pub(crate) fn raise(
     if minimum == floor {
         // The same floor raised for another reason keeps its decision; a
         // review held by this finding carries its code, with the earlier
-        // reason kept in the text so the prompt still shows it.
-        if floor >= ActionFloor::Review {
+        // reason kept in the text so the prompt still shows it. In watch
+        // mode a warning that stands in for a stronger configured action
+        // records that action over a plain warning the same way.
+        if floor >= ActionFloor::Review
+            || (reason_code == OBSERVED && configured > ActionFloor::Warn)
+        {
             result.explicitly_benign = false;
             result.reason_code = reason_code.into();
             result.reason = if result.reason.trim().is_empty() {
