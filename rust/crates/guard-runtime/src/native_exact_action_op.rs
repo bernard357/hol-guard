@@ -59,6 +59,7 @@ mod git_push;
 #[cfg(windows)]
 #[allow(dead_code)]
 mod git_windows;
+mod hook_review;
 mod launch;
 mod launch_evidence;
 pub(crate) use launch::is_safe_single_invocation;
@@ -88,7 +89,8 @@ use std::time::{Duration, Instant};
 
 use guard_contracts::{
     NativeExactActionPayloadV1, NativeExactActionQueryV1, NativeExactActionRequestV1,
-    NativeExactActionResultV1, NATIVE_EXACT_ACTION_MAX_BUDGET_MS, NATIVE_EXACT_ACTION_MAX_BYTES,
+    NativeExactActionResultV1, NATIVE_EXACT_ACTION_HOOK_REVIEW_MAX_BYTES,
+    NATIVE_EXACT_ACTION_MAX_BUDGET_MS, NATIVE_EXACT_ACTION_MAX_BYTES,
     NATIVE_EXACT_ACTION_REQUEST_SCHEMA, NATIVE_EXACT_ACTION_RESULT_SCHEMA,
 };
 
@@ -106,7 +108,13 @@ fn evaluate_with(
     request: &NativeExactActionRequestV1,
     engines: &dyn Engines,
 ) -> Result<Vec<u8>, String> {
-    let request_sha256 = request_digest_with_limit(request, NATIVE_EXACT_ACTION_MAX_BYTES)
+    // A hook review carries the whole hook payload; every other query is a
+    // few derived fields.
+    let limit = match request.query {
+        NativeExactActionQueryV1::HookReview { .. } => NATIVE_EXACT_ACTION_HOOK_REVIEW_MAX_BYTES,
+        _ => NATIVE_EXACT_ACTION_MAX_BYTES,
+    };
+    let request_sha256 = request_digest_with_limit(request, limit)
         .map_err(|_| "native_exact_action_too_large".to_owned())?;
     let (status, code, payload) = match decide(request, engines) {
         Ok(payload) => ("ok", "ok", Some(payload)),
@@ -298,9 +306,37 @@ fn decide_query(
                 once_only_reason,
             }
         }
-        NativeExactActionQueryV1::LaunchEvidence { action } => {
-            launch_evidence::observe(action, engines)?
+        NativeExactActionQueryV1::HookReview { .. } => {
+            let review = hook_review::derive(query)?;
+            let NativeExactActionPayloadV1::ReviewEvidence {
+                binding,
+                token,
+                once_only_reason,
+            } = decide_query(
+                &NativeExactActionQueryV1::ReviewEvidence {
+                    binding: Box::new(review.binding),
+                    action: Box::new(review.action),
+                },
+                engines,
+                fallback,
+            )?
+            else {
+                return Err("native_exact_action_query_invalid");
+            };
+            NativeExactActionPayloadV1::HookReview {
+                policy_binding_valid: review.policy_binding_valid,
+                binding,
+                token,
+                once_only_reason,
+            }
         }
+        NativeExactActionQueryV1::LaunchEvidence { action } => match &**action {
+            // A hook review is observed through the exact action it derives.
+            NativeExactActionQueryV1::HookReview { .. } => {
+                launch_evidence::observe(&hook_review::derive(action)?.action, engines)?
+            }
+            _ => launch_evidence::observe(action, engines)?,
+        },
         NativeExactActionQueryV1::BashSubject { capture } => match bash_capture::inspect(capture) {
             Ok(subject) => NativeExactActionPayloadV1::BashSubject {
                 subject: Some(Box::new(subject)),

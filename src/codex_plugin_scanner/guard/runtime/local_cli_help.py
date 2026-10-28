@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -186,6 +188,9 @@ def _read_help_output(argv: list[str], tmp: str) -> str:
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
         text=True,
+        # Its own process group, so a timeout also stops whatever the
+        # program started.
+        start_new_session=os.name != "nt",
     )
     chunks: list[str] = []
     captured = 0
@@ -201,17 +206,40 @@ def _read_help_output(argv: list[str], tmp: str) -> str:
                 return
             chunks.append(piece)
             captured += len(piece)
-        process.kill()
+        _stop_probe(process)
 
     reader = threading.Thread(target=_drain, daemon=True)
     reader.start()
     reader.join(_HELP_TIMEOUT_SECONDS)
-    if reader.is_alive() or process.poll() is None:
-        process.kill()
-        reader.join(1)
-        if process.poll() is None:
-            process.wait(timeout=1)
+    try:
+        if reader.is_alive() or process.poll() is None:
+            _stop_probe(process)
+            reader.join(1)
+            if process.poll() is None:
+                process.wait(timeout=1)
+    finally:
+        # A child that let go of the output can outlive a program that exited
+        # on its own; nothing a help run started keeps running after it.
+        _stop_group(process)
     return "".join(chunks)[:_HELP_OUTPUT_LIMIT]
+
+
+def _stop_probe(process: subprocess.Popen[str]) -> None:
+    """Kill a help probe and, off Windows, every process in its group.
+
+    A program that ignores --help can start children that keep its output
+    open or keep working after it exits; killing only the direct child would
+    leave them running.
+    """
+
+    _stop_group(process)
+    process.kill()
+
+
+def _stop_group(process: subprocess.Popen[str]) -> None:
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def _with_nested_commands(

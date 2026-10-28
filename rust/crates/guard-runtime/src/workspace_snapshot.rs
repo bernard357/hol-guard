@@ -29,6 +29,8 @@ use crate::workspace_snapshot_git::{git_identity, GitIdentity};
 
 #[path = "workspace_snapshot_editor_tasks.rs"]
 mod editor_tasks;
+#[path = "workspace_snapshot_export_preview.rs"]
+pub(crate) mod export_preview;
 #[path = "workspace_snapshot_hooks.rs"]
 mod hooks;
 #[path = "workspace_snapshot_instructions.rs"]
@@ -479,6 +481,9 @@ fn snapshot_digest(
 #[cfg(test)]
 #[path = "workspace_snapshot_editor_tasks_tests.rs"]
 mod editor_tasks_tests;
+#[cfg(test)]
+#[path = "workspace_snapshot_export_preview_tests.rs"]
+mod export_preview_tests;
 #[cfg(test)]
 #[path = "workspace_snapshot_hooks_tests.rs"]
 mod hooks_tests;

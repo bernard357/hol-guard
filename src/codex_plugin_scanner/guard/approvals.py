@@ -23,14 +23,12 @@ from .adapters import get_adapter
 from .adapters.base import HarnessContext
 from .approval_gate import ApprovalGateGrant, ApprovalGateInput, require_approval_decision
 from .approval_once_eligibility import requires_local_once_approval
-from .approval_persist_select_support import resolve_request_persistence_selection
 from .approval_resolution import require_resolvable_approval_request
+from .approval_scope_selection import resolve_request_scope_selection
 from .approval_scope_support import (
     RETRY_CANNOT_REUSE_APPROVAL,
     apply_scope_surfaces,
     package_request_portable_workspace_scope,
-    request_scope_observation,
-    resolve_request_scope_selection,
     resolve_request_workspace_scope,
     scope_payload_for_request,
 )
@@ -498,34 +496,27 @@ def apply_approval_resolution(
             harness=str(request["harness"]),
             reason=reason,
         )
-    contract, exact_token = (
-        request_scope_observation(request, guard_home=store.guard_home)
-        if request.get("artifact_type") == "native_bash_request"
-        else request_scope_observation(request)
-    )
+    # One resident ask settles the whole resolution: the scope the choice
+    # resolves to, whether it may be remembered against the request's exact
+    # action, and whether an allow has any binding left to run under. The
+    # contract and exact-action token it resolved against ride back with it.
     selection = resolve_request_scope_selection(
         request,
         action=action,
         requested_scope=scope,
         contract_version=scope_contract_version,
         contract_digest=scope_contract_digest,
+        persist_policy=persist_policy,
+        ask_persistence=True,
         guard_home=store.guard_home,
     )
+    if selection.contract is None:
+        raise ApprovalScopeUnavailableError
+    contract = selection.contract
+    exact_token = selection.exact_token
     requested_scope = selection.requested_scope
     scope = selection.applied_scope
-    # The resident owns both eligibility gates: whether this resolution may be
-    # remembered against the request's exact action, and whether an allow has
-    # any binding left to run under.
-    persist_policy = resolve_request_persistence_selection(
-        request,
-        action=action,
-        applied_scope=scope,
-        persist_policy=persist_policy,
-        scope_narrowed=selection.warning is not None,
-        contract_version=scope_contract_version,
-        contract_digest=scope_contract_digest,
-        guard_home=store.guard_home,
-    )
+    persist_policy = selection.persist_policy
     request_artifact_id = _string_or_none(request.get("artifact_id"))
     request_artifact_hash = _string_or_none(request.get("artifact_hash"))
     resolved_workspace = resolve_request_workspace_scope(request, workspace) if scope == "workspace" else None
