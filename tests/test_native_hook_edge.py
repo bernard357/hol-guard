@@ -7,17 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.codex_hook_launch_runtime import BoundedHookProcessResult
 from codex_plugin_scanner.guard.daemon.hook_request_parsing import runtime_hook_event_name
 from codex_plugin_scanner.guard.hook_execution_environment import (
     LIBRARY_SEARCH_PATH_NAMES,
     collect_hook_execution_environment,
 )
 from codex_plugin_scanner.guard.native_hook_edge import _decode_edge, review_raw_hook_native
-from codex_plugin_scanner.guard.native_resident_client import (
-    native_resident_client_failure_code,
-    native_resident_client_request,
-)
 from codex_plugin_scanner.guard.native_route_receipt import native_hook_route
 from codex_plugin_scanner.guard.native_runtime import (
     NativeRuntimeCapabilities,
@@ -198,72 +193,6 @@ def test_edge_decoder_keeps_a_repair_link() -> None:
     assert isinstance(result, dict)
     result.update(repair_url="http://127.0.0.1:1/repair", repair_status="approval_required")
     assert _decode_edge(edge) == edge
-
-
-def test_python_launcher_only_invokes_package_bound_native_client(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executable = tmp_path / "hol-guard-runtime"
-    executable.write_bytes(b"runtime")
-    captured: dict[str, object] = {}
-
-    def fake_run(command: tuple[str, ...], **kwargs: object) -> BoundedHookProcessResult:
-        captured.update(command=tuple(command), **kwargs)
-        return BoundedHookProcessResult(0, '{"ok":true}\n', False, False)
-
-    monkeypatch.setattr(
-        "codex_plugin_scanner.guard.native_resident_client.run_isolated_hook_process",
-        fake_run,
-    )
-    result = native_resident_client_request(
-        executable=executable,
-        guard_home=tmp_path / "guard-home",
-        environment={"HOME": str(tmp_path)},
-        payload=b"{}",
-        timeout_seconds=0.5,
-        raw_hook_envelope=True,
-    )
-    assert result == b'{"ok":true}\n'
-    assert captured["command"] == (
-        str(executable),
-        "hook-client",
-        "--stdin",
-        str(tmp_path / "guard-home" / "native-runtime"),
-    )
-    assert captured["input_text"] == "{}"
-    assert captured["timeout_seconds"] == 0.5
-    assert captured["output_limit"] == 2 * 1024 * 1024
-    assert captured["windows_kill_on_job_close"] is False
-    assert native_resident_client_failure_code() is None
-
-
-def test_native_client_forwards_absolute_deadline_without_relative_floor(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_run(command: tuple[str, ...], **kwargs: object) -> BoundedHookProcessResult:
-        captured.update(command=tuple(command), **kwargs)
-        return BoundedHookProcessResult(0, '{"ok":true}\n', False, False)
-
-    monkeypatch.setattr(
-        "codex_plugin_scanner.guard.native_resident_client.run_isolated_hook_process",
-        fake_run,
-    )
-    deadline = time.monotonic() + 0.001
-    result = native_resident_client_request(
-        executable=tmp_path / "runtime",
-        guard_home=tmp_path / "guard-home",
-        environment={},
-        payload=b"{}",
-        deadline_monotonic=deadline,
-    )
-
-    assert result == b'{"ok":true}\n'
-    assert captured["deadline_monotonic"] == deadline
-    assert captured["timeout_seconds"] is None
 
 
 @pytest.mark.parametrize("event", ["PreToolUse", "PostToolUse", "Stop"])
