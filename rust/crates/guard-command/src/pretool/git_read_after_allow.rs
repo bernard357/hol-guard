@@ -69,17 +69,6 @@ const TREE_PRESERVING_STEPS: &[&str] = &["add", "branch", "commit", "fetch", "pu
 /// program to it; `add` and `move` write where an absolute include may point.
 const TREE_PRESERVING_WORKTREE_ACTIONS: &[&str] = &["list", "lock", "prune", "remove", "unlock"];
 
-/// Global options that take the next argument as their value.
-const GLOBAL_VALUE_OPTIONS: &[&str] = &[
-    "-C",
-    "-c",
-    "--config-env",
-    "--git-dir",
-    "--namespace",
-    "--super-prefix",
-    "--work-tree",
-];
-
 /// The Git ref reads and Docker listings in `model` that the steps before
 /// them leave covered.
 ///
@@ -204,18 +193,12 @@ fn read_directory(model: &CanonicalCommandV1, context: PathContext<'_>) -> Optio
 }
 
 /// Whether a Git step, wherever its global options route it, rewrites no
-/// tracked file.
+/// tracked file. A global option the shared Git parser does not know leaves
+/// the subcommand unknown, so the step does not qualify.
 fn preserves_tree(arguments: &[String]) -> bool {
-    let mut index = 0;
-    while let Some(argument) = arguments.get(index) {
-        if GLOBAL_VALUE_OPTIONS.contains(&argument.as_str()) {
-            index += 2;
-        } else if argument.starts_with('-') {
-            index += 1;
-        } else {
-            break;
-        }
-    }
+    let Some(index) = crate::command_compatibility::git_command_index(arguments) else {
+        return false;
+    };
     match arguments.get(index).map(String::as_str) {
         Some("worktree") => arguments
             .get(index + 1)
@@ -280,12 +263,37 @@ fn ref_read(
 
 #[cfg(test)]
 mod tests {
-    use super::REF_READS;
+    use super::{preserves_tree, REF_READS};
 
     #[test]
     fn working_tree_reads_are_not_ref_reads() {
         for operation in ["status", "diff", "grep", "ls-files", "blame", "check-attr"] {
             assert!(!REF_READS.contains(&operation), "{operation}");
+        }
+    }
+
+    fn words(command: &str) -> Vec<String> {
+        command.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_step_routed_by_global_options_keeps_its_own_subcommand() {
+        for command in [
+            "push",
+            "-C repo worktree remove wt",
+            "-c a.b=c branch -D pr",
+        ] {
+            assert!(preserves_tree(&words(command)), "{command}");
+        }
+        // `--attr-source` takes a value, so `push` here is that value and the
+        // step is a checkout.
+        for command in [
+            "checkout main",
+            "--attr-source push checkout main",
+            "--attr-source=push checkout main",
+            "-C repo worktree add wt",
+        ] {
+            assert!(!preserves_tree(&words(command)), "{command}");
         }
     }
 }
