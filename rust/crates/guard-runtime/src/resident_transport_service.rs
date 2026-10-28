@@ -3,6 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use zeroize::Zeroizing;
 
 use crate::resident_transport::{admit_connection, start_resident_workers};
 
@@ -172,7 +173,11 @@ fn hex_nibble(value: u8) -> Option<u8> {
 }
 
 pub(crate) fn read_resident_auth_token() -> Result<[u8; crate::AUTH_TOKEN_BYTES], String> {
-    let mut encoded = String::new();
+    // The hex line is a second plaintext copy of the resident's authentication
+    // key.  Holding it in `Zeroizing` clears it when this function returns, on
+    // the refusal paths as well as the accepting one, so a freed allocation
+    // cannot keep the key readable for the rest of the process.
+    let mut encoded = Zeroizing::new(String::new());
     io::stdin()
         .lock()
         .take((crate::AUTH_TOKEN_BYTES * 2 + 2) as u64)

@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zeroize::Zeroizing;
 
 #[path = "resident_startup_lock.rs"]
 mod resident_startup_lock;
@@ -62,7 +63,7 @@ pub(crate) use resident_state_discovery::discover_home_states;
 pub(crate) use resident_state_discovery::discover_home_states_prefer;
 pub(crate) use resident_state_discovery::discover_same_executable_states;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ResidentState {
     pub(crate) schema: String,
@@ -79,6 +80,34 @@ pub(crate) struct ResidentState {
     pub(crate) token_hex: String,
     pub(crate) created_ms: u64,
     pub(crate) state_mac: String,
+}
+
+/// The published state carries the resident's authentication token, so the
+/// derived `Debug` would put the key into any message that formats a state.
+/// This rendering keeps every field a diagnostic needs and names the token
+/// without disclosing it.
+impl std::fmt::Debug for ResidentState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ResidentState")
+            .field("schema", &self.schema)
+            .field("generation", &self.generation)
+            .field("process_id", &self.process_id)
+            .field("process_start_marker", &self.process_start_marker)
+            .field("owner_process_id", &self.owner_process_id)
+            .field(
+                "owner_process_start_marker",
+                &self.owner_process_start_marker,
+            )
+            .field("runtime_sha256", &self.runtime_sha256)
+            .field("transport", &self.transport)
+            .field("endpoint", &self.endpoint)
+            .field("unix_endpoint_identity", &self.unix_endpoint_identity)
+            .field("token_hex", &"<redacted>")
+            .field("created_ms", &self.created_ms)
+            .field("state_mac", &self.state_mac)
+            .finish()
+    }
 }
 
 fn now_ms() -> Result<u64, String> {
@@ -226,8 +255,11 @@ pub(crate) fn state_mac(state: &ResidentState, token: &[u8]) -> String {
     ))
 }
 
-pub(crate) fn token_from_state(state: &ResidentState) -> Result<Vec<u8>, String> {
-    let token = decode_hex(&state.token_hex)?;
+/// Decodes the published token for one exchange with the resident.  Every
+/// caller holds a plaintext copy of the key, so the decoded bytes are cleared
+/// when that caller drops them instead of outliving the request they served.
+pub(crate) fn token_from_state(state: &ResidentState) -> Result<Zeroizing<Vec<u8>>, String> {
+    let token = Zeroizing::new(decode_hex(&state.token_hex)?);
     if token.len() != crate::AUTH_TOKEN_BYTES {
         return Err("native_resident_state_token_invalid".to_owned());
     }
