@@ -33256,7 +33256,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "sort <<'EOF' > .tmp/sorted-ids.txt\nb-102\na-477\nEOF"
+        "command": "sort <<'EOF'\nb-102\na-477\nEOF"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -33272,7 +33272,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "jq . <<'EOF' > .tmp/parsed.json\nnull\nEOF"
+        "command": "jq . <<'EOF'\nnull\nEOF"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -33349,6 +33349,194 @@
       "tool": "shell",
       "tool_input": {
         "command": "sort <<'EOF' > ~/.zshrc\nexport EDITOR=vim\nEOF"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "redirect-here-string-jq-parse",
+      "fix_area": "redirect",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq . <<< '{\"id\":42}'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "redirect-here-string-grep-filter",
+      "fix_area": "redirect",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "grep retry <<< \"$lines\""
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "redirect-here-string-wc-count",
+      "fix_area": "redirect",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "wc -l <<< \"$output\""
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "redirect-here-string-cat-echo",
+      "fix_area": "redirect",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cat <<< 'hello'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "redirect-here-string-sort-braced",
+      "fix_area": "redirect",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sort <<< \"${items}\""
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "redirect-here-string-tee-scratch-note",
+      "fix_area": "redirect",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "tee .tmp/here-note.md <<< 'done'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-redirect-here-string-shell-runs-input",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sh <<< 'id'"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-redirect-here-string-bash-runs-script",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bash <<< \"$script\""
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-redirect-here-string-tee-home-rc",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "tee ~/.zshrc <<< 'export X=1'"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-redirect-here-string-substituted-secret",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "grep foo <<< \"$(cat ~/.ssh/id_rsa)\""
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-redirect-here-string-prompt-expansion",
+      "fix_area": "negative",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sort <<< \"${PATH@P}\""
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-redirect-here-string-xargs-runs-input",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "xargs <<< 'rm -rf ~'"
       },
       "cwd": "worktree",
       "expect": "not_allow"
