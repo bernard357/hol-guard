@@ -1214,6 +1214,7 @@ fn bare_variable_re() -> &'static Regex {
 #[derive(Default)]
 struct ApiArgs {
     endpoint: Option<String>,
+    endpoint_index: Option<usize>,
     method: Option<String>,
     fields: Vec<(String, String)>,
     headers: Vec<String>,
@@ -1249,6 +1250,7 @@ fn field_value_is_external(value: &str, allow_graphql_variables: bool) -> bool {
 /// `_parse_api_arguments` (:214-282).
 fn parse_api_arguments(args: &[String]) -> Result<ApiArgs, GitHubCommandAssessment> {
     let mut endpoint: Option<String> = None;
+    let mut endpoint_index: Option<usize> = None;
     let mut method: Option<String> = None;
     let mut fields: Vec<(String, String)> = Vec::new();
     let mut headers: Vec<String> = Vec::new();
@@ -1263,6 +1265,7 @@ fn parse_api_arguments(args: &[String]) -> Result<ApiArgs, GitHubCommandAssessme
                 return Err(api_parse_failure());
             }
             endpoint = Some(args[index].clone());
+            endpoint_index = Some(index);
             index += 1;
             if index != args.len() {
                 return Err(api_parse_failure());
@@ -1333,6 +1336,7 @@ fn parse_api_arguments(args: &[String]) -> Result<ApiArgs, GitHubCommandAssessme
             return Err(api_parse_failure());
         }
         endpoint = Some(token.clone());
+        endpoint_index = Some(index);
         index += 1;
     }
     if endpoint.is_none() {
@@ -1340,6 +1344,7 @@ fn parse_api_arguments(args: &[String]) -> Result<ApiArgs, GitHubCommandAssessme
     }
     Ok(ApiArgs {
         endpoint,
+        endpoint_index,
         method,
         fields,
         headers,
@@ -1518,6 +1523,12 @@ fn mutation_reason(capabilities: &[Cap]) -> String {
             .replace("_remote", "")
             .replace('_', "-")
     )
+}
+
+/// The position of the endpoint operand in `gh api` arguments (those after
+/// `api`), or `None` when the arguments cannot be parsed statically.
+pub(crate) fn api_endpoint_index(args: &[String]) -> Option<usize> {
+    parse_api_arguments(args).ok()?.endpoint_index
 }
 
 /// `classify_github_api` (:60-121).

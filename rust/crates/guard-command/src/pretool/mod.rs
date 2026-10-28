@@ -305,8 +305,11 @@ pub(crate) fn fixed_command_floor(model: &CanonicalCommandV1) -> bool {
 /// The repository `gh` selects with `--repo` or `-R` is not such an argument:
 /// `owner/name` names a repository on the GitHub host, never a local file,
 /// program or process, so a repository called `hol-guard` keeps the Allow.
+/// The same holds for the owner and name in a `gh api repos/{owner}/{name}/...`
+/// endpoint; the rest of that path is still checked.
 fn names_guard_outside_message(segment: &crate::CommandSegmentV1) -> bool {
     let selectors = github_repository_values(segment);
+    let endpoint = github_api_endpoint(segment);
     arguments_outside_message(segment).any(|argument| {
         if selectors
             .iter()
@@ -314,11 +317,54 @@ fn names_guard_outside_message(segment: &crate::CommandSegmentV1) -> bool {
         {
             return false;
         }
-        let lowered = argument.to_ascii_lowercase();
-        ["hol-guard", "plugin-guard", ".hol-guard"]
-            .iter()
-            .any(|needle| lowered.contains(needle))
+        if endpoint.is_some_and(|endpoint| std::ptr::eq(endpoint, argument)) {
+            return names_guard(github_api_path_after_repository(argument).unwrap_or(argument));
+        }
+        names_guard(argument)
     })
+}
+
+fn names_guard(argument: &str) -> bool {
+    let lowered = argument.to_ascii_lowercase();
+    ["hol-guard", "plugin-guard", ".hol-guard"]
+        .iter()
+        .any(|needle| lowered.contains(needle))
+}
+
+/// The endpoint operand of `gh api`, found by the same parser that
+/// classifies the call. An argument list it cannot parse has no endpoint.
+fn github_api_endpoint(segment: &crate::CommandSegmentV1) -> Option<&String> {
+    if crate::command_compatibility::basename(segment) != "gh" {
+        return None;
+    }
+    let (first, rest) = segment.arguments.split_first()?;
+    if first != "api" {
+        return None;
+    }
+    let index = crate::github_command_capabilities::api_endpoint_index(rest)?;
+    rest.get(index)
+}
+
+/// The part of a `repos/{owner}/{name}/...` endpoint after the repository,
+/// or `None` when the endpoint does not start with a valid `owner/name`.
+fn github_api_path_after_repository(endpoint: &str) -> Option<&str> {
+    let path = endpoint.strip_prefix('/').unwrap_or(endpoint);
+    let path = path.strip_prefix("repos/")?;
+    let mut parts = path.splitn(3, '/');
+    let owner = parts.next()?;
+    let name = parts.next()?;
+    let name = name.split(['?', '#']).next()?;
+    if [owner, name]
+        .iter()
+        .any(|part| part.trim_matches('.').is_empty())
+    {
+        return None;
+    }
+    let repository = format!("{owner}/{name}");
+    if !crate::command_compatibility::github_repository_selector(&repository) {
+        return None;
+    }
+    Some(&path[repository.len()..])
 }
 
 /// The `owner/name` values `gh` provably reads as its `--repo` selector.
@@ -1251,6 +1297,9 @@ mod control_flow_tests;
 #[cfg(test)]
 #[path = "for_loop_tests.rs"]
 mod for_loop_tests;
+#[cfg(test)]
+#[path = "guard_named_repository_tests.rs"]
+mod guard_named_repository_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
