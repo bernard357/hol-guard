@@ -227,8 +227,11 @@ fn step_words(
         // checkout after the repository in the step's directory. Options may
         // follow either operand, so the name Git would guess from every
         // operand is screened.
-        if let Some(position) = words.iter().position(|word| remote_word(word)) {
-            words.remove(position);
+        // Only an operand can be the repository: an option value shaped like
+        // a remote is still a path Git writes to.
+        if let Some(position) = operands.iter().position(|word| remote_word(word)) {
+            let offset = words.len() - operands.len();
+            words.remove(offset + position);
         }
         for operand in &operands {
             words.extend(guessed_directories(operand)?);

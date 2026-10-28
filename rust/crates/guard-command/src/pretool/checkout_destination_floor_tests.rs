@@ -111,6 +111,7 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         // A link is judged where it leads, whatever its name looks like.
         "git worktree add HOME/agents-link/wt origin/main",
         "git worktree add ab:c/wt origin/main",
+        "git clone --separate-git-dir=ab:c/x https://github.com/example-org/x.git x",
         // With no directory given, Git names the checkout after the repository.
         "git clone https://github.com/example-org/.claude.git",
         "git clone git@github.com:example-org/.codex",
