@@ -120,6 +120,8 @@ fn ordinary_checkouts_are_not_a_floor() {
         "git worktree add -b br ../sibling origin/main",
         "git worktree add HOME/projects/svc-p -b br-p origin/main 2>&1 | tail -3; cd HOME/projects/svc-p && git rev-parse HEAD",
         "git worktree add ROOT/scratch/contrast --detach 0123abcd",
+        // A checkout named after the project is the user's work, not Guard's files.
+        "git fetch origin main && git worktree add --detach ROOT/scratch/hol-guard-contrast 0123abcd",
         "git fetch origin main && git worktree add --detach ROOT/scratch/c2 0123abcd",
         "git worktree add ../hgp-a origin/main && cd ../hgp-a && git status --short",
         "git worktree add ~/projects/svc-q origin/main",
