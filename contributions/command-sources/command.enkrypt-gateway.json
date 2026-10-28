@@ -95,6 +95,9 @@
             "interleaved_options_with_values": [
               "--config-name",
               "--config-id"
+            ],
+            "forbidden_flags_before_delimiter": [
+              "--help"
             ]
           }
         }
