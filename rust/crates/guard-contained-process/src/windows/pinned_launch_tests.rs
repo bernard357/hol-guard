@@ -1,8 +1,12 @@
 //! A pinned command holds the reviewed executable from inspection to launch.
 //! These cases swap the file the path names after it was pinned and check
 //! that launch either runs the reviewed bytes or refuses, never the swap.
+//!
+//! The reviewed tool is a copy of `hostname.exe`, not `cmd.exe`: the launcher
+//! quotes every argument, and `cmd /c` does not read a quoted `"echo"` as its
+//! builtin.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -10,15 +14,13 @@ use std::time::{Duration, Instant};
 
 use crate::{CapturedOutput, Isolation, PinnedCommand};
 
-const REVIEWED: &str = "pinned-reviewed-output";
-
 fn system_tool(name: &str) -> PathBuf {
     PathBuf::from(std::env::var_os("SystemRoot").unwrap())
         .join("System32")
         .join(name)
 }
 
-/// A workspace whose `tools\tool.exe` is a private copy of `cmd.exe`.
+/// A workspace whose `tools\tool.exe` is a private copy of `hostname.exe`.
 fn workspace() -> (tempfile::TempDir, PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let root = PathBuf::from(
@@ -30,7 +32,7 @@ fn workspace() -> (tempfile::TempDir, PathBuf) {
             .trim_start_matches(r"\\?\"),
     );
     fs::create_dir(root.join("tools")).unwrap();
-    fs::copy(system_tool("cmd.exe"), tool(&root)).unwrap();
+    fs::copy(system_tool("hostname.exe"), tool(&root)).unwrap();
     (directory, root)
 }
 
@@ -38,9 +40,19 @@ fn tool(root: &Path) -> PathBuf {
     root.join("tools").join("tool.exe")
 }
 
-/// Another program's bytes, whose output never contains [`REVIEWED`].
+/// What the reviewed program prints, read from the system copy directly.
+fn reviewed_output() -> String {
+    let output = std::process::Command::new(system_tool("hostname.exe"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Another program's bytes. `whoami` prints `domain\user`, never the bare
+/// host name.
 fn swap_bytes() -> Vec<u8> {
-    fs::read(system_tool("hostname.exe")).unwrap()
+    fs::read(system_tool("whoami.exe")).unwrap()
 }
 
 fn environment() -> Vec<(OsString, OsString)> {
@@ -51,18 +63,7 @@ fn environment() -> Vec<(OsString, OsString)> {
 }
 
 fn pin(root: &Path) -> PinnedCommand {
-    PinnedCommand::new(
-        &tool(root),
-        &[
-            OsStr::new("/d"),
-            OsStr::new("/c"),
-            OsStr::new("echo"),
-            OsStr::new(REVIEWED),
-        ],
-        root,
-        &environment(),
-    )
-    .unwrap()
+    PinnedCommand::new(&tool(root), &[], root, &environment()).unwrap()
 }
 
 fn run(command: PinnedCommand) -> std::io::Result<CapturedOutput> {
@@ -76,7 +77,10 @@ fn run(command: PinnedCommand) -> std::io::Result<CapturedOutput> {
 }
 
 fn ran_reviewed(output: &CapturedOutput) -> bool {
-    output.exit_code == Some(0) && String::from_utf8_lossy(&output.stdout).contains(REVIEWED)
+    let reviewed = reviewed_output();
+    !reviewed.is_empty()
+        && output.exit_code == Some(0)
+        && String::from_utf8_lossy(&output.stdout).trim() == reviewed
 }
 
 #[test]
