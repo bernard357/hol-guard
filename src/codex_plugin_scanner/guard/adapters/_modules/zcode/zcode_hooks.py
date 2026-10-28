@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ....action_lattice import normalize_guard_action
+
 # Review-tier actions become ZCode's ``ask`` so the native permission prompt
 # (allow once / always / deny) can satisfy them; hard denials stay ``deny``.
 _ZCODE_ASK_ACTIONS = frozenset({"review", "require-reapproval"})
@@ -69,15 +71,20 @@ def zcode_hook_process_exit(
     therefore must exit ``0`` so ZCode parses the ``permissionDecision: "ask"``
     envelope and opens its native permission prompt; the user, not the exit
     code, decides whether the action proceeds.
+
+    An action outside the canonical lattice is normalized to the review tier
+    before either set is consulted, so an unrecognized producer value cannot
+    exit ``0`` as though ZCode had been told to allow the call.
     """
 
     resolved_event = event_name
     if resolved_event is None and payload is not None:
         resolved_event = _event_name_for_response(payload)
     compact = (resolved_event or "PreToolUse").replace("_", "").replace("-", "").lower()
-    if compact == "pretooluse" and policy_action in _ZCODE_ASK_ACTIONS:
+    normalized = normalize_guard_action(policy_action)
+    if compact == "pretooluse" and normalized in _ZCODE_ASK_ACTIONS:
         return 0
-    return 2 if policy_action in _ZCODE_BLOCKING_ACTIONS else 0
+    return 2 if normalized in _ZCODE_BLOCKING_ACTIONS else 0
 
 
 __all__ = [

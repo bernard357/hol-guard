@@ -39,6 +39,11 @@ _LOCAL_CLI_RULE_FEATURE = "edge-local-cli-rule-v1"
 # launch can take seconds. It once had its own request with this timeout;
 # the edge keeps that allowance rather than spending the review's budget.
 _LOCAL_CLI_RULE_SECONDS = 5.0
+# The edge proves a review's policy binding, retry binding and exact-action
+# token beside the custom extension rule when the rules carry the daemon's
+# extension-control digest.
+_REVIEW_EVIDENCE_FEATURE = "edge-review-evidence-v1"
+_REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "once_only_reason"})
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -63,7 +68,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         "result",
         "receipt",
     }
-    allowed = required | {"request_id", "harness_response", "containment_route", "local_cli_rule"}
+    allowed = required | {"request_id", "harness_response", "containment_route", "local_cli_rule", "review_evidence"}
     if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
         return None
     event_name = payload.get("event_name")
@@ -94,6 +99,17 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or set(rule) != {"blocked", "harness_response"}
         or not isinstance(rule["blocked"], bool)
         or not isinstance(rule["harness_response"], dict)
+    ):
+        return None
+    evidence = payload.get("review_evidence")
+    if evidence is not None and (
+        not isinstance(evidence, dict)
+        or set(evidence) != _REVIEW_EVIDENCE_KEYS
+        or not isinstance(evidence["policy_binding_valid"], bool)
+        or any(
+            evidence[key] is not None and not isinstance(evidence[key], str)
+            for key in _REVIEW_EVIDENCE_KEYS - {"policy_binding_valid"}
+        )
     ):
         return None
     return payload
@@ -221,6 +237,8 @@ def review_raw_hook_native(
             required_features.add("git-execution-context-v1")
             if local_cli_rules is not None:
                 required_features.add(_LOCAL_CLI_RULE_FEATURE)
+                if local_cli_rules.get("exact_action_control_digest") is not None:
+                    required_features.add(_REVIEW_EVIDENCE_FEATURE)
     if _LOCAL_CLI_RULE_FEATURE not in required_features:
         # Only a tool call has a custom extension rule to settle.
         local_cli_rules = None

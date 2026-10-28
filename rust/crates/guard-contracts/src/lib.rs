@@ -394,6 +394,11 @@ pub struct GuardHookLocalCliRulesV1 {
     pub user_home: String,
     /// The daemon's environment, which the launch resolves `PATH` against.
     pub env: std::collections::BTreeMap<String, String>,
+    /// The daemon's extension-control binding digest. When present, a
+    /// reviewed `PreToolUse` answer carries its review evidence
+    /// (`GuardHookEdgeResultV2::review_evidence`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_action_control_digest: Option<String>,
 }
 
 /// The custom extension rule for a reviewed `PreToolUse`: a block the
@@ -440,6 +445,11 @@ pub struct GuardHookEdgeResultV2 {
     /// its `harness_response` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_cli_rule: Option<GuardHookLocalCliRuleV1>,
+    /// The retry binding and exact-action token of a reviewed `PreToolUse`,
+    /// answered as a `HookReview` query would, when the daemon sent its
+    /// extension-control digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_evidence: Option<GuardHookReviewEvidenceV1>,
     /// Rust-owned decision evidence.  The Python edge may only transport it
     /// to a non-authoritative asynchronous consumer.
     pub receipt: NativeHookDecisionReceiptV1,

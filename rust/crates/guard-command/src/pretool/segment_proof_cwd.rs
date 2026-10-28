@@ -34,6 +34,26 @@ fn verified_read_cwd_compound_context(
     cwd_list_context(model, context, false, true)
 }
 
+/// The directory the Git reads of a `cd <dir> && ...` list run in, for the
+/// Git execution-context floor and the helper-configuration probe. Those
+/// inspect a read where it runs; they authorize no step. A `cd` that climbs
+/// out of the cwd, such as `cd ../app && git status`, counts when no later
+/// step carries an effect of its own.
+pub(in crate::pretool) fn git_read_cwd_compound_context(
+    model: &CanonicalCommandV1,
+    context: PathContext<'_>,
+) -> Option<String> {
+    verified_cwd_compound_context(model, context).or_else(|| {
+        model
+            .segments
+            .iter()
+            .skip(1)
+            .all(|segment| !cwd_effectful_segment(segment))
+            .then(|| verified_read_cwd_compound_context(model, context))
+            .flatten()
+    })
+}
+
 fn cwd_list_context(
     model: &CanonicalCommandV1,
     context: PathContext<'_>,
