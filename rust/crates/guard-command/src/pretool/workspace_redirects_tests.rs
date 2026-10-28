@@ -290,6 +290,22 @@ fn only_the_one_ampersand_that_ends_the_command_is_read_off() {
 }
 
 #[test]
+fn an_escaped_ampersand_stays_in_the_projection() {
+    // `\&` passes a literal `&` and runs in the foreground, so the projection
+    // keeps it. Reading it off would claim the shape of text the sandbox never
+    // runs, and `contained_shape` recomputes this same projection, so nothing
+    // below would catch the difference.
+    for (raw, projected) in [
+        (r"echo foo\& > out.log", r"echo foo\&"),
+        (r"npm run build > build.log \&", r"npm run build \&"),
+        // The backslashes pair off, so this one really is a background job.
+        (r"npm run build > build.log \\&", r"npm run build \\"),
+    ] {
+        assert_eq!(project(raw).as_deref(), Some(projected), "{raw}");
+    }
+}
+
+#[test]
 fn a_backgrounded_redirect_keeps_the_shape_of_its_foreground_text() {
     let workspace = fresh_workspace("background");
     assert!(contained_shape("npm run build > build.log &", "npm run build", &workspace).is_some());
