@@ -55,6 +55,8 @@ def _review(tmp_path: Path, commands: tuple[str, ...]) -> dict[str, dict[str, ob
         "git worktree move ../svc HOME/Library/LaunchAgents/wt",
         "git fetch origin main && git worktree add HOME/.claude/agents origin/main",
         "git clone https://github.com/example-org/x.git HOME/Library/LaunchAgents/x",
+        # No directory given: Git names the checkout `.claude` in the cwd.
+        "git clone https://github.com/example-org/.claude.git",
     ),
 )
 def test_checkout_permission_does_not_allow_a_protected_destination(tmp_path: Path, command: str) -> None:

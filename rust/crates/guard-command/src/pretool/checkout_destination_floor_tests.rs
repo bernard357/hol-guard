@@ -37,6 +37,8 @@ fn layout(name: &str) -> Layout {
     std::fs::write(workspace.join(".git/config"), "[core]\n\tbare = false\n").unwrap();
     std::os::unix::fs::symlink(home.join("Library/LaunchAgents"), home.join("agents-link"))
         .unwrap();
+    // A link whose name is shaped like an SCP remote.
+    std::os::unix::fs::symlink(home.join("Library/LaunchAgents"), workspace.join("ab:c")).unwrap();
     let canonical = |path: PathBuf| path.canonicalize().unwrap().to_str().unwrap().to_owned();
     Layout {
         home: canonical(home),
@@ -56,12 +58,17 @@ fn model(command: &str) -> crate::CanonicalCommandV1 {
 }
 
 fn protected_in(layout: &Layout, cwd: &str, command: &str) -> bool {
+    protected_with(layout, cwd, command, false)
+}
+
+fn protected_with(layout: &Layout, cwd: &str, command: &str, cdpath_unset: bool) -> bool {
     let command = command
         .replace("HOME", &layout.home)
         .replace("ROOT", layout.root.to_str().unwrap());
     let context = PathContext {
         home_dir: Some(layout.home.as_str()),
         cwd: Some(cwd),
+        cdpath_unset,
         ..PathContext::default()
     };
     protected_checkout_destination(&model(&command), context)
@@ -98,12 +105,22 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         "cd ~/Library/LaunchAgents && git clone https://github.com/example-org/x.git",
         "git -C HOME/.claude worktree add agents origin/main",
         "git -CHOME/.claude clone https://github.com/example-org/x.git agents",
-        // A link is judged where it leads.
+        // A link is judged where it leads, whatever its name looks like.
         "git worktree add HOME/agents-link/wt origin/main",
+        "git worktree add ab:c/wt origin/main",
+        // With no directory given, Git names the checkout after the repository.
+        "git clone https://github.com/example-org/.claude.git",
+        "git clone git@github.com:example-org/.codex",
+        "git clone --depth 1 https://github.com/example-org/.husky/",
+        "git submodule add https://github.com/example-org/.github.git",
         // A word or directory the text cannot fix fails closed.
         "git worktree add $HOME/x origin/main",
         "cd - && git clone https://github.com/example-org/x.git x",
+        // CDPATH can send a bare relative `cd` anywhere.
+        "cd projects && git clone https://github.com/example-org/x.git",
         "git worktree add ~other/wt origin/main",
+        // An unknown global option hides where the subcommand starts.
+        "git --unknown-option clone https://github.com/example-org/x.git HOME/projects/x",
     ] {
         assert!(
             protected_in(&layout, &layout.workspace, command),
@@ -160,14 +177,24 @@ fn a_workspace_under_a_hidden_folder_judges_siblings_by_their_own_name() {
 }
 
 #[test]
-fn without_a_cwd_only_the_spelling_is_judged() {
+fn a_bare_cd_is_followed_only_when_cdpath_is_unset() {
+    let layout = layout("cdpath");
+    let command = "cd projects && git worktree add svc-r origin/main";
+    assert!(protected_with(&layout, &layout.home, command, false));
+    assert!(!protected_with(&layout, &layout.home, command, true));
+}
+
+#[test]
+fn without_a_cwd_a_checkout_cannot_be_located() {
     let context = PathContext::default();
-    assert!(protected_checkout_destination(
-        &model("git worktree add .claude/agents origin/main"),
-        context
-    ));
-    assert!(!protected_checkout_destination(
-        &model("git worktree add ../sibling origin/main"),
-        context
-    ));
+    for command in [
+        "git worktree add .claude/agents origin/main",
+        "git worktree add ../sibling origin/main",
+        "cd .claude && git worktree add agents origin/main",
+    ] {
+        assert!(
+            protected_checkout_destination(&model(command), context),
+            "{command}"
+        );
+    }
 }

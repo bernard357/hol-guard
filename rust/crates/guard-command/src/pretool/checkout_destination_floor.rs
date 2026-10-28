@@ -83,8 +83,9 @@ fn checkout_step(segment: &crate::CommandSegmentV1) -> bool {
     }
     let arguments = &segment.arguments;
     let Some(index) = crate::command_compatibility::git_command_index(arguments) else {
-        // An unknown global option hides the subcommand; screen the step if
-        // any word could be a checkout subcommand.
+        // An unknown global option hides the subcommand. When any word could
+        // be a checkout subcommand, treat the step as one; step_words then
+        // fails closed because it cannot tell options from paths.
         return arguments
             .iter()
             .any(|argument| CHECKOUT_SUBCOMMANDS.contains(&argument.as_str()));
@@ -127,11 +128,19 @@ fn entered_directories(
         Some(target) if target == "-" || unresolved_word(target) => None,
         Some(target) => {
             let expanded = expand_word(target, context)?;
-            Some(if expanded.is_absolute() {
-                vec![expanded]
-            } else {
-                bases.iter().map(|base| base.join(&expanded)).collect()
-            })
+            if expanded.is_absolute() {
+                return Some(vec![expanded]);
+            }
+            // POSIX `cd` searches CDPATH for a relative operand unless it
+            // starts with `.` or `..`, and nothing joins a relative operand
+            // when no directory is known.
+            let dotted = matches!(target.as_str(), "." | "..")
+                || target.starts_with("./")
+                || target.starts_with("../");
+            if bases.is_empty() || (!dotted && !context.cdpath_unset) {
+                return None;
+            }
+            Some(bases.iter().map(|base| base.join(&expanded)).collect())
         }
     }
 }
@@ -140,7 +149,9 @@ fn entered_directories(
 /// directories applied to `bases`) and the words to screen: the checkout
 /// directory itself, every word after the subcommand, the value of every
 /// `--option=value`, and the global `--git-dir` and `--work-tree` values.
-/// Option names, URLs and SCP-style remotes are not paths and are skipped.
+/// Option names and the repository of a clone or submodule add are not
+/// paths and are skipped; the directory Git names after that repository is
+/// screened in its place.
 /// The cwd and each directory entered before the step are its bases.
 fn step_words(
     segment: &crate::CommandSegmentV1,
@@ -148,7 +159,7 @@ fn step_words(
     context: PathContext<'_>,
 ) -> Option<(Vec<PathBuf>, Vec<String>)> {
     let arguments = &segment.arguments;
-    let index = crate::command_compatibility::git_command_index(arguments).unwrap_or(0);
+    let index = crate::command_compatibility::git_command_index(arguments)?;
     let mut step_bases = bases.to_vec();
     let mut words = vec![".".to_owned()];
     let mut position = 0;
@@ -175,6 +186,8 @@ fn step_words(
             let entered = expand_word(value, context)?;
             step_bases = if entered.is_absolute() {
                 vec![entered]
+            } else if step_bases.is_empty() {
+                return None;
             } else {
                 step_bases.iter().map(|base| base.join(&entered)).collect()
             };
@@ -198,7 +211,18 @@ fn step_words(
         }
         words.push(argument.clone());
     }
-    words.retain(|word| !remote_word(word));
+    if matches!(arguments[index].as_str(), "clone" | "submodule") {
+        // The repository is the first remote-shaped word; no other word is
+        // exempt from screening. When the last word is the repository (or a
+        // local source), Git names the checkout after it in the step's
+        // directory, so that name is screened too.
+        if let Some(position) = words.iter().position(|word| remote_word(word)) {
+            words.remove(position);
+        }
+        if let Some(last) = arguments.last().filter(|last| !last.starts_with('-')) {
+            words.push(guessed_directory(last)?);
+        }
+    }
     if words.iter().any(|word| unresolved_word(word)) {
         return None;
     }
@@ -219,6 +243,21 @@ fn remote_word(word: &str) -> bool {
         return false;
     };
     host.len() > 1 && !host.contains(['/', '\\']) && !host.starts_with(['.', '~'])
+}
+
+/// The directory `git clone <repository>` creates when none is given: the
+/// last component of the repository, without a trailing `/`, `/.git`, `.git`
+/// or `.bundle`. `None` when nothing is left to name it.
+fn guessed_directory(repository: &str) -> Option<String> {
+    let trimmed = repository.trim_end_matches(['/', '\\']);
+    let trimmed = trimmed.strip_suffix("/.git").unwrap_or(trimmed);
+    let trimmed = trimmed.trim_end_matches(['/', '\\']);
+    let trimmed = trimmed
+        .strip_suffix(".git")
+        .or_else(|| trimmed.strip_suffix(".bundle"))
+        .unwrap_or(trimmed);
+    let name = trimmed.rsplit(['/', '\\', ':']).next()?;
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// A word the shell rewrites before Git sees it: an expansion, a command
@@ -247,8 +286,8 @@ fn located_candidates(
     let targets: Vec<PathBuf> = if expanded.is_absolute() {
         vec![expanded]
     } else if bases.is_empty() {
-        // No cwd to resolve against: only the spelling can be judged.
-        return Some(vec![(expanded, false)]);
+        // No cwd to resolve against, so a link there cannot be followed.
+        return None;
     } else {
         bases.iter().map(|base| base.join(&expanded)).collect()
     };
