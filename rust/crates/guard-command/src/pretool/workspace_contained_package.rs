@@ -466,17 +466,34 @@ pub(super) fn local_package_work(
                     .iter()
                     .any(|argument| !argument.starts_with('-'))
             });
-        // The registry scan stays on the whole list, so a selector spelled
-        // like a registry verb keeps the command out rather than passing.
+        // A group verb names a family of subcommands rather than an effect of
+        // its own, so the word alone cannot say whether a registry is
+        // reached; the subcommand after it does. When that subcommand only
+        // reports what is already on disk, [`groups::reads`] has read every
+        // word behind the options, and the registry scan runs over the
+        // options alone rather than refusing the group word and the ordinary
+        // local reads spelled with it.
+        let group_read = groups::reads(behind);
+        // The registry scan stays on the whole list otherwise, so a selector
+        // spelled like a registry verb keeps the command out rather than
+        // passing.
+        let scanned = if group_read {
+            &arguments[..arguments.len() - behind.len()]
+        } else {
+            &arguments[..]
+        };
         !behind.is_empty()
             && (leading_verb || version_probe)
             && !workspace_fanout
             && !positional_init
-            && !arguments
+            && !scanned
                 .iter()
                 .any(|argument| REGISTRY_VERBS.contains(&argument.to_ascii_lowercase().as_str()))
     })
 }
+
+#[path = "workspace_contained_package_groups.rs"]
+mod groups;
 
 #[path = "workspace_contained_package_options.rs"]
 mod options;
