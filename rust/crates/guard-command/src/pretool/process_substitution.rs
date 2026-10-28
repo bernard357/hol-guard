@@ -14,6 +14,11 @@
 //! the command was handed, so a command that runs, applies or writes what it
 //! is given keeps the answer it has for a file.
 //!
+//! A `#` that begins a word comments out the rest of the line, the `)` that
+//! would close a substitution among it, so the text the shell reads is not
+//! the text this walk reads. Both walks stop at one instead of guessing which
+//! parenthesis closes.
+//!
 //! Only the input form is read. `>(cmd)` feeds the inner program bytes this
 //! text does not hold, a nested substitution or a backtick runs a program the
 //! projected text no longer names, and a substitution in command position runs
@@ -98,6 +103,7 @@ pub(super) fn project(raw: &str) -> Option<Substitutions> {
                 open_word = true;
                 out.push(current);
             }
+            '#' if starts_a_comment(&chars, index) => return None,
             '>' if chars.get(index + 1) == Some(&'(') => return None,
             '<' if chars.get(index + 1) == Some(&'(') => {
                 if open_word || words == 0 || inner.len() == MAX_SUBSTITUTIONS {
@@ -160,11 +166,23 @@ pub(super) fn reads_only(result: &PreToolResultV1) -> bool {
 fn readable_body(body: &str) -> bool {
     !body.trim().is_empty()
         && body.len() <= MAX_INNER_BYTES
+        && !body.contains('\n')
         && !body.contains("<(")
         && !body.contains(">(")
         && !body.contains("$(")
         && !body.contains('`')
         && !body.contains('&')
+}
+
+/// Whether the `#` at `at` begins a word, where the shell starts a comment
+/// that reaches the end of the line. A `#` stuck to the word before it, as in
+/// `grep issue#4 notes.md`, is an ordinary character and names no comment.
+fn starts_a_comment(chars: &[char], at: usize) -> bool {
+    chars[at] == '#'
+        && at.checked_sub(1).is_none_or(|before| {
+            chars[before].is_whitespace()
+                || matches!(chars[before], ';' | '|' | '&' | '(' | ')' | '<' | '>')
+        })
 }
 
 /// The `)` that closes a substitution opened before `start`, honouring quotes
@@ -188,6 +206,7 @@ fn closing_parenthesis(chars: &[char], start: usize) -> Option<usize> {
                 '\\' => index += 1,
                 '\'' => single = true,
                 '"' => double = true,
+                '#' if starts_a_comment(chars, index) => return None,
                 '(' => depth += 1,
                 ')' => {
                     depth -= 1;

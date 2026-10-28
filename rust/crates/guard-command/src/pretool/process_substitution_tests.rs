@@ -47,6 +47,16 @@ fn a_substitution_leaves_an_operand_behind() {
             "diff <(git show HEAD:README.md) README.md",
             "diff guard_process_substitution_0 README.md",
         ),
+        // A `#` stuck to a word, or inside quotes, is an ordinary character
+        // and starts no comment.
+        (
+            "diff <(grep issue#4 notes.md) b.txt",
+            "diff guard_process_substitution_0 b.txt",
+        ),
+        (
+            "diff <(grep '#define' a.h) b.h",
+            "diff guard_process_substitution_0 b.h",
+        ),
     ] {
         assert_eq!(projected(raw).as_deref(), Some(text), "{raw}");
     }
@@ -71,6 +81,15 @@ fn the_substitutions_the_text_cannot_stand_in_for_keep_the_failure() {
         "diff <() b.txt",
         // A heredoc puts bytes the projection does not read on standard input.
         "diff <(sort a.txt) b.txt << EOF\nx\nEOF",
+        // A `#` that begins a word comments out the rest of the line, so the
+        // `)` beside it does not close the substitution and the lines under
+        // it run without being named in the projected text.
+        "diff <(cat a.txt #) '\nrm -rf x\n) b.txt #'",
+        "diff <(cat a.txt #) b.txt",
+        "diff <(cat a.txt) b.txt # <(rm -rf x)",
+        // A body spread over lines is read as one word by this walk and as a
+        // list by the shell.
+        "diff <(cat a.txt\nrm -rf x) b.txt",
         // Nothing to project.
         "diff a.txt b.txt",
     ] {
