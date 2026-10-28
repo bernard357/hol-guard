@@ -58,7 +58,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T032 reserve lifecycle capacity, use deadline-aware admission and RAII release — `native_runtime_admission.rs`, `policy_enforcement_admission.rs`, `hardening.rs::request_expired`;
 - [x] NRH-T033 handle transient accept errors with bounded backoff and fatal corruption with explicit exit — `hardening.rs` (`classify_io_error`, `accept_retry_delay` between 5 ms and 1 s); any unclassified error exits with `native_socket_accept_failed`;
 - [x] NRH-T034 reject poisoned socket paths and remove only verified stale sockets — `resident_endpoint.rs::remove_if_same`, with tests that a replacement socket survives and a replacement symlink is not followed;
-- [x] NRH-T035 add malformed frame, slowloris, auth flood, low-descriptor, panic, capacity, and no-busy-spin tests — descriptor pressure, interrupted accept, idle-poll and capacity/overload cases live in `hardening.rs` and `resident_transport_continuation_tests.rs`; `resident_transport_hardening_tests.rs` adds the malformed-frame, stalled-client and auth-flood cases;
+- [x] NRH-T035 add malformed frame, slowloris, auth flood, low-descriptor, panic, capacity, and no-busy-spin tests — descriptor pressure, interrupted accept, idle-poll and capacity/overload cases live in `hardening.rs` and `resident_transport_continuation_tests.rs`; `resident_transport_hardening_tests.rs` adds the malformed-frame, stalled-client, drip-fed-header, drip-fed-payload and auth-flood cases; `resident_worker_pool.rs` pins the panic case, that a job which panics loses its answer and not the worker serving the queue;
 
 ## PR 3: Supervision, fallback budgeting, and daemon fail-safe
 

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::io;
+use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
 pub const TOTAL_REQUEST_BUDGET: Duration = Duration::from_secs(4);
@@ -19,6 +19,57 @@ pub enum IoFailureClass {
 
 pub fn request_expired(accepted_at: Instant) -> bool {
     accepted_at.elapsed() >= TOTAL_REQUEST_BUDGET
+}
+
+fn deadline_expired() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "resident exchange deadline")
+}
+
+/// A socket read timeout bounds one read, not an exchange: a client that sends
+/// one byte before each timeout renews it for as long as it likes and keeps the
+/// worker that is reading. Every resident read is bounded by a deadline for the
+/// whole exchange, so a drip-fed header or payload loses its worker on time.
+pub fn read_exact_by<R: Read + ?Sized>(
+    reader: &mut R,
+    buffer: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        if Instant::now() >= deadline {
+            return Err(deadline_expired());
+        }
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(read) => filled += read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// The same bound for the answer. A caller that stops reading fills the socket
+/// buffer and blocks the write; without a deadline for the whole response it
+/// holds its worker one write timeout at a time.
+pub fn write_all_by<W: Write + ?Sized>(
+    writer: &mut W,
+    buffer: &[u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < buffer.len() {
+        if Instant::now() >= deadline {
+            return Err(deadline_expired());
+        }
+        match writer.write(&buffer[written..]) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(wrote) => written += wrote,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 pub fn classify_io_error(error: &io::Error) -> IoFailureClass {

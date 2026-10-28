@@ -7,15 +7,24 @@
 //! running.
 
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 /// A peer that sends exactly `input` and then stops, the way a slow client
-/// does. It records what the transport wrote back and every read timeout the
-/// transport set, so a bound can be asserted without waiting for one.
+/// does. It records what the transport wrote back, every read timeout the
+/// transport set, and how far the transport read, so a bound can be asserted
+/// without waiting for one and a byte the transport must not read can be
+/// supplied and then shown to be untouched.
+///
+/// `chunk` and `pace` turn it into a drip feed: a client that answers every
+/// read with one byte, slowly enough that a per-read timeout would be renewed
+/// each time.
 struct ScriptedStream {
     input: Vec<u8>,
-    read_cursor: usize,
+    read_cursor: Arc<AtomicUsize>,
+    chunk: usize,
+    pace: Duration,
     written: Arc<Mutex<Vec<u8>>>,
     read_timeouts: Arc<Mutex<Vec<Option<Duration>>>>,
 }
@@ -24,24 +33,40 @@ impl ScriptedStream {
     fn new(input: Vec<u8>) -> Self {
         Self {
             input,
-            read_cursor: 0,
+            read_cursor: Arc::new(AtomicUsize::new(0)),
+            chunk: usize::MAX,
+            pace: Duration::ZERO,
             written: Arc::new(Mutex::new(Vec::new())),
             read_timeouts: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// A client that keeps sending, one `chunk` every `pace`, for as long as
+    /// the transport keeps reading.
+    fn paced(input: Vec<u8>, chunk: usize, pace: Duration) -> Self {
+        Self {
+            chunk,
+            pace,
+            ..Self::new(input)
         }
     }
 }
 
 impl Read for ScriptedStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let left = &self.input[self.read_cursor..];
+        if !self.pace.is_zero() {
+            thread::sleep(self.pace);
+        }
+        let cursor = self.read_cursor.load(Ordering::Acquire);
+        let left = &self.input[cursor..];
         if left.is_empty() {
             // The peer is still connected and still silent, which is what the
             // socket reports once the read timeout expires.
             return Err(io::Error::new(io::ErrorKind::TimedOut, "stalled peer"));
         }
-        let taken = left.len().min(buf.len());
+        let taken = left.len().min(buf.len()).min(self.chunk);
         buf[..taken].copy_from_slice(&left[..taken]);
-        self.read_cursor += taken;
+        self.read_cursor.store(cursor + taken, Ordering::Release);
         Ok(taken)
     }
 }
@@ -134,13 +159,19 @@ fn a_frame_that_declares_no_payload_is_refused() {
 #[test]
 fn a_length_past_the_request_ceiling_is_refused_without_reading_it() {
     let length = u32::try_from(crate::MAX_NATIVE_REQUEST_BYTES + 1).expect("ceiling fits in u32");
-    let stream = ScriptedStream::new(frame_header(crate::REQUEST_MAGIC, b"", length));
+    let mut frame = frame_header(crate::REQUEST_MAGIC, b"", length);
+    // Payload bytes the transport must not touch. Without them a read past the
+    // header would end on the stalled-peer error and look the same.
+    frame.extend_from_slice(&[7u8; 64]);
+    let stream = ScriptedStream::new(frame);
+    let cursor = Arc::clone(&stream.read_cursor);
 
     let error = header_error(stream, "oversize frame");
 
     // Nothing is allocated for the declared length and no payload byte is
     // read, so a header claiming more than the ceiling costs the header only.
     assert_eq!(error, "native_request_too_large");
+    assert_eq!(cursor.load(Ordering::Acquire), crate::FRAME_HEADER_BYTES);
 }
 
 #[test]
@@ -154,6 +185,27 @@ fn the_header_read_is_bounded_by_the_header_timeout() {
     // A client that sends its header one byte at a time gets the transport's
     // bound, not a worker for as long as it keeps the connection open.
     assert_eq!(*timeouts.lock().unwrap(), vec![Some(crate::HEADER_TIMEOUT)]);
+}
+
+#[test]
+fn a_header_fed_one_byte_at_a_time_still_ends_on_the_header_bound() {
+    // A socket read timeout bounds one read. `read_exact` makes as many reads
+    // as it needs, so a client that sends a byte before each timeout would
+    // renew the bound for as long as it liked and hold an authentication
+    // worker the whole time. The header has a deadline of its own, so this
+    // client loses its worker having sent part of a header.
+    let body = br#"{"operation":"pre_tool_decide"}"#;
+    let frame = frame_header(crate::REQUEST_MAGIC, body, body.len() as u32);
+    let stream = ScriptedStream::paced(frame, 1, crate::HEADER_TIMEOUT / 8);
+    let cursor = Arc::clone(&stream.read_cursor);
+
+    let started = Instant::now();
+    let error = header_error(stream, "a drip-fed header must not become a request");
+
+    assert_eq!(error, "native_frame_header_failed");
+    assert!(cursor.load(Ordering::Acquire) < crate::FRAME_HEADER_BYTES);
+    // Unbounded, this client would have held the worker for 72 reads.
+    assert!(started.elapsed() < crate::HEADER_TIMEOUT * 4);
 }
 
 fn pending(stream: ScriptedStream, length: usize, prefix: &[u8], digest: &[u8]) -> PendingRequest {
@@ -210,6 +262,7 @@ fn a_request_that_waited_past_its_budget_is_answered_without_reading_its_payload
     let body = br#"{"operation":"pre_tool_decide"}"#;
     let stream = ScriptedStream::new(body.to_vec());
     let written = Arc::clone(&stream.written);
+    let cursor = Arc::clone(&stream.read_cursor);
     let mut request = pending(stream, body.len(), b"", &Sha256::digest(body));
     request.accepted_at = Instant::now() - crate::hardening::TOTAL_REQUEST_BUDGET;
 
@@ -219,6 +272,32 @@ fn a_request_that_waited_past_its_budget_is_answered_without_reading_its_payload
     assert!(contains(&written, b"native_request_deadline_exceeded"));
     // Retryable, because the caller may simply have arrived in a burst.
     assert!(contains(&written, b"\"retryable\":true"));
+    // The payload was there to be read and the expired request left it alone.
+    assert_eq!(cursor.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn a_payload_fed_one_byte_at_a_time_ends_on_what_is_left_of_the_budget() {
+    // The payload timeout is the larger of the two bounds, so a drip-feeding
+    // client is held to whatever remains of the request's total budget: it
+    // cannot keep an evaluation worker past the budget it was admitted under.
+    let body = vec![b'x'; 4096];
+    let stream = ScriptedStream::paced(body.clone(), 1, Duration::from_millis(2));
+    let written = Arc::clone(&stream.written);
+    let cursor = Arc::clone(&stream.read_cursor);
+    let mut request = pending(stream, body.len(), b"", &Sha256::digest(&body));
+    let left = Duration::from_millis(200);
+    request.accepted_at = Instant::now() - (crate::hardening::TOTAL_REQUEST_BUDGET - left);
+
+    let started = Instant::now();
+    handle_pending_request(request, None, None);
+
+    assert!(contains(
+        &written.lock().unwrap(),
+        b"native_frame_read_failed"
+    ));
+    assert!(cursor.load(Ordering::Acquire) < body.len());
+    assert!(started.elapsed() < left * 4);
 }
 
 #[test]
@@ -258,34 +337,49 @@ const TOKEN: [u8; crate::AUTH_TOKEN_BYTES] = [5u8; crate::AUTH_TOKEN_BYTES];
 /// `client`, and the client half so it stays open while the server reads.
 fn authenticate_against(
     client: impl FnOnce(&mut UnixStream) + Send + 'static,
-) -> (Result<(), String>, thread::JoinHandle<()>) {
+) -> (Result<(), String>, Duration, thread::JoinHandle<()>) {
     let (mut server, mut peer) = UnixStream::pair().expect("socket pair");
     let handle = thread::spawn(move || {
+        // A peer that waits forever for a proof the server never sends would
+        // wedge the test run rather than fail it.
+        peer.set_read_timeout(Some(peer_patience()))
+            .expect("bound the peer's own reads");
         client(&mut peer);
         // Hold the connection open: a client that disconnects would end
         // the read on EOF rather than on the auth timeout under test.
-        thread::sleep(crate::AUTH_TIMEOUT * 3);
+        thread::sleep(peer_patience());
     });
+    let started = Instant::now();
     let result = authenticate_resident_stream(&mut server, &TOKEN);
-    (result, handle)
+    (result, started.elapsed(), handle)
+}
+
+/// Long enough that an answer arriving inside it cannot have come from the
+/// peer closing, and short enough that a wedged exchange fails the test.
+#[cfg(unix)]
+fn peer_patience() -> Duration {
+    crate::AUTH_TIMEOUT * 3
 }
 
 #[cfg(unix)]
 #[test]
 fn a_client_that_never_sends_its_nonce_loses_its_worker_on_the_auth_timeout() {
-    let (result, handle) = authenticate_against(|_peer| {});
+    let (result, elapsed, handle) = authenticate_against(|_peer| {});
 
     assert_eq!(
         result.expect_err("a silent client must not authenticate"),
         "native_resident_auth_nonce_failed"
     );
+    // The peer is still connected and still holding the socket open, so this
+    // answer came from the auth deadline rather than from a closed peer.
+    assert!(elapsed < peer_patience());
     handle.join().expect("client thread");
 }
 
 #[cfg(unix)]
 #[test]
 fn a_client_that_stops_after_its_nonce_loses_its_worker_on_the_auth_timeout() {
-    let (result, handle) = authenticate_against(|peer| {
+    let (result, elapsed, handle) = authenticate_against(|peer| {
         peer.write_all(&[1u8; crate::AUTH_NONCE_BYTES])
             .expect("send the nonce");
         let mut proof = [0u8; crate::AUTH_PROOF_BYTES];
@@ -296,13 +390,14 @@ fn a_client_that_stops_after_its_nonce_loses_its_worker_on_the_auth_timeout() {
         result.expect_err("half an exchange must not authenticate"),
         "native_resident_auth_client_failed"
     );
+    assert!(elapsed < peer_patience());
     handle.join().expect("client thread");
 }
 
 #[cfg(unix)]
 #[test]
 fn a_client_proof_for_another_token_is_rejected() {
-    let (result, handle) = authenticate_against(|peer| {
+    let (result, _elapsed, handle) = authenticate_against(|peer| {
         let nonce = [1u8; crate::AUTH_NONCE_BYTES];
         peer.write_all(&nonce).expect("send the nonce");
         let mut proof = [0u8; crate::AUTH_PROOF_BYTES];
