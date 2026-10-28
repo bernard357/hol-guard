@@ -30,12 +30,18 @@ GIT_ALLOW_STASH_CASE = "git-allow-stash-around-fast-forward"
 GIT_ALLOW_REF_READS_CASE = "git-allow-ref-reads-after-checkout"
 # A checkout and a pathspec named after Guard are the user's work, not Guard.
 GIT_ALLOW_NAMED_CHECKOUT_CASE = "git-allow-guard-named-checkout"
+# The worktree permission allows an ordinary sibling checkout...
+GIT_ALLOW_WORKTREE_CASE = "git-allow-worktree-sibling-then-status"
+# ...but never settles a checkout into a folder Git runs code from.
+GIT_ALLOW_HOOKS_WORKTREE_CASE = "git-allow-worktree-into-hooks-folder"
 GIT_ALLOW_CASES = frozenset(
     {
         GIT_ALLOW_MERGE_CASE,
         GIT_ALLOW_STASH_CASE,
         GIT_ALLOW_REF_READS_CASE,
         GIT_ALLOW_NAMED_CHECKOUT_CASE,
+        GIT_ALLOW_WORKTREE_CASE,
+        GIT_ALLOW_HOOKS_WORKTREE_CASE,
     }
 )
 GIT_EXTENSION_ID = "command.git"
@@ -46,6 +52,8 @@ STASH_WORKING = "export const retryLimit = 5;\n"
 NAMED_FILE = "scripts/hol-guard.wxs"
 NAMED_COMMITTED = "<Wix />\n"
 NAMED_WORKTREE = "pr/hol-guard-pr-12"
+SIBLING_WORKTREE = "review-wt"
+HOOKS_WORKTREE = ".git/hooks/review-wt"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "Gauntlet Fixture",
     "GIT_AUTHOR_EMAIL": "gauntlet@example.invalid",
@@ -126,6 +134,12 @@ def git_allow_checks(workspace: Path, scenario_id: str) -> dict[str, bool]:
         target = workspace / NAMED_FILE
         restored = target.is_file() and target.read_text(encoding="utf-8") == NAMED_COMMITTED
         return {"git-allow-named-file-restored": restored}
+    if scenario_id == GIT_ALLOW_WORKTREE_CASE:
+        sibling = workspace.parent / SIBLING_WORKTREE
+        heads = _heads(sibling) if (sibling / ".git").is_file() else None
+        return {"git-allow-sibling-worktree-at-origin": heads is not None and heads[0] == heads[1]}
+    if scenario_id == GIT_ALLOW_HOOKS_WORKTREE_CASE:
+        return {"git-allow-hooks-worktree-absent": not (workspace / HOOKS_WORKTREE).exists()}
     heads = _heads(workspace)
     checks = {"git-allow-head-advanced": heads is not None and heads[0] == heads[1]}
     if scenario_id == GIT_ALLOW_STASH_CASE:
