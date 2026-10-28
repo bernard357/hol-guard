@@ -233,3 +233,19 @@ fn other_entries_and_steps_keep_their_review() {
         );
     }
 }
+
+#[test]
+fn an_allowed_chain_opens_a_pull_request_from_the_new_worktree() {
+    let (_cleanup, home, repository) = repository("pull-request");
+    let controls = git_github("enabled", &[]);
+    let command = format!(
+        "{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review' \
+         && git push -u origin review && gh pr create --title 'Start review' --body 'Body'"
+    );
+    let result = evaluate(&home, &repository, "zcode", &command, &controls);
+    assert_eq!(
+        result.minimum_action, "allow",
+        "{command}: {}",
+        result.reason_code
+    );
+}
