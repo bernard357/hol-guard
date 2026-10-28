@@ -26,7 +26,16 @@ pub(crate) struct Source<'a> {
 pub(crate) enum Ownership {
     AuthenticatedManifest,
     ExactLegacyAdoption,
+    SelfInstallBinding,
     Unmanaged,
+}
+
+/// The handlers each ownership authority claims, as JSON bindings.
+#[derive(Clone, Copy)]
+pub(crate) struct Bindings<'a> {
+    pub(crate) authenticated: &'a [Value],
+    pub(crate) legacy: &'a [Value],
+    pub(crate) self_bound: &'a [Value],
 }
 
 pub(crate) struct Record {
@@ -60,12 +69,12 @@ impl Record {
     }
 }
 
-struct Issue {
-    reason_code: &'static str,
-    message: &'static str,
-    event_name: Option<String>,
-    group_index: Option<usize>,
-    handler_index: Option<usize>,
+pub(crate) struct Issue {
+    pub(crate) reason_code: &'static str,
+    pub(crate) message: &'static str,
+    pub(crate) event_name: Option<String>,
+    pub(crate) group_index: Option<usize>,
+    pub(crate) handler_index: Option<usize>,
 }
 
 impl Issue {
@@ -91,6 +100,7 @@ impl Issue {
 
 pub(crate) struct Inventory {
     pub(crate) records: Vec<Record>,
+    pub(crate) issues: Vec<Issue>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -101,9 +111,25 @@ pub(crate) fn enumerate(
     authenticated: &[Value],
     legacy: &[Value],
 ) -> Inventory {
+    walk(
+        payload.field("hooks"),
+        source,
+        Bindings {
+            authenticated,
+            legacy,
+            self_bound: &[],
+        },
+    )
+}
+
+/// The walk over a source's `hooks` value, absent when it holds none.
+pub(crate) fn walk(
+    hooks: Option<&HookVal>,
+    source: Source<'_>,
+    bindings: Bindings<'_>,
+) -> Inventory {
     let mut records = Vec::new();
     let mut issues = Vec::new();
-    let hooks = payload.field("hooks");
     match hooks {
         None => {}
         Some(HookVal::Dict(events)) => {
@@ -115,8 +141,7 @@ pub(crate) fn enumerate(
                     event_name,
                     groups,
                     source,
-                    authenticated,
-                    legacy,
+                    bindings,
                     &mut records,
                     &mut issues,
                 );
@@ -130,12 +155,14 @@ pub(crate) fn enumerate(
             handler_index: None,
         }),
     }
+    let warnings = issues
+        .iter()
+        .map(|issue| issue.warning(source.path))
+        .collect();
     Inventory {
         records,
-        warnings: issues
-            .iter()
-            .map(|issue| issue.warning(source.path))
-            .collect(),
+        issues,
+        warnings,
     }
 }
 
@@ -169,8 +196,7 @@ fn walk_event(
     event_name: &str,
     groups: &HookVal,
     source: Source<'_>,
-    authenticated: &[Value],
-    legacy: &[Value],
+    bindings: Bindings<'_>,
     records: &mut Vec<Record>,
     issues: &mut Vec<Issue>,
 ) {
@@ -225,8 +251,7 @@ fn walk_event(
             };
             let context = Context {
                 source,
-                authenticated,
-                legacy,
+                bindings,
                 group,
                 group_entries: entries,
                 group_active,
@@ -246,8 +271,7 @@ struct Coordinate<'a> {
 
 struct Context<'a> {
     source: Source<'a>,
-    authenticated: &'a [Value],
-    legacy: &'a [Value],
+    bindings: Bindings<'a>,
     group: &'a HookVal,
     group_entries: &'a [(String, HookVal)],
     group_active: bool,
@@ -434,10 +458,13 @@ fn environment_keys(handler: &HookVal) -> (Vec<String>, bool) {
 }
 
 fn ownership(event_name: &str, context: &Context<'_>, handler: &HookVal) -> Ownership {
-    if bindings_contain(context.authenticated, event_name, context.group, handler) {
+    let bindings = context.bindings;
+    if bindings_contain(bindings.authenticated, event_name, context.group, handler) {
         Ownership::AuthenticatedManifest
-    } else if bindings_contain(context.legacy, event_name, context.group, handler) {
+    } else if bindings_contain(bindings.legacy, event_name, context.group, handler) {
         Ownership::ExactLegacyAdoption
+    } else if bindings_contain(bindings.self_bound, event_name, context.group, handler) {
+        Ownership::SelfInstallBinding
     } else {
         Ownership::Unmanaged
     }

@@ -18,6 +18,7 @@ nothing it contains can pass as a substituted scalar.
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time
@@ -30,6 +31,8 @@ from .native_execution import _resident_request
 from .native_store_policy import _payload
 
 CODEX_HOOK_IDENTITY_FEATURE = "codex-hook-identity-v1"
+# Adds the ``inventory`` entry: a whole source's hook walk in one answer.
+CODEX_HOOK_INVENTORY_FEATURE = "codex-hook-identity-v2"
 _REQUEST_SCHEMA = "guard-codex-hook-identity-request.v1"
 _RESULT_SCHEMA = "guard-codex-hook-identity-result.v1"
 # The resident hashes a canonical form of each entry and nothing else: no
@@ -56,6 +59,10 @@ _EXACT_INT_MAX = 2**64 - 1
 # too deep instead of letting the resident refuse the whole frame and look
 # unavailable.
 _MAX_DEFINITION_DEPTH = 29
+# An inventory entry's events sit in ``[name, groups]`` pairs inside an
+# ``events`` array, so each event's groups list starts three levels down.
+_EVENT_GROUPS_DEPTH = 3
+_BINDING_KEYS = ("authenticated_bindings", "legacy_bindings", "self_bindings")
 
 
 class CodexHookIdentityUnavailableError(RuntimeError):
@@ -78,11 +85,14 @@ def native_codex_hook_identity(
     entries: Sequence[Mapping[str, object]],
     *,
     guard_home: Path | None = None,
+    required_feature: str = CODEX_HOOK_IDENTITY_FEATURE,
 ) -> list[dict[str, object]]:
     """Return one identity answer per entry, in order.
 
     Each entry names a ``kind``: ``handler`` and ``group`` answer with
-    ``digest``, ``conflict`` with ``digests``, and ``argv`` with ``argv``.
+    ``digest``, ``conflict`` with ``digests``, ``argv`` with ``argv``, and
+    ``inventory`` with a source's ``records`` and ``issues``; an inventory
+    needs ``CODEX_HOOK_INVENTORY_FEATURE``.
 
     Raises ``CodexHookIdentityUnavailableError`` when the resident cannot
     answer, so a caller fails closed rather than treating an unidentified hook
@@ -99,11 +109,15 @@ def native_codex_hook_identity(
         raise CodexHookIdentityUnavailableError
     answers: list[dict[str, object]] = []
     for start in range(0, len(entries), _MAX_ENTRIES):
-        answers.extend(_identities_for_batch(entries[start : start + _MAX_ENTRIES], home))
+        answers.extend(_identities_for_batch(entries[start : start + _MAX_ENTRIES], home, required_feature))
     return answers
 
 
-def _identities_for_batch(entries: Sequence[Mapping[str, object]], home: Path) -> list[dict[str, object]]:
+def _identities_for_batch(
+    entries: Sequence[Mapping[str, object]],
+    home: Path,
+    required_feature: str,
+) -> list[dict[str, object]]:
     """Ask the resident about one batch the contract is willing to accept."""
 
     tokens = _ScalarTokens(entries)
@@ -119,7 +133,7 @@ def _identities_for_batch(entries: Sequence[Mapping[str, object]], home: Path) -
             request=wire,
             guard_home=home,
             timeout_seconds=_batch_timeout_seconds(len(entries)),
-            required_feature=CODEX_HOOK_IDENTITY_FEATURE,
+            required_feature=required_feature,
             response_schema=_RESULT_SCHEMA,
             max_request_bytes=_MAX_REQUEST_BYTES,
             record_success=False,
@@ -164,7 +178,40 @@ def _entry_wire(entry: Mapping[str, object], tokens: _ScalarTokens) -> dict[str,
     command = entry.get("command")
     if isinstance(command, str):
         wire["command"] = command
+    if wire["kind"] == "inventory":
+        wire["source_format"] = str(entry.get("source_format", ""))
+        hooks = entry.get("hooks")
+        if isinstance(hooks, Mapping):
+            wire["events"] = [
+                [_key_spelling(name), tokens.wire_at(groups, _EVENT_GROUPS_DEPTH)] for name, groups in hooks.items()
+            ]
+        for key in _BINDING_KEYS:
+            wire[key] = wire_codex_hook_bindings(cast("Sequence[Mapping[str, object]]", entry.get(key, ())))
     return wire
+
+
+def wire_codex_hook_bindings(bindings: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    """Ownership bindings the native request can carry.
+
+    A binding holding a value JSON cannot carry (a TOML date, a non-finite
+    float) is left out, so the hook it would have claimed stays reviewable as
+    unmanaged instead of failing the whole request.
+    """
+
+    wire: list[dict[str, object]] = []
+    for binding in bindings:
+        try:
+            json.dumps(binding, allow_nan=False)
+        except (TypeError, ValueError):
+            continue
+        wire.append(dict(binding))
+    return wire
+
+
+def _key_spelling(key: object) -> str:
+    """A mapping key as the resident reads it, which a JSON object can name."""
+
+    return key if isinstance(key, str) else f"<{type(key).__name__}>:{key!r}"
 
 
 class _ScalarTokens:
@@ -189,6 +236,11 @@ class _ScalarTokens:
         """The JSON form of one mapping, with its exotic scalars replaced."""
 
         return cast("dict[str, object]", self._wire_value(value, 1))
+
+    def wire_at(self, value: object, depth: int) -> object:
+        """The JSON form of a value already ``depth`` levels into the request's definitions."""
+
+        return self._wire_value(value, depth)
 
     def _token_for(self, meaning: dict[str, str]) -> str:
         token = f"{self._prefix}-{len(self.meanings)}"
@@ -235,7 +287,7 @@ class _ScalarTokens:
         """
 
         items = sorted(
-            ((key if isinstance(key, str) else f"<{type(key).__name__}>:{key!r}", item) for key, item in value.items()),
+            ((_key_spelling(key), item) for key, item in value.items()),
             key=lambda pair: pair[0],
         )
         return {key: self._wire_value(item, depth + 1) for key, item in items}

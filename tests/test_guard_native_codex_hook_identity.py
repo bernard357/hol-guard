@@ -31,15 +31,21 @@ def _resident(monkeypatch: pytest.MonkeyPatch, reply) -> list[dict[str, object]]
 def _identity(**question: object) -> str:
     """Ask the bridge for one handler identity, as a single-entry request."""
 
-    entry = codex_hook_identity._handler_entry(codex_hook_identity.CodexHookHandlerQuestion(**question))
+    entry = {"kind": "handler", **question}
     return codex_hook_identity._digest_of(bridge.native_codex_hook_identity([entry])[0])
 
 
 def _argv(command: str | None) -> tuple[str, ...] | None:
     """Ask the bridge to tokenize one command, as a single-entry request."""
 
-    entry = codex_hook_identity._argv_entry(command)
-    return codex_hook_identity._argv_of(bridge.native_codex_hook_identity([entry])[0])
+    entry: dict[str, object] = {"kind": "argv"}
+    if command is not None:
+        entry["command"] = command
+    argv = bridge.native_codex_hook_identity([entry])[0].get("argv")
+    if argv is None:
+        return None
+    assert isinstance(argv, list)
+    return tuple(cast(list[str], argv))
 
 
 def _digests(request: dict[str, object]) -> dict[str, object]:
