@@ -23,16 +23,6 @@ fn custom_rules_still_answer_a_command_that_launches_no_local_cli() {
     );
     // `pwd` launches no local CLI, so no custom rule can block it.
     assert_eq!(run(&rules, allowed_payload(&rules))["outcome"], "answer");
-    // Without the daemon's environment the lane cannot tell, and it never
-    // resolves the launch against the resident's own, so the daemon checks.
-    let unpublished = allowing_lane(
-        "cli-rules-unpublished",
-        json!({ "local_cli_block_rules": true }),
-    );
-    assert_eq!(
-        deferred(&run(&unpublished, allowed_payload(&unpublished))),
-        "direct_hook_local_cli_rules"
-    );
     // The edge reviews a launch it cannot prove benign, so the daemon
     // renders that verdict whether or not a rule names the CLI. A `tsc`
     // build script gets no narrow build receipt, and the hook carries no

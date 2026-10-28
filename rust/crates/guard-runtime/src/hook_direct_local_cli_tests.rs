@@ -342,6 +342,33 @@ fn gated(
 }
 
 #[test]
+fn a_launch_the_daemon_published_no_environment_for_defers() {
+    let case = Case::new("unpublished", "");
+    let answered = json!({ "result": { "decision": "allow", "minimum_action": "allow" } });
+    let unpublished = |command: &str| {
+        let payload = object(json!({ "tool_input": { "command": command } }));
+        custom_rule_response(
+            &answered,
+            &RuleCheck {
+                payload: Some(&payload),
+                harness: "codex",
+                workspace: &case.workspace,
+                home_dir: &case.workspace,
+                guard_home: &case.guard_home,
+                recording_only: false,
+                launch_env: None,
+            },
+        )
+    };
+    // A package script names its identity from `package.json`, so it needs
+    // no environment.
+    assert_eq!(unpublished("npm run build"), Ok(None));
+    // Any other launch resolves against the daemon's `PATH`. The resident
+    // never substitutes its own, so without the daemon's the daemon checks.
+    assert_eq!(unpublished("pwd"), Err(()));
+}
+
+#[test]
 fn an_unreadable_store_defers() {
     let broken = Case::new("broken", "");
     fs::write(
