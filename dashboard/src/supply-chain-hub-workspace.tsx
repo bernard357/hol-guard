@@ -88,6 +88,9 @@ export function SupplyChainHubWorkspace(props: {
   const handleAuditNavigate = useCallback(() => {
     props.onNavigate("/audit");
   }, [props.onNavigate]);
+  const handleWorkspacesNavigate = useCallback(() => {
+    props.onNavigate("/workspaces");
+  }, [props.onNavigate]);
   const handleFixAll = useCallback(() => {
     firewallPanelRef.current?.fixAll();
   }, []);
@@ -116,6 +119,7 @@ export function SupplyChainHubWorkspace(props: {
             receipts={props.receipts}
             approvalGate={props.approvalGate}
             auditSession={auditSession}
+            onOpenWorkspaces={handleWorkspacesNavigate}
           />
         )}
         {tab === "workspaces" && (

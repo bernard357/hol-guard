@@ -1,6 +1,7 @@
 import { j as jsxRuntimeExports, T as Tag, f as formatRelativeTime, r as reactExports, A as ActionButton, es as HiMiniChevronLeft, H as HiMiniChevronRight, dy as IconActionButton, _ as HiMiniXMark, d5 as GuardModalLayer, cR as HiMiniFunnel, p as HiMiniMagnifyingGlass, et as HiMiniArrowDown, eu as HiMiniArrowUp, e2 as HiMiniFolder, S as SectionLabel, d as HiMiniArrowPath, dC as HiMiniBugAnt, N as EmptyState, aM as HiMiniAdjustmentsHorizontal, dF as ConnectFlowCard, a4 as HiMiniExclamationTriangle, bQ as useResolvedApprovalGate, ev as runAuditRemediation, a6 as Badge, ew as isBlockedGuardAction, dw as isSupplyChainAuditEvidence, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, aG as ApprovalProofModal, q as HiMiniDocumentText, bc as guardAwareHref, R as HiMiniShieldCheck } from "../guard-dashboard.js";
-import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-B-wJQDtX.js";
+import { n as normalizeSupplyChainAuditWorkspaceInput, p as packageWorkbenchEcosystems, f as filterPackageWorkbenchFindings, c as sortPackageWorkbenchFindings, i as isApprovalGateRequiredError, l as listSupplyChainAuditWorkspaceChoices } from "./supply-chain-hub-workspace-CKNAxTGr.js";
 import { r as resolveManagerCoverageManagers, a as resolveManagerCoverageStatus } from "./supply-chain-protection-stats-D5t87g7g.js";
+import { c as createLatestRefresh, f as fetchWorkspaceFindings, s as sameWorktree, w as worktreeStatus } from "./workspace-findings-status-BLCsG7Dy.js";
 const STEPS = [
   { id: "preparing", label: "Prepare workspace" },
   { id: "scanning", label: "Scan manifests and lockfiles" },
@@ -1019,6 +1020,110 @@ function auditPriorityBadgeLabel(results, resolvedIds) {
   ).length;
   return count > 0 ? `${count} high priority` : null;
 }
+const REFRESH_MS = 15e3;
+const FINDING_CAP_REASONS = ["finding_cap", "carried_finding_cap"];
+function summarizeCodebaseChecks(state) {
+  const summary = {
+    worktrees: state.worktrees.length,
+    notChecked: 0,
+    latestCheckAtMs: null,
+    oldestCheckAtMs: null,
+    needAttention: 0,
+    openFindings: 0,
+    openFindingsLowerBound: false
+  };
+  for (const worktree of state.worktrees) {
+    const newestRun = state.latestRuns.find((run) => sameWorktree(worktree, run));
+    const assessment = state.assessments.find((item) => sameWorktree(worktree, item));
+    const status = worktreeStatus(worktree, newestRun, assessment);
+    if (status.tone === "red" || status.tone === "attention") summary.needAttention += 1;
+    if (assessment === void 0) {
+      summary.notChecked += 1;
+      continue;
+    }
+    summary.openFindings += assessment.findings.length;
+    if (assessment.reasons.some((reason) => FINDING_CAP_REASONS.includes(reason))) {
+      summary.openFindingsLowerBound = true;
+    }
+    const atMs = assessment.finishedAtMs;
+    if (atMs === null) continue;
+    if (summary.latestCheckAtMs === null || atMs > summary.latestCheckAtMs) summary.latestCheckAtMs = atMs;
+    if (summary.oldestCheckAtMs === null || atMs < summary.oldestCheckAtMs) summary.oldestCheckAtMs = atMs;
+  }
+  return summary;
+}
+function checkTime(atMs) {
+  return atMs === null ? "Not yet" : formatRelativeTime(new Date(atMs).toISOString());
+}
+function Fact(props) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 py-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { className: "text-xs text-slate-500", children: props.label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { className: "font-mono text-sm font-semibold tabular-nums text-brand-dark", title: props.title, children: props.value })
+  ] });
+}
+function AuditCodebaseChecksView(props) {
+  const { summary } = props;
+  if (summary.worktrees === 0) return null;
+  const notes = [];
+  if (summary.notChecked > 0) {
+    notes.push(
+      summary.notChecked === 1 ? "1 workspace has no finished check yet." : `${summary.notChecked} workspaces have no finished check yet.`
+    );
+  }
+  if (summary.openFindingsLowerBound) {
+    notes.push("A check found more issues than it keeps, so open findings is a minimum.");
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { "aria-labelledby": "audit-codebase-checks-title", "data-testid": "audit-codebase-checks", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-start justify-between gap-x-4 gap-y-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 max-w-2xl", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "audit-codebase-checks-title", className: "text-lg font-semibold tracking-tight text-brand-dark", children: "Background workspace checks" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "Guard re-checks tracked project folders on this device between agent sessions. Their findings are on the Workspaces tab, not in the audit list below." })
+      ] }),
+      props.onOpenWorkspaces && /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: props.onOpenWorkspaces, children: "Open Workspaces" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("dl", { className: "mt-2 grid grid-cols-2 gap-x-6 border-y border-slate-200 sm:grid-cols-3 lg:grid-cols-5", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Fact, { label: "Workspaces", value: String(summary.worktrees) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Fact, { label: "Latest check", value: checkTime(summary.latestCheckAtMs) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Fact, { label: "Oldest result", value: checkTime(summary.oldestCheckAtMs) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Fact, { label: "Need attention", value: String(summary.needAttention) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        Fact,
+        {
+          label: "Open findings",
+          value: `${summary.openFindings}${summary.openFindingsLowerBound ? "+" : ""}`
+        }
+      )
+    ] }),
+    notes.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "mt-2 space-y-0.5 text-xs text-slate-500", children: notes.map((note) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: note }, note)) })
+  ] });
+}
+function AuditCodebaseChecks(props) {
+  const [state, setState] = reactExports.useState(null);
+  const mounted = reactExports.useRef(true);
+  const refresh = reactExports.useMemo(
+    () => createLatestRefresh(() => fetchWorkspaceFindings(), {
+      onData: (next) => {
+        if (mounted.current) setState(next);
+      },
+      // The Workspaces tab owns load errors; a failed read leaves the last summary in place.
+      onError: () => {
+      }
+    }),
+    []
+  );
+  reactExports.useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), REFRESH_MS);
+    return () => {
+      mounted.current = false;
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+  const summary = reactExports.useMemo(() => state === null ? null : summarizeCodebaseChecks(state), [state]);
+  if (summary === null) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(AuditCodebaseChecksView, { summary, onOpenWorkspaces: props.onOpenWorkspaces });
+}
 function auditSeverityForDecision(decision, blockedCount) {
   if (decision === "block" || blockedCount > 0) {
     return "high";
@@ -1308,7 +1413,7 @@ function AuditRowActions(props) {
   }
   return null;
 }
-function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession }) {
+function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession, onOpenWorkspaces }) {
   const [filter, setFilter] = reactExports.useState({
     severityFilter: "all",
     harnessFilter: "",
@@ -1443,6 +1548,7 @@ function AuditWorkspace({ snapshot, receipts, approvalGate, auditSession }) {
         ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { tone: "success", children: "All clear" })
       ] })
     ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AuditCodebaseChecks, { onOpenWorkspaces }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded-2xl border border-slate-100 bg-white shadow-sm", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-b border-slate-100 px-4 py-3 space-y-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(SectionLabel, { children: "Filters" }),

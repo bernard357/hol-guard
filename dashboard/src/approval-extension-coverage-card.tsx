@@ -5,17 +5,11 @@ import {
   coverageScopeLine,
   coverageSegmentsBeyond,
   coverageStepLabel,
+  segmentDetail,
 } from "./approval-extension-coverage";
-import type { GuardApprovalExtensionCoverage, GuardCoveredSegment } from "./approval-extension-coverage-types";
+import type { GuardApprovalExtensionCoverage } from "./approval-extension-coverage-types";
 import { commitDashboardLocation } from "./dashboard-location";
 import { extensionPatternHref } from "./extension-pattern-href";
-
-function segmentDetail(segment: GuardCoveredSegment): string | null {
-  const titles = segment.rules.map((rule) => rule.title);
-  const labels = segment.permissions.filter((permission) => permission.configurable).map((item) => item.label);
-  const parts = titles.length > 0 ? titles : labels;
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
 
 /** Names the extension behind each step of a paused command, and links to it.
  *

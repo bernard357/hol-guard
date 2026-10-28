@@ -235,19 +235,40 @@ pub(super) fn preview_with(
 
 /// Components of a root-relative `/`-separated path, or `None` when it is
 /// empty, absolute, too long, or names `.`/`..`, an empty component or a
-/// backslash.
+/// backslash. On Windows a component may not hold `:`, end in `.` or a
+/// space, or look like an 8.3 short name: Windows drops trailing dots and
+/// spaces and resolves short names, so `.env.` or `ENV~1` would open `.env`
+/// while slipping past the name checks.
 fn components(path: &str) -> Option<Vec<&str>> {
     if path.is_empty() || path.len() > MAX_PATH_BYTES || path.contains(['\\', '\0']) {
         return None;
     }
     let parts: Vec<&str> = path.split('/').collect();
     let invalid = |part: &&str| {
-        part.is_empty() || *part == "." || *part == ".." || (cfg!(windows) && part.contains(':'))
+        part.is_empty()
+            || *part == "."
+            || *part == ".."
+            || (cfg!(windows)
+                && (part.contains(':') || part.ends_with(['.', ' ']) || may_be_short_name(part)))
     };
     if parts.iter().any(invalid) {
         return None;
     }
     Some(parts)
+}
+
+/// Whether `part` could be an 8.3 short name, which holds `~` followed by a
+/// digit. A long name of that shape is refused too.
+pub(super) fn may_be_short_name(part: &str) -> bool {
+    part.split('~')
+        .skip(1)
+        .any(|tail| tail.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// `SKIP_DIRS` names are lowercase, and a case-insensitive filesystem opens
+/// `.GIT` as `.git`, so the caller's spelling is compared without case.
+fn is_policy_directory(name: &str) -> bool {
+    SKIP_DIRS.iter().any(|skip| skip.eq_ignore_ascii_case(name))
 }
 
 fn preview_file(
@@ -269,7 +290,7 @@ fn preview_file(
         };
         match node.kind {
             Kind::Symlink => return Outcome::Excluded("symlink"),
-            Kind::Directory if SKIP_DIRS.contains(directory) => {
+            Kind::Directory if is_policy_directory(directory) => {
                 return Outcome::Excluded("policy_directory")
             }
             Kind::Directory => match current.open_dir(OsStr::new(directory), &node) {
@@ -290,7 +311,7 @@ fn preview_file(
         Kind::Special => return Outcome::Excluded("special"),
         Kind::File => {}
     }
-    if is_audit_sensitive_basename(name) || is_credential_store(path) {
+    if is_audit_sensitive_basename(name) || is_credential_store(&path.to_ascii_lowercase()) {
         return Outcome::Excluded("sensitive");
     }
     if node.len > limits.file_bytes {
@@ -309,6 +330,9 @@ fn preview_file(
             Err(HashError::Unstable) => return Outcome::Excluded("unstable"),
             Err(HashError::Unreadable) => return Outcome::Excluded("unreadable"),
         };
+    // The budget bounds what is read and scanned, so a file excluded after
+    // reading still spends it.
+    *total += bytes;
     let Some(text) = decode_text(path, &content[..]) else {
         return Outcome::Excluded("not_text");
     };
@@ -320,7 +344,6 @@ fn preview_file(
     else {
         return Outcome::Excluded("redaction_failed");
     };
-    *total += bytes;
     Outcome::Included(Included {
         path: path.to_owned(),
         bytes,
@@ -333,7 +356,10 @@ fn preview_file(
 }
 
 /// Replace every secret the detector finds with the marker, then require a
-/// second scan of the result to find nothing.
+/// second scan of the result to find nothing. Every occurrence of every
+/// matched secret is located first and the output is built in one pass, so a
+/// file with many findings is not copied once per finding. Overlapping
+/// occurrences collapse into a single marker.
 pub(super) fn redact(text: &str, path: &str, scanner: Scanner) -> Redaction {
     let summary = scanner(text, path, MAX_FINDINGS_PER_FILE);
     let mut findings = summary.findings;
@@ -343,18 +369,44 @@ pub(super) fn redact(text: &str, path: &str, scanner: Scanner) -> Redaction {
         wipe(&mut findings);
         return Redaction::Failed;
     }
-    let mut redacted = Zeroizing::new(text.to_owned());
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut redactions = 0;
     let mut rules: Vec<&'static str> = Vec::new();
-    for finding in &findings {
-        if redacted.contains(finding.candidate.as_str()) {
-            redacted =
-                Zeroizing::new(redacted.replace(finding.candidate.as_str(), REDACTION_MARKER));
+    for (index, finding) in findings.iter().enumerate() {
+        let candidate = finding.candidate.as_str();
+        // The same secret found again (on another line, or by another rule)
+        // is one redaction.
+        let repeated = findings[..index]
+            .iter()
+            .any(|earlier| earlier.candidate == candidate);
+        let before = ranges.len();
+        if !repeated {
+            ranges.extend(
+                text.match_indices(candidate)
+                    .map(|(start, matched)| (start, start + matched.len())),
+            );
+        }
+        if ranges.len() > before {
             redactions += 1;
         }
         rules.push(finding.rule_id);
     }
     wipe(&mut findings);
+    ranges.sort_unstable();
+    // Sized up front so the buffer holding source text is never reallocated
+    // and left behind unwiped.
+    let mut redacted = Zeroizing::new(String::with_capacity(
+        text.len() + ranges.len() * REDACTION_MARKER.len(),
+    ));
+    let mut cursor = 0;
+    for (start, end) in ranges {
+        if start >= cursor {
+            redacted.push_str(&text[cursor..start]);
+            redacted.push_str(REDACTION_MARKER);
+        }
+        cursor = cursor.max(end);
+    }
+    redacted.push_str(&text[cursor..]);
     let mut recheck = scanner(&redacted, path, 1).findings;
     if !recheck.is_empty() {
         wipe(&mut recheck);
