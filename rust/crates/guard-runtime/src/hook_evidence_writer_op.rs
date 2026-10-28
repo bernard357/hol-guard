@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 
 use guard_command::hook_evidence_writer::{
     ComposioApi, EvidenceWriterDeps, NativeEvidenceJournal, NativeReceiptValidation,
@@ -322,28 +322,50 @@ fn with_running<T>(guard_home: &Path, act: impl FnOnce(&ResidentWriter) -> T) ->
     held.as_ref().map(act)
 }
 
-/// This Guard home's canonical spelling when a live writer runs for it. The
-/// edge records its receipt only into such a writer and never starts one: a
-/// writer that has exited or is draining would never write what it is given.
-pub(crate) fn running_home(guard_home: &Path) -> Option<PathBuf> {
-    let guard_home = canonical_home(guard_home);
-    let live = with_running(&guard_home, |resident| {
-        !resident.writer.has_exited() && !resident.writer.is_stopping()
-    })?;
-    live.then_some(guard_home)
+/// Encode an edge answer that says its receipt was recorded, then queue
+/// `receipt` with the live writer for `guard_home`, holding that writer the
+/// whole time so it cannot exit or start draining between the two.
+///
+/// `None` means nothing was queued and the answer must say so: no live writer
+/// runs for the home, its slot is busy starting one (a journal replay) or
+/// draining one, or the writer refused the receipt. The edge never waits on
+/// that slot and never starts a writer. An answer that fails to encode is
+/// returned as is and queues nothing.
+pub(crate) fn record_edge_receipt<E>(
+    guard_home: &Path,
+    receipt: &NativeHookDecisionReceiptV1,
+    encode: impl FnOnce() -> Result<Vec<u8>, E>,
+) -> Option<Result<Vec<u8>, E>> {
+    let Ok(Value::Object(receipt)) = serde_json::to_value(receipt) else {
+        return None;
+    };
+    let slot = slot(&canonical_home(guard_home));
+    let held = match slot.writer.try_lock() {
+        Ok(held) => held,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => return None,
+    };
+    let resident = held.as_ref()?;
+    if resident.writer.has_exited() || resident.writer.is_stopping() {
+        return None;
+    }
+    let encoded = match encode() {
+        Ok(encoded) => encoded,
+        Err(error) => return Some(Err(error)),
+    };
+    resident
+        .writer
+        .submit_native_decision_receipt(&receipt)
+        .then_some(Ok(encoded))
 }
 
-/// Queue an edge's own receipt with the writer running for `guard_home` (as
-/// [`running_home`] spells it), as a `submit_native_decision_receipt` request
-/// would. The writer's signals stay put for the daemon's next request.
-pub(crate) fn queue_edge_receipt(guard_home: &Path, receipt: &NativeHookDecisionReceiptV1) -> bool {
-    let Ok(Value::Object(receipt)) = serde_json::to_value(receipt) else {
-        return false;
-    };
-    with_running(guard_home, |resident| {
-        resident.writer.submit_native_decision_receipt(&receipt)
-    })
-    .unwrap_or(false)
+/// Run `act` while this Guard home's writer slot is held, as starting a
+/// writer or draining one holds it.
+#[cfg(test)]
+pub(crate) fn while_slot_busy<T>(guard_home: &Path, act: impl FnOnce() -> T) -> T {
+    let slot = slot(&canonical_home(guard_home));
+    let _held = slot.writer.lock().unwrap_or_else(|e| e.into_inner());
+    act()
 }
 
 /// The widest drain a caller may ask for. `timeout_seconds` arrives as an

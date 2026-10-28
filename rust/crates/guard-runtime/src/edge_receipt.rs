@@ -6,8 +6,9 @@
 //! so the daemon skips that request.
 //!
 //! Only a writer already running for the request's Guard home takes the
-//! receipt: starting one replays its journal, which no hook answer waits for.
-//! Without a running writer the answer says nothing was recorded and the
+//! receipt: starting one replays its journal, and a stop drains it, neither of
+//! which a hook answer waits for. Without a live writer free to take it, or
+//! when the writer refuses it, the answer says nothing was recorded and the
 //! daemon submits the receipt as before, which starts the writer. The receipt
 //! is queued only once the answer is encoded, so a call that fails closed on
 //! an answer too large to send leaves no receipt behind. It is queued before
@@ -33,15 +34,19 @@ pub(crate) fn encode(
     started: Instant,
 ) -> Result<Vec<u8>, String> {
     let mut edge = crate::edge_structured::attached(envelope, edge, started);
-    let writer_home = (resident && envelope.record_receipt)
-        .then(|| writer_op::running_home(Path::new(&envelope.source.guard_home)))
-        .flatten();
-    edge.receipt_recorded = writer_home.is_some();
-    let encoded = crate::encode_response(&edge)?;
-    if let Some(guard_home) = writer_home {
-        writer_op::queue_edge_receipt(&guard_home, &edge.receipt);
+    if resident && envelope.record_receipt {
+        edge.receipt_recorded = true;
+        let recorded = writer_op::record_edge_receipt(
+            Path::new(&envelope.source.guard_home),
+            &edge.receipt,
+            || crate::encode_response(&edge),
+        );
+        if let Some(encoded) = recorded {
+            return encoded;
+        }
+        edge.receipt_recorded = false;
     }
-    Ok(encoded)
+    crate::encode_response(&edge)
 }
 
 #[cfg(test)]

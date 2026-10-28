@@ -137,6 +137,19 @@ fn a_stopped_writer_takes_no_receipt() {
 }
 
 #[test]
+fn a_writer_slot_busy_starting_or_draining_leaves_the_receipt_to_the_daemon() {
+    let home = store_home("edge-receipt-busy");
+    start_writer(&home);
+    let (envelope, edge) = answered(&home, true);
+    // The answer comes back at once instead of waiting on the slot.
+    let answer =
+        crate::hook_evidence_writer_op::while_slot_busy(&home, || encoded(&envelope, true, edge));
+    assert!(answer.get("receipt_recorded").is_none());
+    assert_eq!(receipts_accepted(&home), json!(0));
+    writer(&home, json!({"action": "stop", "timeout_seconds": 10.0}));
+}
+
+#[test]
 fn the_resident_advertises_that_its_edge_records_receipts() {
     assert!(
         crate::resident_op_features::RESIDENT_OP_FEATURES.contains(&EDGE_RECEIPT_RECORD_FEATURE)
