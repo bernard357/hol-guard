@@ -38,7 +38,7 @@ def test_countly_package_identity_is_external_and_opt_in() -> None:
     assert contribution["trustClass"] == "external"
     assert contribution["publisher"] == {
         "id": "community.kantorcodes",
-        "displayName": "Michael Kantor (HOL)",
+        "displayName": "Michael Kantor",
         "url": "https://github.com/kantorcodes",
     }
     assert contribution["launch"] == {
