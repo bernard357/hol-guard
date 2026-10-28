@@ -113,3 +113,20 @@ def test_python_carried_as_a_script_template_is_scanned() -> None:
     found = {str(site["func"]) for site in audit.discover()}
     assert "BOUNDED_HOOK_NATIVE_TEMPLATE:_to_native" in found
     assert "BOUNDED_HOOK_SCRIPT_TEMPLATE:_rewrite_grok_decision" in found
+
+
+def test_an_unnamed_template_keeps_its_label_when_lines_move() -> None:
+    """The label of a literal with no name of its own cannot be its line number.
+
+    Line numbers move whenever anything above them is edited, and before
+    Python 3.12 the constant parts of an f-string report the enclosing
+    JoinedStr's position instead of their own. Either would make `--check`
+    report the same unchanged template as newly unreadable.
+    """
+
+    template = '"def guard():\\n    return \\"allow\\"\\n"\n'
+    first = ast.parse(f"TOP = 1\nf({template})")
+    shifted = ast.parse(f"TOP = 1\n# a comment nobody reads\nSECOND = 2\nf({template})")
+
+    assert [label for label, _line, _source in audit._embedded_sources(first)] == ["literal#0"]
+    assert [label for label, _line, _source in audit._embedded_sources(shifted)] == ["literal#0"]

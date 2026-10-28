@@ -248,13 +248,23 @@ def _embedded_sources(tree: ast.Module) -> Iterator[tuple[str, int, str]]:
     """
 
     labels = _literal_labels(tree)
+    unnamed = 0
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
             continue
         text = node.value
         if not (text.startswith("def ") or "\ndef " in text):
             continue
-        yield labels.get(id(node), f"literal@{node.lineno}"), node.lineno, text
+        label = labels.get(id(node))
+        if label is None:
+            # A literal with no name of its own is counted rather than placed.
+            # Its line number would do neither job: an edit anywhere above it
+            # moves it, and before Python 3.12 the constant parts of an
+            # f-string carry the enclosing JoinedStr's position, so the same
+            # unchanged file labels it differently on 3.10 and 3.12.
+            label = f"literal#{unnamed}"
+            unnamed += 1
+        yield label, node.lineno, text
 
 
 def discover(package: Path = PACKAGE) -> list[dict[str, object]]:

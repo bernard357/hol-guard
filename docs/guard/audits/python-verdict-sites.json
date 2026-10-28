@@ -11,14 +11,14 @@
     "health-probe": "Writes a probe row that is rolled back; evaluates no policy.",
     "presentation": "A label, band or next-step string that never reaches enforcement.",
     "composes-in-python": "Settles a verdict in Python that the resident did not give. The invariant forbids this.",
-    "acknowledges-observation": "Replies to an event that reports completed activity, so its allow authorizes no tool action.",
+    "acknowledges-observation": "Replies to an event that reports completed activity, so its allow authorizes no tool action. A site filed here may still block, and does so for any event that can pause a tool call.",
     "labels-finding": "A field on a scan finding record, alongside its severity and lifecycle state; no hook reads it.",
     "routes-guard-own-sink": "Passes a call through to Guard's own approval sink, which opens the request owner-only, checks its digest and re-authorizes the command there."
   },
   "unparsed_templates": [
     {
       "file": "src/codex_plugin_scanner/guard/adapters/cline_hooks.py",
-      "label": "literal@112",
+      "label": "literal#0",
       "line": 112,
       "reason": "unmatched ')'"
     }
@@ -58,12 +58,12 @@
       "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
       "func": "BOUNDED_HOOK_NATIVE_TEMPLATE:_failure_payload",
       "root": "hook",
-      "reading": "fails-closed",
+      "reading": "acknowledges-observation",
       "actions": [
         "allow",
         "block"
       ],
-      "note": "The generated client's own fail-safe: a pausing event denies, an observation acknowledges. Same split as _pause_payload and _observe_payload above."
+      "note": "The generated client's own fail-safe: a pausing event denies, an observation acknowledges. The allow is only ever the observation branch. Same split as _pause_payload and _observe_payload above."
     },
     {
       "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
@@ -206,12 +206,12 @@
       "file": "src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py",
       "func": "emit_hook_review",
       "root": "hook",
-      "reading": "fails-closed",
+      "reading": "acknowledges-observation",
       "actions": [
         "allow",
         "block"
       ],
-      "note": "The outage path: a pausing event blocks, an observation does not."
+      "note": "The outage path: a pausing event blocks, an observation does not. The allow is only ever the observation branch."
     },
     {
       "file": "src/codex_plugin_scanner/guard/cli/product.py",
