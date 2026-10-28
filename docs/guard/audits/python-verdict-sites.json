@@ -56,6 +56,16 @@
     },
     {
       "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
+      "func": "BOUNDED_HOOK_NATIVE_TEMPLATE:_canonical_policy_action",
+      "root": "hook",
+      "reading": "fails-closed",
+      "actions": [
+        "block"
+      ],
+      "note": "Places the resident's policy_action in the lattice the generated client carries. A recognised action passes through unchanged; the only verdict this function itself composes is the block it answers for an action it cannot place, matching the native bridge's own is_guard_action filter."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",
       "func": "BOUNDED_HOOK_NATIVE_TEMPLATE:_failure_payload",
       "root": "hook",
       "reading": "acknowledges-observation",
@@ -84,7 +94,7 @@
       "actions": [
         "allow"
       ],
-      "note": "Maps the resident's policy_action into the harness permission vocabulary and returns None for an action it does not recognise."
+      "note": "Maps the resident's policy_action into the harness permission vocabulary. _canonical_policy_action reads an unplaceable action as block first, so the None branch is now unreachable from a daemon response."
     },
     {
       "file": "src/codex_plugin_scanner/guard/adapters/bounded_cli_hook_script_native.py",

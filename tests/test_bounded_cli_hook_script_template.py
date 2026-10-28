@@ -548,3 +548,91 @@ def test_generated_client_devin_pretooluse_allow_has_no_decision(tmp_path: Path)
     payload = json.loads(stdout)
     assert code == 0
     assert "decision" not in payload
+
+
+# A newer resident, a truncated field or a corrupted response can hand the
+# standalone client an action it cannot place in Guard's lattice. The client
+# reads that as "block", the way the native bridge that answers for it does,
+# rather than rendering the empty "nothing to say" envelope that let the call
+# run.
+_UNPLACEABLE_ACTIONS = ("quarantine-required", "ask", "", "BLOCK", "0", None, 7)
+
+
+@pytest.mark.parametrize(
+    "harness",
+    ["kimi", "zcode", "grok", "devin", "copilot", "hermes", "cursor", "opencode"],
+)
+@pytest.mark.parametrize("action", _UNPLACEABLE_ACTIONS)
+def test_generated_client_denies_an_action_outside_the_lattice(
+    tmp_path: Path,
+    harness: str,
+    action: object,
+) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": action, "reason": "Review in HOL Guard."},
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    specific = payload.get("hookSpecificOutput")
+    decision = specific["permissionDecision"] if isinstance(specific, dict) else payload["decision"]
+    assert decision in {"deny", "block"}, (harness, action, stdout)
+
+
+@pytest.mark.parametrize(
+    ("harness", "event_name", "code"),
+    [
+        ("kimi", "PreToolUse", 2),
+        ("zcode", "PreToolUse", 2),
+        ("grok", "PreToolUse", 2),
+        ("devin", "PreToolUse", 2),
+        ("hermes", "PreToolUse", 2),
+        ("hermes", "PostToolUse", 2),
+        ("kimi", "UserPromptSubmit", 2),
+        ("zcode", "UserPromptSubmit", 2),
+        # Copilot carries its decision in the envelope, so a deny still exits 0.
+        ("copilot", "PreToolUse", 0),
+    ],
+)
+def test_generated_client_exit_code_for_an_unplaceable_action_matches_the_harness(
+    tmp_path: Path,
+    harness: str,
+    event_name: str,
+    code: int,
+) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    _stdout, _stderr, exit_code = module._to_native(
+        {"policy_action": "quarantine-required", "reason": "Review in HOL Guard."},
+        event_name,
+    )
+    assert exit_code == code
+
+
+@pytest.mark.parametrize("harness", ["kimi", "zcode", "grok", "devin", "hermes"])
+def test_generated_client_still_allows_the_permissive_tiers(tmp_path: Path, harness: str) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    for action in ("allow", "warn"):
+        stdout, _stderr, exit_code = module._to_native(
+            {"policy_action": action, "reason": ""},
+            "PreToolUse",
+        )
+        payload = json.loads(stdout)
+        specific = payload.get("hookSpecificOutput")
+        decision = specific.get("permissionDecision") if isinstance(specific, dict) else payload.get("decision")
+        assert exit_code == 0, (harness, action)
+        assert decision in {"allow", None}, (harness, action, stdout)
+
+
+def test_generated_client_canonicalizes_before_naming_the_action_in_a_reason(tmp_path: Path) -> None:
+    # The stderr reason names the tier the client acted on, not the raw value
+    # it could not place, so an operator reading it sees the decision Guard made.
+    module = _load_script(tmp_path, harness="zcode")
+    _stdout, stderr, exit_code = module._to_native(
+        {
+            "policy_action": "quarantine-required",
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"},
+        },
+        "PreToolUse",
+    )
+    assert exit_code == 2
+    assert "quarantine-required" not in stderr

@@ -1,6 +1,24 @@
 """Native response rendering embedded in the standalone hook client."""
 
-BOUNDED_HOOK_NATIVE_TEMPLATE = """def _permission_decision(policy_action: str) -> str | None:
+BOUNDED_HOOK_NATIVE_TEMPLATE = """_GUARD_ACTIONS = frozenset(
+    {"allow", "warn", "review", "require-reapproval", "sandbox-required", "block"}
+)
+
+
+def _canonical_policy_action(policy_action: object) -> str:
+    # An action this client cannot place -- one a newer resident introduced,
+    # or a truncated or corrupted field -- is not evidence of permission, so
+    # it reads as "block": what this client already answers for a missing
+    # action, and what the native bridge that answers for this client reads
+    # the same value as. Matching is exact and excludes the "ask" alias, as
+    # the bridge's own is_guard_action does.
+    if isinstance(policy_action, str) and policy_action in _GUARD_ACTIONS:
+        return policy_action
+    return "block"
+
+
+def _permission_decision(policy_action: str) -> str | None:
+    policy_action = _canonical_policy_action(policy_action)
     if policy_action in {"allow", "warn"}:
         return "allow"
     if policy_action in {"review", "require-reapproval", "sandbox-required"}:
@@ -16,6 +34,7 @@ BOUNDED_HOOK_NATIVE_TEMPLATE = """def _permission_decision(policy_action: str) -
 
 
 def _should_exit_block(event_name: str, policy_action: str) -> bool:
+    policy_action = _canonical_policy_action(policy_action)
     compact = _compact(event_name)
     blocking_events = {"pretooluse", "userpromptsubmit", "pretoolcall"}
     if HARNESS == "devin":
@@ -91,7 +110,7 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
         return stdout, "", 2 if decision == "block" else 0
     if "hookSpecificOutput" in daemon_response or "decision" in daemon_response:
         native_response = dict(daemon_response)
-        policy = str(native_response.get("policy_action") or "block")
+        policy = _canonical_policy_action(native_response.get("policy_action") or "block")
         exit_code = 2 if _should_exit_block(event_name, policy) else 0
         if HARNESS == "devin" and exit_code == 2:
             native_response["decision"] = "block"
@@ -107,7 +126,7 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
                 reason = f"HOL Guard blocked this action ({policy})"
             return stdout, _stderr_reason(reason), exit_code
         return stdout, "", exit_code
-    policy_action = str(daemon_response.get("policy_action") or "block")
+    policy_action = _canonical_policy_action(daemon_response.get("policy_action") or "block")
     reason = str(daemon_response.get("reason") or daemon_response.get("permission_decision_reason") or "")
     payload: dict[str, object] = {}
     if event_name == "UserPromptSubmit":
