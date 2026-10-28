@@ -501,12 +501,18 @@ fn a_route_to_no_repository_still_needs_a_trusted_git() {
             .as_nanos()
     ));
     let _cleanup = FixtureCleanup(root.clone());
+    // The workspace sits below the declared home, which admits the route on
+    // every host. A route below the temporary root is admitted only under
+    // `/tmp`, and the platform temporary directory is elsewhere on macOS and
+    // Windows. The root is spelled without the Windows verbatim prefix, as a
+    // user types it.
+    std::fs::create_dir_all(&root).unwrap();
+    let canonical_root = root.canonicalize().unwrap();
+    let spelling = canonical_root.to_str().unwrap();
+    let root = std::path::PathBuf::from(spelling.strip_prefix(r"\\?\").unwrap_or(spelling));
     let home = root.join("home");
-    let workspace = root.join("workspace");
-    std::fs::create_dir_all(&home).unwrap();
+    let workspace = home.join("workspace");
     std::fs::create_dir_all(workspace.join("repository")).unwrap();
-    let home = home.canonicalize().unwrap();
-    let workspace = workspace.canonicalize().unwrap();
     let original_path = std::env::var("PATH").unwrap();
     let environment = |path: String| GuardExecutionEnvironmentV1 {
         path,
