@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RUST_READERS = (
     "rust/crates/guard-runtime/src/resident_process_identity.rs",
     "rust/crates/guard-runtime/src/resident_state.rs",
+    "rust/crates/guard-runtime/src/pack_lifecycle/release.rs",
+    "rust/crates/guard-command/src/bundle_metadata.rs",
 )
 DEVELOPMENT_WHEEL_BUILDS = (
     "scripts/ci/build-native-wheel-macos.sh",
