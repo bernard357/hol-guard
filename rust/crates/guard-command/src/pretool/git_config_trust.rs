@@ -83,6 +83,23 @@ pub(in crate::pretool) fn clean_environment(
     })
 }
 
+/// Whether the Git a segment names resolves, from this home and working
+/// directory, to a binary in a trusted install location. A read that needs no
+/// configuration probe still runs whatever the search path finds first.
+pub(in crate::pretool) fn trusted_launch(
+    executable: &str,
+    context: crate::pretool::PathContext<'_>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
+    let (Some(home), Some(cwd)) = (context.home_dir, context.cwd) else {
+        return false;
+    };
+    let (Ok(home), Ok(cwd)) = (fs::canonicalize(home), fs::canonicalize(cwd)) else {
+        return false;
+    };
+    trusted_command(executable, &home, &cwd, execution_environment).is_some()
+}
+
 pub(in crate::pretool) fn trusted_command(
     executable: &str,
     home: &Path,

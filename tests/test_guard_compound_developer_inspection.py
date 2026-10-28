@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from tests.developer_inspection_test_support import assert_leading_cd_inspection_allowed
-from tests.git_execution_test_support import assert_host_git_proof_result
 from tests.live_hook_review_support import (
     LIVE_REVIEWS_RETIRED_ALLOW,
     live_allows_retired_review_on,
@@ -330,10 +329,9 @@ def test_compound_git_and_filesystem_inspection_requires_host_binary_proof(live_
         home=home,
     )
 
-    assert_host_git_proof_result(artifact is None, cwd=workspace)
-    if os.name == "nt":
-        assert artifact is not None
-        assert artifact["policy_action"] != "allow"
+    # The native proof resolves Git on the search path and requires it to sit in
+    # a trusted install location. The Rust suite covers a planted Git.
+    assert artifact is None
 
 
 @pytest.mark.xfail(

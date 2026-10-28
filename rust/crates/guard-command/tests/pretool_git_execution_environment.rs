@@ -483,3 +483,85 @@ fn stamped_git_reads_allow_only_when_no_diff_helper_is_configured() {
     let assigned = evaluate("GIT_EXTERNAL_DIFF=./x git diff", Some(&stamped));
     assert_eq!(assigned.decision, "deny");
 }
+
+/// A `-C` route to a directory that holds no repository skips the
+/// configuration probe, because Git stops in its own setup there. The probe
+/// was also where the Git binary was checked, so a planted `git` ahead of the
+/// real one on the search path must still keep the review.
+#[test]
+fn a_route_to_no_repository_still_needs_a_trusted_git() {
+    use guard_command::pretool::evaluate_pre_tool_envelope_with_execution_context;
+    use guard_contracts::GuardExecutionEnvironmentV1;
+    let root = std::env::temp_dir().join(format!(
+        "guard-git-no-repository-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _cleanup = FixtureCleanup(root.clone());
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(workspace.join("repository")).unwrap();
+    let home = home.canonicalize().unwrap();
+    let workspace = workspace.canonicalize().unwrap();
+    let original_path = std::env::var("PATH").unwrap();
+    let environment = |path: String| GuardExecutionEnvironmentV1 {
+        path,
+        environment_names: vec!["GIT_CONFIG_NOSYSTEM".into()],
+        environment_digest: "0".repeat(64),
+        home: None,
+        git_pager_disabled: false,
+        pager_disabled: false,
+        xdg_config_home: None,
+        git_config_no_system: true,
+        library_search_paths: Default::default(),
+    };
+    let evaluate = |command: &str, context: &GuardExecutionEnvironmentV1| {
+        evaluate_pre_tool_envelope_with_execution_context(
+            "omp",
+            "PreToolUse",
+            &json!({"tool_name":"bash", "tool_input":{"command":command}}),
+            None,
+            None,
+            guard_command::pretool::PathContext {
+                home_dir: home.to_str(),
+                cwd: workspace.to_str(),
+                ..Default::default()
+            },
+            Some(context),
+        )
+    };
+    let commands = [
+        "git -C repository status --short",
+        "git -C repository status --short && echo \"---FILES---\"",
+    ];
+    let trusted = environment(original_path.clone());
+    for command in commands {
+        assert_eq!(evaluate(command, &trusted).decision, "allow", "{command}");
+    }
+
+    let shadow = home.join("bin");
+    std::fs::create_dir_all(&shadow).unwrap();
+    let shadow_executable = if cfg!(windows) { "git.exe" } else { "git" };
+    std::fs::write(
+        shadow.join(shadow_executable),
+        b"synthetic executable must never run",
+    )
+    .unwrap();
+    let shadow_path =
+        std::env::join_paths(std::iter::once(shadow).chain(std::env::split_paths(&original_path)))
+            .unwrap();
+    let planted = environment(shadow_path.to_string_lossy().into_owned());
+    for command in commands {
+        let result = evaluate(command, &planted);
+        assert_ne!(result.decision, "allow", "{command}");
+        assert_eq!(result.minimum_action, "require-reapproval", "{command}");
+        assert_eq!(
+            result.reason_code, "native_git_execution_context_review",
+            "{command}"
+        );
+    }
+}
