@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
-from codex_plugin_scanner.guard.cli.install_commands import list_harness_setup_items
+from codex_plugin_scanner.guard.cli.install_commands import build_harness_verification, list_harness_setup_items
 from codex_plugin_scanner.guard.runtime.fleet_posture_common import DIAGNOSTICS_STATE_KEY, iso
 from codex_plugin_scanner.guard.store import GuardStore
 
@@ -88,3 +88,25 @@ def test_old_setup_check_falls_back_to_the_install_record(tmp_path: Path) -> Non
 
     assert items["codex"]["status"] == "protected"
     assert items["kimi"]["installed"] is False
+
+
+def test_setup_check_that_overlapped_an_install_change_is_ignored(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    store = GuardStore(context.guard_home)
+    now = datetime.now(timezone.utc)
+    # Repair stamps the record first; a fleet check that ran mid-repair saw the old broken setup.
+    store.set_managed_install("codex", True, None, {}, iso(now - timedelta(minutes=2)))
+    _record_fleet_check(store, now - timedelta(minutes=1), codex="broken")
+
+    assert _items_by_harness(context, store)["codex"]["status"] == "protected"
+
+
+def test_app_verification_reads_the_install_record_not_the_fleet_check(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    store = GuardStore(context.guard_home)
+    now = datetime.now(timezone.utc)
+    store.set_managed_install("codex", True, None, {}, iso(now - timedelta(days=2)))
+    _record_fleet_check(store, now - timedelta(minutes=5), codex="broken", kimi="active")
+
+    assert build_harness_verification("codex", context, store)["verification"]["installed"] is True
+    assert build_harness_verification("kimi", context, store)["verification"]["installed"] is False
