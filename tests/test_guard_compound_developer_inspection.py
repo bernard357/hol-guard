@@ -12,6 +12,7 @@ from tests.developer_inspection_test_support import assert_leading_cd_inspection
 from tests.live_hook_review_support import (
     LIVE_REVIEWS_RETIRED_ALLOW,
     live_allows_retired_review_on,
+    live_decision,
     live_shell_review,
     quietly_allowed,
 )
@@ -340,7 +341,7 @@ def test_compound_git_and_filesystem_inspection_requires_host_binary_proof(live_
         assert artifact is None
     else:
         assert artifact is not None
-        assert artifact["policy_action"] != "allow"
+        assert live_decision(artifact) != "allow"
 
 
 @pytest.mark.xfail(
