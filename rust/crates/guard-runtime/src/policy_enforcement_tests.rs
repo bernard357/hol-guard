@@ -258,8 +258,6 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
         "{}",
         result.reason
     );
-    // Without detected override wording the setting still applies, but the
-    // text must not accuse the prompt of overriding instructions.
     assert!(
         !result
             .reason
