@@ -235,9 +235,10 @@ pub(super) fn preview_with(
 
 /// Components of a root-relative `/`-separated path, or `None` when it is
 /// empty, absolute, too long, or names `.`/`..`, an empty component or a
-/// backslash. On Windows a component may not hold `:` or end in `.` or a
-/// space: Windows drops trailing dots and spaces, so `.env.` would open
-/// `.env` while slipping past the name checks.
+/// backslash. On Windows a component may not hold `:`, end in `.` or a
+/// space, or look like an 8.3 short name: Windows drops trailing dots and
+/// spaces and resolves short names, so `.env.` or `ENV~1` would open `.env`
+/// while slipping past the name checks.
 fn components(path: &str) -> Option<Vec<&str>> {
     if path.is_empty() || path.len() > MAX_PATH_BYTES || path.contains(['\\', '\0']) {
         return None;
@@ -247,12 +248,21 @@ fn components(path: &str) -> Option<Vec<&str>> {
         part.is_empty()
             || *part == "."
             || *part == ".."
-            || (cfg!(windows) && (part.contains(':') || part.ends_with(['.', ' '])))
+            || (cfg!(windows)
+                && (part.contains(':') || part.ends_with(['.', ' ']) || may_be_short_name(part)))
     };
     if parts.iter().any(invalid) {
         return None;
     }
     Some(parts)
+}
+
+/// Whether `part` could be an 8.3 short name, which holds `~` followed by a
+/// digit. A long name of that shape is refused too.
+pub(super) fn may_be_short_name(part: &str) -> bool {
+    part.split('~')
+        .skip(1)
+        .any(|tail| tail.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 /// `SKIP_DIRS` names are lowercase, and a case-insensitive filesystem opens

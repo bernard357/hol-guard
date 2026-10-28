@@ -7,8 +7,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::export_preview::{
-    preview, preview_with, run_command, ExportPreviewRequest, MAX_FINDINGS_PER_FILE, MAX_PATHS,
-    REDACTION_MARKER,
+    may_be_short_name, preview, preview_with, run_command, ExportPreviewRequest,
+    MAX_FINDINGS_PER_FILE, MAX_PATHS, REDACTION_MARKER,
 };
 
 // The values are split so repository secret scanners do not read this file as
@@ -199,18 +199,34 @@ fn policy_directories_match_without_case() {
 
 #[cfg(windows)]
 #[test]
-fn windows_names_with_a_trailing_dot_or_space_are_rejected() {
+fn windows_names_with_a_trailing_dot_or_space_or_a_short_name_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), ".env", b"value\n");
     write(dir.path(), "node_modules/pkg/index.js", b"value\n");
 
-    let named = [".env.", ".env ", "node_modules./pkg/index.js"];
+    let named = [
+        ".env.",
+        ".env ",
+        "node_modules./pkg/index.js",
+        "ENV~1",
+        "NODE_M~1/pkg/index.js",
+    ];
     let result = run(dir.path(), &named);
     let reasons = reasons(&result);
     for path in named {
         assert_eq!(reasons[path], "invalid_path", "{path:?}");
     }
     assert_eq!(result["file_count"], 0);
+}
+
+#[test]
+fn a_tilde_and_a_digit_mark_a_possible_short_name() {
+    for short in ["ENV~1", "NODE_M~1", "PROGRA~12", "a~b~3.txt"] {
+        assert!(may_be_short_name(short), "{short}");
+    }
+    for long in [".env", "notes~", "backup~old", "~", "file.txt~"] {
+        assert!(!may_be_short_name(long), "{long}");
+    }
 }
 
 #[test]
