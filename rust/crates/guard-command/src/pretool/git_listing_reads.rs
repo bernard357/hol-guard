@@ -222,6 +222,25 @@ const LS_FILES_FLAGS: [&str; 25] = [
     "--deduplicate",
 ];
 
+/// Whether an `ls-files` read asks which tracked files differ from the index.
+/// Git answers that by comparing the working-tree copy with the stored blob,
+/// and when the stat data alone cannot decide it reads the file and converts
+/// it to its stored form, which runs the repository's clean filters. Only the
+/// modified selector asks for that comparison: the deleted, untracked, killed
+/// and unmerged selectors are answered from `lstat`, the directory walk and
+/// the index alone, so none of them hashes a file.
+pub(super) fn compares_working_tree(subcommand: &str, rest: &[String]) -> bool {
+    subcommand == "ls-files"
+        && rest
+            .iter()
+            .take_while(|argument| *argument != "--")
+            .any(|argument| {
+                argument == "-m"
+                    || argument == "--modified"
+                    || (short_bundle(argument, "cdmoisuktvz") && argument.contains('m'))
+            })
+}
+
 /// `git ls-files` prints the paths the index holds, optionally compared
 /// against the files on disk. The operands are pathspecs the index is
 /// matched against, never files it opens.
