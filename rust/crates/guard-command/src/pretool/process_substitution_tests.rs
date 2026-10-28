@@ -1,20 +1,23 @@
 use super::project;
-use crate::CommandModelRequestV1;
 
+/// The envelope answer for `command`. The projection runs on the envelope
+/// path, so the single-command entry point would read past it and prove
+/// nothing.
 fn decide(command: &str) -> (String, String) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .unwrap();
     let root = root.to_str().unwrap();
-    let request = CommandModelRequestV1 {
-        command: command.to_owned(),
-        dialect: "posix".to_owned(),
-        transport: "shell_string".to_owned(),
-        extraction_provenance: "guard-shell".to_owned(),
-    };
-    let decision =
-        crate::pretool::evaluate_pre_tool_with_context(&request, Some(root), Some(root)).unwrap();
-    (decision.minimum_action, decision.reason_code)
+    let result = super::super::evaluate_pre_tool_envelope_with_context(
+        "zcode",
+        "PreToolUse",
+        &serde_json::json!({"tool_name": "Bash", "tool_input": {"command": command}}),
+        None,
+        None,
+        Some(root),
+        Some(root),
+    );
+    (result.minimum_action, result.reason_code)
 }
 
 fn projected(command: &str) -> Option<String> {
