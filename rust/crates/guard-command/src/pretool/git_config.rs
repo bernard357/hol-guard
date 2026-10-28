@@ -104,6 +104,8 @@ pub(super) fn execution_free_paging(
             | "count-objects"
             | "check-attr"
             | "sparse-checkout"
+            | "rev-parse"
+            | "ls-files"
             | "apply"
             | "bisect"
             | "notes"
@@ -132,7 +134,13 @@ pub(super) fn execution_free_paging(
     }
     if matches!(
         operation,
-        "shortlog" | "check-ignore" | "count-objects" | "check-attr" | "sparse-checkout"
+        "shortlog"
+            | "check-ignore"
+            | "count-objects"
+            | "check-attr"
+            | "sparse-checkout"
+            | "rev-parse"
+            | "ls-files"
     ) && !super::git_listing_reads::read_form(operation, &remaining[1..])
     {
         return None;
