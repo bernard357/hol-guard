@@ -86,7 +86,7 @@ fn write_fixture_file(path: &std::path::Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
-fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
+pub(crate) fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
     let digest = "a".repeat(64);
     let guard_home = std::env::temp_dir().join(format!(
         "hol-guard-native-edge-generation-test-{}-{}",
@@ -132,6 +132,8 @@ fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
             execution_environment: None,
         },
         recording_only: false,
+        local_cli_rules: None,
+        structured_output_config: None,
     }
 }
 

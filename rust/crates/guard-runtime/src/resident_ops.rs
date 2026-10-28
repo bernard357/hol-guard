@@ -456,9 +456,6 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
                     &request,
                 )
             }
-            ResidentOperationV1::CodexToolOutput(request) => {
-                crate::codex_tool_output_op::evaluate_codex_tool_output_request(&request)
-            }
             ResidentOperationV1::PolicyBundleAuthority(request) => {
                 crate::policy_bundle_op::evaluate_policy_bundle_authority_request(&request)
             }
@@ -584,6 +581,11 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             }
             ResidentOperationV1::CodexHookFileIdentity(request) => {
                 crate::codex_hook_file_identity_op::evaluate_codex_hook_file_identity_request(
+                    &request,
+                )
+            }
+            ResidentOperationV1::CodexHookManifestVerify(request) => {
+                crate::codex_hook_manifest_verify_op::evaluate_codex_hook_manifest_verify_request(
                     &request,
                 )
             }

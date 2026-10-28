@@ -23,7 +23,12 @@ from ..codex_config import dump_toml, read_config_bytes, read_toml_payload
 from ..codex_hook_command_line import encode_hook_config_argument, render_hook_command
 from ..codex_hook_compatibility import NATIVE_CODEX_HOOK_COMMAND, NATIVE_CODEX_HOOK_FEATURE, python_bridge_argv
 from ..codex_hook_file_integrity import validate_regular_file
-from ..codex_hook_identity import CodexHookIdentityUnavailableError
+from ..codex_hook_identity import (
+    CodexHookGroupQuestion,
+    CodexHookIdentityUnavailableError,
+    canonical_codex_hook_group_conflict_keys,
+    canonical_codex_hook_group_identities,
+)
 from ..codex_hook_integrity import (
     atomic_write_bytes,
     atomic_write_text,
@@ -38,10 +43,7 @@ from ..codex_hook_integrity import (
 )
 from ..codex_hook_inventory import (
     CODEX_HOOK_INVENTORY_UNMANAGED_EXECUTABLE,
-    CodexHookGroupQuestion,
     CodexHookInventory,
-    canonical_codex_hook_group_conflict_keys,
-    canonical_codex_hook_group_identities,
     enumerate_codex_hooks,
 )
 from ..codex_hook_launch_runtime import isolated_daemon_start_command, isolated_guard_cli_command
@@ -91,6 +93,7 @@ from ..codex_install_transaction import codex_install_transaction
 from ..config import MAX_APPROVAL_WAIT_TIMEOUT_SECONDS, load_guard_config, resolve_guard_home
 from ..launcher import merge_guard_launcher_env
 from ..models import HarnessDetection
+from ..native_codex_hook_identity import wire_codex_hook_bindings as _wire_bindings
 from ..native_path_anchor import anchor_to_process_directory
 from ..shims import install_guard_shim, prepare_guard_shim, remove_guard_shim
 from ..stable_guard_cli import resolve_frozen_guard_cli
@@ -499,24 +502,6 @@ def _current_install_self_bindings(
         guard_home=_runtime_guard_home(context),
         recorded_commands=_recorded_handler_commands(authenticated_bindings),
     )
-
-
-def _wire_bindings(bindings: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
-    """Ownership bindings the native request can carry.
-
-    A binding holding a value JSON cannot carry (a TOML date, a non-finite
-    float) is left out, so the hook it would have claimed stays reviewable as
-    unmanaged instead of failing the whole detection.
-    """
-
-    wire: list[dict[str, object]] = []
-    for binding in bindings:
-        try:
-            json.dumps(binding, allow_nan=False)
-        except (TypeError, ValueError):
-            continue
-        wire.append(dict(binding))
-    return wire
 
 
 def _legacy_wire_bindings(context: HarnessContext, payload: dict[str, object]) -> list[dict[str, object]]:
