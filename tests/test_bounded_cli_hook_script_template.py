@@ -737,6 +737,121 @@ def test_generated_client_reads_a_padded_canonical_action_as_that_action(
     assert decision in {"allow", None}, (harness, action, stdout)
 
 
+@pytest.mark.parametrize("harness", ["copilot", "cursor", "opencode", "kimi", "zcode", "grok", "devin"])
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("quarantine-required", "deny"),
+        ("block", "deny"),
+        ("sandbox-required", "ask"),
+        ("review", "ask"),
+        ("require-reapproval", "ask"),
+    ],
+)
+def test_generated_client_writes_a_decision_into_an_empty_envelope(
+    tmp_path: Path,
+    harness: str,
+    action: str,
+    expected: str,
+) -> None:
+    # An envelope with no permission decision beside a restrictive action is
+    # what a harness that reads the envelope rather than the exit code runs
+    # on. Copilot, cursor and opencode exit 0, so the envelope is the whole
+    # answer for them. The native bridge writes the decision in; so does the
+    # client, or the same request gets two answers.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": action, "hookSpecificOutput": {"hookEventName": "PreToolUse"}},
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert payload["hookSpecificOutput"]["permissionDecision"] == expected, (harness, action, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode"])
+def test_generated_client_writes_a_decision_into_an_envelope_it_cannot_read(
+    tmp_path: Path,
+    harness: str,
+) -> None:
+    # The key is there but carries no envelope, so there is nowhere for the
+    # decision to go until the client makes one, as the bridge does.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": "block", "hookSpecificOutput": "PreToolUse"},
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert payload["hookSpecificOutput"] == {"hookEventName": "PreToolUse", "permissionDecision": "deny"}, stdout
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+@pytest.mark.parametrize("word", ["permit", "allowed", "", 7, None, "DENY-ish"])
+def test_generated_client_denies_an_unplaceable_decision_word_on_a_gating_event(
+    tmp_path: Path,
+    harness: str,
+    word: object,
+) -> None:
+    # A decision word this client cannot place names no permission. Passing
+    # it through beside an "allow" action left the call running on a harness
+    # that reads the envelope; the bridge writes "deny" over it instead.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {
+            "policy_action": "allow",
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": word},
+        },
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny", (harness, word, stdout)
+    assert payload["policy_action"] == "block", (harness, word, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+def test_generated_client_denies_an_unplaceable_top_level_decision_on_a_gating_event(
+    tmp_path: Path,
+    harness: str,
+) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": "allow", "decision": "permit"},
+        "UserPromptSubmit",
+    )
+    payload = json.loads(stdout)
+    # Devin names its own blocking decision after the exit code it is about
+    # to take; every other harness keeps the word the bridge writes.
+    assert payload["decision"] == ("block" if harness == "devin" else "deny"), (harness, stdout)
+    assert payload["policy_action"] == "block", (harness, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+def test_generated_client_blocks_a_restrictive_prompt_with_no_decision(
+    tmp_path: Path,
+    harness: str,
+) -> None:
+    # UserPromptSubmit has no permission envelope to carry the decision, so a
+    # restrictive action gets the top-level block the bridge writes.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": "quarantine-required", "hookSpecificOutput": {"hookEventName": "UserPromptSubmit"}},
+        "UserPromptSubmit",
+    )
+    assert json.loads(stdout)["decision"] == "block", (harness, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+def test_generated_client_leaves_a_post_tool_envelope_alone(tmp_path: Path, harness: str) -> None:
+    # Only an event that gates the call gets a decision written into it. A
+    # PostToolUse envelope decides nothing, and the bridge leaves it as it
+    # arrived, so the client cannot invent a field the bridge would not.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": "block", "hookSpecificOutput": {"hookEventName": "PostToolUse"}},
+        "PostToolUse",
+    )
+    assert "permissionDecision" not in json.loads(stdout)["hookSpecificOutput"], (harness, stdout)
+
+
 _DECISION_LATTICE = Path(__file__).resolve().parents[1] / "rust/crates/guard-contracts/src/decision_lattice.rs"
 
 

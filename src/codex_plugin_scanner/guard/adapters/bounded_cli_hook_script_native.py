@@ -27,7 +27,9 @@ def _decision_word(value: object) -> str | None:
     return word if word in _GUARD_DECISIONS else None
 
 
-def _agreeing_native_response(native_response: dict[str, object], policy_action: str) -> str:
+def _agreeing_native_response(
+    native_response: dict[str, object], policy_action: str, event_name: str
+) -> str:
     # Make an already-shaped response say what the canonical action says.
     #
     # A response that carries its harness's own decision fields is emitted as
@@ -39,14 +41,43 @@ def _agreeing_native_response(native_response: dict[str, object], policy_action:
     # client reconciles the same two fields, so both routes answer one
     # request alike.
     #
+    # On an event that gates the call, a decision word this client cannot
+    # place names no permission either, so it is written as "deny", and a
+    # restrictive action whose envelope carries no decision at all has one
+    # inserted: an empty envelope beside a restrictive action is what a
+    # harness that reads the envelope rather than the exit code would run on.
+    #
     # The envelope is only ever tightened: a restrictive decision beside a
     # permissive action lowers the action, never the other way round.
+    compact = _compact(event_name)
+    gating = compact in {"permissionrequest", "pretoolcall", "pretooluse", "userpromptsubmit"}
     hook_specific = native_response.get("hookSpecificOutput")
     entries = dict(hook_specific) if isinstance(hook_specific, dict) else None
     has_top = "decision" in native_response
     has_nested = entries is not None and "permissionDecision" in entries
     top = _decision_word(native_response.get("decision")) if has_top else None
     nested = _decision_word(entries.get("permissionDecision")) if has_nested else None
+    if gating and has_top and top is None:
+        top = "deny"
+        native_response["decision"] = "deny"
+    if gating and has_nested and nested is None and entries is not None:
+        nested = "deny"
+        entries["permissionDecision"] = "deny"
+    restrictive = policy_action in {"review", "require-reapproval", "sandbox-required", "block"}
+    if restrictive and compact == "userpromptsubmit" and top is None:
+        top = "block"
+        native_response["decision"] = "block"
+    elif restrictive and compact in {"permissionrequest", "pretoolcall", "pretooluse"}:
+        if entries is None and "hookSpecificOutput" in native_response:
+            # The key is there but carries no envelope this client can read,
+            # so the decision goes into one the harness can.
+            entries = {"hookEventName": event_name}
+        if entries is not None and nested is None:
+            nested = "deny" if policy_action == "block" else "ask"
+            entries["permissionDecision"] = nested
+        if HARNESS in {"grok", "openclaw"} and top is None:
+            top = "deny"
+            native_response["decision"] = "deny"
     words = [word for word in (top, nested) if word is not None]
     if policy_action in {"allow", "warn"}:
         if any(word in {"deny", "block"} for word in words):
@@ -56,14 +87,14 @@ def _agreeing_native_response(native_response: dict[str, object], policy_action:
     if policy_action == "block":
         # A decision field this client cannot place is handled the way an
         # unplaceable action is: it names no permission, so it reads as deny.
-        if has_top:
+        if top is not None:
             native_response["decision"] = "block" if top == "block" else "deny"
-        if has_nested:
+        if nested is not None and entries is not None:
             entries["permissionDecision"] = "deny"
     elif policy_action in {"review", "require-reapproval", "sandbox-required"}:
-        if has_top:
+        if top is not None:
             native_response["decision"] = "block" if top == "block" else "deny"
-        if has_nested and nested == "allow":
+        if nested == "allow" and entries is not None:
             entries["permissionDecision"] = "ask"
     if entries is not None:
         native_response["hookSpecificOutput"] = entries
@@ -171,6 +202,7 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
         policy = _agreeing_native_response(
             native_response,
             _canonical_policy_action(native_response.get("policy_action") or "block"),
+            event_name,
         )
         exit_code = 2 if _should_exit_block(event_name, policy) else 0
         if HARNESS == "devin" and exit_code == 2:
