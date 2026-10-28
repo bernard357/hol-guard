@@ -1,8 +1,8 @@
-import { j as jsxRuntimeExports, r as reactExports, cx as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dC as HiMiniBugAnt, a6 as Badge, T as Tag, f as formatRelativeTime, A as ActionButton, dW as fetchReceipts, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, c as HiMiniChevronDown, d as HiMiniArrowPath } from "../guard-dashboard.js";
-import { m as missingBundleMessage, f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-D3rOF1AE.js";
-import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-B-wJQDtX.js";
+import { j as jsxRuntimeExports, r as reactExports, cx as HiMiniArrowTopRightOnSquare, a4 as HiMiniExclamationTriangle, dA as HiMiniBugAnt, a6 as Badge, T as Tag, f as formatRelativeTime, c as HiMiniChevronDown, dW as fetchReceipts, A as ActionButton, s as HiMiniCheckCircle, aA as HiMiniXCircle, h as harnessDisplayName, b as HiMiniChevronUp, d as HiMiniArrowPath } from "../guard-dashboard.js";
+import { m as missingBundleMessage, f as formatBundleExpiry, i as isBundleExpired, b as bundleRefreshKey, r as resolveIntelFreshness } from "./feed-health-workspace-C2IC39dg.js";
+import { u as useSupplyChainBundle } from "./supply-chain-hub-workspace-CF-2s4KS.js";
 import { s as supplyChainEvidenceHref, d as deriveSupplyChainEvidenceRail } from "./supply-chain-protection-stats-D5t87g7g.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-BA-loYgi.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-Cf495xGb.js";
 import "./home-protection-module-BWAkAvfY.js";
 function SupplyChainDetailSection({
   id,
@@ -401,7 +401,6 @@ function SupplyChainAuditTeaser({ auditSnapshot, auditRunning, onOpenAudit }) {
 }
 function SupplyChainWorkspaceDetails({
   snapshot,
-  onGoHome,
   onAuditNavigate,
   auditSnapshot,
   auditRunning
@@ -411,6 +410,8 @@ function SupplyChainWorkspaceDetails({
     () => snapshot.managed_installs ?? [],
     [snapshot.managed_installs]
   );
+  const [open, setOpen] = reactExports.useState(false);
+  const toggleOpen = reactExports.useCallback(() => setOpen((value) => !value), []);
   const [evidenceRail, setEvidenceRail] = reactExports.useState(void 0);
   const supplyChainIssues = reactExports.useMemo(() => resolveSupplyChainIssues(snapshot), [snapshot]);
   const cloudCapabilities = reactExports.useMemo(
@@ -438,8 +439,28 @@ function SupplyChainWorkspaceDetails({
     };
   }, [snapshot.generated_at, snapshot.receipt_count]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { "data-testid": "supply-chain-workspace", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold tracking-tight text-brand-dark", children: "Activity and sources" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 divide-y divide-slate-200 border-y border-slate-200", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold tracking-tight text-brand-dark", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        onClick: toggleOpen,
+        "aria-expanded": open,
+        "aria-controls": "supply-chain-activity",
+        className: "-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-left hover:text-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30",
+        children: [
+          "Activity and sources",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            HiMiniChevronDown,
+            {
+              className: `h-4 w-4 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`,
+              "aria-hidden": "true"
+            }
+          )
+        ]
+      }
+    ) }),
+    !open && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-600", children: "Recent blocks, workspace audit, safety data and connected apps." }),
+    open && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { id: "supply-chain-activity", className: "mt-2 divide-y divide-slate-200 border-y border-slate-200", children: [
       evidenceRail === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainEvidenceRailPlaceholder, {}) : evidenceRail !== null ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainEvidenceRail, { rail: evidenceRail }) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         SupplyChainAuditTeaser,
@@ -485,8 +506,7 @@ function SupplyChainWorkspaceDetails({
         }
       ),
       supplyChainIssues.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(SupplyChainCloudCapabilitiesPanel, { state: cloudCapabilities }) : null
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-4 -ml-3 sm:-ml-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "ghost", onClick: onGoHome, children: "Back to Home" }) })
+    ] })
   ] });
 }
 function FeedHealthPanel({ snapshot, hideLocalOnlyWarning = false }) {

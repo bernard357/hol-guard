@@ -221,13 +221,15 @@ def test_saved_exact_action_block_wins_over_custom_extension_allow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     saved_block = {"decision": "deny", "source": "saved"}
-    monkeypatch.setattr(hook_native_review_approval, "native_review_policy_binding", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        hook_native_review_approval, "native_review_evidence", lambda **_kwargs: (True, None, "token", None)
+    )
     monkeypatch.setattr(
         hook_native_review_approval,
         "native_local_cli_grant_response",
         lambda *_args, **_kwargs: (False, {"decision": "allow", "source": "custom"}),
     )
-    monkeypatch.setattr(hook_native_review_approval, "native_saved_review_response", lambda *_a, **_k: saved_block)
+    monkeypatch.setattr(hook_native_review_approval, "native_saved_decision_response", lambda *_a, **_k: saved_block)
 
     response = hook_native_review_approval.pause_native_pre_tool_for_approval(
         object(),
