@@ -45,7 +45,7 @@ def test_native_contract_keeps_complete_original_inputs_and_visible_stronger_dif
         "cases": 51_000,
         "sources": 52,
         "groups": 58,
-        "equal_to_original_oracle": 46_683,
+        "equal_to_original_oracle": 46_658,
         "stronger_than_original_oracle": 4_342,
         "below_original_oracle": 0,
         "native_evaluation_errors": 20_835,
@@ -62,6 +62,7 @@ _GIT_CONTEXT_REVIEW_GROUPS = frozenset(
         "workflow:git-local:diff-check|all",
         "workflow:git-local:recent-log|all",
         "workflow:git-local:show-stat|all",
+        "workflow:navigation-public-read:repository-root|all",
         "workflow:navigation-public-read:status|all",
         "workflow:shell-composition:json-pipeline|all",
     }
@@ -266,10 +267,7 @@ def test_contract_diagnostics_show_actionable_finite_facts(field: str, value: ob
 
 def test_non_inspection_git_contracts_do_not_claim_helper_reapproval() -> None:
     groups = contract._groups()
-    for group_id in (
-        "workflow:navigation-public-read:repository-root|all",
-        "workflow:workspace-patch-write:patch-check|all",
-    ):
+    for group_id in ("workflow:workspace-patch-write:patch-check|all",):
         expected = groups[group_id]
         assert expected.expected_floor == "review"
         assert expected.expected_native_floor == "review"

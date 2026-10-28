@@ -1405,7 +1405,7 @@
   "totals": {
     "below_original_oracle": 0,
     "cases": 51000,
-    "equal_to_original_oracle": 46683,
+    "equal_to_original_oracle": 46658,
     "groups": 58,
     "improved_bounded_git_cases": 50,
     "improved_bounded_git_sources": 2,
@@ -1413,6 +1413,6 @@
     "improved_upstream_benign_sources": 3,
     "native_evaluation_errors": 20835,
     "sources": 52,
-    "stronger_than_original_oracle": 4317
+    "stronger_than_original_oracle": 4342
   }
 }
