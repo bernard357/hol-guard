@@ -68,7 +68,8 @@ def test_checkout_permission_still_allows_ordinary_checkouts(tmp_path: Path) -> 
         "git worktree add ../sibling -b br origin/main",
         "git worktree add -b br ../sibling origin/main",
         "git worktree add SCRATCH/contrast --detach origin/main",
-        "git fetch origin main && git worktree add --detach SCRATCH/hol-guard-contrast origin/main",
+        # A checkout named after the project is the user's work, not Guard's files.
+        "git worktree add --detach SCRATCH/hol-guard-contrast origin/main",
         "git worktree add HOME/projects/svc-p -b br-p origin/main",
     )
 
