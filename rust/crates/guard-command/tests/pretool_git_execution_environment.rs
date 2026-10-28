@@ -492,33 +492,35 @@ fn stamped_git_reads_allow_only_when_no_diff_helper_is_configured() {
 fn a_route_to_no_repository_still_needs_a_trusted_git() {
     use guard_command::pretool::evaluate_pre_tool_envelope_with_execution_context;
     use guard_contracts::GuardExecutionEnvironmentV1;
-    let root = std::env::temp_dir().join(format!(
+    // The same layout `pretool_git_absent_repository` proves on every host: a
+    // root below `/tmp` on unix (the read screens refuse the macOS per-user
+    // temporary directory under `/var`) and below the per-user temporary
+    // directory on Windows, spelled without the verbatim prefix. The route
+    // names a plain directory below the declared home, outside a checkout.
+    #[cfg(unix)]
+    let base = std::path::PathBuf::from("/tmp");
+    #[cfg(windows)]
+    let base = std::env::temp_dir();
+    let root = std::fs::canonicalize(base).unwrap().join(format!(
         "guard-git-no-repository-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        crate::unique_nanos::unique_nanos()
     ));
-    let _cleanup = FixtureCleanup(root.clone());
-    // The workspace sits below the declared home, which admits the route on
-    // every host. A route below the temporary root is admitted only under
-    // `/tmp`, and the platform temporary directory is elsewhere on macOS and
-    // Windows. The root is spelled without the Windows verbatim prefix, as a
-    // user types it.
     std::fs::create_dir_all(&root).unwrap();
-    let canonical_root = root.canonicalize().unwrap();
-    let spelling = canonical_root.to_str().unwrap();
-    let root = std::path::PathBuf::from(spelling.strip_prefix(r"\\?\").unwrap_or(spelling));
+    let _cleanup = FixtureCleanup(root.clone());
+    let root = fixture::canonical_spelling(root);
     let home = root.join("home");
-    let workspace = home.join("workspace");
-    std::fs::create_dir_all(workspace.join("repository")).unwrap();
+    let workspace = home.join("Code").join("app-portal");
+    std::fs::create_dir_all(&workspace).unwrap();
+    crate::pretool_home_layout_reads::repository(&workspace);
+    let plain = home.join("Code").join("scratch-notes");
+    std::fs::create_dir_all(&plain).unwrap();
     let original_path = std::env::var("PATH").unwrap();
     let environment = |path: String| GuardExecutionEnvironmentV1 {
         path,
-        environment_names: vec!["GIT_CONFIG_NOSYSTEM".into()],
+        environment_names: vec!["GIT_CONFIG_NOSYSTEM".into(), "HOME".into(), "PATH".into()],
         environment_digest: "0".repeat(64),
-        home: None,
+        home: home.to_str().map(str::to_owned),
         git_pager_disabled: false,
         pager_disabled: false,
         xdg_config_home: None,
@@ -540,13 +542,19 @@ fn a_route_to_no_repository_still_needs_a_trusted_git() {
             Some(context),
         )
     };
+    let route = fixture::shell_word(&plain);
     let commands = [
-        "git -C repository status --short",
-        "git -C repository status --short && echo \"---FILES---\"",
+        format!("git -C {route} status --short"),
+        format!("git -C {route} status --short && echo \"---FILES---\""),
     ];
     let trusted = environment(original_path.clone());
-    for command in commands {
-        assert_eq!(evaluate(command, &trusted).decision, "allow", "{command}");
+    for command in &commands {
+        let result = evaluate(command, &trusted);
+        assert_eq!(
+            result.decision, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
     }
 
     let shadow = home.join("bin");
@@ -561,7 +569,7 @@ fn a_route_to_no_repository_still_needs_a_trusted_git() {
         std::env::join_paths(std::iter::once(shadow).chain(std::env::split_paths(&original_path)))
             .unwrap();
     let planted = environment(shadow_path.to_string_lossy().into_owned());
-    for command in commands {
+    for command in &commands {
         let result = evaluate(command, &planted);
         assert_ne!(result.decision, "allow", "{command}");
         assert_eq!(result.minimum_action, "require-reapproval", "{command}");
