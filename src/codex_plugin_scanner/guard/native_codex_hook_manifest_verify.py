@@ -9,7 +9,6 @@ the installation as unverified, never as valid.
 
 from __future__ import annotations
 
-import contextlib
 import math
 import os
 import time
@@ -31,7 +30,6 @@ _RESULT_SCHEMA = "guard-codex-hook-manifest-verify-result.v1"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 # The resident stats and hashes a dozen packaged files and the interpreter.
 _TIMEOUT_SECONDS = 10.0
-_TIMEOUT_FLOOR_SECONDS = 1.0
 # Each round answers every private-group question the previous one asked, so
 # a second round settles the walk; a third covers files that changed between
 # the two.
@@ -150,8 +148,14 @@ def _interpreter_spellings(manifest: Mapping[str, object]) -> dict[str, object]:
     for spelling in dict.fromkeys(paths):
         if not Path(spelling).is_absolute():
             continue
-        with contextlib.suppress(OSError, RuntimeError):
+        try:
             canonical[spelling] = integrity.canonical_path(Path(spelling))
+        except CodexHookIntegrityError:
+            # An exhausted deadline or refused path is the caller's failure,
+            # not a spelling the resident can do without.
+            raise
+        except (OSError, RuntimeError):
+            pass
         if integrity._is_installed_python_package_file(Path(spelling)):
             installed.append(spelling)
     argvs: dict[str, list[str] | None] = {}
@@ -209,7 +213,12 @@ def _ask(wire: dict[str, object], home: Path) -> dict[str, object] | None:
     deadline = active_hook_validation_deadline()
     timeout = _TIMEOUT_SECONDS
     if deadline is not None:
-        timeout = min(_TIMEOUT_SECONDS, max(_TIMEOUT_FLOOR_SECONDS, deadline - time.monotonic()))
+        # The resident gets only what is left of the caller's budget; a spent
+        # budget leaves the installation unverified.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        timeout = min(_TIMEOUT_SECONDS, remaining)
     try:
         response = _resident_request(
             operation="codex_hook_manifest_verify",
