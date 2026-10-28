@@ -181,6 +181,12 @@ def _validate_sink(answer: Mapping[str, Any], inputs: Mapping[str, object]) -> N
         raise NativeHookDecisionError(_INVALID)
 
 
+def edge_routed_shape(routed: object, payload: Mapping[str, object]) -> bool:
+    """Whether an edge's routed allow runs only a new command line for ``payload``'s call."""
+
+    return _routed_shape(routed, _tool_input(payload))
+
+
 def _routed_shape(routed: object, original: object) -> bool:
     """The allow runs only a new command line; every other field is the call's own."""
 
@@ -207,6 +213,7 @@ __all__ = [
     "HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE",
     "HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE",
     "ContainmentRewrite",
+    "edge_routed_shape",
     "host_platform",
     "native_containment_rewrite",
 ]

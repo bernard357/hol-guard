@@ -268,3 +268,34 @@ def test_an_unmarked_sink_route_without_a_resident_answer_is_the_outage(
     assert native is False
     assert answer.get("reason_code") == "native_containment_rewrite_unavailable"
     assert answer.get("policy_action") != "allow"
+
+
+@pytest.mark.parametrize(
+    "routed",
+    (
+        # An allow that changes a field other than the command line.
+        {
+            **_ROUTED_RESPONSE,
+            "hookSpecificOutput": {
+                **_ROUTED_RESPONSE["hookSpecificOutput"],  # type: ignore[dict-item]
+                "updatedInput": {"command": "guard execute-contained-test", "run_in_background": True},
+            },
+        },
+        # An allow that is not the routed reason.
+        {**_ROUTED_RESPONSE, "reason_code": "native_allow"},
+        # The receipt, marked routed.
+        _RECEIPT_RESPONSE,
+    ),
+)
+def test_an_edge_routed_allow_off_the_routed_shape_is_the_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, routed: dict[str, object]
+) -> None:
+    def second_call(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("a refused edge rewrite is not asked again")
+
+    monkeypatch.setattr(zcode_contained_tests, "route_zcode_containment", second_call)
+    fixture = _SinkRouteFixture(edge=_edge(harness_response=dict(routed), containment_rewrite="routed"))
+    answer, native = _review(fixture, tmp_path)
+    assert native is False
+    assert answer.get("reason_code") == "native_containment_rewrite_invalid"
+    assert answer.get("policy_action") != "allow"

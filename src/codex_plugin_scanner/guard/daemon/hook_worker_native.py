@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from ..cli.commands_support_command_activity import hook_post_succeeded
 from ..native_codex_binding_capture import CodexBindingCaptureWriter
+from ..native_hook_containment_route import edge_routed_shape
 from ..native_hook_decision import NativeHookDecisionError
 from ..native_policy_snapshot_harness_postures import recording_only_for_binding
 from ..native_resident_client import (
@@ -52,6 +53,7 @@ def _edge_harness_response(edge: Mapping[str, object]) -> dict[str, object]:
 _NATIVE_PRE_TOOL_APPROVAL_ACTIONS = frozenset({"review", "require-reapproval"})
 # `containment_rewrite` answers the edge gives once it rewrote a sink route.
 _EDGE_CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
+_EDGE_REWRITE_INVALID = "native_containment_rewrite_invalid"
 
 
 class _HookWorkerMetrics(Protocol):
@@ -474,8 +476,13 @@ class HookWorkerNativeMixin:
                 else _edge_harness_response(edge)
             )
             # The edge rewrote the sink route itself when it says so; an edge
-            # that did not is asked, and no answer is the outage response.
-            if containment == "sink" and edge.get("containment_rewrite") not in _EDGE_CONTAINMENT_REWRITES:
+            # that did not is asked, and no answer is the outage response. Its
+            # routed allow is held to the shape the resident's answer is.
+            rewrite = edge.get("containment_rewrite") if containment == "sink" else None
+            if rewrite == "routed" and not edge_routed_shape(rendered, payload):
+                error = NativeHookDecisionError(_EDGE_REWRITE_INVALID)
+                return _containment_outage(self, payload, native_harness, error, guard_home, deadline)
+            if containment == "sink" and rewrite not in _EDGE_CONTAINMENT_REWRITES:
                 try:
                     rendered = route_zcode_containment(
                         rendered,
