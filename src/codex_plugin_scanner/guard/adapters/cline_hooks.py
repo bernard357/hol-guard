@@ -205,10 +205,12 @@ def blocked(value):
     decision = value.get("decision")
     if isinstance(decision, str) and decision.lower() in {{"deny", "block", "ask"}}:
         return True
-    action = value.get("policy_action", value.get("policyAction"))
-    if isinstance(action, str):
-        if action.lower() in {{"review", "require-reapproval", "sandbox-required", "block"}}:
-            return True
+    for action in (value.get("policy_action"), value.get("policyAction")):
+        # Either spelling is read, not just the first one present: a response
+        # carrying a restrictive action under the alias still says so.
+        if isinstance(action, str):
+            if action.lower() in {{"review", "require-reapproval", "sandbox-required", "block"}}:
+                return True
     specific = value.get("hookSpecificOutput")
     if isinstance(specific, dict):
         permission = specific.get("permissionDecision")
@@ -235,7 +237,16 @@ def explicitly_allows(value):
         return False
     raw_decision = value.get("decision")
     decision = raw_decision.lower() if isinstance(raw_decision, str) else None
-    raw_action = value.get("policy_action", value.get("policyAction"))
+    if "policy_action" in value and not isinstance(value.get("policy_action"), str):
+        # A present action field that is not a word this client can read -- a
+        # null, a number, a truncated object -- is unplaceable, so it is not
+        # evidence of permission and the alias does not stand in for it.
+        return False
+    raw_action = value.get("policy_action")
+    if not isinstance(raw_action, str):
+        raw_action = value.get("policyAction")
+    if "policyAction" in value and not isinstance(value.get("policyAction"), str):
+        return False
     action = raw_action.lower() if isinstance(raw_action, str) else None
     permission = None
     nested_behavior = None

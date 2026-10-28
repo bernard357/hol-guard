@@ -708,8 +708,7 @@ def test_generated_plugin_rejects_nonzero_guard_exit_even_with_allow_json(tmp_pa
 def _scripted_guard(tmp_path: Path, response: str) -> Path:
     path = tmp_path / f"scripted_guard_{sha256(response.encode()).hexdigest()[:12]}.py"
     path.write_text(
-        "from __future__ import annotations\nimport json, sys\njson.load(sys.stdin)\n"
-        f"print({response!r})\n",
+        f"from __future__ import annotations\nimport json, sys\njson.load(sys.stdin)\nprint({response!r})\n",
         encoding="utf-8",
     )
     return path
@@ -729,9 +728,31 @@ _UNPLACEABLE_RESPONSES = (
     '{"hookSpecificOutput": {"decision": {"behavior": "escalate"}}}',
 )
 
+# The camelCase alias stands in for the snake_case action only when that field
+# is absent. A present field neither transport can read is unplaceable, so the
+# alias beside it never turns the response into permission.
+_CONTRADICTORY_ALIAS_RESPONSES = (
+    '{"policy_action": null, "policyAction": "allow"}',
+    '{"policy_action": "allow", "policyAction": null}',
+    '{"policy_action": null, "policyAction": "warn"}',
+    '{"policyAction": 7}',
+    '{"policyAction": null}',
+)
+
+# A restrictive action under the alias is read by both transports, whichever
+# spelling carries it.
+_ALIASED_RESTRICTIVE_RESPONSES = (
+    '{"policyAction": "block"}',
+    '{"policyAction": "review"}',
+    '{"policyAction": "sandbox-required"}',
+    '{"policyAction": "require-reapproval"}',
+)
+
 _ALLOWING_RESPONSES = (
     '{"decision": "allow"}',
     '{"policy_action": "allow"}',
+    '{"policyAction": "allow"}',
+    '{"policyAction": "warn"}',
     '{"policy_action": "warn"}',
     '{"policy_action": "WARN"}',
     '{"decision": "allow", "policy_action": "allow"}',
@@ -827,3 +848,58 @@ def test_the_two_cline_transports_agree_on_an_action_guard_did_not_place(tmp_pat
     )
     assert plugin.returncode == 0, plugin.stderr
     assert json.loads(plugin.stdout)["skip"] is True
+
+
+def _hook_withholds(tmp_path: Path, response: str, *, home: str) -> bool:
+    """Whether the generated hook worker cancels the call for ``response``."""
+
+    context = _context(tmp_path / home)
+    _activate(context, "hooks")
+    guard = _scripted_guard(tmp_path, response)
+    result = _run_hook(
+        _hook_source(context, event_name="PreToolUse", guard_cli=[sys.executable, str(guard)]),
+        tmp_path,
+        {"hookName": "PreToolUse", "tool_call": {"name": "run_command", "input": {"command": "rm -rf /"}}},
+    )
+    assert result.returncode == 0, result.stderr
+    return bool(json.loads(result.stdout)["cancel"])
+
+
+def _plugin_withholds(tmp_path: Path, response: str, *, home: str) -> bool:
+    """Whether the generated plugin skips the call for ``response``."""
+
+    context = _context(tmp_path / home)
+    _activate(context, "plugin")
+    guard = _scripted_guard(tmp_path, response)
+    result = _run_plugin(
+        _plugin_source(context, [sys.executable, str(guard)]),
+        tmp_path,
+        'plugin.hooks.beforeTool({toolCall:{toolCallId:"1",toolName:"run_command"},input:{command:"rm -rf /"}})',
+    )
+    assert result.returncode == 0, result.stderr
+    if result.stdout.strip() == "undefined":
+        # The plugin returns nothing when it lets the call through.
+        return False
+    return bool(json.loads(result.stdout)["skip"])
+
+
+@pytest.mark.parametrize("response", _CONTRADICTORY_ALIAS_RESPONSES)
+def test_both_cline_transports_withhold_an_alias_beside_an_unplaceable_action(tmp_path: Path, response: str) -> None:
+    # The worker reads ``policy_action`` first and the plugin used a nullish
+    # fallback, so a present null beside an allowing alias made one transport
+    # withhold while the other let the call through. Both now treat a present
+    # action field they cannot read as unplaceable.
+    assert _hook_withholds(tmp_path, response, home="hooks-home") is True
+    assert _plugin_withholds(tmp_path, response, home="plugin-home") is True
+
+
+@pytest.mark.parametrize("response", _ALIASED_RESTRICTIVE_RESPONSES)
+def test_both_cline_transports_read_a_restrictive_action_under_the_alias(tmp_path: Path, response: str) -> None:
+    assert _hook_withholds(tmp_path, response, home="hooks-home") is True
+    assert _plugin_withholds(tmp_path, response, home="plugin-home") is True
+
+
+@pytest.mark.parametrize("response", ['{"policyAction": "allow"}', '{"policyAction": "warn"}'])
+def test_both_cline_transports_still_read_the_alias_when_it_stands_alone(tmp_path: Path, response: str) -> None:
+    assert _hook_withholds(tmp_path, response, home="hooks-home") is False
+    assert _plugin_withholds(tmp_path, response, home="plugin-home") is False

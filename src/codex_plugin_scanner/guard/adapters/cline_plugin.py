@@ -157,9 +157,12 @@ function guardBlocks(payload) {{
   if (typeof payload.decision === "string") {{
     if (BLOCK_DECISIONS.includes(payload.decision.toLowerCase())) return true;
   }}
-  const action = payload.policy_action ?? payload.policyAction;
-  if (typeof action === "string") {{
-    if (REVIEW_ACTIONS.includes(action.toLowerCase())) return true;
+  // Either spelling is read, not just the first one present: a response
+  // carrying a restrictive action under the alias still says so.
+  for (const action of [payload.policy_action, payload.policyAction]) {{
+    if (typeof action === "string") {{
+      if (REVIEW_ACTIONS.includes(action.toLowerCase())) return true;
+    }}
   }}
   const specific = payload.hookSpecificOutput;
   if (specific && typeof specific === "object") {{
@@ -178,7 +181,13 @@ function guardExplicitlyAllows(payload) {{
   if (!payload || typeof payload !== "object" || guardBlocks(payload)) return false;
   if (Object.prototype.hasOwnProperty.call(payload, "decision") && typeof payload.decision !== "string") return false;
   const decision = typeof payload.decision === "string" ? payload.decision.toLowerCase() : undefined;
-  const actionValue = payload.policy_action ?? payload.policyAction;
+  // A present action field that is not a word this transport can read -- a
+  // null, a number, a truncated object -- is unplaceable, so it is not
+  // evidence of permission and the alias does not stand in for it.
+  for (const key of ["policy_action", "policyAction"]) {{
+    if (Object.prototype.hasOwnProperty.call(payload, key) && typeof payload[key] !== "string") return false;
+  }}
+  const actionValue = typeof payload.policy_action === "string" ? payload.policy_action : payload.policyAction;
   const action = typeof actionValue === "string" ? actionValue.toLowerCase() : undefined;
   const specific = payload.hookSpecificOutput;
   const permission = specific && typeof specific === "object" && typeof specific.permissionDecision === "string"
