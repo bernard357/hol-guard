@@ -1174,17 +1174,25 @@ fn git_read_order_settled_by_allow(
     else {
         return false;
     };
-    result.minimum_action == "allow"
-        && result.action.bounded
-        && !result.action.sensitive_target
-        && super::git_read_floor::unsettled_steps_before_reads(
+    if result.minimum_action != "allow" || !result.action.bounded || result.action.sensitive_target
+    {
+        return false;
+    }
+    super::git_read_floor::unsettled_steps_before_reads(
+        model,
+        context,
+        deadline,
+        execution_environment,
+    )
+    .is_some_and(|steps| {
+        super::git_read_after_allow::allow_settles_read_order(
             model,
+            &steps,
             context,
             deadline,
             execution_environment,
         )
-        .is_some()
-        && controls.explicit_allow_covers_command(model, observations, context)
+    }) && controls.explicit_allow_covers_command(model, observations, context)
 }
 
 /// The Git floor's reason when every Git read was proven helper-free on its

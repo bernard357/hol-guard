@@ -15,6 +15,14 @@
 //! The same holds for a Docker listing Guard proves on its own (`docker ps`,
 //! `docker images`, `docker logs`): none of them reads a project file, so a
 //! Git step before it cannot change what it does.
+//!
+//! Two things an allowed step could still change reach a later read: Git's
+//! configuration, which a `git config` write rewrites outright, and a tracked
+//! file a configuration include names, which a checkout or reset can replace.
+//! The first ends the run here, since only steps on [`CONFIG_STABLE_STEPS`]
+//! carry it. The second needs a probe of the repository, which the Git floor
+//! runs when it asks whether the Allow settles its order check, through
+//! [`allow_settles_read_order`].
 
 use super::PathContext;
 use crate::CanonicalCommandV1;
@@ -42,6 +50,20 @@ const REF_READS: &[&str] = &[
     "reflog",
 ];
 
+/// Git operations that write no configuration a later read obeys. Some record
+/// an upstream (`push -u`, `checkout --track`, `branch -u`), and those
+/// `branch.*` keys name no program. Only a step whose first argument is one of
+/// these carries a read, so a leading `-C` that points the step at another
+/// repository ends the run.
+const CONFIG_STABLE_STEPS: &[&str] = &[
+    "add", "branch", "checkout", "commit", "fetch", "merge", "pull", "push", "reset", "restore",
+    "stash", "switch", "tag",
+];
+
+/// Git operations that rewrite no tracked file. Any other step the Git floor
+/// leaves unsettled may replace a file a configuration include names.
+const TREE_PRESERVING_STEPS: &[&str] = &["add", "branch", "commit", "fetch", "push", "tag"];
+
 /// The Git ref reads and Docker listings in `model` that the steps before
 /// them leave covered.
 ///
@@ -49,9 +71,10 @@ const REF_READS: &[&str] = &[
 /// every segment covered so far, by that proof, an enabled permission or a
 /// GitHub grant. A read qualifies when it is proven safe on its own, takes no
 /// leading Git option (so `-C` and `--git-dir` cannot route it elsewhere), and
-/// every earlier step is covered and either a Git command or benign. A step
-/// that is neither, such as an allowed `ln`, could repoint the directory the
-/// read runs in, so it ends the run.
+/// every earlier step is covered and either benign or a Git step on
+/// [`CONFIG_STABLE_STEPS`]. Any other step, such as an allowed `ln` or `git
+/// config`, could repoint the directory the read runs in or the program it
+/// starts, so it ends the run.
 pub(crate) fn git_reads_after_allowed_steps(
     model: &CanonicalCommandV1,
     context: PathContext<'_>,
@@ -61,15 +84,9 @@ pub(crate) fn git_reads_after_allowed_steps(
     if model.confidence != "exact" || model.path_overridden || !model.wrapper_chain.is_empty() {
         return Vec::new();
     }
-    let cwd = super::segment_proof::verified_cwd_compound_context(model, context);
-    if cwd.is_none()
-        && model
-            .segments
-            .iter()
-            .any(|segment| segment.executable.as_deref() == Some("cd"))
-    {
+    let Some(cwd) = read_directory(model, context) else {
         return Vec::new();
-    }
+    };
     let proof_context = PathContext {
         creates_nothing: super::search::command_creates_nothing(model),
         cwd: cwd.as_deref().or(context.cwd),
@@ -79,7 +96,9 @@ pub(crate) fn git_reads_after_allowed_steps(
     for (index, segment) in model.segments.iter().enumerate() {
         let git = git_segment(segment);
         if covered.contains(&index) {
-            if git || benign.contains(&index) {
+            if benign.contains(&index)
+                || (git && leading_operation_in(segment, CONFIG_STABLE_STEPS))
+            {
                 continue;
             }
             break;
@@ -95,6 +114,86 @@ pub(crate) fn git_reads_after_allowed_steps(
         added.push(index);
     }
     added
+}
+
+/// Whether the user's Allow may settle the Git floor's order check for
+/// `steps`, the earlier steps it could not prove leave a later read's
+/// configuration as Guard read it. A step that may rewrite tracked files
+/// settles it only when no configuration include reaches the work tree, so no
+/// file it checks out becomes configuration the read obeys. A Git step with a
+/// leading option may act on another repository, whose files an absolute
+/// include could name, so it never settles. Steps outside Git keep the Allow's
+/// judgment.
+pub(crate) fn allow_settles_read_order(
+    model: &CanonicalCommandV1,
+    steps: &[usize],
+    context: PathContext<'_>,
+    deadline: Option<std::time::Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
+    let routed_elsewhere = |index: &usize| {
+        model.segments.get(*index).is_none_or(|segment| {
+            git_segment(segment)
+                && segment
+                    .arguments
+                    .first()
+                    .is_none_or(|argument| argument.starts_with('-'))
+        })
+    };
+    if steps.iter().any(routed_elsewhere) {
+        return false;
+    }
+    let rewrites_tree = |index: &usize| {
+        model.segments.get(*index).is_some_and(|segment| {
+            git_segment(segment) && !leading_operation_in(segment, TREE_PRESERVING_STEPS)
+        })
+    };
+    let Some(first) = steps.iter().copied().filter(rewrites_tree).min() else {
+        return true;
+    };
+    // The directory the floor probed its reads in.
+    let destination = super::segment_proof::git_read_cwd_compound_context(model, context);
+    let read_context = PathContext {
+        cwd: destination.as_deref().or(context.cwd),
+        ..context
+    };
+    (first + 1..model.segments.len()).all(|index| {
+        // `... | xargs git log` runs its read as the child.
+        let child = super::fanout_reads::git_xargs_child(model, index);
+        let later = child.as_ref().unwrap_or(&model.segments[index]);
+        !git_segment(later)
+            || super::git_remote_ops::work_tree_outside_configuration(
+                later,
+                read_context,
+                deadline,
+                execution_environment,
+            )
+    })
+}
+
+/// The directory a `cd` chain leaves the reads in: `Some(None)` when the
+/// command has no `cd` and runs where it was reported, `None` when a `cd`
+/// cannot be followed.
+fn read_directory(model: &CanonicalCommandV1, context: PathContext<'_>) -> Option<Option<String>> {
+    let cwd = super::segment_proof::verified_cwd_compound_context(model, context);
+    if cwd.is_none()
+        && model
+            .segments
+            .iter()
+            .any(|segment| segment.executable.as_deref() == Some("cd"))
+    {
+        return None;
+    }
+    Some(cwd)
+}
+
+/// Whether the segment's first argument, with no global option before it, is
+/// one of `operations`.
+fn leading_operation_in(segment: &crate::CommandSegmentV1, operations: &[&str]) -> bool {
+    segment
+        .arguments
+        .first()
+        .is_some_and(|operation| operations.contains(&operation.as_str()))
 }
 
 fn git_segment(segment: &crate::CommandSegmentV1) -> bool {
