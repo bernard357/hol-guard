@@ -149,7 +149,7 @@
         "allow",
         "block"
       ],
-      "note": "Renders the resident's policy_action for Grok. Unlike the other two renderings in this table an action it does not recognise falls through to allow; no production caller reaches it today, so it is recorded here rather than as a finding."
+      "note": "Renders the resident's policy_action for Grok. An action it does not recognise is normalized to the review tier before rendering, so an enforcement event denies like the other two renderings in this table; a prompt blocks, an observe-only event renders nothing and a recording-only session renders allow because it records rather than enforces."
     },
     {
       "file": "src/codex_plugin_scanner/guard/aibom_trust_metadata.py",

@@ -102,8 +102,10 @@ read. Thirty-four hold no authority of their own, in these readings:
 
 `grok_hook_response_from_guard`, recorded here in an earlier pass as a latent
 allow-shaped fallthrough, now normalizes an action it does not recognise to the
-review tier before rendering, so it denies like the other two renderings of its
-kind. Nothing is left to tighten there.
+review tier before rendering. An enforcement event then denies like the other
+two renderings of its kind, a prompt blocks, an observe-only event renders
+nothing, and a recording-only session renders allow because it records rather
+than enforces. Nothing is left to tighten there.
 
 ## The findings
 
