@@ -180,6 +180,10 @@ def _changed_rules(result: dict[str, Any], receipt: dict[str, Any]) -> tuple[dic
     changed_receipt = copy.deepcopy(receipt)
     for value in (changed_result["command_extensions"]["binding"], changed_receipt["command_extensions"]):
         value["control_revision"] += 1
+    return changed_result, _resigned(changed_receipt)
+
+
+def _resigned(changed_receipt: dict[str, Any]) -> dict[str, Any]:
     identity = {
         **{
             key: value
@@ -191,7 +195,7 @@ def _changed_rules(result: dict[str, Any], receipt: dict[str, Any]) -> tuple[dic
     changed_receipt["decision_id"] = hashlib.sha256(
         json.dumps(identity, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
     ).hexdigest()
-    return changed_result, changed_receipt
+    return changed_receipt
 
 
 def _proven(command: str, workspace: Path) -> bool:
@@ -210,7 +214,7 @@ def _proven(command: str, workspace: Path) -> bool:
     return first != _token(command, workspace, result=changed_result, receipt=changed_receipt)
 
 
-def test_token_changes_when_native_rules_change(
+def test_token_changes_when_the_configured_command_extensions_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     workspace = _wrangler_workspace(tmp_path, monkeypatch)
@@ -219,6 +223,22 @@ def test_token_changes_when_native_rules_change(
     original = _token("cat package.json", workspace, result=result, receipt=receipt)
     assert original is not None
     assert _token("cat package.json", workspace, result=changed_result, receipt=changed_receipt) not in {None, original}
+
+
+def test_a_guard_rule_upgrade_keeps_the_saved_always(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    # A new Guard release compiles different rules, so its `rule_digest`
+    # moves. The same reviewed action with the same verdict keeps its token:
+    # an upgrade must not re-ask for every saved Always allow.
+    workspace = _wrangler_workspace(tmp_path, monkeypatch)
+    result, receipt = _verdict()
+    upgraded = copy.deepcopy(receipt)
+    upgraded["rule_digest"] = "e" * 64
+    upgraded = _resigned(upgraded)
+    original = _token("cat package.json", workspace, result=result, receipt=receipt)
+    assert original is not None
+    assert _token("cat package.json", workspace, result=result, receipt=upgraded) == original
 
 
 def _node_script(workspace: Path) -> Path:

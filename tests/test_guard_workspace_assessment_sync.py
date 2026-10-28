@@ -311,6 +311,35 @@ def test_findings_are_read_only_for_the_summarized_worktrees(
     assert reads.latest_assessed_runs(guard_store, []) == []
 
 
+def test_ended_install_admissions_never_take_a_summary_slot_from_a_watched_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codex_plugin_scanner.guard import workspace_assessment_admissions as admissions
+
+    guard_store = GuardStore(tmp_path / "home")
+    ended = assessments.WorktreeKeys(digest("ended-codebase"), digest("ended-worktree"))
+    for keys, root, at in ((ended, f"{ROOT}-ended", T0), (KEYS, ROOT, T0 + 1)):
+        admissions.admit_and_queue(
+            guard_store,
+            keys,
+            root=root,
+            now_ms=at,
+            automatic=True,
+            stat_digest=digest(f"stat-{root}"),
+            feed_digest=None,
+            detector_set_digest=DETECTORS,
+        )
+    assert admissions.end_unregistered_install_admissions(guard_store, {ROOT}, now_ms=T0 + 2) == 1
+    monkeypatch.setattr(sync, "MAX_WORKTREES", 1)
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None
+    [entry] = built.payload["worktrees"]
+    assert entry["status"] != "paused"
+
+
 def test_request_fit_trims_findings_and_the_full_summary_is_sent_next_time(tmp_path: Path) -> None:
     guard_store = GuardStore(tmp_path / "home")
     assessed(guard_store, findings=[finding(index) for index in range(sync.MAX_FINDINGS_PER_WORKTREE)])

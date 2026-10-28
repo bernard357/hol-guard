@@ -33,9 +33,11 @@ fn git(repository: &std::path::Path, home: &std::path::Path, arguments: &[&str])
 }
 
 /// `home/Code/org/app` and `home/Code/org/api`, two unrelated repositories
-/// side by side, each with one commit.
+/// side by side, each with one commit. `CARGO_TARGET_TMPDIR` keeps the
+/// fixture outside `/var` on macOS, where the read screens refuse a sibling
+/// for reasons unrelated to the climb under test.
 fn siblings(label: &str) -> (std::path::PathBuf, std::path::PathBuf, FixtureCleanup) {
-    let root = std::env::temp_dir().join(format!(
+    let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "guard-git-read-climb-{label}-{}",
         std::process::id()
     ));
@@ -58,7 +60,8 @@ fn siblings(label: &str) -> (std::path::PathBuf, std::path::PathBuf, FixtureClea
         git(&repository, &home, &["commit", "--quiet", "-m", "fixture"]);
     }
     std::fs::write(home.join(".gitconfig"), "").unwrap();
-    let home = home.canonicalize().unwrap();
+    // Git for Windows cannot run under the `\\?\` form `canonicalize` returns.
+    let home = canonical_spelling(home);
     let org = home.join("Code/org");
     (home, org, cleanup)
 }

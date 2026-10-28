@@ -62,7 +62,9 @@ def build_workspace_assessment_sync(store: GuardStore, *, now: str) -> Workspace
     from .. import workspace_assessment_reads as reads
     from ..workspace_assessment_store import WorktreeKeys
 
-    worktrees = reads.list_worktrees(store)[:MAX_WORKTREES]
+    # Worktrees whose install admission ended keep their records, but they never
+    # take a summary slot from one Guard still watches.
+    worktrees = sorted(reads.list_worktrees(store), key=lambda item: bool(item["ended"]))[:MAX_WORKTREES]
     if not worktrees:
         return None
     hash_key = load_hash_key(store, now)
