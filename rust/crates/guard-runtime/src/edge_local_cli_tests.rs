@@ -127,11 +127,14 @@ fn a_custom_block_replaces_an_allowed_answer() {
 #[test]
 fn an_unreadable_grant_blocks_an_allowed_call_as_unverified() {
     let (envelope, _) = case("allow-unverified", Some("blocked"), false);
-    // A store the edge refuses to read still counts as holding block rules,
-    // and its grant cannot be checked.
-    let mut outside = envelope.clone();
-    outside.local_cli_rules.as_mut().unwrap().store_path = "/elsewhere/guard.db".to_owned();
-    let rule = settle(&outside, "claude-code", "PreToolUse", &allowed())
+    // A store the edge cannot read still counts as holding block rules, and
+    // the grant behind it cannot be checked.
+    fs::write(
+        &envelope.local_cli_rules.as_ref().unwrap().store_path,
+        b"not a sqlite store",
+    )
+    .unwrap();
+    let rule = settle(&envelope, "claude-code", "PreToolUse", &allowed())
         .unwrap()
         .unwrap();
     assert!(rule.blocked);
