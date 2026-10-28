@@ -113,6 +113,9 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         "git clone git@github.com:example-org/.codex",
         "git clone --depth 1 https://github.com/example-org/.husky/",
         "git submodule add https://github.com/example-org/.github.git",
+        // Git trims whitespace around the name it guesses.
+        "git clone 'https://github.com/example-org/ .claude.git'",
+        "git clone 'https://github.com/example-org/.claude.git/ '",
         // A word or directory the text cannot fix fails closed.
         "git worktree add $HOME/x origin/main",
         "cd - && git clone https://github.com/example-org/x.git x",

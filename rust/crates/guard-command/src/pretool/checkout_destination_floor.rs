@@ -220,7 +220,7 @@ fn step_words(
             words.remove(position);
         }
         if let Some(last) = arguments.last().filter(|last| !last.starts_with('-')) {
-            words.push(guessed_directory(last)?);
+            words.extend(guessed_directories(last)?);
         }
     }
     if words.iter().any(|word| unresolved_word(word)) {
@@ -245,19 +245,43 @@ fn remote_word(word: &str) -> bool {
     host.len() > 1 && !host.contains(['/', '\\']) && !host.starts_with(['.', '~'])
 }
 
-/// The directory `git clone <repository>` creates when none is given: the
-/// last component of the repository, without a trailing `/`, `/.git`, `.git`
-/// or `.bundle`. `None` when nothing is left to name it.
-fn guessed_directory(repository: &str) -> Option<String> {
-    let trimmed = repository.trim_end_matches(['/', '\\']);
-    let trimmed = trimmed.strip_suffix("/.git").unwrap_or(trimmed);
-    let trimmed = trimmed.trim_end_matches(['/', '\\']);
-    let trimmed = trimmed
+/// The directory `git clone <repository>` creates when none is given, the
+/// way Git guesses it: trailing separators, whitespace and `/.git` dropped, a
+/// bare `host:port` reduced to the host, the last component without `.git`,
+/// and runs of whitespace and control characters collapsed to one space and
+/// trimmed. Git strips `.bundle` only from a bundle file, so a name ending in
+/// it is screened in both forms. `None` when nothing is left to name it.
+fn guessed_directories(repository: &str) -> Option<Vec<String>> {
+    let separator = |c: char| c == '/' || c == '\\';
+    let mut trimmed =
+        repository.trim_end_matches(|c: char| separator(c) || c.is_ascii_whitespace());
+    if let Some(parent) = trimmed
         .strip_suffix(".git")
-        .or_else(|| trimmed.strip_suffix(".bundle"))
-        .unwrap_or(trimmed);
-    let name = trimmed.rsplit(['/', '\\', ':']).next()?;
-    (!name.is_empty()).then(|| name.to_owned())
+        .and_then(|rest| rest.strip_suffix(separator))
+        .filter(|parent| !parent.is_empty())
+    {
+        trimmed = parent.trim_end_matches(separator);
+    }
+    if !trimmed.contains('/') {
+        if let Some((host, port)) = trimmed.rsplit_once(':') {
+            if port.bytes().all(|byte| byte.is_ascii_digit()) {
+                trimmed = host;
+            }
+        }
+    }
+    let name = trimmed.rsplit(|c: char| separator(c) || c == ':').next()?;
+    let mut names = vec![name.strip_suffix(".git").unwrap_or(name)];
+    names.extend(name.strip_suffix(".bundle"));
+    let names: Vec<String> = names
+        .into_iter()
+        .map(|name| {
+            name.split(|c: char| c.is_ascii_whitespace() || c.is_ascii_control())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    (!names.iter().any(String::is_empty)).then_some(names)
 }
 
 /// A word the shell rewrites before Git sees it: an expansion, a command
