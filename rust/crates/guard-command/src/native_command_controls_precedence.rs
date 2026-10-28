@@ -80,8 +80,8 @@ impl CompiledNativeCommandControls {
     /// Whether the user's authenticated Allow for every segment's extension
     /// permissions settles a command whose delegated floor is already allow.
     /// Guard self-protection, secret access and exfiltration, configured Git
-    /// programs, disabled permissions and evaluation failures are fixed
-    /// floors. Allowed uncertainty also needs every segment to stay inside
+    /// programs, Git checkouts into protected locations, disabled
+    /// permissions and evaluation failures are fixed floors. Allowed uncertainty also needs every segment to stay inside
     /// what its text proves ([`settles_enabled_uncertainty`]).
     pub(super) fn explicit_allow(
         &self,
@@ -98,6 +98,7 @@ impl CompiledNativeCommandControls {
                 || OVERRIDABLE_NATIVE_REASONS.contains(&result.reason_code.as_str()))
             && command.is_some_and(|model| {
                 !crate::pretool::fixed_command_floor(model)
+                    && !crate::pretool::protected_checkout_destination(model, context)
                     && (!enabled_uncertainty
                         || model
                             .segments

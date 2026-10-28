@@ -166,6 +166,7 @@ mod safe_links;
 pub(crate) mod safe_reads;
 mod safe_scalar;
 mod safe_writes;
+pub(crate) use safe_writes::protected_checkout_destination;
 mod script_content;
 pub(crate) use script_content::{argv_script, ArgvScript};
 mod search;

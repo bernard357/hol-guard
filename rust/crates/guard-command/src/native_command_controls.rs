@@ -473,8 +473,9 @@ impl CompiledNativeCommandControls {
     /// whole command. It reads the observations already recorded on the
     /// result, so it classifies exactly what the controls classified, and it
     /// keeps every fixed floor: a segment that runs a configured Git program
-    /// or names Guard itself fails `fixed_command_floor`, and an evaluation
-    /// error leaves nothing to read.
+    /// or names Guard itself fails `fixed_command_floor`, a Git checkout
+    /// into a protected location fails `protected_checkout_destination`, and
+    /// an evaluation error leaves nothing to read.
     pub(crate) fn explicit_allow_covers_command(
         &self,
         command: &CanonicalCommandV1,
@@ -483,6 +484,7 @@ impl CompiledNativeCommandControls {
     ) -> bool {
         observations.evaluation_error.is_none()
             && !crate::pretool::fixed_command_floor(command)
+            && !crate::pretool::protected_checkout_destination(command, context)
             && self.explicit_permissions_cover_command(
                 command,
                 &observations.observations,

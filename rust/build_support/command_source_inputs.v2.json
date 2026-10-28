@@ -289,6 +289,7 @@
       "src/pretool/chain_literals_pwd.rs",
       "src/pretool/chain_literals_temp_cd.rs",
       "src/pretool/chain_temporary.rs",
+      "src/pretool/checkout_destination_floor.rs",
       "src/pretool/clone_siblings.rs",
       "src/pretool/command_sequences.rs",
       "src/pretool/compound_reason.rs",
