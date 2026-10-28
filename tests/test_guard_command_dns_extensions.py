@@ -137,22 +137,38 @@ def test_dns_observer_and_help_commands_remain_safe(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("command", "rule_id"),
+    ("command", "rule_id", "minimum_action"),
     [
-        ("aws route53 delete-hosted-zone --id Z123 > --help", "command.dns.aws.zone-deletion"),
-        ("aws route53 delete-hosted-zone --id Z123 >--help", "command.dns.aws.zone-deletion"),
+        (
+            "aws route53 delete-hosted-zone --id Z123 > --help",
+            "command.dns.aws.zone-deletion",
+            "block",
+        ),
+        (
+            "aws route53 delete-hosted-zone --id Z123 >--help",
+            "command.dns.aws.zone-deletion",
+            "block",
+        ),
+        # A heredoc delimiter is an ordinary word, so `--help` names one the
+        # way `EOF` does. The command keeps its review behind an approval
+        # card, which is what the same deletion reaches without a heredoc and
+        # with an `EOF`-delimited one; what it must never reach is the safe
+        # `--help` classification the redirection target could stand in for.
         (
             "aws route53 delete-hosted-zone --id Z123 << --help\npayload\n--help",
             "command.dns.aws.zone-deletion",
+            "review",
         ),
     ],
 )
-def test_help_redirection_target_does_not_hide_dns_command(command: str, rule_id: str, tmp_path: Path) -> None:
+def test_help_redirection_target_does_not_hide_dns_command(
+    command: str, rule_id: str, minimum_action: str, tmp_path: Path
+) -> None:
     payload = inspect_command(command, cwd=tmp_path, home_dir=tmp_path)
     rules = payload["rules"]
     assert isinstance(rules, list)
 
-    assert payload["minimum_action"] == "block"
+    assert payload["minimum_action"] == minimum_action
     assert rules == []
     assert payload["classification"]["action_class"] is None
 
