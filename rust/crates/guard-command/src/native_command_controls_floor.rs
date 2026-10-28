@@ -98,25 +98,64 @@ pub(super) fn explain_expired_deadline(result: &mut PreToolResultV1, deadline: O
 /// A redirect into the home folder names a path the shell expands when the
 /// command runs, so Guard cannot match it and keeps the block, inside a loop
 /// as well as on its own. The agent is told about that redirect rather than
-/// about a script it never ran.
+/// about a script it never ran, but only when the redirect is what stopped
+/// the match: `matches` evaluates the same command with each home redirect
+/// pointed at a project file, and a command that still fails that way, such
+/// as an unread script launch, keeps the original reason.
 pub(super) fn explain_home_redirect(
     result: &mut PreToolResultV1,
     command: Option<&CanonicalCommandV1>,
+    matches: impl FnOnce(&CanonicalCommandV1) -> bool,
 ) {
-    if result.reason_code == "native_command_extension_evaluation_failed"
-        && command.is_some_and(|command| redirects_into_home(&command.normalized_text))
-    {
+    if result.reason_code != "native_command_extension_evaluation_failed" {
+        return;
+    }
+    let Some(command) = command else {
+        return;
+    };
+    let Some(text) = without_home_redirects(&command.normalized_text) else {
+        return;
+    };
+    let probe = crate::parse_command(&crate::CommandModelRequestV1 {
+        command: text,
+        dialect: command.dialect.clone(),
+        transport: command.transport.clone(),
+        extraction_provenance: command.extraction_provenance.clone(),
+    });
+    if probe.is_ok_and(|probe| matches(&probe)) {
         result.reason = HOME_REDIRECT_REASON.to_owned();
     }
 }
 
-fn redirects_into_home(text: &str) -> bool {
+/// The command with every output redirect into the home folder pointed at a
+/// relative file, or `None` when it writes to no such path. The shell-aware
+/// redirect scan skips quoted text and heredoc bodies, so a `> ~/notes` that
+/// is only an argument's words is not a redirect.
+fn without_home_redirects(text: &str) -> Option<String> {
+    let heredocs = crate::shell_structure::extract_heredocs(text);
+    let masked = crate::shell_structure::mask_complete_heredocs(text, &heredocs);
+    let redirects = crate::command_structure::extract_command_redirects(&masked, &heredocs);
+    let mut chars: Vec<char> = text.chars().collect();
+    let mut found = false;
+    for redirect in redirects.iter().rev() {
+        if !redirect.operator.contains('>') || !names_home(&redirect.target) {
+            continue;
+        }
+        let replacement = format!("{} guard-home-redirect.out", redirect.operator);
+        chars
+            .splice(redirect.start..redirect.end, replacement.chars())
+            .for_each(drop);
+        found = true;
+    }
+    found.then(|| chars.into_iter().collect())
+}
+
+fn names_home(target: &str) -> bool {
     static HOME: OnceLock<Regex> = OnceLock::new();
     HOME.get_or_init(|| {
-        Regex::new(r#"(?:^|[^<>])>[>|]?[ \t]*"?(?:~|\$HOME\b|\$\{HOME\})(?:[/"\s;&|)]|$)"#)
-            .expect("bounded home redirect")
+        Regex::new(r"^(?:~|\$HOME\b|\$\{HOME\})(?:/|$)").expect("bounded home redirect target")
     })
-    .is_match(text)
+    .is_match(target)
 }
 
 pub(super) const HOME_REDIRECT_REASON: &str = "HOL Guard could not match this command to the installed extension controls, so it stays blocked. It writes to a path under the home folder (`~` or `$HOME`), which the shell only works out when the command runs. Write the output inside the project or a temporary folder instead, or use the built-in edit tool for a file in the home folder.";

@@ -59,4 +59,23 @@ fn a_redirect_into_the_home_folder_stays_blocked_and_says_why() {
 
     let result = evaluate(&root, "echo x >> notes.txt");
     assert!(!result.reason.contains(HOME_TEXT), "{}", result.reason);
+
+    // A script launch blocks on its own, and quoted text is not a redirect, so
+    // neither is blamed on the home folder.
+    for command in [
+        "bash ./missing.sh > ~/out.log",
+        "bash ./missing.sh '> ~/notes.txt'",
+    ] {
+        let result = evaluate(&root, command);
+        assert_eq!(
+            result.reason_code, "native_command_extension_evaluation_failed",
+            "{command}: {}",
+            result.reason
+        );
+        assert!(
+            !result.reason.contains(HOME_TEXT),
+            "{command}: {}",
+            result.reason
+        );
+    }
 }
