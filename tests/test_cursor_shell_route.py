@@ -61,27 +61,6 @@ def test_a_failed_probe_is_a_plain_allow(tmp_path: Path) -> None:
     assert _respond(_PROBE, None) == {"policy_action": "allow"}
 
 
-@posix_only
-@pytest.mark.parametrize(
-    "placement",
-    [
-        lambda directory: {"cwd": directory},
-        lambda directory: {"tool_input": {"command": "pytest -q", "cwd": directory}},
-        lambda directory: {"tool_input": {"command": "pytest -q", "working_directory": directory}},
-    ],
-)
-def test_a_probe_outside_the_workspace_is_never_reviewed(tmp_path: Path, placement: object) -> None:
-    # The sink runs in the workspace, so a call Cursor runs elsewhere keeps its own directory.
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    worker = _FailingWorker()
-    assert _respond({**_PROBE, **placement(str(elsewhere))}, tmp_path, worker) == {"policy_action": "allow"}  # type: ignore[operator]
-    assert not worker.asked
-    inside = _FailingWorker()
-    assert _respond({**_PROBE, **placement(str(tmp_path))}, tmp_path, inside) == {"policy_action": "allow"}  # type: ignore[operator]
-    assert inside.asked
-
-
 def test_the_sink_command_accepts_the_cursor_harness(tmp_path: Path) -> None:
     from codex_plugin_scanner.cli import _build_parser
 
@@ -114,17 +93,32 @@ def test_non_probe_calls_are_reviewed_as_usual(tmp_path: Path) -> None:
 
 
 @posix_only
-@pytest.mark.parametrize(
-    "command",
-    [
-        "guard execute-contained-test --harness cursor",
-        "rm -rf build; guard execute-contained-test --harness cursor",
-        "guard execute-contained-test --harness cursor --guard-home /tmp/other",
-    ],
-)
-def test_before_shell_admits_only_the_exact_sink_command(tmp_path: Path, command: str) -> None:
-    payload = {**_BEFORE_SHELL, "tool_input": {"command": command}}
+def test_before_shell_asks_the_resident_about_a_call_naming_the_sink(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render
+
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    answer: dict[str, object] = {"value": None}
+
+    def render(kind: str, harness: str, params: dict[str, object], **_kwargs: object) -> tuple[str, object]:
+        calls.append((kind, harness, params))
+        return ("document", dict(answer))
+
+    monkeypatch.setattr(native_hook_render, "native_render_cli", render)
+    payload = {**_BEFORE_SHELL, "tool_input": {"command": "guard execute-contained-test --harness cursor"}}
+    # The resident admits only the exact sink command; anything else is reviewed.
     assert _respond(payload, tmp_path) is None
+    admitted = {"policy_action": "allow", "reason_code": _ROUTED}
+    answer["value"] = admitted
+    assert _respond(payload, tmp_path) == admitted
+    kind, harness, params = calls[-1]
+    assert (kind, harness) == ("cursor_shell_route", "cursor")
+    assert params["payload"] == payload
+    assert params["workspace"] == str(tmp_path)
+    assert "edge" not in params
+    assert params["sink_command"] and all(isinstance(part, str) for part in params["sink_command"])  # type: ignore[union-attr]
+    # Without a workspace the sink cannot be bound, so the call is reviewed.
+    assert _respond(payload, None) is None
+    assert len(calls) == 2
 
 
 def test_windows_is_never_routed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -180,21 +174,29 @@ class _RoutingWorker:
 
 @posix_only
 def test_a_probe_the_sink_takes_answers_with_the_rewritten_call(tmp_path: Path, monkeypatch) -> None:
-    from codex_plugin_scanner.guard import native_hook_containment_route, native_policy_snapshot_harness_postures
-    from codex_plugin_scanner.guard.adapters import zcode_contained_tests
-    from codex_plugin_scanner.guard.daemon import hook_fail_closed
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
 
     routed = {"policy_action": "allow", "reason_code": _ROUTED, "hookSpecificOutput": {"updatedInput": _SINK}}
     asked: list[dict[str, object]] = []
 
-    def rewrite(response: dict[str, object], **kwargs: object) -> native_hook_containment_route.ContainmentRewrite:
-        asked.append(kwargs)
-        return native_hook_containment_route.ContainmentRewrite("test", None, routed)
+    def render(kind: str, harness: str, params: dict[str, object], **_kwargs: object) -> tuple[str, object]:
+        asked.append(params)
+        return ("document", {"value": routed})
 
     monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
-    monkeypatch.setattr(native_hook_containment_route, "edge_containment_route", lambda *_a, **_k: "sink")
-    monkeypatch.setattr(hook_fail_closed, "render_pre_tool", lambda *_a, **_k: {"policy_action": "deny"})
-    monkeypatch.setattr(zcode_contained_tests, "native_containment_rewrite", rewrite)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", render)
     assert _respond(_PROBE, tmp_path, _RoutingWorker()) == routed  # type: ignore[arg-type]
-    # Cursor is routed only as a bridge harness: its own hook applies the rewrite.
-    assert [call["bridge"] for call in asked] == [True]
+    # The resident reads the edge the daemon reviewed, never a re-review.
+    assert [params["edge"] for params in asked] == [
+        {"harness": "cursor", "event_name": "PreToolUse", "result": {"decision": "deny"}}
+    ]
+    assert asked[0]["payload"] == _PROBE
+
+
+@posix_only
+def test_a_probe_the_resident_cannot_answer_is_a_plain_allow(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", lambda *_a, **_k: None)
+    assert _respond(_PROBE, tmp_path, _RoutingWorker()) == {"policy_action": "allow"}  # type: ignore[arg-type]

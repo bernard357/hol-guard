@@ -167,6 +167,52 @@ pub(super) fn admit_sink(
     }))
 }
 
+/// The daemon path's answer to Cursor's route probe or a call naming the
+/// sink, for the `hook_render` op's `cursor_shell_route` kind.
+///
+/// The daemon reviews a probe through its own edge call and ships that edge
+/// here with the call; the resident reads the rest, as the direct lane does.
+/// A probe always gets a response: the sink command when the edge routes the
+/// call to the sink and the rewrite wrote its snapshot, and a plain allow
+/// otherwise. A `beforeShellExecution` gets the routed allow only for the
+/// exact command a probe wrote. `None` keeps the daemon's ordinary review.
+pub(crate) fn daemon_answer(params: &Map<String, Value>) -> Result<Option<Value>, &'static str> {
+    const INVALID: &str = "native_hook_render_invalid";
+    let text = |name: &str| params.get(name).and_then(Value::as_str).ok_or(INVALID);
+    let payload = params
+        .get("payload")
+        .and_then(Value::as_object)
+        .ok_or(INVALID)?;
+    let sink_command = params
+        .get("sink_command")
+        .and_then(Value::as_array)
+        .ok_or(INVALID)?
+        .iter()
+        .map(|part| part.as_str().map(str::to_owned).ok_or(INVALID))
+        .collect::<Result<Vec<_>, _>>()?;
+    let scope = Scope::new(
+        text("workspace")?,
+        text("home_dir")?,
+        text("guard_home")?,
+        Some(&sink_command),
+    )
+    .map_err(|_| INVALID)?;
+    let answer = match route(payload) {
+        Ok(Route::Probe) => {
+            let edge =
+                serde_json::to_vec(params.get("edge").ok_or(INVALID)?).map_err(|_| INVALID)?;
+            unreviewed_probe(payload, &scope, false)
+                .unwrap_or_else(|| probe_answer(&edge, payload, &scope))
+        }
+        Ok(Route::Sink) => match admit_sink(payload, &scope) {
+            Ok(admitted) => admitted,
+            Err(_) => return Ok(None),
+        },
+        Ok(Route::Review) | Err(_) => return Ok(None),
+    };
+    Ok(answer.get("harness_response").cloned())
+}
+
 fn allow() -> Value {
     json!({ "harness_response": { "policy_action": "allow" } })
 }
