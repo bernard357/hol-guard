@@ -157,6 +157,12 @@ fn safe_value(value: &str) -> bool {
 /// on, and one that opens with `[`, whose bracket expression is a character
 /// set the text itself does not spell out.
 ///
+/// A pattern without a directory in it only reads as a path when its own text
+/// says so, by naming a directory or a file type. `for id in PRRT_example*`
+/// walks identifiers the shell never expands, and the body then runs its
+/// program over the pattern itself, so a bare word keeps its review however
+/// the loop is written.
+///
 /// The body reads the loop variable unquoted, so each name the pattern matches
 /// has to be a single field once the shell splits it. The proofs that expand
 /// the pattern own that rule: `read_globs` admits a match only when its name
@@ -170,6 +176,7 @@ fn pattern_value(value: &str) -> bool {
         // `..` reaches above the working directory, so the matches would sit
         // outside it.
         && !value.split('/').any(|segment| segment == "..")
+        && (value.contains('/') || names_a_file_type(value))
         && value.chars().all(|c| {
             c.is_ascii_alphanumeric()
                 || matches!(
@@ -178,6 +185,21 @@ fn pattern_value(value: &str) -> bool {
                         | ']'
                 )
         })
+}
+
+/// A pattern with no directory in it whose own text reads as a path: a
+/// directory glob such as `*/`, or a name carrying a literal file type such
+/// as `*.ts`.
+///
+/// The extension has to be spelled out, because the text is all the loop says
+/// about what the pattern will match.
+fn names_a_file_type(value: &str) -> bool {
+    if let Some(stem) = value.strip_suffix('/') {
+        return !stem.is_empty();
+    }
+    value.rsplit_once('.').is_some_and(|(stem, extension)| {
+        !stem.is_empty() && !extension.is_empty() && !extension.contains(['*', '?', '[', ']'])
+    })
 }
 
 /// Literal words, and glob patterns, up to the first unquoted `;` or newline.

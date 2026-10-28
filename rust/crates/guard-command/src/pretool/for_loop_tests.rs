@@ -42,9 +42,9 @@ fn read_only_loops_match_their_unrolled_form() {
         ),
         ("for d in src/*/; do echo $d; done", "echo src/*/"),
         // A pattern with no directory in it names the directory the loop
-        // runs in, which is the directory the written-out command names.
+        // runs in, which is the directory the written-out command names, as
+        // long as the pattern's own text reads as a path.
         ("for f in *.ts; do echo $f; done", "echo *.ts"),
-        ("for f in build*; do echo $f; done", "echo build*"),
         ("for d in */; do echo $d; done", "echo */"),
         // The body talks about the name without binding it, so the loop
         // variable still holds the header word.
@@ -114,6 +114,12 @@ fn unsupported_loops_fall_back_to_review() {
         // the loop runs in.
         "for f in [ab]*.ts; do echo $f; done",
         "for f in -*.ts; do echo $f; done",
+        // A directoryless pattern that names no file type is an identifier the
+        // shell leaves alone, so the body runs its program over the pattern
+        // itself rather than over the names of files.
+        "for id in PRRT_example*; do echo $id; done",
+        "for d in disk*; do echo $d; done",
+        "for f in *; do echo $f; done",
         "for f in ../*.ts; do echo $f; done",
         "for f in /etc/*.conf; do echo $f; done",
         "for f in src/../../*.ts; do echo $f; done",
