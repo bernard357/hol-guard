@@ -34,7 +34,7 @@
           },
           "publisher": {
             "id": "community.kantorcodes",
-            "display_name": "Michael Kantor (HOL)",
+            "display_name": "Michael Kantor",
             "url": "https://github.com/kantorcodes"
           },
           "permissions": [
@@ -108,6 +108,10 @@
                     "-o",
                     "--client-timeout",
                     "-t"
+                  ],
+                  "forbidden_flags_before_delimiter": [
+                    "--help",
+                    "-h"
                   ]
                 }
               }
@@ -564,9 +568,7 @@
         "command.upctl"
       ],
       "expected_action": "review",
-      "expected_effective_segments": [
-        0
-      ],
+      "expected_effective_segments": [],
       "rule_id": "command.upctl.account-purge"
     },
     {
@@ -624,6 +626,30 @@
       "expected_effective_segments": [
         0
       ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_short_help_before_purge",
+      "command": "upctl -h all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_disabled_permission_help_only",
+      "command": "upctl all purge --help",
+      "disabled_permissions": [
+        "command.upctl.permission.account-purge"
+      ],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
       "rule_id": "command.upctl.account-purge"
     }
   ],
