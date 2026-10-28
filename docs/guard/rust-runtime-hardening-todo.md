@@ -120,7 +120,7 @@ measured parity gate, not the detection itself.
 ## PR 6: DX, observability, repair, and dead-code cleanup
 
 - [x] NRH-T100 add stable native status model for CLI/dashboard/Desktop/MDM — `native_runtime_resilience.rs::NativeRuntimeHealthSnapshot`, surfaced through `native_runtime.py::native_runtime_health`;
-- [x] NRH-T101 add `hol-guard doctor --native` and `hol-guard runtime status --json` — `guard doctor --native` reports the native health snapshot and `guard runtime status --json` renders it as a machine-readable document;
+- [ ] NRH-T101 add `hol-guard doctor --native` and `hol-guard runtime status --json` — `hol-guard guard doctor` and `hol-guard guard runtime [posture] --json` exist, and the health model is in place, but the posture command reports harness detections and advisories, not the native health snapshot, and `doctor` has no `--native` flag;
 - [ ] NRH-T102 add idempotent native lifecycle repair and clear diagnosis for noexec/wrong wheel/unsupported/manifest/permission/stale endpoint/circuit/daemon — `codex_hook_repair_native.py` and the protection repair page cover part of this;
 - [ ] NRH-T103 add bounded aggregate metrics for latency/size/cost/queue/overload/auth/fallback/timeout/crash/restart/circuit/mismatch;
 - [ ] NRH-T104 add support-bundle redaction and privacy tests;
