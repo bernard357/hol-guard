@@ -2,7 +2,12 @@
 
 Scope is a static import-graph closure (``ast``) from reviewed runtime root
 modules.  Edges are classified ``eager`` (executed at import time) or ``lazy``
-(inside a function/lambda, or a literal ``importlib.import_module`` call).
+(inside a function/lambda, or an ``importlib.import_module`` call).  A
+dynamic import resolves when its module argument is a string the source fixes:
+a literal, a conditional between literals, a name bound to one of those, a loop
+variable drawn from a module-level literal table, or the parameter of a
+module-private helper every caller passes a literal to.  Anything else is
+counted unresolved and must be declared in the scope contract.
 Imports under ``if TYPE_CHECKING`` are not runtime edges.  Reviewed exclusions
 prune a module and everything reachable only through it.  LOC counts physical
 lines holding at least one non-comment token (docstrings count).
@@ -80,6 +85,106 @@ def _literal_package(node: ast.expr, module: PythonModule) -> str | None:
     return None
 
 
+def _literal_strings(node: ast.expr, env: dict[str, set[str] | None]) -> set[str] | None:
+    """Every string ``node`` can evaluate to, or ``None`` when the source leaves it open."""
+    if isinstance(node, ast.Constant):
+        return {node.value} if isinstance(node.value, str) else None
+    if isinstance(node, ast.IfExp):
+        body = _literal_strings(node.body, env)
+        orelse = _literal_strings(node.orelse, env)
+        return None if body is None or orelse is None else body | orelse
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    return None
+
+
+def _literal_tables(tree: ast.Module) -> dict[str, list[ast.expr]]:
+    """Module-level names bound exactly once to a literal tuple or list."""
+    tables: dict[str, list[ast.expr]] = {}
+    seen: set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            name, value = stmt.targets[0].id, stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            name, value = stmt.target.id, stmt.value
+        else:
+            continue
+        if name in seen:
+            tables.pop(name, None)
+            continue
+        seen.add(name)
+        if isinstance(value, (ast.Tuple, ast.List)):
+            tables[name] = list(value.elts)
+    return tables
+
+
+def _column_values(rows: list[set[str] | None]) -> set[str] | None:
+    """Union of one column of candidate values, or ``None`` if any row is open."""
+    if not rows or any(row is None for row in rows):
+        return None
+    result: set[str] = set()
+    for row in rows:
+        result |= row or set()
+    return result
+
+
+def _calls_by_name(tree: ast.Module) -> dict[str, list[tuple[ast.Call, bool]]]:
+    """Every ``name(...)`` call in the module, paired with whether it runs at import time."""
+    calls: dict[str, list[tuple[ast.Call, bool]]] = {}
+
+    def walk(node: ast.AST, eager: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name):
+                calls.setdefault(child.func.id, []).append((child, eager))
+            nested = eager and not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+            walk(child, nested)
+
+    walk(tree, True)
+    return calls
+
+
+def _wrapper_literals(tree: ast.Module) -> dict[str, dict[str, Any]]:
+    """Parameters of module-private helpers that every call site fixes to literals.
+
+    A helper whose name appears only as the callee of a call in its own module
+    cannot be reached with other arguments, so its parameters are known to be
+    exactly the literals those call sites pass.  ``mode`` is ``eager`` when any
+    call site runs at import time, because the helper's imports then run too.
+    """
+    functions = {
+        stmt.name: stmt
+        for stmt in tree.body
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name.startswith("_")
+    }
+    if not functions:
+        return {}
+    calls = _calls_by_name(tree)
+    callee_ids = {id(call.func) for sites in calls.values() for call, _ in sites}
+    escaped = {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id in functions and id(node) not in callee_ids
+    }
+    bindings: dict[str, dict[str, Any]] = {}
+    for name, function in functions.items():
+        sites = calls.get(name, [])
+        spec = function.args
+        if name in escaped or not sites or spec.posonlyargs or spec.kwonlyargs or spec.vararg or spec.kwarg:
+            continue
+        params = [argument.arg for argument in spec.args]
+        columns: list[list[set[str] | None]] = [[] for _ in params]
+        if any(
+            call.keywords or len(call.args) != len(params) or any(isinstance(item, ast.Starred) for item in call.args)
+            for call, _ in sites
+        ):
+            continue
+        for call, _ in sites:
+            for index, argument in enumerate(call.args):
+                columns[index].append(_literal_strings(argument, {}))
+        resolved = {param: values for param, column in zip(params, columns) if (values := _column_values(column)) is not None}
+        if resolved:
+            bindings[name] = {"params": resolved, "mode": "eager" if any(eager for _, eager in sites) else "lazy"}
+    return bindings
+
+
 def _absolute_name(name: str, package: str | None) -> str | None:
     if not name.startswith("."):
         return name
@@ -99,6 +204,33 @@ class _ImportCollector(ast.NodeVisitor):
         self.found: list[tuple[str, str, int, tuple[str, ...]]] = []
         self.dynamic_unresolved = 0
         self._function_depth = 0
+        self._tables: dict[str, list[ast.expr]] = {}
+        self._wrappers: dict[str, dict[str, Any]] = {}
+        self._env: list[dict[str, set[str] | None]] = [{}]
+        self._assigned: list[set[str]] = [set()]
+        self._modes: list[str | None] = [None]
+
+    def _lookup(self) -> dict[str, set[str] | None]:
+        merged: dict[str, set[str] | None] = {}
+        for scope in self._env:
+            merged.update(scope)
+        return merged
+
+    def _dynamic_mode(self) -> str:
+        for mode in reversed(self._modes):
+            if mode is not None:
+                return mode
+        return "lazy"
+
+    def _push(self, scope: dict[str, set[str] | None], mode: str | None) -> None:
+        self._env.append(scope)
+        self._assigned.append(set())
+        self._modes.append(mode)
+
+    def _pop(self) -> None:
+        self._env.pop()
+        self._assigned.pop()
+        self._modes.pop()
 
     def _mode(self) -> str:
         return "lazy" if self._function_depth else "eager"
@@ -109,6 +241,11 @@ class _ImportCollector(ast.NodeVisitor):
             return
         super().visit(node)
 
+    def visit_Module(self, node: ast.Module) -> None:
+        self._tables = _literal_tables(node)
+        self._wrappers = _wrapper_literals(node)
+        self.generic_visit(node)
+
     def visit_If(self, node: ast.If) -> None:
         if is_type_checking_test(node.test):
             for child in node.orelse:
@@ -117,12 +254,71 @@ class _ImportCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        wrapper = self._wrappers.get(getattr(node, "name", ""))
         self._function_depth += 1
+        self._push(dict(wrapper["params"]) if wrapper else {}, wrapper["mode"] if wrapper else None)
         self.generic_visit(node)
+        self._pop()
         self._function_depth -= 1
 
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
     visit_Lambda = visit_FunctionDef  # type: ignore[assignment]  # noqa: N815
+
+    def _bind(self, target: ast.expr, value: ast.expr) -> None:
+        """Record what a single-name assignment leaves the name holding."""
+        if not isinstance(target, ast.Name):
+            return
+        scope, assigned = self._env[-1], self._assigned[-1]
+        if target.id in assigned:
+            scope[target.id] = None  # assigned more than once: no single static value
+            return
+        assigned.add(target.id)
+        scope[target.id] = _literal_strings(value, self._lookup())
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.generic_visit(node)
+        if len(node.targets) == 1:
+            self._bind(node.targets[0], node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self.generic_visit(node)
+        if node.value is not None:
+            self._bind(node.target, node.value)
+
+    def _loop_bindings(self, node: ast.For | ast.AsyncFor) -> dict[str, set[str] | None]:
+        """Loop variables drawn from a literal table, resolved by tuple position."""
+        if isinstance(node.iter, ast.Name):
+            elements = self._tables.get(node.iter.id)
+        elif isinstance(node.iter, (ast.Tuple, ast.List)):
+            elements = list(node.iter.elts)
+        else:
+            elements = None
+        if not elements:
+            return {}
+        if isinstance(node.target, ast.Name):
+            values = _column_values([_literal_strings(element, {}) for element in elements])
+            return {node.target.id: values}
+        if not isinstance(node.target, ast.Tuple) or not all(isinstance(item, ast.Name) for item in node.target.elts):
+            return {}
+        width = len(node.target.elts)
+        columns: list[list[set[str] | None]] = [[] for _ in range(width)]
+        for element in elements:
+            if not isinstance(element, (ast.Tuple, ast.List)) or len(element.elts) != width:
+                return {}
+            for index, item in enumerate(element.elts):
+                columns[index].append(_literal_strings(item, {}))
+        return {name.id: _column_values(column) for name, column in zip(node.target.elts, columns)}
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self._push(self._loop_bindings(node), None)
+        for child in node.body:
+            self.visit(child)
+        self._pop()
+        for child in node.orelse:
+            self.visit(child)
+
+    visit_AsyncFor = visit_For  # type: ignore[assignment]  # noqa: N815
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -141,10 +337,12 @@ class _ImportCollector(ast.NodeVisitor):
                 if keyword.arg == "package":
                     package_node = keyword.value
             package = _literal_package(package_node, self.module) if package_node is not None else None
-            literal = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else None
-            target = _absolute_name(literal, package) if literal is not None else None
-            if target:
-                self.found.append(("lazy", target, 0, ()))
+            names = _literal_strings(arg, self._lookup())
+            targets = [_absolute_name(item, package) for item in sorted(names)] if names else []
+            if targets and all(targets):
+                mode = self._dynamic_mode()
+                for target in targets:
+                    self.found.append((mode, target or "", 0, ()))
             else:
                 self.dynamic_unresolved += 1
         self.generic_visit(node)
@@ -185,11 +383,12 @@ def build_graph(repo: Path, package_root: str, plans: dict[str, ModulePlan] | No
     for name, module in modules.items():
         source = (repo / module.path).read_text(encoding="utf-8")
         plan = (plans or {}).get(module.path)
-        collector = _ImportCollector(module, plan.skip_linenos if plan else None)
         try:
-            collector.visit(ast.parse(source))
+            tree = ast.parse(source)
         except SyntaxError:
             continue
+        collector = _ImportCollector(module, plan.skip_linenos if plan else None)
+        collector.visit(tree)
         graph.eager[name], graph.lazy[name] = set(), set()
         graph.dynamic_unresolved[name] = collector.dynamic_unresolved
         for found in collector.found:

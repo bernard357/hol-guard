@@ -2119,63 +2119,7 @@
         "evidence": "discover_shared_workspace_aibom_artifacts is called only from inventory_contract.py, which is outside runtime scope. The role grammar this entry used to cover now lives in the resident's aibom_paths.rs and reaches Python only as the inventory_source_evidence answer. The retained adapter detection, Codex skill discovery and MCP metadata enrichment do not reference it, and the report validates this reference closure on every run."
       }
     ],
-    "dynamic_imports": [
-      {
-        "path": "src/codex_plugin_scanner/guard/adapters/__init__.py",
-        "count": 1,
-        "resolution": "follow",
-        "mode": "lazy",
-        "targets": [
-          ".codex",
-          ".claude_code",
-          ".copilot",
-          ".cursor",
-          ".cline",
-          ".devin",
-          ".antigravity",
-          ".gemini",
-          ".grok",
-          ".hermes",
-          ".kimi",
-          ".pi",
-          ".openclaw",
-          ".opencode",
-          ".zcode",
-          ".paseo"
-        ],
-        "evidence": "Adapter registry: _adapters() imports each module named in the literal _ADAPTER_SPECS table with import_module(module_name, __package__) and instantiates the named class. Targets list every module in that table (.pi holds two classes). Decision: follow. Adapters normalize harness payloads into hook requests and get_adapter(harness).approval_flow() is called from hook handling (commands_hook_native_review), so the registry is on the hook path and hook-path authority is never excluded. The modules listed in the adapter registry reviewed_runtime entry join the scope. Install, setup and config methods keep their reviewed function-level exclusions (install_config, not hook path)."
-      },
-      {
-        "path": "src/codex_plugin_scanner/guard/cli/_commands_shared.py",
-        "count": 1,
-        "resolution": "follow",
-        "mode": "eager",
-        "targets": [
-          "..daemon",
-          "..proxy",
-          ".approval_commands",
-          ".bootstrap"
-        ],
-        "evidence": "_load_lazy_export(module_name, attribute) is only ever called at module level with literal module names: ..daemon (GuardDaemonServer, ensure_guard_daemon and the other daemon exports), ..proxy (the harness MCP proxy classes), .approval_commands (the guard approvals command handlers) and .bootstrap (the guard bootstrap payload builder), so the one non-literal site resolves to those four modules."
-      },
-      {
-        "path": "src/codex_plugin_scanner/guard/codex_config.py",
-        "count": 1,
-        "resolution": "external",
-        "evidence": "Selects the stdlib tomllib module (Python 3.11+) or the third-party tomli backport by interpreter version; both are external to the package, so the call adds no in-package module."
-      },
-      {
-        "path": "src/codex_plugin_scanner/guard/runtime/__init__.py",
-        "count": 1,
-        "resolution": "follow",
-        "mode": "lazy",
-        "targets": [
-          ".wrapper_run",
-          ".runner"
-        ],
-        "evidence": "Package __getattr__ resolves the six names in the literal __all__ to .wrapper_run (guard_run) or .runner (the sync and receipt helpers) with import_module(module_name, __name__). Both targets are real submodules; wrapper_run is the guard run launch path so it is followed, and runner stays in scope as the lazy attribute owner except for the modules excluded by their own entries."
-      }
-    ]
+    "dynamic_imports": []
   },
   "rust": {
     "workspace": "rust",
