@@ -209,7 +209,7 @@ impl CompiledNativeCommandControls {
         let heredocs = data_heredocs(text);
         let shell = match &heredocs {
             Some((shell, _)) => shell.clone(),
-            None => shell_text(text).to_owned(),
+            None => shell_text(text),
         };
         // A redirection such as `;2>&1` is not a program. It goes before the
         // awk pass, which rejoins words with spaces: `2>&1` became `2 >& 1`,
@@ -854,33 +854,64 @@ fn moves_data(literal: &str) -> bool {
         })
 }
 
-/// One heredoc on the first line, ending the text, whose body cannot run
-/// commands: its delimiter is quoted, or the body expands nothing.
-fn input_heredoc(text: &str) -> bool {
-    let Some((line, rest)) = text.split_once('\n') else {
-        return false;
-    };
-    let Some((before, after)) = line.split_once("<<") else {
-        return false;
-    };
-    let after = after.strip_prefix('-').unwrap_or(after).trim();
+/// The one heredoc a first line opens: what runs before it, what follows its
+/// delimiter on the same line, the delimiter itself and the body under it.
+/// A second `<<` on that line opens a heredoc this reading does not hold.
+struct FirstHeredoc<'a> {
+    before: &'a str,
+    trailing: &'a str,
+    delimiter: &'a str,
+    quoted: bool,
+    body: &'a str,
+}
+
+fn first_heredoc(text: &str) -> Option<FirstHeredoc<'_>> {
+    let (line, body) = text.split_once('\n')?;
+    let (before, after) = line.split_once("<<")?;
+    let after = after.strip_prefix('-').unwrap_or(after).trim_start();
     let quoted = after.starts_with(['\'', '"']);
-    let delimiter = after.trim_matches(['\'', '"']);
-    if delimiter.is_empty()
-        || !delimiter
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        || moves_data(&unquoted_literal(before))
+    let start = usize::from(quoted);
+    let end = after[start..]
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map_or(after.len(), |at| at + start);
+    let delimiter = &after[start..end];
+    let trailing = &after[end..];
+    // An opening quote the line never closes names no delimiter at all.
+    let trailing = if quoted {
+        trailing.strip_prefix(['\'', '"'])?
+    } else {
+        trailing
+    };
+    (!delimiter.is_empty() && !trailing.contains("<<")).then_some(FirstHeredoc {
+        before,
+        trailing,
+        delimiter,
+        quoted,
+        body,
+    })
+}
+
+/// One heredoc on the first line whose body cannot run commands: its
+/// delimiter is quoted, or the body expands nothing. The heredoc need not end
+/// the line. What follows the delimiter is the rest of the command, so it
+/// answers for its own data movement the way the text around it does.
+/// Reading the delimiter as everything left on the line left
+/// `sort <<'EOF' > out.txt` unparseable here, and an unparseable shape has no
+/// floor to reach, which blocks it outright with no approval left to give it.
+fn input_heredoc(text: &str) -> bool {
+    let Some(heredoc) = first_heredoc(text) else {
+        return false;
+    };
+    if !plain_after_heredocs(&format!("{}{}", heredoc.before, heredoc.trailing)) {
+        return false;
+    }
+    let mut lines: Vec<&str> = heredoc.body.lines().collect();
+    if lines.pop().map(str::trim) != Some(heredoc.delimiter)
+        || lines.iter().any(|body| body.trim() == heredoc.delimiter)
     {
         return false;
     }
-    let mut lines: Vec<&str> = rest.lines().collect();
-    if lines.pop().map(str::trim) != Some(delimiter)
-        || lines.iter().any(|body| body.trim() == delimiter)
-    {
-        return false;
-    }
-    quoted || lines.iter().all(|body| !body.contains(['$', '`', '\\']))
+    heredoc.quoted || lines.iter().all(|body| !body.contains(['$', '`', '\\']))
 }
 
 /// Every word the shell could read as a program name or keyword token, with
@@ -959,12 +990,20 @@ fn unquoted_literal(text: &str) -> String {
 }
 
 /// The text the shell runs as commands. An accepted input heredoc contributes
-/// only its command, since `input_heredoc` already keeps its body from
-/// expanding and the body is data on standard input.
-fn shell_text(text: &str) -> &str {
-    match text.split_once('\n') {
-        Some((line, _)) if text.contains("<<") => line.split_once("<<").map_or(line, |(b, _)| b),
-        _ => text,
+/// its command and whatever follows its delimiter, since `input_heredoc`
+/// already keeps the body from expanding and the body is data on standard
+/// input. Dropping the rest of the line with the body would hide the
+/// programs a pipe after the heredoc names from the owners below.
+fn shell_text(text: &str) -> String {
+    let Some((line, _)) = text.split_once('\n').filter(|_| text.contains("<<")) else {
+        return text.to_owned();
+    };
+    match first_heredoc(text) {
+        Some(heredoc) => format!("{}{}", heredoc.before, heredoc.trailing),
+        None => line
+            .split_once("<<")
+            .map_or(line, |(before, _)| before)
+            .to_owned(),
     }
 }
 
@@ -1488,6 +1527,10 @@ mod tree_group_tests;
 #[cfg(test)]
 #[path = "native_command_unmodeled_quoted_angle_tests.rs"]
 mod quoted_angle_tests;
+
+#[cfg(test)]
+#[path = "native_command_unmodeled_heredoc_tests.rs"]
+mod heredoc_tests;
 
 #[cfg(test)]
 #[path = "native_command_unmodeled_substitution_tests.rs"]
