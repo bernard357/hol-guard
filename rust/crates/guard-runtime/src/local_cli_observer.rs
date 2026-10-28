@@ -114,18 +114,23 @@ pub(crate) fn candidate(
 
 /// The launch a directly answered `PreToolUse` names. Its payload keeps the
 /// execution environment the hook stamped, which the daemon read the `PATH`
-/// from when it drained the record.
+/// from when it drained the record, over the home and environment the
+/// daemon published (`launch_env`).
 pub(crate) fn direct_candidate(
     payload: &Map<String, Value>,
     workspace: &str,
     home_dir: &str,
     guard_home: &str,
+    launch_env: Option<LaunchEnvironment>,
 ) -> Option<Candidate> {
     let path = payload
         .get(crate::hook_direct::EXECUTION_ENVIRONMENT_FIELD)
         .and_then(|environment| environment.get("path"))
         .and_then(Value::as_str);
-    candidate(payload, Some(workspace), home_dir, guard_home, path)
+    candidate(payload, Some(workspace), home_dir, guard_home, path).map(|found| Candidate {
+        launch_env,
+        ..found
+    })
 }
 
 /// The launch an edge envelope names, when the daemon asked the resident to

@@ -107,8 +107,13 @@ impl Case {
             native_result: object(native_result),
             workspace: Some(self.workspace.clone()),
             home_dir: self.workspace.clone(),
-            user_home: None,
-            env: None,
+            // The edge always sends the daemon's home and environment.
+            user_home: Some(self.workspace.clone()),
+            env: Some(
+                std::env::var("PATH")
+                    .map(|path| [("PATH".to_owned(), path)].into_iter().collect())
+                    .unwrap_or_default(),
+            ),
         }
     }
 }
@@ -238,8 +243,16 @@ fn the_reply_names_the_verdict_and_refuses_an_unknown_mode() {
 fn the_launch_resolves_against_the_daemon_environment_it_was_sent() {
     let case = Case::new("launch-env", Some("blocked"));
     let mut request = case.request("allowed", "npm run build", allowed());
-    // Without the daemon's environment the resident resolves against its own.
+    request.user_home = None;
+    request.env = None;
     assert!(launch_env(&request).is_none());
+    // Without the daemon's environment no launch past a package script is
+    // resolved, never against the resident's own, so the check cannot
+    // verify one.
+    let mut unresolved = case.request("allowed", "pwd", allowed());
+    unresolved.user_home = None;
+    unresolved.env = None;
+    assert_eq!(allowed_verdict(&unresolved), RuleVerdict::Unverified);
     request.user_home = Some("/daemon/home".to_owned());
     assert!(launch_env(&request).is_none());
     request.env = Some(

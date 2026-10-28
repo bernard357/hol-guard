@@ -552,6 +552,17 @@ fn answer(
             answered["harness_response"]["structured_content_mediation"] = mediation;
         }
     }
+    // The daemon checks its rules, and observes the command line, against its
+    // own home and environment, which it published with the binding. The
+    // resident's own carry no `PATH`.
+    let daemon_environment = binding
+        .exact_action_environment
+        .as_ref()
+        .map(|environment| &environment.0);
+    let daemon_home = daemon_environment.and_then(saved_decision::review_request::expanded_home);
+    let launch_env = daemon_environment
+        .zip(daemon_home.as_deref())
+        .map(|(env, user_home)| local_cli::LaunchEnv { user_home, env });
     let rule_check = local_cli::RuleCheck {
         payload: rule_payload.as_ref(),
         harness: &request.harness,
@@ -559,7 +570,7 @@ fn answer(
         home_dir: &request_home,
         guard_home: &guard_home,
         recording_only,
-        launch_env: None,
+        launch_env,
     };
     // The daemon's custom block replaces the edge response before it routes
     // a sandbox requirement, so a block also drops any routed snapshot.
@@ -576,6 +587,10 @@ fn answer(
             &workspace,
             &request_home,
             &guard_home,
+            launch_env.map(|daemon| crate::local_cli_observer::LaunchEnvironment {
+                user_home: daemon.user_home.to_owned(),
+                env: daemon.env.clone(),
+            }),
         )
     } else {
         None

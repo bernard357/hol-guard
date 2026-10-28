@@ -51,6 +51,7 @@ use guard_contracts::{
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 use zeroize::Zeroizing;
@@ -165,7 +166,7 @@ pub(super) fn answer(edge: &[u8], context: &Context<'_>) -> Result<Value, HookDi
         // the daemon reads one only while the store holds a grant row.
         custom = store
             .grants()?
-            .then(|| custom_grant(context, &result))
+            .then(|| custom_grant(context, &result, &environment.0))
             .flatten();
         if let Some(ReviewVerdict::Blocked(name)) = &custom {
             // A custom block wins over any saved decision or approval.
@@ -217,8 +218,14 @@ pub(super) fn answer(edge: &[u8], context: &Context<'_>) -> Result<Value, HookDi
 
 /// `native_local_cli_grant_response` for this review: the custom rule the
 /// daemon reads before any saved decision, or `None` when none applies. The
-/// daemon reads it only for a review it holds at a review action.
-fn custom_grant(context: &Context<'_>, result: &Object) -> Option<ReviewVerdict> {
+/// daemon reads it only for a review it holds at a review action, and
+/// resolves the launch against `Path.home()` and `os.environ`, which it
+/// published as `environment`.
+fn custom_grant(
+    context: &Context<'_>,
+    result: &Object,
+    environment: &BTreeMap<String, String>,
+) -> Option<ReviewVerdict> {
     if !result
         .get("policy_action")
         .and_then(Value::as_str)
@@ -226,6 +233,7 @@ fn custom_grant(context: &Context<'_>, result: &Object) -> Option<ReviewVerdict>
     {
         return None;
     }
+    let user_home = review_request::expanded_home(environment);
     super::local_cli::review_grant(&super::local_cli::RuleCheck {
         payload: Some(context.payload),
         harness: context.harness,
@@ -234,7 +242,12 @@ fn custom_grant(context: &Context<'_>, result: &Object) -> Option<ReviewVerdict>
         guard_home: context.guard_home,
         // The daemon pauses no review in Watch, so this lane never records.
         recording_only: false,
-        launch_env: None,
+        launch_env: user_home
+            .as_deref()
+            .map(|user_home| super::local_cli::LaunchEnv {
+                user_home,
+                env: environment,
+            }),
     })
 }
 

@@ -205,13 +205,24 @@ fn a_direct_answer_reads_the_stamped_path() {
         "tool_input": {"command": "ls"},
         "guard_execution_environment": {"path": "/opt/bin"},
     }));
-    let found = direct_candidate(&payload, "/work", "/home/dev", "/g").unwrap();
+    let found = direct_candidate(&payload, "/work", "/home/dev", "/g", None).unwrap();
     assert_eq!(found.path.as_deref(), Some("/opt/bin"));
+    assert_eq!(found.launch_env, None);
+    // The daemon's published home and environment go with the observation,
+    // as the edge's do, so the resident never identifies the launch against
+    // its own.
+    let daemon = LaunchEnvironment {
+        user_home: "/home/dev".to_owned(),
+        env: [("PATH".to_owned(), "/usr/bin".to_owned())].into(),
+    };
+    let found =
+        direct_candidate(&payload, "/work", "/home/dev", "/g", Some(daemon.clone())).unwrap();
+    assert_eq!(found.launch_env, Some(daemon));
     let unstamped = object(json!({
         "tool_input": {"command": "ls"},
         "guard_execution_environment": null,
     }));
-    let found = direct_candidate(&unstamped, "/work", "/home/dev", "/g").unwrap();
+    let found = direct_candidate(&unstamped, "/work", "/home/dev", "/g", None).unwrap();
     assert_eq!(found.path, None);
 }
 
