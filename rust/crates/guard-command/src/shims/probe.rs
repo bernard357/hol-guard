@@ -209,6 +209,17 @@ impl ProbeFailure {
             Self::Failed => "probe_failed",
         }
     }
+
+    /// The reason to report when both halves of a probe failed. A reader that
+    /// answered is definite; a drain that ran out of time only says the host
+    /// was busy, and it would send a developer looking at load when the probe
+    /// had already produced more evidence than can be read whole.
+    fn or_definite(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Failed, _) | (_, Self::Failed) => Self::Failed,
+            _ => Self::TimedOut,
+        }
+    }
 }
 
 /// `subprocess.run([...], capture_output=True, timeout=...)`; the error stands
@@ -259,7 +270,9 @@ fn run_probe(
     // group is reaped so nothing lingers in the resident.
     // Evidence larger than the cap cannot be read whole, so a reader that
     // reports the cap was passed fails the probe rather than let a truncated
-    // object be parsed as "no evaluator ran".
+    // object be parsed as "no evaluator ran". Both pipes are classified before
+    // a reason is chosen: one half passing the cap while the other is still
+    // held open is a broken probe, not a busy host.
     let drain = |receiver: &mpsc::Receiver<Option<Vec<u8>>>| match receiver
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
     {
@@ -269,7 +282,11 @@ fn run_probe(
     };
     let stdout = match (drain(&stdout), drain(&stderr)) {
         (Ok(stdout), Ok(_)) => stdout,
-        (Err(failure), _) | (Ok(_), Err(failure)) => {
+        (Err(first), Err(second)) => {
+            kill_tree(&mut child);
+            return Err(first.or_definite(second));
+        }
+        (Err(failure), Ok(_)) | (Ok(_), Err(failure)) => {
             kill_tree(&mut child);
             return Err(failure);
         }
@@ -458,6 +475,21 @@ mod tests {
         assert_eq!(
             run("sleep 30", Duration::from_millis(200)).err(),
             Some(ProbeFailure::TimedOut),
+        );
+    }
+
+    #[test]
+    fn output_past_the_cap_outranks_a_pipe_held_open_past_the_budget() {
+        // stderr passes the cap and its reader answers once the shell exits,
+        // which is definite; a descendant keeps stdout open past the budget,
+        // which on its own would only say the host was busy.
+        let script = format!(
+            "head -c {} /dev/zero >&2; sleep 30 2>/dev/null & exit 0",
+            PROBE_OUTPUT_CAP + 1
+        );
+        assert_eq!(
+            run(&script, Duration::from_millis(500)).err(),
+            Some(ProbeFailure::Failed),
         );
     }
 
