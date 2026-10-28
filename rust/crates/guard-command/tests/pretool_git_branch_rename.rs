@@ -65,24 +65,29 @@ fn branch_creation_at_a_start_point_is_quiet_only_in_the_plain_form() {
             "{command}"
         );
     };
+    // Each of these is refused by the creation form, so none of them reaches
+    // the local-write proof. Some route to the workspace sandbox instead,
+    // which carries a floor of its own, so what is claimed here is the proof
+    // the command is admitted to, not the floor that follows from it.
     let reviewed = |command: &str| {
         let result = at_tree(command);
-        assert_ne!(
-            result.minimum_action, "allow",
-            "{command}: {}",
-            result.reason_code
+        assert_ne!(result.reason_code, WRITE, "{command}");
+    };
+    let contained = |command: &str| {
+        let result = at_tree(command);
+        assert_eq!(
+            result.reason_code, "native_workspace_containment_required",
+            "{command}"
         );
     };
     // Creating a branch writes one new ref. It leaves `HEAD` and every file
     // in the checkout alone, and Git refuses a name that is already taken.
     for command in [
-        "git branch fix/report",
         "git branch fix/report HEAD",
         "git branch fix/report main",
         "git branch fix/report origin/main",
         "git branch fix/report refs/heads/main",
         "git branch -q fix/report origin/main",
-        "git branch --no-track fix/report origin/main",
     ] {
         allowed(command);
     }
@@ -102,6 +107,16 @@ fn branch_creation_at_a_start_point_is_quiet_only_in_the_plain_form() {
         "git -c core.hooksPath=x branch fix/report main",
     ] {
         reviewed(command);
+    }
+    // A creation with one positional, and one that asks for no upstream, name
+    // no `branch.NAME.*` key the workspace sandbox would have to refuse, so
+    // they keep the containment route they already had and never reach the
+    // local-write proof.
+    for command in [
+        "git branch fix/report",
+        "git branch --no-track fix/report origin/main",
+    ] {
+        contained(command);
     }
     // Creation updates a ref, so it answers for the reference-transaction hook.
     executable_hook(&session.primary.join(".git/hooks/reference-transaction"));
