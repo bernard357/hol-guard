@@ -23,9 +23,14 @@ fn many(patterns: &[(&str, &str)]) -> Vec<Regex> {
 
 /// One `---` delimited block, read from where it opens.
 static FRONTMATTER: LazyLock<Regex> = LazyLock::new(|| py_regex(r"\A---\s.*?---", "s"));
-/// A block whose first line is a YAML `key:` entry.
-static FRONTMATTER_KEY_OPEN: LazyLock<Regex> =
-    LazyLock::new(|| py_regex(r"\A---[ \t]*\r?\n[ \t]*[\w-]+[ \t]*:", ""));
+/// A block whose first line is a YAML `key:` entry. Keys may be dotted or
+/// quoted.
+static FRONTMATTER_KEY_OPEN: LazyLock<Regex> = LazyLock::new(|| {
+    py_regex(
+        r#"\A---[ \t]*\r?\n[ \t]*(?:[\w.-]+|"[^"\r\n]+"|'[^'\r\n]+')[ \t]*:"#,
+        "",
+    )
+});
 static SHELL_COMMAND: LazyLock<Regex> =
     LazyLock::new(|| py_regex(r"```(?:bash|sh|shell|zsh)\s(.*?)```", "s"));
 
@@ -318,28 +323,34 @@ fn check_unicode_controls(content: &str, out: &mut Vec<RiskSignalV2>) {
 /// The `---` blocks that read as frontmatter: the one that opens the file,
 /// and any later one whose first line is a YAML `key:` entry. A Markdown body
 /// that puts `---` thematic breaks around a shell fence is not frontmatter.
-fn frontmatter_blocks(content: &str) -> impl Iterator<Item = &str> {
+/// Blocks do not overlap, so a block's closing `---` never opens another.
+fn frontmatter_blocks(content: &str) -> Vec<&str> {
     let body = content.trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']);
     let opening = content.len() - body.len();
-    content
-        .char_indices()
-        .map(|(start, _)| start)
-        .filter(move |&start| content[start..].starts_with("---"))
-        .filter(move |&start| {
-            (start >= opening && content[opening..start].bytes().all(|byte| byte == b'-'))
-                || re_search(&FRONTMATTER_KEY_OPEN, &content[start..])
-        })
-        .filter_map(move |start| {
-            FRONTMATTER
-                .find(&content[start..])
-                .ok()
-                .flatten()
-                .map(|block| block.as_str())
-        })
+    let opening_dashes_end = opening + body.bytes().take_while(|&byte| byte == b'-').count();
+    let mut consumed = 0;
+    let mut blocks = Vec::new();
+    for (start, _) in content.char_indices() {
+        if start < consumed || !content[start..].starts_with("---") {
+            continue;
+        }
+        let opens = (opening..=opening_dashes_end).contains(&start)
+            || re_search(&FRONTMATTER_KEY_OPEN, &content[start..]);
+        if !opens {
+            continue;
+        }
+        if let Ok(Some(block)) = FRONTMATTER.find(&content[start..]) {
+            consumed = start + block.end();
+            blocks.push(block.as_str());
+        }
+    }
+    blocks
 }
 
 fn check_shell_in_frontmatter(content: &str, out: &mut Vec<RiskSignalV2>) {
-    let hit = frontmatter_blocks(content).any(|block| re_search(&SHELL_COMMAND, block));
+    let hit = frontmatter_blocks(content)
+        .into_iter()
+        .any(|block| re_search(&SHELL_COMMAND, block));
     if hit {
         out.push(skill_signal(
             &Sig {
