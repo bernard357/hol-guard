@@ -30,7 +30,7 @@ def test_discourse_launch_identity_and_opt_in_trust() -> None:
     assert contribution["activation"] == "opt-in"
     assert contribution["publisher"] == {
         "id": "community.kantorcodes",
-        "displayName": "Michael Kantor (HOL)",
+        "displayName": "Michael Kantor",
         "url": "https://github.com/kantorcodes",
     }
     trust = json.loads(_TRUST_BINDING.read_text(encoding="utf-8"))
