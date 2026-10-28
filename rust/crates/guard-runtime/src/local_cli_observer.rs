@@ -17,6 +17,12 @@
 //! The worker records through `local_cli_hook_op::observe_only` under the
 //! shared storage gate and puts the store files back into private mode, as
 //! the daemon's store call did. A failed record is dropped.
+//!
+//! The launch resolves against the daemon's home and environment, as it did
+//! when the daemon recorded it: an edge envelope carries both in its
+//! `local_cli_rules`. The resident runs in an isolated environment without
+//! the user's `PATH`, so its own is used only for a direct answer, which the
+//! direct lane's rule check resolves the same way.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -51,6 +57,15 @@ pub(crate) struct Candidate {
     home_dir: String,
     guard_home: String,
     path: Option<String>,
+    launch_env: Option<LaunchEnvironment>,
+}
+
+/// The daemon's home and environment, which a launch resolves `~` and
+/// `PATH` against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LaunchEnvironment {
+    pub(crate) user_home: String,
+    pub(crate) env: BTreeMap<String, String>,
 }
 
 /// One queued observation: the command, its resolved launch directory, and
@@ -62,6 +77,7 @@ pub(crate) struct Observation {
     pub(crate) home_dir: String,
     pub(crate) guard_home: String,
     pub(crate) path: Option<String>,
+    pub(crate) launch_env: Option<LaunchEnvironment>,
 }
 
 type Key = (String, String, Option<String>);
@@ -92,6 +108,7 @@ pub(crate) fn candidate(
         path: path
             .filter(|path| !path.is_empty() && !path.contains('\0'))
             .map(str::to_owned),
+        launch_env: None,
     })
 }
 
@@ -112,7 +129,8 @@ pub(crate) fn direct_candidate(
 }
 
 /// The launch an edge envelope names, when the daemon asked the resident to
-/// observe it and it is a `PreToolUse`.
+/// observe it and it is a `PreToolUse`, with the daemon's home and
+/// environment when the envelope carries them.
 pub(crate) fn edge_candidate(envelope: &GuardHookEnvelopeV2) -> Option<Candidate> {
     if !envelope.observe_local_cli
         || crate::edge::canonical_event(&envelope.event).ok()? != "PreToolUse"
@@ -130,6 +148,16 @@ pub(crate) fn edge_candidate(envelope: &GuardHookEnvelopeV2) -> Option<Candidate
             .as_ref()
             .map(|environment| environment.path.as_str()),
     )
+    .map(|found| Candidate {
+        launch_env: envelope
+            .local_cli_rules
+            .as_ref()
+            .map(|rules| LaunchEnvironment {
+                user_home: rules.user_home.clone(),
+                env: rules.env.clone(),
+            }),
+        ..found
+    })
 }
 
 /// Resolve the candidate's launch directory and offer it to the process-wide
@@ -157,6 +185,7 @@ fn resolve(candidate: Candidate) -> Option<Observation> {
         home_dir: candidate.home_dir,
         guard_home: candidate.guard_home,
         path: candidate.path,
+        launch_env: candidate.launch_env,
     })
 }
 
@@ -231,9 +260,7 @@ fn record(observation: Observation) {
     if !guard_home.join(STORE_FILE_NAME).is_file() {
         return;
     }
-    let Some(request) = request(&observation) else {
-        return;
-    };
+    let request = request(&observation);
     let timeout_ms = crate::hook_evidence_store_timeout::sqlite_timeout_ms();
     {
         let Ok(_gate) = crate::hook_evidence_store_gate::hold_storage_gate(
@@ -249,18 +276,23 @@ fn record(observation: Observation) {
 
 /// The `LocalCliHook` request the daemon sent for an observation: its own
 /// home and environment, with the agent's `PATH` when the hook stamped one.
-fn request(observation: &Observation) -> Option<LocalCliHookRequestV1> {
-    let user_home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()?;
-    let mut env: BTreeMap<String, String> = std::env::vars_os()
-        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
-        .collect();
+fn request(observation: &Observation) -> LocalCliHookRequestV1 {
+    let (user_home, mut env) = match &observation.launch_env {
+        Some(daemon) => (daemon.user_home.clone(), daemon.env.clone()),
+        None => (
+            account_home(|name| std::env::var(name).ok(), &observation.home_dir),
+            std::env::vars_os()
+                .filter_map(|(name, value)| {
+                    Some((name.into_string().ok()?, value.into_string().ok()?))
+                })
+                .collect(),
+        ),
+    };
     if let Some(path) = &observation.path {
         env.insert("PATH".to_owned(), path.clone());
     }
     let timeout_ms = crate::hook_evidence_store_timeout::sqlite_timeout_ms();
-    Some(LocalCliHookRequestV1 {
+    LocalCliHookRequestV1 {
         schema: LOCAL_CLI_HOOK_REQUEST_SCHEMA.to_owned(),
         request_id: REQUEST_ID.to_owned(),
         store_path: Path::new(&observation.guard_home)
@@ -278,7 +310,17 @@ fn request(observation: &Observation) -> Option<LocalCliHookRequestV1> {
         current_action: "allow".to_owned(),
         current_reason_code: None,
         grant_allowed: false,
-    })
+    }
+}
+
+/// The account home a launch without the daemon's resolves `~` against:
+/// `HOME`, else `USERPROFILE`, else the home the hook reported, which is the
+/// same account's when a service runs without either variable.
+fn account_home(lookup: impl Fn(&str) -> Option<String>, hook_home: &str) -> String {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .find_map(|name| lookup(name).filter(|home| !home.is_empty()))
+        .unwrap_or_else(|| hook_home.to_owned())
 }
 
 #[cfg(test)]

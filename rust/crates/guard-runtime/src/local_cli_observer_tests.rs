@@ -21,6 +21,7 @@ fn observation(command: &str, cwd: &str, path: Option<&str>) -> Observation {
         home_dir: "/home/dev".to_owned(),
         guard_home: "/home/dev/.hol-guard".to_owned(),
         path: path.map(str::to_owned),
+        launch_env: None,
     }
 }
 
@@ -215,7 +216,15 @@ fn a_direct_answer_reads_the_stamped_path() {
 }
 
 fn envelope(event: &str, observe_local_cli: bool) -> GuardHookEnvelopeV2 {
-    serde_json::from_value(json!({
+    envelope_with(event, observe_local_cli, None)
+}
+
+fn envelope_with(
+    event: &str,
+    observe_local_cli: bool,
+    rules: Option<Value>,
+) -> GuardHookEnvelopeV2 {
+    let mut envelope = json!({
         "schema": guard_contracts::GUARD_HOOK_ENVELOPE_V2_SCHEMA,
         "harness": "codex",
         "event": event,
@@ -233,8 +242,11 @@ fn envelope(event: &str, observe_local_cli: bool) -> GuardHookEnvelopeV2 {
             },
         },
         "observe_local_cli": observe_local_cli,
-    }))
-    .unwrap()
+    });
+    if let Some(rules) = rules {
+        envelope["local_cli_rules"] = rules;
+    }
+    serde_json::from_value(envelope).unwrap()
 }
 
 #[test]
@@ -246,6 +258,49 @@ fn an_edge_envelope_is_observed_only_when_asked_and_before_a_tool() {
     assert!(edge_candidate(&envelope("beforeShellExecution", true)).is_some());
     assert!(edge_candidate(&envelope("PreToolUse", false)).is_none());
     assert!(edge_candidate(&envelope("PostToolUse", true)).is_none());
+}
+
+#[test]
+fn an_edge_launch_resolves_against_the_daemon_environment() {
+    let rules = json!({
+        "store_path": "/home/dev/.hol-guard/guard.db",
+        "user_home": "/home/daemon",
+        "env": {"PATH": "/usr/local/bin:/usr/bin", "LANG": "C"},
+    });
+    let found = edge_candidate(&envelope_with("PreToolUse", true, Some(rules))).unwrap();
+    let observation = Observation {
+        command: found.command,
+        cwd: "/work".to_owned(),
+        home_dir: found.home_dir,
+        guard_home: found.guard_home,
+        path: found.path,
+        launch_env: found.launch_env,
+    };
+    let sent = request(&observation);
+    assert_eq!(sent.user_home, "/home/daemon");
+    assert_eq!(sent.env.get("LANG").map(String::as_str), Some("C"));
+    // The agent's stamped PATH still wins over the daemon's.
+    assert_eq!(sent.env.get("PATH").map(String::as_str), Some("/opt/bin"));
+    let unstamped = request(&Observation {
+        path: None,
+        ..observation
+    });
+    assert_eq!(
+        unstamped.env.get("PATH").map(String::as_str),
+        Some("/usr/local/bin:/usr/bin")
+    );
+}
+
+#[test]
+fn a_service_without_home_variables_uses_the_hook_home() {
+    let none = |_: &str| None;
+    assert_eq!(account_home(none, "/home/dev"), "/home/dev");
+    let empty_home = |name: &str| (name == "HOME").then(String::new);
+    assert_eq!(account_home(empty_home, "/home/dev"), "/home/dev");
+    let profile = |name: &str| (name == "USERPROFILE").then(|| "C:\\Users\\dev".to_owned());
+    assert_eq!(account_home(profile, "/home/dev"), "C:\\Users\\dev");
+    let home = |name: &str| Some(format!("/{name}"));
+    assert_eq!(account_home(home, "/home/dev"), "/HOME");
 }
 
 #[test]
