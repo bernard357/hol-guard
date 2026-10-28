@@ -16,6 +16,7 @@ const GUARD_PROGRAMS: &[&str] = &[
     "hol-guard",
     "plugin-guard",
     "hol-guard-runtime",
+    "hol-guard-core",
     "hol_guard",
 ];
 
@@ -35,6 +36,29 @@ const INSTALL_PARENTS: &[&str] = &[
     "program files",
     "program files (x86)",
     "applications",
+    // Guard's system state and bundled runtime: `/etc/hol-guard`,
+    // `/var/lib/hol-guard`, `lib/hol-guard-core/hol-guard`.
+    "etc",
+    "lib",
+    "share",
+    "hol-guard-core",
+];
+
+/// Folder names the desktop application and its state use, which count as
+/// Guard only below one of [`APP_PARENTS`] or as the `.app` bundle.
+const APP_NAMES: &[&str] = &["hol guard", "hol guard state"];
+
+/// Directories the desktop application or its state are installed in.
+const APP_PARENTS: &[&str] = &[
+    "applications",
+    "program files",
+    "program files (x86)",
+    "programs",
+    "programdata",
+    "application support",
+    "local",
+    "roaming",
+    "opt",
 ];
 
 /// Suffixes an installed program or application carries on some platforms.
@@ -46,38 +70,124 @@ pub(super) fn judged_by_location(segment: &crate::CommandSegmentV1) -> bool {
     LOCATION_PROGRAMS.contains(&crate::command_compatibility::basename(segment).as_str())
 }
 
+/// Where the steps before a segment left the shell's directory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Moved {
+    /// No earlier step changed directory.
+    Stayed,
+    /// Every change named an absolute target, or a relative one below it.
+    To(String),
+    /// A change Guard cannot follow from the text: a relative first target,
+    /// `cd -`, `popd` or a variable.
+    Unknown,
+}
+
+/// The directory `segments` leave the shell in, from their `cd` and `pushd`
+/// arguments alone.
+pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
+    let mut moved = Moved::Stayed;
+    for segment in segments {
+        let program = crate::command_compatibility::basename(segment);
+        if !matches!(program.as_str(), "cd" | "pushd" | "popd") {
+            continue;
+        }
+        let target = match (program.as_str(), segment.arguments.as_slice()) {
+            ("popd", _) => None,
+            (_, [target]) if !target.starts_with('-') && !target.contains('$') => {
+                Some(target.to_ascii_lowercase().replace('\\', "/"))
+            }
+            _ => None,
+        };
+        moved = match (target, moved) {
+            (Some(target), _) if !relative(&target) => Moved::To(target),
+            (Some(target), Moved::To(base)) => Moved::To(format!("{base}/{target}")),
+            _ => Moved::Unknown,
+        };
+    }
+    moved
+}
+
 /// Whether a path, ref or remote argument reaches Guard's state directory,
 /// an installed Guard program or the desktop application.
 ///
 /// Text with whitespace, or a leading `!`, is shell text a Git alias or
-/// option could run, so it keeps the plain name screen.
-pub(super) fn names_guard_location(argument: &str) -> bool {
+/// option could run, so it keeps the plain name screen. After an earlier
+/// `cd`, a relative path is judged where it resolves; when that directory is
+/// unknown, a relative path that names a Guard program counts as Guard.
+pub(super) fn names_guard_location(argument: &str, moved: &Moved) -> bool {
     let lowered = argument.to_ascii_lowercase().replace('\\', "/");
     if names_guard_state(&lowered) {
         return true;
     }
+    // `--work-tree=bin/hol-guard` is judged by the path after the `=`.
+    let lowered = match lowered.split_once('=') {
+        Some((option, value)) if option.starts_with('-') => value.to_owned(),
+        _ => lowered,
+    };
     if remote_url(&lowered) {
         return false;
     }
-    let components: Vec<&str> = lowered.split('/').map(str::trim).collect();
-    if components
-        .iter()
-        .any(|component| matches!(*component, "hol guard" | "hol guard.app"))
+    let components = components(&lowered);
+    if components.contains(&"hol guard.app")
+        || components
+            .windows(2)
+            .any(|pair| APP_PARENTS.contains(&pair[0]) && APP_NAMES.contains(&pair[1]))
     {
         return true;
+    }
+    if relative(&lowered) {
+        match moved {
+            Moved::Stayed => {}
+            Moved::To(base) => {
+                if names_guard_location(&format!("{base}/{lowered}"), &Moved::Stayed) {
+                    return true;
+                }
+            }
+            Moved::Unknown => {
+                if components.iter().any(|component| guard_program(component)) {
+                    return true;
+                }
+            }
+        }
     }
     if lowered.starts_with('!') || lowered.chars().any(char::is_whitespace) {
         return ["hol-guard", "plugin-guard"]
             .iter()
             .any(|needle| lowered.contains(needle));
     }
-    components.windows(2).any(|pair| {
-        let stem = PROGRAM_SUFFIXES
-            .iter()
-            .find_map(|suffix| pair[1].strip_suffix(suffix))
-            .unwrap_or(pair[1]);
-        INSTALL_PARENTS.contains(&pair[0]) && GUARD_PROGRAMS.contains(&stem)
-    })
+    components
+        .windows(2)
+        .any(|pair| INSTALL_PARENTS.contains(&pair[0]) && guard_program(pair[1]))
+}
+
+/// The path's components with `.` dropped and each `..` folded into the
+/// component before it, so `venvs/x/../hol-guard` is `venvs/hol-guard`.
+fn components(lowered: &str) -> Vec<&str> {
+    let mut components: Vec<&str> = Vec::new();
+    for component in lowered.split('/').map(str::trim) {
+        match component {
+            "" | "." => {}
+            ".." if components.last().is_some_and(|last| *last != "..") => {
+                components.pop();
+            }
+            _ => components.push(component),
+        }
+    }
+    components
+}
+
+fn guard_program(component: &str) -> bool {
+    let stem = PROGRAM_SUFFIXES
+        .iter()
+        .find_map(|suffix| component.strip_suffix(suffix))
+        .unwrap_or(component);
+    GUARD_PROGRAMS.contains(&stem)
+}
+
+/// A path that resolves against the current directory.
+fn relative(lowered: &str) -> bool {
+    !lowered.starts_with(['/', '~', '$'])
+        && !lowered.as_bytes().get(1).is_some_and(|byte| *byte == b':')
 }
 
 /// Whether text names Guard's state directory or the variable that moves it.
@@ -120,7 +230,10 @@ pub(super) fn github_api_raw_fields(segment: &crate::CommandSegmentV1) -> Vec<&S
         if argument == "--" {
             break;
         }
-        if argument.starts_with("--raw-field=") {
+        // `-fbody=x` and `-f=body=x` attach the field to the flag.
+        if argument.starts_with("--raw-field=")
+            || (argument.len() > 2 && argument.starts_with("-f") && !argument.starts_with("--"))
+        {
             if index == 0 || !super::takes_next_value(&arguments[index - 1], false) {
                 values.push(argument);
             }
@@ -155,8 +268,13 @@ mod tests {
             "ssh://git@github.com/someone/hol-guard.git",
             "C:\\Users\\u\\src\\hol-guard",
             "origin/fix/hol-guard-names",
+            "/work/HOL Guard",
+            "--work-tree=../hol-guard",
         ] {
-            assert!(!names_guard_location(argument), "{argument}");
+            assert!(
+                !names_guard_location(argument, &Moved::Stayed),
+                "{argument}"
+            );
         }
     }
 
@@ -177,8 +295,39 @@ mod tests {
             "file:///home/u/.hol-guard",
             "!hol-guard hooks remove",
             "hol-guard uninstall",
+            "/etc/hol-guard",
+            "/var/lib/hol-guard/managed-policy-cache.json",
+            "C:\\ProgramData\\HOL Guard\\managed-policy.json",
+            "/Library/Application Support/HOL Guard State",
+            "/opt/hol-guard/lib/hol-guard-core/hol-guard",
+            "--work-tree=bin/hol-guard",
+            "--git-dir=/var/lib/hol-guard/.git",
         ] {
-            assert!(names_guard_location(argument), "{argument}");
+            assert!(names_guard_location(argument, &Moved::Stayed), "{argument}");
+        }
+    }
+
+    #[test]
+    fn a_relative_path_after_a_directory_change_is_judged_where_it_resolves() {
+        let venvs = Moved::To("/home/u/.local/pipx/venvs".to_owned());
+        let projects = Moved::To("/home/u/projects".to_owned());
+        assert!(names_guard_location("hol-guard", &venvs));
+        assert!(names_guard_location("./hol-guard/bin", &venvs));
+        assert!(!names_guard_location("hol-guard", &projects));
+        assert!(!names_guard_location("hol-guard-pr-12", &venvs));
+        let sibling = Moved::To("/home/u/.local/pipx/venvs/other".to_owned());
+        assert!(names_guard_location("../hol-guard", &sibling));
+        for argument in ["hol-guard", "./hol-guard/bin", "hol-guard-core"] {
+            assert!(
+                names_guard_location(argument, &Moved::Unknown),
+                "{argument}"
+            );
+        }
+        for argument in ["hol-guard-pr-12", "/home/u/projects/hol-guard"] {
+            assert!(
+                !names_guard_location(argument, &Moved::Unknown),
+                "{argument}"
+            );
         }
     }
 
