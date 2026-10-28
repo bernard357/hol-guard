@@ -145,6 +145,13 @@ struct ProbeRun {
 
 /// Reads a child pipe to EOF. `None` means the output passed the cap, so the
 /// kept prefix is not the whole stream and must not be parsed as evidence.
+///
+/// Passing the cap is answered before the rest of the stream is drained. A
+/// descendant holding that same pipe open would otherwise keep the verdict
+/// until the deadline, and a probe that produced more evidence than can be
+/// read whole would be reported as a busy host rather than the broken probe
+/// it is. The drain still runs afterwards so the child never blocks on a
+/// full pipe.
 fn spawn_reader<R: Read + Send + 'static>(mut stream: R) -> mpsc::Receiver<Option<Vec<u8>>> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -153,9 +160,14 @@ fn spawn_reader<R: Read + Send + 'static>(mut stream: R) -> mpsc::Receiver<Optio
             .by_ref()
             .take(PROBE_OUTPUT_CAP + 1)
             .read_to_end(&mut kept);
-        let _ = std::io::copy(&mut stream, &mut std::io::sink());
         let within_cap = u64::try_from(kept.len()).is_ok_and(|len| len <= PROBE_OUTPUT_CAP);
-        let _ = sender.send(within_cap.then_some(kept));
+        if !within_cap {
+            let _ = sender.send(None);
+        }
+        let _ = std::io::copy(&mut stream, &mut std::io::sink());
+        if within_cap {
+            let _ = sender.send(Some(kept));
+        }
     });
     receiver
 }
@@ -485,6 +497,21 @@ mod tests {
         // which on its own would only say the host was busy.
         let script = format!(
             "head -c {} /dev/zero >&2; sleep 30 2>/dev/null & exit 0",
+            PROBE_OUTPUT_CAP + 1
+        );
+        assert_eq!(
+            run(&script, Duration::from_millis(500)).err(),
+            Some(ProbeFailure::Failed),
+        );
+    }
+
+    #[test]
+    fn a_pipe_that_passed_the_cap_is_definite_while_it_is_still_held_open() {
+        // The over-cap pipe is the held-open one, so nothing else can speak for
+        // it. Waiting for its EOF would report the busy-host reason for a probe
+        // that had already produced more evidence than can be read whole.
+        let script = format!(
+            "head -c {} /dev/zero; sleep 30 & exit 0",
             PROBE_OUTPUT_CAP + 1
         );
         assert_eq!(
