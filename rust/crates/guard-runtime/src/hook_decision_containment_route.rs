@@ -6,7 +6,9 @@
 //!
 //! * `containment_route` reads the native result. A `sandbox-required`
 //!   result goes to the sink; an outside-roots review a broad grant may lift
-//!   first asks this device's local CLI grant; anything else keeps its answer.
+//!   first asks this device's local CLI grant, whose resident answer routes
+//!   only a sandbox-bound action to the sink, so an allowed CLI is left to
+//!   the edge's custom rule, which allows it; anything else keeps its answer.
 //! * `containment_sink` reads the rendered receipt, the harness, the host and
 //!   the shape of the call, and names the profile the sink runs it under, or
 //!   why the receipt stands.
@@ -17,8 +19,9 @@
 //! Codex. Any other host has no sink and says so; nothing here allows a call.
 //!
 //! The approval invariant holds: a review that is not routed keeps its card
-//! with Allow once and Always allow, and a review the grant takes still ends
-//! at the sink, which asks the store for the grant again. A malformed query is
+//! with Allow once and Always allow, a review an allowed CLI lifts runs as
+//! that Always allow would, and a review the grant sends to the sink is one
+//! the sink asks the store for the grant again. A malformed query is
 //! an error the transport reports as a resident outage, never a default route.
 
 use guard_contracts::{

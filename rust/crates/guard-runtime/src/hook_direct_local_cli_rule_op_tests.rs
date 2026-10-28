@@ -198,6 +198,17 @@ fn a_custom_allow_lifts_only_a_non_recognition_review() {
         )),
         RuleVerdict::Allowed
     );
+    // The review the workspace sandbox leaves for a program outside its
+    // executable roots asks the same question, so it lifts too, rather than
+    // running the allowed program in a sandbox with no network.
+    assert_eq!(
+        review_verdict(&case.request(
+            "review",
+            "npm run build",
+            review("native_workspace_containment_executable_outside_roots")
+        )),
+        RuleVerdict::Allowed
+    );
     // A review with its own risk signal stands.
     assert_eq!(
         review_verdict(&case.request("review", "npm run build", review("network_target"))),
