@@ -98,3 +98,18 @@ def test_countly_each_application_write_requires_native_review_when_enabled(tool
     decision = apply_contributed_mcp_decision(enabled, artifact, "allow")
     assert decision is not None
     assert decision[:2] == ("review", "catalog-mcp-extension")
+
+@pytest.mark.parametrize(
+    "tool_name",
+    ["apps_list", "apps_update", "apps_delete_all", "apps_reset_preview"],
+)
+def test_countly_native_unlisted_tools_retain_host_policy(tool_name: str) -> None:
+    """An opted-in Countly extension must not expand review to other tool names."""
+    identity = build_mcp_server_identity(
+        config_path="", command="npx", args=("-y", "countly-mcp-server"), transport="stdio"
+    )
+    artifact = _artifact(identity, tool_name)
+    enabled = _AuthorityStore(
+        (_layer(ControlLayerKind.LOCAL_ADMIN, "command.mcp-countly", ControlState.ENABLED),)
+    )
+    assert apply_contributed_mcp_decision(enabled, artifact, "allow") is None
