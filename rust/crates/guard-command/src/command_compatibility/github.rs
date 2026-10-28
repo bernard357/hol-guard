@@ -1,5 +1,6 @@
 //! Closed static CLI grammar. Ambiguous flags, bindings and GraphQL stay unsupported.
 use super::{catalog::github_owner, CommandSegmentV1, CompatibilityObservations};
+use crate::pretool::shell_literal::literal_everywhere;
 
 #[path = "github_api.rs"]
 mod api;
@@ -71,30 +72,6 @@ pub(super) fn arguments_are_read_only(arguments: &[String], text: &str) -> bool 
     })
 }
 
-/// True when every `target` in the raw segment text is literal: inside single
-/// quotes, or escaped with a backslash, so the shell passes it through instead
-/// of expanding a variable or running a command substitution.
-fn literal_everywhere(text: &str, target: char) -> bool {
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    for character in text.chars() {
-        match quote {
-            Some('\'') => {
-                if character == '\'' {
-                    quote = None;
-                }
-            }
-            _ if escaped => escaped = false,
-            _ if character == '\\' => escaped = true,
-            _ if character == target => return false,
-            Some(_) if character == '"' => quote = None,
-            None if matches!(character, '\'' | '"') => quote = Some(character),
-            _ => {}
-        }
-    }
-    true
-}
-
 /// `--jq @tsv`: a bare jq rendering format given as the whole filter, which
 /// names a formatter rather than a file.
 fn bare_jq_format(original: &[String], index: usize) -> bool {
@@ -105,11 +82,31 @@ fn bare_jq_format(original: &[String], index: usize) -> bool {
             .is_some_and(crate::pretool::safe_reads::jq_rendering_format)
 }
 
+/// `--jq '.[] | (.state // "") as $state | $state'`: a response filter whose
+/// every `$` names a variable it binds itself, written where the shell passes
+/// each `$` through. Such a variable holds a value the filter computed from
+/// the response, never the environment or an outside argument.
+fn self_bound_jq_filter(original: &[String], index: usize, text: &str) -> bool {
+    let value = original[index].as_str();
+    let filter = value
+        .strip_prefix("--jq=")
+        .or_else(|| (value.starts_with("-q") && value.len() > 2).then(|| &value[2..]))
+        .or_else(|| {
+            (index > 0 && matches!(original[index - 1].as_str(), "--jq" | "-q")).then_some(value)
+        });
+    filter.is_some_and(|filter| {
+        !filter.contains(['\n', '\r'])
+            && literal_everywhere(text, '$')
+            && crate::pretool::safe_reads::jq_variables_bound(filter)
+    })
+}
+
 fn classify(original: &[String], text: &str) -> Capabilities {
     // Quoted dynamic-looking values are deliberately outside this small native
     // grammar too. Distinguishing their expansion provenance needs literal proof.
     // The one exception is a single-quoted `gh api graphql` document whose
-    // `$variables` it declares itself: the shell never expands those.
+    // `$variables` it declares itself: the shell never expands those. A
+    // `--jq` filter that binds its own `$variables` is the other.
     // A backtick the raw text escapes or single-quotes is Markdown code
     // formatting in a body, never a command substitution.
     let graphql = original.len() > 1 && original[0] == "api" && original[1] == "graphql";
@@ -122,7 +119,8 @@ fn classify(original: &[String], text: &str) -> Capabilities {
                     && literal_everywhere(text, '$')
                     && value
                         .strip_prefix("query=")
-                        .is_some_and(api::graphql_text_is_static)))
+                        .is_some_and(api::graphql_text_is_static))
+                && !self_bound_jq_filter(original, index, text))
     }) {
         return None;
     }

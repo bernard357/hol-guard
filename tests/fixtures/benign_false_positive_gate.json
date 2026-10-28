@@ -3826,6 +3826,91 @@
       "expect": "allow"
     },
     {
+      "id": "inbox-npx-jest-file-run-in-band",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx jest __tests__/services/cache/moved-commit-cache.test.ts --runInBand"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "npx-jest-outside-config-reviews",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx jest --config /tmp/jest.outside.config.js __tests__/services/cache/moved-commit-cache.test.ts"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "npx-jest-outside-test-runner-reviews",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx jest --testRunner /tmp/outside-runner.js __tests__/services/cache/moved-commit-cache.test.ts"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "npx-jest-pinned-version-reviews",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx jest@29 __tests__/services/cache/moved-commit-cache.test.ts --runInBand"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "npx-jest-foreign-package-reviews",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx -p jest-preset-outside jest __tests__/services/cache/moved-commit-cache.test.ts"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "inbox-nvm-node-version",
       "fix_area": "shell",
       "harnesses": [
@@ -9838,6 +9923,125 @@
       "tool": "shell",
       "tool_input": {
         "command": "gh api repos/example/app/releases/latest --jq @json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-empty-validates-json",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq empty ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-self-bound-variable",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '.scripts | to_entries[] | .key as $name | $name' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-jq-double-quoted-variable",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r \". as \\$name | $name\" README.md"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "gh-pr-view-jq-self-bound-variable",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr view 12 --repo example/app --json statusCheckRollup --jq '[.statusCheckRollup[] | select((.conclusion // .state // \"\") as $s | ($s != \"SUCCESS\" and $s != \"SKIPPED\"))]'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "pgrep-children-of-parent",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "pgrep -P 4120 -fl ."
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "ps-column-width",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "ps -o pid,etime,wchan:30,state -p 4120"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "test-tty-descriptor",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "test -t 0; echo tty_status:$?"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -22265,6 +22469,23 @@
       "expect": "allow"
     },
     {
+      "id": "shell-lsof-process-working-directory",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "lsof -a -p 1 -d cwd"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "shell-uname-all",
       "fix_area": "shell",
       "harnesses": [
@@ -32319,6 +32540,70 @@
       },
       "cwd": "org_app",
       "expect": "not_allow"
+    },
+    {
+      "id": "session-git-branch-create-at-remote-start",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-a origin/main"
+      }
+    },
+    {
+      "id": "session-git-branch-create-at-head",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-b HEAD"
+      }
+    },
+    {
+      "id": "session-git-branch-create-at-local-branch",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-c main"
+      }
+    },
+    {
+      "id": "session-git-branch-create-quiet-at-remote-start",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch -q fix/branch-start-d origin/main"
+      }
     }
   ],
   "mcp_cases": [

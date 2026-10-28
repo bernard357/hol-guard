@@ -10,12 +10,15 @@
 //! parenthesised group. Stages may compare two such operands against each
 //! other or against a plain literal, combine comparisons with `and`/`or`, and
 //! fall back to a second filter with `//`. A stage may also be a bare
-//! format such as `@tsv` or `@base64`, which only renders the value as text.
+//! format such as `@tsv` or `@base64`, which only renders the value as text,
+//! or bind a term to a name (`(.state // "") as $state`) that later stages
+//! read back as `$state`.
 //!
 //! Every form here is a pure function of the value read: none of them reaches
 //! the environment, further input, files or modules, and the characters that
-//! would let one do so are refused outright. `$` (variable bindings, `$ENV`,
-//! `$__loc__`), `@` outside a bare rendering format (so `@sh` and a
+//! would let one do so are refused outright. A `$` that names anything but a
+//! variable the filter binds itself (so `$ENV`, `$__loc__` and a `--arg`
+//! value stay out), `@` outside a bare rendering format (so `@sh` and a
 //! `@fmt "string"` template stay out), `;` (which every multi-argument and
 //! binding builtin needs: `def`, `reduce`, `foreach`, `limit`, `range`,
 //! `getpath`), string interpolation, a `,` or `:` outside a bracket, computed
@@ -36,6 +39,7 @@ const VALUE_BUILTINS: &[&str] = &[
     "ascii_downcase",
     "ascii_upcase",
     "booleans",
+    "empty",
     "first",
     "flatten",
     "floor",
@@ -111,14 +115,122 @@ const FORMATS: &[&str] = &[
 const COMPARISONS: &[&str] = &["==", "!=", "<=", ">=", "<", ">"];
 
 pub(super) fn safe_filter(filter: &str) -> bool {
-    filter.len() <= 256 && valid_characters(filter) && pipeline(filter)
+    filter.len() <= 256 && valid_characters(filter) && variables_bound(filter) && pipeline(filter)
 }
 
 fn pipeline(filter: &str) -> bool {
     let Some(stages) = split_marker(filter, b"|") else {
         return false;
     };
-    stages.len() <= MAX_STAGES && stages.iter().all(|stage| sequence(stage))
+    stages.len() <= MAX_STAGES
+        && stages
+            .iter()
+            .enumerate()
+            .all(|(index, part)| match binding(part) {
+                Some(term) => index + 1 < stages.len() && stage(term),
+                None => sequence(part),
+            })
+}
+
+/// The term of `(.a // .b) as $s`, which the stages after it read back as
+/// `$s`. jq binds `as` tighter than every operator, so `.a // .b as $s`
+/// binds `.b` alone; only a lone term is read here, and the operator form
+/// fails as a stage.
+fn binding(part: &str) -> Option<&str> {
+    let (term, name) = part.rsplit_once(" as $")?;
+    variable_name(name).then(|| term.trim_end())
+}
+
+fn variable_name(name: &str) -> bool {
+    name.starts_with(|value: char| value.is_ascii_alphabetic() || value == '_')
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Whether every `$name` in `filter` is a variable the filter binds itself
+/// with `... as $name`, read inside that binding's scope, so each one holds a
+/// value the filter computed from its input. jq looks any other name up
+/// outside the filter: `$ENV` is the process environment, `$__loc__` the
+/// source position, and the rest come from `--arg` and friends. Those names
+/// are refused even when bound, and so is a `$` that opens no name. A binding
+/// jq reads differently, such as a destructuring `as [$a, $b]`, binds nothing
+/// here, so its names stay out.
+///
+/// A binding reaches the end of the group it was made in, so a name read
+/// before its `as`, or after the bracket around its binding closes, is not
+/// bound. String text is skipped and the code of an interpolation is read,
+/// so `as $x` written inside a string binds nothing.
+pub(crate) fn variables_bound(filter: &str) -> bool {
+    let bytes = filter.as_bytes();
+    // Each open group with the number of bindings in scope when it opened. A
+    // `\(` interpolation returns to string text when its `)` closes.
+    let mut groups: Vec<(u8, usize)> = Vec::new();
+    let mut bound: Vec<&str> = Vec::new();
+    let mut in_string = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            match byte {
+                b'"' => in_string = false,
+                b'\\' if bytes.get(index + 1) == Some(&b'(') => {
+                    groups.push((b'\\', bound.len()));
+                    in_string = false;
+                    index += 1;
+                }
+                b'\\' => index += 1,
+                _ => {}
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            // A `#` opens a jq comment that ends at the newline, so a quote
+            // after it starts no string and the rest of the scan is unsound.
+            b'#' => return false,
+            b'"' => in_string = true,
+            b'(' | b'[' | b'{' => groups.push((byte, bound.len())),
+            b')' | b']' | b'}' => {
+                let Some((open, in_scope)) = groups.pop() else {
+                    return false;
+                };
+                let close = match open {
+                    b'[' => b']',
+                    b'{' => b'}',
+                    _ => b')',
+                };
+                if byte != close {
+                    return false;
+                }
+                bound.truncate(in_scope);
+                in_string = open == b'\\';
+            }
+            b'$' => {
+                let rest = &filter[index + 1..];
+                let end = rest
+                    .find(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+                    .unwrap_or(rest.len());
+                let name = &rest[..end];
+                if !variable_name(name) || name == "ENV" || name.starts_with("__") {
+                    return false;
+                }
+                let before = filter[..index].trim_end();
+                if before
+                    .strip_suffix("as")
+                    .is_some_and(|term| term.ends_with(' '))
+                {
+                    bound.push(name);
+                } else if !bound.contains(&name) {
+                    return false;
+                }
+                index += end;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    !in_string && groups.is_empty()
 }
 
 /// `,` is admitted only inside a bracket, so a sequence of outputs is reached
@@ -238,6 +350,24 @@ fn stage(part: &str) -> bool {
         || array(part)
         || group(part)
         || format(part)
+        || variable(part)
+}
+
+/// `$state`, `$check.name` or `$items[0]`: a variable read back, optionally
+/// projected. [`variables_bound`] has already checked that the filter binds
+/// the name itself.
+fn variable(part: &str) -> bool {
+    let Some(rest) = part.strip_prefix('$') else {
+        return false;
+    };
+    let end = rest
+        .find(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+        .unwrap_or(rest.len());
+    let (name, suffix) = rest.split_at(end);
+    variable_name(name)
+        && (suffix.is_empty()
+            || (suffix.starts_with('.') && projection(suffix))
+            || (suffix.starts_with('[') && projection(&format!(".{suffix}"))))
 }
 
 /// `@tsv`, `@base64`: a bare rendering format, applied to the value read.
@@ -252,8 +382,8 @@ pub(crate) fn rendering_format(name: &str) -> bool {
 
 /// Outside string literals only names, projections, spaces, call and group
 /// parentheses, comparison operators, the `+` and `-` a number literal
-/// uses, `//`, a `@` that opens a known rendering format, and bracket
-/// punctuation may appear; inside one only printable
+/// uses, `//`, a `@` that opens a known rendering format, a `$` that opens a
+/// variable name, and bracket punctuation may appear; inside one only printable
 /// ASCII and the `\n`, `\t` and `\\`
 /// escapes, so neither `\(` interpolation nor an escaped quote can appear.
 /// Brackets must balance and close in the kind they opened.
@@ -286,6 +416,16 @@ fn valid_characters(filter: &str) -> bool {
                     .next()
                     .unwrap_or_default();
                 if !FORMATS.contains(&name) {
+                    return false;
+                }
+                index += name.len();
+            }
+            b'$' => {
+                let name = filter[index + 1..]
+                    .split(|value: char| !(value.is_ascii_alphanumeric() || value == '_'))
+                    .next()
+                    .unwrap_or_default();
+                if name.is_empty() {
                     return false;
                 }
                 index += name.len();

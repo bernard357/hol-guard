@@ -323,6 +323,12 @@ pub(super) fn run() -> Result<(), String> {
             let bytes = read_stdin_bounded()?;
             write_json(&workspace_snapshot::run_command(&bytes)?)
         }
+        [command, flag]
+            if command == workspace_snapshot::export_preview::COMMAND && flag == "--stdin" =>
+        {
+            let bytes = read_stdin_bounded()?;
+            write_json(&workspace_snapshot::export_preview::run_command(&bytes)?)
+        }
         [command, flag] if command == workspace_mcp_config::COMMAND && flag == "--stdin" => {
             let bytes = read_stdin_bounded()?;
             write_json(&workspace_mcp_config::run_command(&bytes)?)
