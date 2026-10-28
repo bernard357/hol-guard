@@ -121,6 +121,56 @@ def test_an_inventory_request_leaves_out_empty_binding_lists(monkeypatch: pytest
     assert wire["events"] == [["Stop", []]]
 
 
+def _inventory_entry(**fields: object) -> dict[str, object]:
+    return {"kind": "inventory", "source_scope": "user", "source_format": "toml", **fields}
+
+
+def test_a_binding_scalar_json_cannot_carry_travels_as_a_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A binding naming a TOML date still claims its handler instead of being dropped."""
+
+    sent = _resident(monkeypatch, lambda _request: {"identities": [{"records": [], "issues": []}]})
+    handler = {"type": "command", "command": "guard-hook", "since": date(2026, 10, 23), "ratio": float("inf")}
+    binding = {"event": "Stop", "group": {"matcher": None}, "handler": handler}
+    entry = _inventory_entry(hooks={"Stop": [{"hooks": [handler]}]}, self_bindings=[binding])
+    bridge.native_codex_hook_identity([entry], required_feature=bridge.CODEX_HOOK_INVENTORY_FEATURE)
+    (wire,) = sent[0]["entries"]
+    tokens = sent[0]["scalar_tokens"]
+    assert isinstance(tokens, dict)
+    (wired,) = wire["self_bindings"]
+    assert tokens[wired["handler"]["since"]] == {"type": "date", "value": "2026-10-23"}
+    assert tokens[wired["handler"]["ratio"]] == {"type": "float", "value": "inf"}
+
+
+def test_an_event_name_that_is_not_a_string_travels_without_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The walk reports it as an unsupported event rather than reading its groups."""
+
+    sent = _resident(monkeypatch, lambda _request: {"identities": [{"records": [], "issues": []}]})
+    groups = [{"hooks": [{"type": "command", "command": "x"}]}]
+    entry = _inventory_entry(hooks={1: groups, "Stop": groups})
+    bridge.native_codex_hook_identity([entry], required_feature=bridge.CODEX_HOOK_INVENTORY_FEATURE)
+    (wire,) = sent[0]["entries"]
+    assert wire["events"][0] == ["<int>:1", None]
+    assert wire["events"][1][0] == "Stop"
+
+
+def _echo_commands(request: dict[str, object]) -> dict[str, object]:
+    entries = request["entries"]
+    assert isinstance(entries, list)
+    return {"identities": [{"argv": [entry["command"]]} for entry in entries]}
+
+
+def test_a_batch_too_large_for_one_reply_splits_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent = _resident(
+        monkeypatch, lambda request: {"identities": [{"argv": [e["command"]]} for e in request["entries"]]}
+    )
+    monkeypatch.setattr(bridge, "_SPLIT_REQUEST_BYTES", 600)
+    entries = [{"kind": "argv", "command": f"{index:02d}" + "x" * 120} for index in range(6)]
+    answers = bridge.native_codex_hook_identity(entries)
+    assert [answer["argv"] for answer in answers] == [[entry["command"]] for entry in entries]
+    assert len(sent) > 1
+    assert sum(len(request["entries"]) for request in sent) == len(entries)
+
+
 def test_an_argv_answer_of_null_is_not_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     _resident(monkeypatch, lambda _request: {"identities": [{"argv": None}]})
     assert _argv("sh -c 'echo $HOME'") is None

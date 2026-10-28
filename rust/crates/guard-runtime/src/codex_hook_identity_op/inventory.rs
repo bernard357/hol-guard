@@ -17,7 +17,7 @@ use guard_contracts::CodexHookIdentityEntryV1;
 use serde_json::{json, Value};
 
 use crate::codex_hooks::{walk, Bindings, Issue, Ownership, Record, Source};
-use crate::codex_value::HookVal;
+use crate::codex_value::{token_value, HookVal};
 use crate::pyjson::float_repr;
 
 /// Whether an inventory entry names a source format and carries only tokens
@@ -67,6 +67,7 @@ pub(super) fn answer(entry: &CodexHookIdentityEntryV1, tokens: &BTreeMap<String,
             authenticated: &entry.authenticated_bindings,
             legacy: &entry.legacy_bindings,
             self_bound: &entry.self_bindings,
+            tokens,
         },
     );
     if inventory.records.iter().any(|record| record.unencodable) {
@@ -100,7 +101,7 @@ fn decode(value: &Value, tokens: &BTreeMap<String, Value>) -> Option<HookVal> {
         }
         Value::Number(number) => HookVal::Float(number.as_f64()?),
         Value::String(text) => match tokens.get(text) {
-            Some(meaning) => token(meaning)?,
+            Some(meaning) => token_value(meaning)?,
             None => HookVal::Str(text.clone()),
         },
         Value::Array(items) => HookVal::List(
@@ -116,36 +117,6 @@ fn decode(value: &Value, tokens: &BTreeMap<String, Value>) -> Option<HookVal> {
                 .collect::<Option<_>>()?,
         ),
     })
-}
-
-/// What one token stands for: a wide integer, a non-finite float, or a TOML
-/// date, time or datetime.
-fn token(meaning: &Value) -> Option<HookVal> {
-    let fields = meaning.as_object()?;
-    if let Some(digits) = fields.get("__int__") {
-        let digits = digits.as_str().filter(|_| fields.len() == 1)?;
-        let magnitude = digits.strip_prefix('-').unwrap_or(digits);
-        let canonical = !magnitude.is_empty()
-            && magnitude.bytes().all(|byte| byte.is_ascii_digit())
-            && (magnitude == "0" || !magnitude.starts_with('0'));
-        return canonical.then(|| HookVal::Int(digits.to_owned()));
-    }
-    if fields.len() != 2 {
-        return None;
-    }
-    let value = fields.get("value")?.as_str()?;
-    match fields.get("type")?.as_str()? {
-        "float" => match value {
-            "inf" => Some(HookVal::Float(f64::INFINITY)),
-            "-inf" => Some(HookVal::Float(f64::NEG_INFINITY)),
-            "nan" => Some(HookVal::Float(f64::NAN)),
-            _ => None,
-        },
-        "datetime" => Some(HookVal::Temporal("datetime", value.to_owned())),
-        "date" => Some(HookVal::Temporal("date", value.to_owned())),
-        "time" => Some(HookVal::Temporal("time", value.to_owned())),
-        _ => None,
-    }
 }
 
 fn record_json(record: &Record) -> Value {

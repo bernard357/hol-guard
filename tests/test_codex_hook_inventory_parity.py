@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.codex_hook_inventory import (
+    CODEX_HOOK_INVENTORY_IDENTITY_UNAVAILABLE,
     CodexHookInventory,
     CodexHookInventoryIssue,
     enumerate_codex_hooks,
@@ -63,8 +64,10 @@ def _warnings(inventory: CodexHookInventory) -> list[str]:
 def _require_identity(inventory: CodexHookInventory) -> None:
     """The resident walks the source; without one there is nothing to compare."""
 
-    if any(issue.reason_code.startswith(IDENTITY_PREFIX) for issue in inventory.issues):
+    if any(issue.reason_code == CODEX_HOOK_INVENTORY_IDENTITY_UNAVAILABLE for issue in inventory.issues):
         pytest.skip("the hook inventory needs a paired native runtime")
+    # Any other identity code is the resident refusing a recorded source.
+    assert not any(issue.reason_code.startswith(IDENTITY_PREFIX) for issue in inventory.issues)
 
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: case["name"])

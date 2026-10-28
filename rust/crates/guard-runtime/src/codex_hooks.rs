@@ -2,6 +2,8 @@
 //! hooks one Codex JSON or TOML source configures, with the exact issue
 //! messages Guard reports for shapes it cannot model.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 use super::codex_identity::{command_argv, hook_identity};
@@ -36,7 +38,11 @@ pub(crate) struct Bindings<'a> {
     pub(crate) authenticated: &'a [Value],
     pub(crate) legacy: &'a [Value],
     pub(crate) self_bound: &'a [Value],
+    /// The request's scalar tokens, which a binding's strings may name.
+    pub(crate) tokens: &'a BTreeMap<String, Value>,
 }
+
+static NO_TOKENS: BTreeMap<String, Value> = BTreeMap::new();
 
 pub(crate) struct Record {
     pub(crate) source_path: String,
@@ -118,6 +124,7 @@ pub(crate) fn enumerate(
             authenticated,
             legacy,
             self_bound: &[],
+            tokens: &NO_TOKENS,
         },
     )
 }
@@ -459,11 +466,29 @@ fn environment_keys(handler: &HookVal) -> (Vec<String>, bool) {
 
 fn ownership(event_name: &str, context: &Context<'_>, handler: &HookVal) -> Ownership {
     let bindings = context.bindings;
-    if bindings_contain(bindings.authenticated, event_name, context.group, handler) {
+    if bindings_contain(
+        bindings.authenticated,
+        bindings.tokens,
+        event_name,
+        context.group,
+        handler,
+    ) {
         Ownership::AuthenticatedManifest
-    } else if bindings_contain(bindings.legacy, event_name, context.group, handler) {
+    } else if bindings_contain(
+        bindings.legacy,
+        bindings.tokens,
+        event_name,
+        context.group,
+        handler,
+    ) {
         Ownership::ExactLegacyAdoption
-    } else if bindings_contain(bindings.self_bound, event_name, context.group, handler) {
+    } else if bindings_contain(
+        bindings.self_bound,
+        bindings.tokens,
+        event_name,
+        context.group,
+        handler,
+    ) {
         Ownership::SelfInstallBinding
     } else {
         Ownership::Unmanaged
@@ -473,6 +498,7 @@ fn ownership(event_name: &str, context: &Context<'_>, handler: &HookVal) -> Owne
 /// `_bindings_contain_handler`.
 fn bindings_contain(
     bindings: &[Value],
+    tokens: &BTreeMap<String, Value>,
     event_name: &str,
     group: &HookVal,
     handler: &HookVal,
@@ -482,7 +508,8 @@ fn bindings_contain(
     bindings.iter().any(|binding| {
         let expected_group = binding.get("group").and_then(Value::as_object);
         binding.get("event").and_then(Value::as_str) == Some(event_name)
-            && expected_group.is_some_and(|expected| equals_json(matcher, expected.get("matcher")))
-            && equals_json(handler, binding.get("handler"))
+            && expected_group
+                .is_some_and(|expected| equals_json(matcher, expected.get("matcher"), tokens))
+            && equals_json(handler, binding.get("handler"), tokens)
     })
 }

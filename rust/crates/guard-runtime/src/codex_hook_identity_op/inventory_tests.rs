@@ -158,3 +158,33 @@ fn an_entry_naming_an_unknown_token_or_format_is_refused() {
         Some("native_codex_hook_identity_entry_invalid")
     );
 }
+
+#[test]
+fn a_binding_token_claims_the_handler_holding_the_same_scalar() {
+    let tokens = json!({
+        "t-0": {"type": "date", "value": "2026-10-23"},
+        "t-1": {"type": "date", "value": "2026-10-23"},
+        "t-2": {"type": "date", "value": "2026-10-24"},
+        "t-3": {"type": "float", "value": "inf"},
+        "t-4": {"type": "float", "value": "inf"},
+    });
+    let handler = |since: &str, ratio: &str| json!({"type": "command", "command": "guard-hook", "since": since, "ratio": ratio});
+    let entry = |binding_since: &str| {
+        let mut entry = inventory(json!([[
+            "PreToolUse",
+            [{"matcher": "Bash", "hooks": [handler("t-0", "t-3")]}],
+        ]]));
+        entry["self_bindings"] = json!([{
+            "event": "PreToolUse",
+            "group": {"matcher": "Bash"},
+            "handler": handler(binding_since, "t-4"),
+        }]);
+        entry
+    };
+    let answers = answers(&request(vec![entry("t-1"), entry("t-2")], tokens));
+    assert_eq!(
+        answers[0]["records"][0]["ownership"],
+        json!("self_install_binding")
+    );
+    assert_eq!(answers[1]["records"][0]["ownership"], json!("unmanaged"));
+}

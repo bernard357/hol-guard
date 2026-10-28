@@ -120,23 +120,28 @@ def enumerate_codex_hooks(
     hooks = payload.get("hooks")
     if hooks is None:
         return CodexHookInventory(str(source_path), (), ())
-    entry = {
+    shared = {
         "kind": "inventory",
         "source_scope": source_scope,
         "source_hooks_enabled": source_hooks_enabled,
         "source_format": source_format,
-        "hooks": hooks,
         "authenticated_bindings": authenticated_bindings,
         "legacy_bindings": legacy_bindings,
         "self_bindings": self_bindings,
     }
+    # The walk reads each event on its own, so one entry per event lets a large
+    # source split across requests without changing what any event answers.
+    events = [{name: groups} for name, groups in hooks.items()] if isinstance(hooks, Mapping) else [hooks]
     try:
-        (answer,) = native_codex_hook_identity([entry], required_feature=CODEX_HOOK_INVENTORY_FEATURE)
+        answers = native_codex_hook_identity(
+            [{**shared, "hooks": event} for event in events], required_feature=CODEX_HOOK_INVENTORY_FEATURE
+        )
         records = tuple(
             _record(item, str(source_path), source_scope, source_format, source_hooks_enabled)
+            for answer in answers
             for item in _list_of(answer, "records")
         )
-        issues = tuple(_issue(item, str(source_path)) for item in _list_of(answer, "issues"))
+        issues = tuple(_issue(item, str(source_path)) for answer in answers for item in _list_of(answer, "issues"))
     except CodexHookIdentityUnavailableError as error:
         return CodexHookInventory(str(source_path), (), (_unidentified_source_issue(source_path, error),))
     return CodexHookInventory(str(source_path), records, issues)
