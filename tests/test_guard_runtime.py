@@ -50,6 +50,7 @@ from codex_plugin_scanner.guard.models import (
     HarnessDetection,
     PolicyDecision,
 )
+from codex_plugin_scanner.guard.native_hook_authority_state import hook_authority_state, object_field
 from codex_plugin_scanner.guard.native_runner_authority import NativeRunnerAuthorityError
 from codex_plugin_scanner.guard.policy import build_decision_v2
 from codex_plugin_scanner.guard.policy_bundle_delivery import policy_bundle_acknowledgement_payload
@@ -962,20 +963,6 @@ clearer UX and an implementation plan with technical references.
 
         assert rc == 0
         _assert_copilot_holds_for_review(json.loads(output))
-
-    def test_codex_prompt_display_sanitizes_common_home_paths(self) -> None:
-        display = guard_commands_module._codex_prompt_display_text(
-            r"Read /Users/alice/.npmrc, /home/bob/.env, and C:\Users\carol\.ssh\id_rsa with API_KEY=sk-test"
-        )
-
-        assert "alice" not in display
-        assert "bob" not in display
-        assert "carol" not in display
-        assert "sk-test" not in display
-        assert "API_KEY=[redacted]" in display
-        assert "/Users/" not in display
-        assert "/home/" not in display
-        assert r"C:\Users" not in display
 
     def test_codex_post_tool_use_allows_read_only_source_search_with_secret_like_output(
         self,
@@ -9394,12 +9381,11 @@ def test_guard_hook_claude_signed_unseen_pending_cannot_bootstrap_allow(tmp_path
         artifact_hash=artifact_hash_value,
     )
 
-    pending_pair = guard_commands_module._load_single_claude_pending_permission(
-        store,
-        {"session_id": session_id},
+    reply = hook_authority_state(
+        store, "claude_load_single_pending", now=guard_commands_module._now(), session_id=session_id
     )
-    assert pending_pair is not None
-    pending = pending_pair[1]
+    pending = object_field(reply, "pending")
+    assert pending is not None
     assert pending.get("permission_prompt_seen") is not True
     approval_question = str(pending["approval_question"])
     approval_options = pending["approval_options"]

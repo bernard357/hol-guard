@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 from ..native_bash_protocol import ARTIFACT_ID, NativeBashError
 from ..native_bash_reply import supported_execution_assurance, validate_review_lineage
-from ..native_decision_receipt import receipt_matches_edge, validate_native_decision_receipt
+from ..native_decision_receipt import edge_receipt
 
 
 def valid_bound_bash_review(
@@ -21,7 +21,6 @@ def valid_bound_bash_review(
     review = prepared.get("review")
     subject = prepared.get("subject")
     context = subject.get("context") if isinstance(subject, Mapping) else None
-    receipt = validate_native_decision_receipt(native_receipt)
     host = {"omp": "omp-input-rewrite-v1", "pi": "pi-input-mutation-v1"}.get(harness)
     try:
         lineage = validate_review_lineage(prepared.get("review_lineage"))
@@ -41,14 +40,5 @@ def valid_bound_bash_review(
         and host is not None
         and isinstance(context, Mapping)
         and context.get("host") == host
-        and receipt is not None
-        and receipt_matches_edge(
-            {
-                "harness": harness,
-                "event_name": "PreToolUse",
-                "payload_kind": receipt["payload_kind"],
-                "result": decision,
-            },
-            receipt,
-        )
+        and edge_receipt(harness, decision, native_receipt) is not None
     )

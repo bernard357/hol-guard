@@ -220,16 +220,74 @@ fn receipt_agrees(
     result: &Map<String, Value>,
     receipt: &Value,
 ) -> bool {
-    // The validator reads the receipt as a hook client parses it off the wire.
-    if !pyjson::parse(&receipt.to_string())
-        .is_ok_and(|receipt| native_decision_receipt::valid(&receipt))
+    receipt_records(
+        edge.event_name.as_str(),
+        edge.harness.as_str(),
+        edge.request_id.as_deref(),
+        kind,
+        result,
+        receipt,
+    )
+}
+
+/// A receipt handed back by a caller outside the edge: one read from the
+/// store, or one carried by a queued review. Without an edge it must only be
+/// valid; with one it must record exactly that result.
+pub(crate) fn standalone_receipt(receipt: &Value, edge: &Value) -> bool {
+    if edge.is_null() {
+        return valid_receipt(receipt);
+    }
+    let Some(edge) = edge.as_object() else {
+        return false;
+    };
+    let text = |name: &str| edge.get(name).and_then(Value::as_str);
+    let request_id = match edge.get("request_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(request_id)) => Some(request_id.as_str()),
+        Some(_) => return false,
+    };
+    let (Some(event), Some(harness), Some(kind), Some(result)) = (
+        text("event_name"),
+        text("harness"),
+        text("payload_kind"),
+        edge.get("result").and_then(Value::as_object),
+    ) else {
+        return false;
+    };
+    let action = result.get("action");
+    let prompt = |name: &str| {
+        action
+            .and_then(|action| action.get(name))
+            .and_then(Value::as_str)
+    };
+    if event == "UserPromptSubmit"
+        && (prompt("event") != Some(event) || prompt("action_type") != Some("prompt"))
     {
+        return false;
+    }
+    receipt_records(event, harness, request_id, kind, result, receipt)
+}
+
+fn valid_receipt(receipt: &Value) -> bool {
+    // The validator reads the receipt as a hook client parses it off the wire.
+    pyjson::parse(&receipt.to_string())
+        .is_ok_and(|receipt| native_decision_receipt::valid(&receipt))
+}
+
+fn receipt_records(
+    event: &str,
+    harness: &str,
+    request_id: Option<&str>,
+    kind: &str,
+    result: &Map<String, Value>,
+    receipt: &Value,
+) -> bool {
+    if !valid_receipt(receipt) {
         return false;
     }
     let Some(receipt) = receipt.as_object() else {
         return false;
     };
-    let event = edge.event_name.as_str();
     let pre_tool = event != "PostToolUse";
     let recorded = |name: &str| receipt.get(name).unwrap_or(&Value::Null);
     let answered = |name: &str| result.get(name).unwrap_or(&Value::Null);
@@ -251,12 +309,9 @@ fn receipt_agrees(
         return false;
     }
     recorded("event_name").as_str() == Some(event)
-        && recorded("harness").as_str() == Some(edge.harness.as_str())
+        && recorded("harness").as_str() == Some(harness)
         && recorded("payload_kind").as_str() == Some(kind)
-        && edge
-            .request_id
-            .as_deref()
-            .is_none_or(|request_id| recorded("request_id").as_str() == Some(request_id))
+        && request_id.is_none_or(|request_id| recorded("request_id").as_str() == Some(request_id))
         && recorded("decision") == answered("decision")
         && recorded("model_output_action") == &model_output_action
         && recorded("policy_action") == answered("policy_action")

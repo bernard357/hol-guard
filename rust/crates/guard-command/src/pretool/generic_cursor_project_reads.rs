@@ -113,7 +113,7 @@ fn exact_target(value: &str, declared_home: &Path, home: &Path) -> Option<PathBu
     (metadata.is_file() && metadata.len() <= MAX_READ_BYTES).then_some(resolved)
 }
 
-fn canonical(path: &Path) -> Option<PathBuf> {
+pub(super) fn canonical(path: &Path) -> Option<PathBuf> {
     crate::runtime_read_paths::canonicalize_text(path).ok()
 }
 
@@ -140,7 +140,7 @@ fn project_leaf(rest: &[&str], conversation: Option<&str>) -> bool {
 
 /// The conversation the hook payload belongs to, when every spelling of the
 /// field present names the same plausible id.
-fn conversation_id(payload: &Value) -> Option<&str> {
+pub(super) fn conversation_id(payload: &Value) -> Option<&str> {
     let mut found: Option<&str> = None;
     for key in ["conversation_id", "conversationId"] {
         let Some(value) = payload.get(key) else {
@@ -165,7 +165,7 @@ fn conversation_id(payload: &Value) -> Option<&str> {
 /// with the leading separator dropped and every other non-alphanumeric
 /// character spelled `-`. Cursor names the directory after the path it was
 /// opened with, so both that spelling and the canonical one are accepted.
-fn workspace_slugs(cwd: Option<&str>) -> Vec<String> {
+pub(super) fn workspace_slugs(cwd: Option<&str>) -> Vec<String> {
     let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) else {
         return Vec::new();
     };

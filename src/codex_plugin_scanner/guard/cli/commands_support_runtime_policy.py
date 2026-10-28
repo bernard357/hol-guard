@@ -7,17 +7,15 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ..runtime.data_flow_sink import data_flow_sink_type
 from ..runtime.package_request_evaluation import strip_review_evidence_tail as _strip_review_evidence_tail
 
 if TYPE_CHECKING:
     from ._commands_shared import _now
 
 
-from ..store import runtime_tool_action_exact_match_context
 from ..text import ensure_terminal_punctuation as _ensure_terminal_punctuation
 from ._commands_shared import *
 from .commands_parser_helpers import *
@@ -211,26 +209,6 @@ def _is_cloud_inbox_url(value: str) -> bool:
     parsed = urllib.parse.urlparse(value)
     return parsed.scheme in {"http", "https"} and parsed.path.rstrip("/") == "/guard/inbox"
 
-def _runtime_artifact_exact_match_context(artifact: GuardArtifact) -> str | None:
-    if artifact.artifact_type != "tool_action_request":
-        return None
-    raw_command_text = artifact.metadata.get("raw_command_text")
-    if not isinstance(raw_command_text, str) or not raw_command_text:
-        raw_command_text = artifact.command
-    wrapper_chain = artifact.metadata.get("wrapper_chain")
-    normalized_wrapper_chain = (
-        wrapper_chain if isinstance(wrapper_chain, Sequence) and not isinstance(wrapper_chain, str) else None
-    )
-    return runtime_tool_action_exact_match_context(
-        config_path=artifact.config_path,
-        source_scope=artifact.source_scope,
-        raw_command_text=raw_command_text if isinstance(raw_command_text, str) else None,
-        wrapper_chain=normalized_wrapper_chain,
-    )
-
-
-_runtime_data_flow_sink_type = data_flow_sink_type
-
 def _guard_settings_payload(config: GuardConfig) -> dict[str, object]:
     return {
         "generated_at": _now(),
@@ -378,7 +356,7 @@ __all__ = [
     "_guard_settings_payload", "_is_cloud_inbox_url", "_localize_decision_v2_review_copy",
     "_localize_pending_approval_copy", "_native_approval_center_context",
     "_runtime_artifact_command_action_floor", "_runtime_artifact_policy_action",
-    "_runtime_data_flow_sink_type", "_runtime_detector_perf_payload",
+    "_runtime_detector_perf_payload",
     "_runtime_detector_registry_payload", "_strip_cloud_inbox_urls",
     "_strip_legacy_approval_center_sentence", "_strip_review_evidence_tail",
 ]

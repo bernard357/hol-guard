@@ -193,4 +193,20 @@ fn the_display_text_hides_secret_values_and_home_directories() {
         ),
         "Codex prompt for `~/.apitoken`: read ~/.apitoken now"
     );
+    let display = display_text(
+        r"Read /Users/alice/.npmrc, /home/bob/.env, and C:\Users\carol\.ssh\id_rsa with API_KEY=sk-test",
+        None,
+    );
+    for hidden in [
+        "alice",
+        "bob",
+        "carol",
+        "sk-test",
+        "/Users/",
+        "/home/",
+        r"C:\Users",
+    ] {
+        assert!(!display.contains(hidden), "{hidden} in {display}");
+    }
+    assert!(display.contains("API_KEY=[redacted]"), "{display}");
 }

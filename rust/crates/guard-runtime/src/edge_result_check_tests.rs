@@ -208,3 +208,82 @@ fn command_extension_evidence_must_be_bound_and_a_failed_evaluation_must_block()
     extra["raw_command"] = Value::from("secret");
     assert!(!accepted(&with_floor(extra, "allow", "allow")));
 }
+
+#[test]
+fn a_receipt_read_back_outside_the_edge_is_checked_against_its_result() {
+    use guard_contracts::{
+        ContextDigestKindV1, ContextDigestRequestV1, ContextDigestResultV1,
+        CONTEXT_DIGEST_REQUEST_SCHEMA,
+    };
+    let edge = pre_tool();
+    let receipt = serde_json::to_value(&edge.receipt).unwrap();
+    let answered = serde_json::json!({
+        "harness": edge.harness,
+        "event_name": "PreToolUse",
+        "payload_kind": serde_json::to_value(&edge.payload_kind).unwrap(),
+        "request_id": edge.request_id,
+        "result": edge.result,
+    });
+    assert!(standalone_receipt(&receipt, &Value::Null));
+    assert!(standalone_receipt(&receipt, &answered));
+
+    let mut tampered = receipt.clone();
+    tampered["reason_code"] = Value::from("some_other_reason");
+    assert!(!standalone_receipt(&tampered, &Value::Null));
+    assert!(!standalone_receipt(&Value::from("receipt"), &Value::Null));
+    assert!(!standalone_receipt(&receipt, &Value::from("edge")));
+    for (field, value) in [
+        ("event_name", Value::from("PostToolUse")),
+        ("harness", Value::from("another-harness")),
+        ("request_id", Value::from("another-request")),
+        ("request_id", Value::from(1)),
+    ] {
+        let mut other = answered.clone();
+        other[field] = value;
+        assert!(!standalone_receipt(&receipt, &other), "{field}");
+    }
+    let mut other = answered.clone();
+    other["result"]["reason_code"] = Value::from("some_other_reason");
+    assert!(!standalone_receipt(&receipt, &other));
+
+    let asked = prompt();
+    let receipt_of_prompt = serde_json::to_value(&asked.receipt).unwrap();
+    let mut answered_prompt = serde_json::json!({
+        "harness": asked.harness,
+        "event_name": "UserPromptSubmit",
+        "payload_kind": "inline",
+        "result": asked.result,
+    });
+    assert!(standalone_receipt(&receipt_of_prompt, &answered_prompt));
+    answered_prompt["result"]["action"]["event"] = Value::from("PreToolUse");
+    assert!(!standalone_receipt(&receipt_of_prompt, &answered_prompt));
+
+    for (edge, expected) in [(answered, true), (serde_json::json!({}), false)] {
+        let request = ContextDigestRequestV1 {
+            schema: CONTEXT_DIGEST_REQUEST_SCHEMA.into(),
+            request_id: "receipt-validation".into(),
+            kind: ContextDigestKindV1::NativeDecisionReceiptValidation {
+                receipt: receipt.clone(),
+                edge,
+            },
+        };
+        let bytes = crate::context_digest::evaluate_context_digest_request(&request).unwrap();
+        let result: ContextDigestResultV1 = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(result.native_decision_receipt_valid, Some(expected));
+        let mut payload: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(crate::context_digest_result_check::check_result(
+            "native_decision_receipt_validation",
+            &payload
+        )
+        .is_ok());
+        assert!(
+            crate::context_digest_result_check::check_result("canonical_sha256", &payload).is_err()
+        );
+        payload["native_decision_receipt_valid"] = serde_json::json!(1);
+        assert!(crate::context_digest_result_check::check_result(
+            "native_decision_receipt_validation",
+            &payload
+        )
+        .is_err());
+    }
+}

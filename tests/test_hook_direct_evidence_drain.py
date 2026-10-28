@@ -63,7 +63,7 @@ def _record(**overrides: object) -> dict[str, object]:
 @pytest.fixture
 def observed(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
-    monkeypatch.setattr(native_decision_receipt, "validate_native_decision_receipt", lambda receipt: receipt)
+    monkeypatch.setattr(native_decision_receipt, "validate_native_decision_receipt", lambda receipt, **_: receipt)
     monkeypatch.setattr(
         hook_native_cli_observer,
         "observe_native_pre_tool_cli",
@@ -198,7 +198,7 @@ def test_an_unmanaged_harness_is_passed_through_without_recording(
 def test_an_invalid_receipt_is_not_submitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: list[dict[str, object]]
 ) -> None:
-    monkeypatch.setattr(native_decision_receipt, "validate_native_decision_receipt", lambda receipt: None)
+    monkeypatch.setattr(native_decision_receipt, "validate_native_decision_receipt", lambda receipt, **_: None)
     host = _host(tmp_path)
     assert record_direct_hook_evidence(host, _record())
     assert host.activity_writer.receipts == []
