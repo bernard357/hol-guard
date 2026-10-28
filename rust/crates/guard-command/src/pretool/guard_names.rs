@@ -84,6 +84,17 @@ pub(super) struct Moved {
     pub(super) unknown: bool,
 }
 
+/// The most candidate directories [`moved_by`] keeps.
+const MAX_BASES: usize = 16;
+
+impl Moved {
+    fn add(&mut self, base: String) {
+        if !self.bases.contains(&base) {
+            self.bases.push(base);
+        }
+    }
+}
+
 /// The directories `segments` may leave the shell in, from their `cd` and
 /// `pushd` arguments alone. No change leaves the default: the shell stayed.
 pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
@@ -101,7 +112,7 @@ pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
             _ => None,
         };
         match target {
-            Some(target) if !relative(&target) => moved.bases.push(target),
+            Some(target) if !relative(&target) => moved.add(target),
             Some(target) => {
                 // From the starting directory, which the text does not name,
                 // the target lands somewhere unknown.
@@ -110,10 +121,19 @@ pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
                     .iter()
                     .map(|base| format!("{base}/{target}"))
                     .collect();
-                moved.bases.extend(joined);
+                for base in joined {
+                    moved.add(base);
+                }
                 moved.unknown = true;
             }
             None => moved.unknown = true,
+        }
+        // Each relative change can double the candidates. Past the bound the
+        // oldest are dropped and the rest of the way counts as unknown.
+        if moved.bases.len() > MAX_BASES {
+            let excess = moved.bases.len() - MAX_BASES;
+            moved.bases.drain(..excess);
+            moved.unknown = true;
         }
     }
     moved
@@ -348,6 +368,20 @@ mod tests {
         for argument in ["hol-guard-pr-12", "/home/u/projects/hol-guard"] {
             assert!(!names_guard_location(argument, &unknown), "{argument}");
         }
+        // A long run of relative changes stays bounded and still judges a
+        // Guard program name.
+        let changes: String = (0..40).map(|step| format!("; cd d{step}")).collect();
+        let command = format!("cd /home/u/.local/pipx/venvs{changes}");
+        let model = crate::parse_command(&crate::CommandModelRequestV1 {
+            command,
+            dialect: "posix".to_owned(),
+            transport: "shell_string".to_owned(),
+            extraction_provenance: "guard-shell".to_owned(),
+        })
+        .unwrap();
+        let long = moved_by(&model.segments);
+        assert!(long.bases.len() <= MAX_BASES && long.unknown);
+        assert!(names_guard_location("hol-guard", &long));
     }
 
     #[test]
