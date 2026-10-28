@@ -109,6 +109,9 @@ def _with_dynamic(entries: list[dict]) -> dict:
     return scope
 
 
+_BOTH_BRANCHES = {"pkg", "pkg.root", "pkg.plugin", "pkg.fallback"}
+
+
 def _in_scope(result: dict) -> set[str]:
     return {item["module"] for item in result["python"]["files"]}
 
@@ -136,7 +139,7 @@ def test_a_conditional_between_literals_resolves_to_both_branches(tmp_path: Path
         "def load(flag):\n"
         '    return import_module(".plugin" if flag else ".fallback", __package__)\n'
     )
-    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == {"pkg", "pkg.root", "pkg.plugin", "pkg.fallback"}
+    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == _BOTH_BRANCHES
 
 
 def test_a_name_bound_to_a_conditional_resolves(tmp_path: Path) -> None:
@@ -146,7 +149,7 @@ def test_a_name_bound_to_a_conditional_resolves(tmp_path: Path) -> None:
         '    module_name = ".plugin" if flag else ".fallback"\n'
         "    return import_module(module_name, __package__)\n"
     )
-    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == {"pkg", "pkg.root", "pkg.plugin", "pkg.fallback"}
+    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == _BOTH_BRANCHES
 
 
 def test_a_loop_over_a_literal_table_resolves_by_tuple_position(tmp_path: Path) -> None:
@@ -159,7 +162,7 @@ def test_a_loop_over_a_literal_table_resolves_by_tuple_position(tmp_path: Path) 
         "        found.append(getattr(import_module(module_name, __package__), class_name))\n"
         "    return found\n"
     )
-    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == {"pkg", "pkg.root", "pkg.plugin", "pkg.fallback"}
+    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == _BOTH_BRANCHES
 
 
 def test_a_private_helper_resolves_from_its_literal_call_sites(tmp_path: Path) -> None:
@@ -181,8 +184,7 @@ def test_a_private_helper_resolves_from_its_literal_call_sites(tmp_path: Path) -
     "helper",
     [
         # A public name can be called from another module with any argument.
-        "def load(module_name):\n    return import_module(module_name, __package__)\n\n\n"
-        'Plugin = load(".plugin")\n',
+        'def load(module_name):\n    return import_module(module_name, __package__)\n\n\nPlugin = load(".plugin")\n',
         # A private name that escapes as a value can be called with any argument too.
         "def _load(module_name):\n    return import_module(module_name, __package__)\n\n\n"
         'loader = _load\nPlugin = _load(".plugin")\n',
@@ -198,6 +200,74 @@ def test_an_argument_the_source_leaves_open_still_needs_a_declaration(tmp_path: 
     _write(repo / "src" / "pkg" / "plugin.py", "p = 1\n")
     with pytest.raises(ScopeError, match=r"root\.py: 1 non-literal import site"):
         build_report(repo, scope_path)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # An augmented assignment replaces the name's value, so the literal the
+        # plain assignment gave it is not what the import call receives.
+        "def load():\n"
+        '    module_name = ".plug"\n'
+        '    module_name += "in"\n'
+        "    return import_module(module_name, __package__)\n",
+        # A list keeps its identity through append, so the table the loop walks
+        # is not the table the module-level statement wrote.
+        '_SPECS = [".plugin"]\n'
+        '_SPECS.append(".fallback")\n\n\n'
+        "def build():\n"
+        "    for module_name in _SPECS:\n"
+        "        import_module(module_name, __package__)\n",
+        # The function binds a name of its own, so the module-level table of
+        # that spelling is not what this loop walks.
+        '_SPECS = (".plugin",)\n\n\n'
+        "def build(values):\n"
+        "    _SPECS = values\n"
+        "    for module_name in _SPECS:\n"
+        "        import_module(module_name, __package__)\n",
+        # The enclosing function binds the name itself, so the nested loader
+        # closes over that binding and never reads the module-level literal,
+        # however the two are ordered in the source.
+        'MODULE = ".plugin"\n\n\n'
+        "def outer(values):\n"
+        "    def loader():\n"
+        "        return import_module(MODULE, __package__)\n\n"
+        "    MODULE = values[0]\n"
+        "    return loader\n",
+        # The loop rebinds the name, so the value that survives the loop is the
+        # last element it walked, not the literal assigned before it.
+        '_SPECS = (".plugin",)\n'
+        'module_name = ".fallback"\n'
+        "for module_name in _SPECS:\n"
+        "    pass\n\n"
+        "import_module(module_name, __package__)\n",
+        # A parameter shadows the module-level name it spells, and any caller
+        # anywhere can pass it anything.
+        'MODULE = ".plugin"\n\n\ndef load(MODULE):\n    return import_module(MODULE, __package__)\n',
+    ],
+)
+def test_a_name_the_source_can_point_elsewhere_still_needs_a_declaration(tmp_path: Path, source: str) -> None:
+    repo, scope_path = _repo(tmp_path, _scope(), root=f"from importlib import import_module\n\n\n{source}")
+    for module in ("plugin", "fallback", "plug"):
+        _write(repo / "src" / "pkg" / f"{module}.py", "p = 1\n")
+    with pytest.raises(ScopeError, match=r"root\.py: 1 non-literal import site"):
+        build_report(repo, scope_path)
+
+
+def test_a_loader_built_at_import_time_still_imports_when_it_is_called(tmp_path: Path) -> None:
+    root = (
+        "from importlib import import_module\n\n\n"
+        "def _make(module_name):\n"
+        "    def loader():\n"
+        "        return import_module(module_name, __package__)\n\n"
+        "    return loader\n\n\n"
+        'plugin_loader = _make(".plugin")\n'
+    )
+    result = _resolved(tmp_path, root, "plugin")
+    reach = {item["module"]: item["reach"] for item in result["python"]["files"]}
+    # ``_make`` runs at import time, but the import it builds runs only when the
+    # loader it returned is called.
+    assert reach["pkg.plugin"] == "lazy"
 
 
 def test_follow_adds_declared_targets_and_unfollowed_does_not(tmp_path: Path) -> None:
@@ -485,5 +555,7 @@ def test_binary_crate_with_own_library_links_the_library_tree(tmp_path: Path) ->
     result = build_report(repo, scope_path)
     wired = {item["path"].rsplit("/", 1)[1] for item in result["rust"]["files"]}
     assert {"main.rs", "lib.rs", "inside.rs"} <= wired
-    unlinked = {item["path"].rsplit("/", 1)[1] for item in result["exclusions"] if item["category"] == "not_in_module_tree"}
+    unlinked = {
+        item["path"].rsplit("/", 1)[1] for item in result["exclusions"] if item["category"] == "not_in_module_tree"
+    }
     assert "inside.rs" not in unlinked
