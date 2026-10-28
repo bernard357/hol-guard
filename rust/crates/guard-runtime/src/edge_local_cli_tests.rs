@@ -148,6 +148,20 @@ fn without_a_block_rule_an_allowed_call_reads_nothing() {
 }
 
 #[test]
+fn without_a_grant_a_review_reads_nothing() {
+    let (envelope, _) = case("review-ungranted", None, false);
+    assert_eq!(
+        settle(
+            &envelope,
+            "claude-code",
+            "PreToolUse",
+            &review("native_command_review_required")
+        ),
+        Ok(None)
+    );
+}
+
+#[test]
 fn a_custom_rule_settles_a_review() {
     let (envelope, name) = case("review-block", Some("blocked"), false);
     let rule = settle(

@@ -9,8 +9,8 @@
 //! grant can block it, and a launch or grant the edge cannot check blocks it
 //! as unverified. A review is checked outside Watch: a block applies to any
 //! review, and an allow lifts only an overridable review due to
-//! non-recognition alone. A rule the edge cannot read leaves the review
-//! standing. The daemon still applies each answer where it did before:
+//! non-recognition alone, so a review is read only while some CLI grant
+//! exists. A rule the edge cannot read leaves the review standing. The daemon still applies each answer where it did before:
 //! a granted containment answers an allowed call first, and a saved
 //! exact-action block wins over a custom allow.
 
@@ -65,6 +65,12 @@ pub(super) fn settle(
         .map(|response| (true, response))
     } else if !recording_only
         && text("minimum_action").is_some_and(|action| REVIEW_ACTIONS.contains(&action))
+        // Only a CLI with a grant row has a custom rule to read, so a store
+        // without one derives no launch.
+        && crate::local_cli_hook_contained::has_grant_rows_at(
+            &rules.store_path,
+            &envelope.source.guard_home,
+        )
     {
         match checked(envelope, result, "review") {
             Some(RuleVerdict::Blocked(name)) => {
