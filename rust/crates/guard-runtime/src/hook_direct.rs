@@ -23,7 +23,9 @@
 //! `hook_direct_saved_decision.rs` reproduces the daemon. A Claude
 //! Code or ZCode sandbox requirement outside Watch is routed to
 //! contained execution as the daemon routes it, once the daemon has bound
-//! its sink command, and defers without one. While custom extension
+//! its sink command, and defers without one. An outside-roots review the
+//! edge routes to a local CLI grant reads that grant first, as the daemon
+//! does, and runs in the sandbox an allowed grant widens. While custom extension
 //! block rules exist, an allowed `PreToolUse` whose command launches a local
 //! CLI reads that CLI's grant as the daemon does and, when the grant blocks
 //! it, answers with the daemon's block, including the unverified block when
@@ -420,6 +422,13 @@ fn answer(
         .deadline_budget_ms
         .unwrap_or(DEFAULT_DEADLINE_BUDGET_MS)
         .clamp(1, MAX_DEADLINE_BUDGET_MS);
+    let source = GuardHookSourceMetadataV2 {
+        cwd: Some(workspace.clone()),
+        home_dir: request_home.clone(),
+        guard_home: request.guard_home,
+        source_ref_external_allowed,
+        execution_environment,
+    };
     let envelope = GuardHookEnvelopeV2 {
         schema: GUARD_HOOK_ENVELOPE_V2_SCHEMA.to_owned(),
         request_id: None,
@@ -433,13 +442,7 @@ fn answer(
             "policy_digest": snapshot.policy_digest,
             "runtime_identity": snapshot.runtime_identity,
         }),
-        source: GuardHookSourceMetadataV2 {
-            cwd: Some(workspace.clone()),
-            home_dir: request_home.clone(),
-            guard_home: request.guard_home,
-            source_ref_external_allowed,
-            execution_environment,
-        },
+        source: source.clone(),
         recording_only,
         local_cli_rules: None,
         observe_local_cli: false,
@@ -465,23 +468,37 @@ fn answer(
             },
             saved_payload.as_ref(),
         ) {
-            // The daemon returns a saved decision's response as is.
+            // The daemon routes a review its grant covers before it reads
+            // the review's saved decision, whose response it returns as is.
             (Err(HookDirectDefer::NotAllow), Some(payload)) => {
-                let hint = saved_decision::HintScope {
-                    policy_store,
-                    deadline: started + Duration::from_millis(deadline_budget_ms),
-                };
-                let context = saved_decision::Context {
+                let call = grant::GrantCall {
                     harness: &request.harness,
                     payload,
-                    recorded_payload: &evidence_payload,
-                    workspace: &workspace,
-                    home_dir: &request_home,
-                    guard_home: &guard_home,
-                    binding: &binding,
-                    hint: Some(&hint),
+                    source: &source,
+                    contained,
+                    sink_command: binding.contained_sink_command.as_deref(),
+                    deadline: started + Duration::from_millis(deadline_budget_ms),
                 };
-                saved_decision::answer(&edge, &context)?
+                if let Some((granted, written)) = grant::answer(&edge, &call)? {
+                    snapshot = written;
+                    granted
+                } else {
+                    let hint = saved_decision::HintScope {
+                        policy_store,
+                        deadline: started + Duration::from_millis(deadline_budget_ms),
+                    };
+                    let context = saved_decision::Context {
+                        harness: &request.harness,
+                        payload,
+                        recorded_payload: &evidence_payload,
+                        workspace: &workspace,
+                        home_dir: &request_home,
+                        guard_home: &guard_home,
+                        binding: &binding,
+                        hint: Some(&hint),
+                    };
+                    saved_decision::answer(&edge, &context)?
+                }
             }
             (passed, _) => {
                 let mut answered = passed?;
@@ -615,6 +632,8 @@ pub(crate) mod cursor;
 mod edge;
 #[path = "hook_direct_fence.rs"]
 mod fence;
+#[path = "hook_direct_grant.rs"]
+mod grant;
 #[path = "hook_direct_lifecycle.rs"]
 mod lifecycle;
 #[path = "hook_direct_local_cli.rs"]

@@ -66,11 +66,21 @@ pub(super) struct Snapshot {
 }
 
 impl Snapshot {
-    #[cfg_attr(not(unix), allow(dead_code))]
     fn new(request: std::path::PathBuf) -> Self {
         Self {
             request: Some(request),
         }
+    }
+
+    /// The request snapshot the sink command in `routed` reads, as the
+    /// containment rewrite wrote it, or `None` when it names none.
+    pub(super) fn of_routed(routed: &Value) -> Option<Self> {
+        let command = routed
+            .pointer("/hookSpecificOutput/updatedInput/command")?
+            .as_str()?;
+        let argv = crate::mcp_proxy_shlex::split(command)?;
+        let flag = argv.iter().position(|token| token == "--request-file")?;
+        Some(Self::new(argv.get(flag + 1)?.into()))
     }
 
     pub(super) fn keep(mut self) {

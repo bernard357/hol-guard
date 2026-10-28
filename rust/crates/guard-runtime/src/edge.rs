@@ -25,7 +25,7 @@ pub(crate) use edge_identity::{
     policy_generation_matches, review_anchor_digest, stable_policy_identity,
 };
 #[path = "edge_containment.rs"]
-mod edge_containment;
+pub(crate) mod edge_containment;
 #[path = "edge_local_cli.rs"]
 mod edge_local_cli;
 #[path = "edge_result_check.rs"]

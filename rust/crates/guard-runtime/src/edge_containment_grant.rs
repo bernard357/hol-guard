@@ -29,8 +29,8 @@ use std::time::{Duration, Instant};
 
 use guard_command::hook_responses::pre_tool;
 use guard_contracts::{
-    GuardHookEnvelopeV2, GuardHookLocalCliRulesV1, LocalCliHookRequestV1,
-    LOCAL_CLI_HOOK_REQUEST_SCHEMA,
+    GuardHookEnvelopeV2, GuardHookLocalCliRulesV1, GuardHookSourceMetadataV2,
+    LocalCliHookRequestV1, LOCAL_CLI_HOOK_REQUEST_SCHEMA,
 };
 use serde_json::{Map, Value};
 
@@ -72,64 +72,118 @@ pub(super) fn answer(
     if envelope.recording_only {
         return None;
     }
-    let payload = envelope.raw_payload.as_object()?;
-    let result = result.as_object()?;
-    let request = match request(envelope, payload, rules) {
-        Ok(Some(request)) => request,
+    let request = GrantRequest {
+        harness,
+        payload: envelope.raw_payload.as_object()?,
+        result,
+        source: &envelope.source,
+        rules,
+        sink_command: &sink.sink_command,
+        deadline: deadline(envelope, started),
+    };
+    match granted(&request)? {
+        Granted::Routed(routed) => {
+            *harness_response = Some(routed);
+            Some(ROUTED)
+        }
+        Granted::Kept(receipt) => {
+            *harness_response = Some(receipt);
+            Some(KEPT)
+        }
+        Granted::Declined => Some(DECLINED),
+    }
+}
+
+/// A grant-routed `PreToolUse` with what the grant step reads: the call, the
+/// review the edge produced for it, where it runs, the daemon's rules and the
+/// argv that starts Guard's CLI.
+pub(crate) struct GrantRequest<'a> {
+    pub(crate) harness: &'a str,
+    pub(crate) payload: &'a Map<String, Value>,
+    pub(crate) result: &'a Value,
+    pub(crate) source: &'a GuardHookSourceMetadataV2,
+    pub(crate) rules: &'a GuardHookLocalCliRulesV1,
+    pub(crate) sink_command: &'a [String],
+    /// When the grant step must have answered.
+    pub(crate) deadline: Instant,
+}
+
+/// The grant step's answer to a grant-routed `PreToolUse`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Granted {
+    /// The allow that runs the call in the grant's sandbox.
+    Routed(Value),
+    /// The granted sandbox receipt, for a receipt-only call.
+    Kept(Value),
+    /// No grant routes the call, so the review stands.
+    Declined,
+}
+
+/// `edge_granted_containment_response` for `request`, or `None` when the
+/// grant step or its rewrite fails or does not finish by its deadline.
+pub(crate) fn granted(request: &GrantRequest<'_>) -> Option<Granted> {
+    let result = request.result.as_object()?;
+    let local = match local_request(request.source, request.payload, request.rules) {
+        Ok(Some(local)) => local,
         // No command or launch directory: the daemon finds no grant either.
-        Ok(None) => return Some(DECLINED),
+        Ok(None) => return Some(Granted::Declined),
         Err(()) => return None,
     };
     // Only a CLI with a grant row can be allowed; an unreadable store counts
     // as holding one, so the step below decides it.
-    if !has_grant_rows_at(&request.store_path, &request.guard_home) {
-        return Some(DECLINED);
+    if !has_grant_rows_at(&local.store_path, &local.guard_home) {
+        return Some(Granted::Declined);
     }
-    let refined = decided(request, remaining(envelope, started)?)?;
+    let wait = request
+        .deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())?;
+    let refined = decided(local, wait)?;
     if refined.action != ALLOW_CONTAINED_WITH_GRANT || refined.contained_grant.is_none() {
-        return Some(DECLINED);
+        return Some(Granted::Declined);
     }
     let Value::Object(route) = contained_route() else {
         return None;
     };
     let mut granted = result.clone();
     granted.extend(route);
-    let receipt = pre_tool(harness, &granted);
-    let inputs = inputs(envelope, harness, payload, &receipt, &sink.sink_command);
+    let receipt = pre_tool(request.harness, &granted);
+    let inputs = inputs(
+        request.source,
+        request.harness,
+        request.payload,
+        &receipt,
+        request.sink_command,
+    );
     let rewrite = containment_rewrite(&inputs).ok()?;
     if rewrite.kept_because.as_deref() == Some(RECEIPT_ONLY) {
         // The sink re-authorizing gets the sandbox receipt itself.
-        *harness_response = Some(Value::Object(receipt));
-        return Some(KEPT);
+        return Some(Granted::Kept(Value::Object(receipt)));
     }
-    match rewrite.response {
-        Some(routed) => {
-            *harness_response = Some(routed);
-            Some(ROUTED)
-        }
-        None => Some(DECLINED),
-    }
+    Some(match rewrite.response {
+        Some(routed) => Granted::Routed(routed),
+        None => Granted::Declined,
+    })
 }
 
 /// The `LocalCliHook` request the daemon sends for the grant: the command,
 /// its resolved launch directory, the daemon's home and environment with the
 /// agent's `PATH`, held at an outside-roots review. `Ok(None)` when the call
 /// names no command or launches nowhere the daemon could resolve.
-fn request(
-    envelope: &GuardHookEnvelopeV2,
+fn local_request(
+    source: &GuardHookSourceMetadataV2,
     payload: &Map<String, Value>,
     rules: &GuardHookLocalCliRulesV1,
 ) -> Result<Option<LocalCliHookRequestV1>, ()> {
     let Some(command) = pre_tool_command(payload)? else {
         return Ok(None);
     };
-    let workspace = envelope.source.cwd.as_deref().unwrap_or_default();
+    let workspace = source.cwd.as_deref().unwrap_or_default();
     let Some(cwd) = resolve_launch_dir(launch_dir_candidate(payload, workspace)?)? else {
         return Ok(None);
     };
     let mut env = rules.env.clone();
-    if let Some(path) = envelope
-        .source
+    if let Some(path) = source
         .execution_environment
         .as_ref()
         .map(|environment| environment.path.as_str())
@@ -142,13 +196,13 @@ fn request(
         schema: LOCAL_CLI_HOOK_REQUEST_SCHEMA.to_owned(),
         request_id: REQUEST_ID.to_owned(),
         store_path: rules.store_path.clone(),
-        guard_home: envelope.source.guard_home.clone(),
+        guard_home: source.guard_home.clone(),
         // Nothing is recorded here, so the store's source is never read.
         source: String::new(),
         busy_timeout_ms: u64::from(timeout_ms).clamp(1, crate::guard_store_op::MAX_BUSY_TIMEOUT_MS),
         command: command.to_owned(),
         cwd,
-        home_dir: Some(envelope.source.home_dir.clone()),
+        home_dir: Some(source.home_dir.clone()),
         user_home: rules.user_home.clone(),
         env,
         current_action: "review".to_owned(),
@@ -157,16 +211,14 @@ fn request(
     }))
 }
 
-/// The time left for the grant step: the review's budget plus `GRANT_WAIT`,
-/// counted from when the edge began the hook. `None` once it has run out.
-fn remaining(envelope: &GuardHookEnvelopeV2, started: Instant) -> Option<Duration> {
+/// When the edge's grant step must have answered: the review's budget plus
+/// `GRANT_WAIT`, counted from when the edge began the hook.
+fn deadline(envelope: &GuardHookEnvelopeV2, started: Instant) -> Instant {
     let budget = envelope
         .deadline_budget_ms
         .unwrap_or(DEFAULT_DEADLINE_BUDGET_MS)
         .clamp(1, MAX_DEADLINE_BUDGET_MS);
-    (started + Duration::from_millis(budget) + GRANT_WAIT)
-        .checked_duration_since(Instant::now())
-        .filter(|left| !left.is_zero())
+    started + Duration::from_millis(budget) + GRANT_WAIT
 }
 
 /// The grant refinement under the shared storage hold, or `None` when the

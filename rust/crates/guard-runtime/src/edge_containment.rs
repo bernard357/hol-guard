@@ -18,7 +18,10 @@
 
 use std::time::Instant;
 
-use guard_contracts::{ContainmentRewriteInputsV1, GuardHookEdgeResultV2, GuardHookEnvelopeV2};
+use guard_contracts::{
+    ContainmentRewriteInputsV1, GuardHookEdgeResultV2, GuardHookEnvelopeV2,
+    GuardHookSourceMetadataV2,
+};
 use serde_json::{Map, Value};
 
 use crate::hook_decision_containment_rewrite::containment_rewrite;
@@ -92,7 +95,13 @@ fn rewrite(
     }
     let rendered = harness_response.as_ref()?.as_object()?;
     let payload = envelope.raw_payload.as_object()?;
-    let inputs = inputs(envelope, harness, payload, rendered, &sink.sink_command);
+    let inputs = inputs(
+        &envelope.source,
+        harness,
+        payload,
+        rendered,
+        &sink.sink_command,
+    );
     match containment_rewrite(&inputs).ok()?.response {
         Some(routed) => {
             *harness_response = Some(routed);
@@ -105,7 +114,7 @@ fn rewrite(
 /// The facts the daemon sends `containment_rewrite`: the call from the
 /// payload, the receipt as the harness would read it, and the source.
 fn inputs(
-    envelope: &GuardHookEnvelopeV2,
+    source: &GuardHookSourceMetadataV2,
     harness: &str,
     payload: &Map<String, Value>,
     rendered: &Map<String, Value>,
@@ -136,11 +145,11 @@ fn inputs(
         reason_code: rendered_text("reason_code"),
         required_execution_profile: rendered_text("required_execution_profile"),
         observe_mode: rendered.get("observe_mode") == Some(&Value::Bool(true)),
-        workspace: envelope.source.cwd.clone(),
+        workspace: source.cwd.clone(),
         session_id: payload_value(&["session_id", "sessionId"]),
         tool_call_id: payload_value(&["tool_call_id", "toolCallId", "tool_use_id"]),
-        guard_home: envelope.source.guard_home.clone(),
-        home: envelope.source.home_dir.clone(),
+        guard_home: source.guard_home.clone(),
+        home: source.home_dir.clone(),
         sink_command: sink_command.to_vec(),
     }
 }
@@ -151,7 +160,7 @@ fn first<'a>(payload: &'a Map<String, Value>, names: &[&str]) -> Option<&'a Valu
 }
 
 #[path = "edge_containment_grant.rs"]
-mod grant;
+pub(crate) mod grant;
 
 #[cfg(all(test, unix))]
 #[path = "edge_containment_tests.rs"]
