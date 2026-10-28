@@ -13,26 +13,50 @@ question.
 This audit answers it directly. `scripts/audit_python_verdict_sites.py` walks
 the package's syntax tree and reports every function that turns Python control
 flow into one of the six enforced `GuardAction` strings — a `return "allow"`, an
-assignment to a name the runtime reads as the verdict, or a call that passes one
-as the verdict argument. That set is small enough to read by hand, and it is
-exhaustive in a way a grep is not.
+assignment to a name the runtime reads as the verdict, a verdict-keyed entry in
+a dictionary literal, or a call that passes one as the verdict argument. It
+follows a conditional or boolean expression into both of its branches, resolves
+module-level verdict constants so `return dict(_ALLOW)` is not invisible, and
+reads the Python this package carries as embedded script templates, because the
+bounded CLI hook client and the Cursor hook script are written out and run on
+the hook path rather than imported.
+
+## What the scan can and cannot see
+
+It is a syntactic scan, so it is exhaustive over one shape and blind to others.
+It finds every site where a `GuardAction` literal is produced in package source,
+including inside the generated hook clients. It does not follow a verdict that
+arrives as data — a string read from JSON, a value threaded through a `dict`
+that never names it — and it cannot read a template that is not parseable
+Python. One template is in that state today: Cline's hook script is a format
+string with `{event_name!r}` interpolations and escaped braces. Its action
+strings were read by hand and are all membership tests, not productions.
+`docs/guard/audits/python-verdict-sites.json` records that template under
+`unparsed_templates`, and `--check` fails if the set of unreadable templates
+changes, so a second one cannot appear silently.
+
+A site that composes a verdict out of data rather than literals would be missed.
+That is the limit worth stating plainly: this scan narrows the search to a set
+small enough to read, it does not prove the set is everything.
 
 ## What it found
 
-Thirty-five functions across twenty-six files, every one of them under
+Sixty-two functions across forty-four files, every one of them under
 `src/codex_plugin_scanner/guard/`. Nothing outside the guard package produces a
 verdict, so the console-script entry points (`hol-guard`, `hol-guard-eval`,
 `hol-guard-secrets` and the `plugin-*` aliases) hold no authority of their own.
 
-Nineteen of the thirty-five can only ever produce a `block`, a `review` or a
+Twenty-six of the sixty-two can only ever produce a `block`, a `review` or a
 `require-reapproval`. A Python-produced verdict that is stricter than the
 resident's cannot authorize anything, and fail-closed behaviour when the
 resident is unreachable is the design, so these were cleared as a class rather
 than read one at a time. They are the fail-closed renderers, the review queues
-and the protect-path blocks.
+and the protect-path blocks. `--check` compares the action set of each site, not
+just its name, so one of them growing an `allow` is a failure rather than a
+silent reclassification.
 
-The remaining sixteen can produce an `allow`, so each one was read. Fifteen
-hold no authority of their own:
+The remaining thirty-six can produce an `allow` or a `warn`, so each one was
+read. Thirty-four hold no authority of their own, in these readings:
 
 - **Renders the resident's verdict** — `native_local_cli_grant_response` acts
   only on the resident's `hook_local_cli_rule` answer and leaves the review
@@ -40,7 +64,11 @@ hold no authority of their own:
   the native route's own `decision_policy_action`; `allow_tool_call` files the
   row for a call the route already allowed; `local_tool_grant_decision` refuses
   any reply that is not a resident allow; `_expected_policy_action` echoes the
-  action the request carried.
+  action the request carried. In the generated bounded client, `_hermes_policy`
+  reads the decision out of the daemon response and `_to_native` allows only
+  when it read `allow` or `warn`; `_permission_decision` and the Cursor tail's
+  `_cursor_permission` map the resident's action into a harness vocabulary and
+  refuse an action they do not recognise.
 - **Decodes a signed or stored decision** — `_exact_action`,
   `normalize_remote_approval_decision` and `_normalize_action` map a signed
   one-time answer onto the enforced vocabulary. `local_cli_command_state` admits
@@ -51,12 +79,40 @@ hold no authority of their own:
   `native_saved_decision_response` replays a saved exact-action decision bound to
   the artifact hash, and only where the resident marked the review approvable;
   `temporary_mcp_grant_decision` and `_continuation` do the same for MCP grants
-  and retry copy; `wait_for_grok_live_approval` reads resolved approval rows.
+  and retry copy; `wait_for_grok_live_approval` reads resolved approval rows, and
+  `apply_grok_pretool_approval_wait` and the generated client's
+  `_rewrite_grok_decision` carry its answer; `apply_approval_resolution` applies
+  the resident's own resolution plan; `pause_native_pre_tool_for_approval` blocks
+  while a review is pending and allows only on a saved approval the store
+  matched.
+- **Labels rather than enforces** — the workspace scan findings carry a `warn`
+  in a record field beside their severity and lifecycle state, which no hook
+  reads; `_request_recommended_scope`'s string is a key into the row's
+  `recommended_scope_by_action` table; `_install_recommendation` feeds
+  `policy_recommendation.action` and `can_install`, both read only by the CLI
+  report renderer.
 - **Neither** — `_repair_command_activity_persistence_health` writes a probe row
   inside a savepoint and rolls it back, proving the evidence write path without
-  evaluating policy.
+  evaluating policy. `_observe_payload` and the generated client's
+  `_failure_payload` answer observation events, which report activity that has
+  already finished, so their `allow` authorizes no tool action. The two Cursor
+  `beforeShellExecution` routes pass a call through to Guard's own approval sink,
+  which opens the request owner-only, checks its digest and re-authorizes the
+  command there.
 
-## The finding
+One more is worth recording without raising it as a finding.
+`grok_hook_response_from_guard` renders the resident's action for Grok, but
+unlike the other two renderings of its kind an action it does not recognise
+falls through to `{"decision": "allow"}` rather than to a deny or a `None`. No
+production caller in `src/` reaches it — only the capability contract listing and
+the tests — so it is latent rather than live. It belongs in the same pass that
+tightens the composers below.
+
+## The findings
+
+Two sites settle a verdict in Python that the resident did not give.
+
+### `_script_free_watch`
 
 `src/codex_plugin_scanner/guard/daemon/hook_native_package_review.py` settles a
 package review in Python in one case the resident did not settle.
@@ -89,23 +145,48 @@ proved the install writes registry package files and nothing else — but the ru
 that combines them into an allow exists nowhere else. `rg
 script_free_watch rust/crates` finds nothing.
 
-This is a residual authority-composition rule, not an open door: the install it
-admits is one the resident already proved runs no package code, and `may_allow`
-still gates it. It is nonetheless the shape MAJ-AC-01 was written to catch, and
-it is the only one left.
+### The package-shim approval resume
 
-**Fix:** have the evaluation carry the answer. The resident already computes
-every input, so the widening belongs beside them in
-`supply_chain_package_eval`, surfaced as a field on the evaluation result that
-`native_package_review_response` reads the way it reads `decision`. Tracked
-separately so this audit can land on its own.
+`_run_guard_protect_command` in `guard/cli/commands_dispatch_local.py` does the
+same thing at the `guard protect` root. After an approval wait resolves with no
+blocking row, it re-runs the request through the resident. When the resident
+comes back with `review` or `require-reapproval`, this path checks that the
+package request and execution context are unchanged and then overwrites the
+verdict:
+
+```python
+elif _package_shim_approval_matches_fresh_request(initial_payload, fresh_payload):
+    fresh_verdict = fresh_payload.get("verdict")
+    if isinstance(fresh_verdict, dict):
+        fresh_verdict["action"] = "allow"
+        fresh_verdict["blocking"] = False
+    fresh_payload["policy_action"] = "allow"
+```
+
+The resident evaluated the fresh request and asked for review. Python concludes
+that the approval the user already gave covers it, because the request bytes
+match. That is an authority rule, and it lives only here.
+
+Neither is an open door: the first admits an install the resident already proved
+runs no package code and `may_allow` still gates it; the second needs a resolved
+approval for a byte-identical request. Both are nonetheless the shape MAJ-AC-01
+was written to catch.
+
+**Fix:** have the resident carry the answer. For `_script_free_watch` the
+widening belongs beside the facts it reads, in `supply_chain_package_eval`,
+surfaced as a field on the evaluation result that `native_package_review_response`
+reads the way it reads `decision`. For the protect resume, the match test and
+its conclusion belong in the resident's re-evaluation, which already receives
+the approval state. Both are tracked separately so this audit can land on its
+own.
 
 ## Keeping it true
 
 A point-in-time audit stops being evidence the moment someone adds a site.
-`docs/guard/audits/python-verdict-sites.json` records the reading for each of
-the thirty-five, and `scripts/audit_python_verdict_sites.py --check` fails when
-the package and the baseline disagree —
-`tests/test_python_verdict_site_audit.py` runs it. A new verdict site has to be
-read and recorded before it can land, which is what MAJ-AC-01 asked for in the
-first place.
+`docs/guard/audits/python-verdict-sites.json` records the reading and the action
+set for each of the sixty-two, plus the one template the scan cannot read, and
+`scripts/audit_python_verdict_sites.py --check` fails when the package and the
+baseline disagree — on a new site, a removed site, a changed action set, or a
+change in which templates are unreadable. `tests/test_python_verdict_site_audit.py`
+runs it. A new verdict site has to be read and recorded before it can land,
+which is what MAJ-AC-01 asked for in the first place.
