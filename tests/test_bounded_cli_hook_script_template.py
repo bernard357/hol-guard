@@ -636,3 +636,121 @@ def test_generated_client_canonicalizes_before_naming_the_action_in_a_reason(tmp
     )
     assert exit_code == 2
     assert "quarantine-required" not in stderr
+
+
+@pytest.mark.parametrize("harness", ["copilot", "cursor", "opencode", "kimi", "zcode", "grok", "devin"])
+@pytest.mark.parametrize("action", ["quarantine-required", "ask", "BLOCK", "0", None, 7])
+def test_generated_client_denies_a_prebuilt_allow_beside_an_unplaceable_action(
+    tmp_path: Path,
+    harness: str,
+    action: object,
+) -> None:
+    # A response that already carries its harness's permission decision is
+    # emitted as it arrived, so canonicalizing the action on its own left the
+    # "allow" standing: a harness that reads the envelope rather than the exit
+    # code still ran the call. Copilot is the one in this set that does.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {
+            "policy_action": action,
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"},
+        },
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny", (harness, action, stdout)
+    assert payload["policy_action"] == "block", (harness, action, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode"])
+def test_generated_client_denies_a_prebuilt_top_level_allow_beside_an_unplaceable_action(
+    tmp_path: Path,
+    harness: str,
+) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {"policy_action": "quarantine-required", "decision": "allow"},
+        "PreToolUse",
+    )
+    assert json.loads(stdout)["decision"] == "deny", (harness, stdout)
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+@pytest.mark.parametrize(
+    ("decision", "expected_action"),
+    [("deny", "block"), ("block", "block"), ("ask", "review")],
+)
+def test_generated_client_lowers_a_permissive_action_to_its_restrictive_decision(
+    tmp_path: Path,
+    harness: str,
+    decision: str,
+    expected_action: str,
+) -> None:
+    # A permissive action beside a restrictive decision is not permission.
+    # The native bridge lowers the action to the decision; so does the client.
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, _code = module._to_native(
+        {
+            "policy_action": "allow",
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision},
+        },
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert payload["policy_action"] == expected_action, (harness, decision, stdout)
+    assert payload["hookSpecificOutput"]["permissionDecision"] != "allow", stdout
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+def test_generated_client_leaves_an_agreeing_prebuilt_allow_alone(tmp_path: Path, harness: str) -> None:
+    module = _load_script(tmp_path, harness=harness)
+    stdout, _stderr, exit_code = module._to_native(
+        {
+            "policy_action": "allow",
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"},
+        },
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+    assert exit_code == 0
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow", stdout
+    assert payload["policy_action"] == "allow", stdout
+
+
+@pytest.mark.parametrize("harness", ["copilot", "kimi", "zcode", "grok", "devin"])
+@pytest.mark.parametrize("action", [" allow ", "\tallow\n", " warn"])
+def test_generated_client_reads_a_padded_canonical_action_as_that_action(
+    tmp_path: Path,
+    harness: str,
+    action: str,
+) -> None:
+    # The native bridge strips the action before testing it against the
+    # lattice. A client that did not denied a padded "allow" the bridge
+    # allowed, so one response produced two decisions.
+    module = _load_script(tmp_path, harness=harness)
+    assert module._canonical_policy_action(action) == action.strip()
+    stdout, _stderr, exit_code = module._to_native({"policy_action": action, "reason": ""}, "PreToolUse")
+    payload = json.loads(stdout)
+    specific = payload.get("hookSpecificOutput")
+    decision = specific.get("permissionDecision") if isinstance(specific, dict) else payload.get("decision")
+    assert exit_code == 0, (harness, action, stdout)
+    assert decision in {"allow", None}, (harness, action, stdout)
+
+
+_DECISION_LATTICE = Path(__file__).resolve().parents[1] / "rust/crates/guard-contracts/src/decision_lattice.rs"
+
+
+def test_generated_client_action_lattice_matches_guard_action(tmp_path: Path) -> None:
+    # The standalone client runs with no Guard on its path, so it writes the
+    # lattice out by hand and the copy can drift from the one the native
+    # runtime answers from. This reads GuardAction::from_canonical's own arms
+    # so a name added or renamed there fails here instead of in the field.
+    import re
+
+    source = _DECISION_LATTICE.read_text(encoding="utf-8")
+    body = source.split("pub fn from_canonical", 1)[1].split("\n    }", 1)[0]
+    canonical = frozenset(re.findall(r'"([a-z-]+)" => Self::', body))
+
+    assert canonical, body
+    module = _load_script(tmp_path, harness="grok")
+    assert canonical == module._GUARD_ACTIONS

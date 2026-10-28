@@ -3,6 +3,7 @@
 BOUNDED_HOOK_NATIVE_TEMPLATE = """_GUARD_ACTIONS = frozenset(
     {"allow", "warn", "review", "require-reapproval", "sandbox-required", "block"}
 )
+_GUARD_DECISIONS = frozenset({"allow", "ask", "deny", "block"})
 
 
 def _canonical_policy_action(policy_action: object) -> str:
@@ -10,11 +11,68 @@ def _canonical_policy_action(policy_action: object) -> str:
     # or a truncated or corrupted field -- is not evidence of permission, so
     # it reads as "block": what this client already answers for a missing
     # action, and what the native bridge that answers for this client reads
-    # the same value as. Matching is exact and excludes the "ask" alias, as
-    # the bridge's own is_guard_action does.
-    if isinstance(policy_action, str) and policy_action in _GUARD_ACTIONS:
-        return policy_action
+    # the same value as. Surrounding whitespace is stripped first, as the
+    # bridge does, so a padded canonical action is not read as unplaceable.
+    # Matching is otherwise exact and excludes the "ask" alias, as the
+    # bridge's own is_guard_action does.
+    if isinstance(policy_action, str) and policy_action.strip() in _GUARD_ACTIONS:
+        return policy_action.strip()
     return "block"
+
+
+def _decision_word(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    word = value.strip().lower()
+    return word if word in _GUARD_DECISIONS else None
+
+
+def _agreeing_native_response(native_response: dict[str, object], policy_action: str) -> str:
+    # Make an already-shaped response say what the canonical action says.
+    #
+    # A response that carries its harness's own decision fields is emitted as
+    # it arrived, so those fields -- not the action beside them -- are what
+    # the harness honours. An action this client cannot place reads as
+    # "block", and without this an "allow" permission decision next to one
+    # would still let the call run on a harness that reads the envelope
+    # rather than the exit code. The native bridge that answers for this
+    # client reconciles the same two fields, so both routes answer one
+    # request alike.
+    #
+    # The envelope is only ever tightened: a restrictive decision beside a
+    # permissive action lowers the action, never the other way round.
+    hook_specific = native_response.get("hookSpecificOutput")
+    entries = dict(hook_specific) if isinstance(hook_specific, dict) else None
+    has_top = "decision" in native_response
+    has_nested = entries is not None and "permissionDecision" in entries
+    top = _decision_word(native_response.get("decision")) if has_top else None
+    nested = _decision_word(entries.get("permissionDecision")) if has_nested else None
+    words = [word for word in (top, nested) if word is not None]
+    if policy_action in {"allow", "warn"}:
+        if any(word in {"deny", "block"} for word in words):
+            policy_action = "block"
+        elif "ask" in words:
+            policy_action = "review"
+    if policy_action == "block":
+        # A decision field this client cannot place is handled the way an
+        # unplaceable action is: it names no permission, so it reads as deny.
+        if has_top:
+            native_response["decision"] = "block" if top == "block" else "deny"
+        if has_nested:
+            entries["permissionDecision"] = "deny"
+    elif policy_action in {"review", "require-reapproval", "sandbox-required"}:
+        if has_top:
+            native_response["decision"] = "block" if top == "block" else "deny"
+        if has_nested and nested == "allow":
+            entries["permissionDecision"] = "ask"
+    if entries is not None:
+        native_response["hookSpecificOutput"] = entries
+    if "policy_action" in native_response and native_response["policy_action"] != policy_action:
+        # The action travels with the decision it produced, so a reader that
+        # looks at the action alone cannot read permission out of a stale or
+        # unplaceable value the decision fields no longer agree with.
+        native_response["policy_action"] = policy_action
+    return policy_action
 
 
 def _permission_decision(policy_action: str) -> str | None:
@@ -110,7 +168,10 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
         return stdout, "", 2 if decision == "block" else 0
     if "hookSpecificOutput" in daemon_response or "decision" in daemon_response:
         native_response = dict(daemon_response)
-        policy = _canonical_policy_action(native_response.get("policy_action") or "block")
+        policy = _agreeing_native_response(
+            native_response,
+            _canonical_policy_action(native_response.get("policy_action") or "block"),
+        )
         exit_code = 2 if _should_exit_block(event_name, policy) else 0
         if HARNESS == "devin" and exit_code == 2:
             native_response["decision"] = "block"
