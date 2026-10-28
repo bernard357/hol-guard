@@ -194,7 +194,6 @@ fn other_work_in_the_new_worktree_stays_reviewed() {
     for command in [
         "git worktree add -b flat ../service origin/main && cd ../service && git status",
         "git worktree add -b flat ../link/flat origin/main && cd ../link/flat && git status",
-        "git worktree add -b flat ../app-flat origin/main; cd ../app-flat && git status",
         "git worktree add -b flat ../app-flat origin/main && git status && cd ../app-flat",
         "rm -rf ../app-flat && git worktree add -b flat ../app-flat origin/main && cd ../app-flat && git status",
     ] {

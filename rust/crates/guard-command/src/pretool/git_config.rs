@@ -415,10 +415,11 @@ fn probe(
     // config pages by default only for its listing forms.
     let pages_by_default = match operation {
         // `clean` prints its preview, and `apply` its check report, without
-        // a pager.
+        // a pager. `rev-parse` and `ls-files` are plumbing: Git starts no
+        // pager for either, so only their own `pager.*` key can ask for one.
         "status" | "hash-object" | "merge-base" | "ls-tree" | "cat-file" | "show-ref"
         | "for-each-ref" | "rev-list" | "describe" | "clean" | "apply" | "count-objects"
-        | "check-attr" | "sparse-checkout" | "submodule" => false,
+        | "check-attr" | "sparse-checkout" | "submodule" | "rev-parse" | "ls-files" => false,
         "config" => super::git_config_reads::pages_by_default(&remaining[1..]),
         _ => true,
     };
