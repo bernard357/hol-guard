@@ -9996,6 +9996,57 @@
       "expect": "allow"
     },
     {
+      "id": "gh-pr-list-jq-top-level-comma",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr list --repo example/app --state open --json number,title --jq '.[] | .number, .title'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "gh-pr-view-jq-string-slice",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr view 12 --repo example/app --json headRefOid --jq '.headRefOid[0:12]'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-optional-projection",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '.scripts.build?' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "pgrep-children-of-parent",
       "fix_area": "shell",
       "harnesses": [

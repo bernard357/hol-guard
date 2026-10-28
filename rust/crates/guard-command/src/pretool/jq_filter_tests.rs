@@ -253,7 +253,6 @@ fn rejects_a_bare_literal_as_a_stage() {
 #[test]
 fn rejects_malformed_and_oversized_pipelines() {
     for filter in [
-        ".a, .b",
         ".a : .b",
         ".a |",
         ".a | | length",
@@ -394,5 +393,51 @@ fn a_binding_is_read_only_inside_its_scope() {
         ". as $x | $x # \"\n| $y # \"",
     ] {
         assert!(!variables_bound(filter), "expected unbound: {filter}");
+    }
+}
+
+#[test]
+fn admits_sequences_slices_and_optional_projections() {
+    for filter in [
+        ".number, .title",
+        ".[] | .headBranch, .headSha",
+        ".[] | [.headBranch, .headSha[0:12], .databaseId]",
+        ".a, .b, .c | length",
+        ".headSha[0:12]",
+        ".items[1:]",
+        ".items[:3]",
+        ".items[-2:]",
+        ".items[-2:-1]",
+        ".items[:]",
+        ".name[0:4] | ascii_downcase",
+        ".[]?",
+        ".a?",
+        ".a?.b",
+        ".items[]? | .name",
+        "map(.a)?",
+        "(.a // .b)?",
+        "select(.draft)? | .number",
+        ".[] | select(.a == 1), .b",
+    ] {
+        assert!(safe_filter(filter), "expected admitted: {filter}");
+    }
+}
+
+#[test]
+fn rejects_malformed_sequences_slices_and_optionals() {
+    for filter in [
+        ".a,",
+        ",",
+        ".a, env",
+        ".items[-]",
+        ".items[1:2:3]",
+        ".items[a:1]",
+        ".items[1:b]",
+        ".a ? .b",
+        "?",
+        ".a[0:12]x",
+        "? .a",
+    ] {
+        assert!(!safe_filter(filter), "expected refused: {filter}");
     }
 }
