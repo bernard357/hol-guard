@@ -356,6 +356,16 @@
     },
     {
       "file": "src/codex_plugin_scanner/guard/daemon/hook_native_review_approval.py",
+      "func": "_policy_binding_failed",
+      "root": "hook",
+      "reading": "fails-closed",
+      "actions": [
+        "block"
+      ],
+      "note": "Blocks when a native review cannot be bound to its native policy."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/daemon/hook_native_review_approval.py",
       "func": "pause_native_pre_tool_for_approval",
       "root": "hook",
       "reading": "records-approval",
