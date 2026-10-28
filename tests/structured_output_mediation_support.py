@@ -136,6 +136,8 @@ class _NativeRouteFixture(HookWorkerNativeMixin):
     raw_receipt: object | None = None
     recorded_receipt: object | None = None
     answered: bool = False
+    # No resident writer: the receipt stays with this fixture's own recorder.
+    activity_writer: object | None = None
 
     def _load_config(self, _guard_home: Path, _workspace: Path | None) -> object:
         self.reads += 1

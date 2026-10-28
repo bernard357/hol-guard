@@ -443,6 +443,7 @@ fn answer(
         recording_only,
         local_cli_rules: None,
         observe_local_cli: false,
+        record_receipt: false,
         structured_output_config: None,
     };
     let (edge, fence_wait) = fence::evaluate(envelope, policy_store)?;

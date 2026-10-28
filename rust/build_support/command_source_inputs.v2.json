@@ -418,6 +418,7 @@
       "src/pretool/github_metadata_text.rs",
       "src/pretool/glob_words.rs",
       "src/pretool/guard_diagnostics.rs",
+      "src/pretool/guard_names.rs",
       "src/pretool/hidden_listing.rs",
       "src/pretool/home_hidden_listing.rs",
       "src/pretool/hooks_path_writes.rs",

@@ -21,7 +21,7 @@ from .hook_fail_closed import (
     render_pre_tool_review,
     render_silent_review_block,
 )
-from .hook_native_exact_action import native_review_evidence
+from .hook_native_exact_action import review_evidence_parts
 from .hook_native_package_review import native_package_review_response
 from .hook_native_review_binding import (
     native_review_claimed_allow,
@@ -77,8 +77,9 @@ def pause_native_pre_tool_for_approval(
     claimed_saved_allow_hash: str | None = None,
     claimed_approval_request_id: str | None = None,
     local_cli_rule: Mapping[str, object] | None = None,
+    review_evidence: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Answer a native review; ``local_cli_rule`` is the edge's custom extension rule."""
+    """Answer a native review from the edge's custom extension rule and review evidence."""
     launch_target = _native_review_launch_target(payload)
     tool_name = _native_review_tool_name(payload)
     # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
@@ -86,19 +87,15 @@ def pause_native_pre_tool_for_approval(
     if local_cli_rule is not None and local_cli_rule["blocked"] is True:
         return cast("dict[str, object]", custom)
     # A custom block denies whatever the policy binding holds, so it settles
-    # before the binding is checked. One resident ask checks the receipt's
-    # policy binding and answers both the retry binding and the exact-action
-    # token. The saved-decision lookup and the queued request must bind the
-    # identical token, so it is derived once.
-    valid, identity, exact_token, once_only_reason = native_review_evidence(
-        harness=harness,
-        payload=payload,
-        native_result=native_result,
-        native_receipt=native_receipt,
-        workspace=workspace,
-        home_dir=home_dir,
-        guard_home=guard_home,
-    )
+    # before the binding is checked. The edge answered the receipt's policy
+    # binding, the retry binding and the exact-action token in the same round
+    # trip; the saved-decision lookup and the queued request bind that one
+    # token. Missing evidence fails closed.
+    evidence = review_evidence_parts(review_evidence)
+    if evidence is None:
+        _LOGGER.warning("Native review for %s arrived without the edge's review evidence", harness)
+        return _policy_binding_failed(harness, native_result, guard_home)
+    valid, identity, exact_token, once_only_reason = evidence
     if not valid:
         return _policy_binding_failed(harness, native_result, guard_home)
     saved = native_saved_decision_response(

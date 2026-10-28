@@ -88,10 +88,11 @@ mod tool_target;
 use std::time::{Duration, Instant};
 
 use guard_contracts::{
-    NativeExactActionPayloadV1, NativeExactActionQueryV1, NativeExactActionRequestV1,
-    NativeExactActionResultV1, NATIVE_EXACT_ACTION_HOOK_REVIEW_MAX_BYTES,
-    NATIVE_EXACT_ACTION_MAX_BUDGET_MS, NATIVE_EXACT_ACTION_MAX_BYTES,
-    NATIVE_EXACT_ACTION_REQUEST_SCHEMA, NATIVE_EXACT_ACTION_RESULT_SCHEMA,
+    GuardHookReviewEvidenceV1, NativeExactActionPayloadV1, NativeExactActionQueryV1,
+    NativeExactActionRequestV1, NativeExactActionResultV1,
+    NATIVE_EXACT_ACTION_HOOK_REVIEW_MAX_BYTES, NATIVE_EXACT_ACTION_MAX_BUDGET_MS,
+    NATIVE_EXACT_ACTION_MAX_BYTES, NATIVE_EXACT_ACTION_REQUEST_SCHEMA,
+    NATIVE_EXACT_ACTION_RESULT_SCHEMA,
 };
 
 use crate::package_authority_op::request_digest_with_limit;
@@ -224,6 +225,52 @@ pub(crate) fn review_binding_for(
         policy_binding,
         launcher,
     )
+}
+
+/// The `HookReview` answers of a reviewed `PreToolUse` the edge holds
+/// (`edge_review_evidence`), as the resident op would answer the query. A
+/// query the proofs reject still answers: its policy binding as checked, no
+/// binding and no token, with `unproven_launch` as the once-only reason.
+pub(crate) fn hook_review_evidence(
+    query: &NativeExactActionQueryV1,
+    guard_home: Option<&std::path::Path>,
+) -> GuardHookReviewEvidenceV1 {
+    match decide_query(
+        query,
+        &ResidentEngines { guard_home },
+        Fallback::CommandHash,
+    ) {
+        Ok(NativeExactActionPayloadV1::HookReview {
+            policy_binding_valid,
+            binding,
+            token,
+            once_only_reason,
+        }) => {
+            // Exactly one of a token and a once-only reason.
+            let (token, once_only_reason) = match (token, once_only_reason) {
+                (Some(token), None) => (Some(token), None),
+                (None, Some(reason)) => (None, Some(reason)),
+                _ => (None, Some(reasons::UNPROVEN_LAUNCH.to_owned())),
+            };
+            GuardHookReviewEvidenceV1 {
+                policy_binding_valid,
+                binding,
+                token,
+                once_only_reason,
+            }
+        }
+        _ => unproven_review_evidence(hook_review::policy_binding_valid(query)),
+    }
+}
+
+/// Review evidence that binds no retry and mints no token.
+pub(crate) fn unproven_review_evidence(policy_binding_valid: bool) -> GuardHookReviewEvidenceV1 {
+    GuardHookReviewEvidenceV1 {
+        policy_binding_valid,
+        binding: None,
+        token: None,
+        once_only_reason: Some(reasons::UNPROVEN_LAUNCH.to_owned()),
+    }
 }
 
 /// What an unprovable command falls back to (`CommandHash`), or the strict

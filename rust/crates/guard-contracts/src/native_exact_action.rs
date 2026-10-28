@@ -228,3 +228,20 @@ pub struct NativeExactActionResultV1 {
     #[serde(default)]
     pub payload: Option<NativeExactActionPayloadV1>,
 }
+
+/// Capability advertised by the runtime when a reviewed `PreToolUse` edge
+/// answer carries its review evidence.
+pub const EDGE_REVIEW_EVIDENCE_FEATURE: &str = "edge-review-evidence-v1";
+
+/// The `HookReview` answers of one reviewed `PreToolUse`, returned in the
+/// edge answer so the daemon does not ask for them in a second request.
+/// A proof that fails carries its once-only reason; evidence the edge could
+/// not derive carries `unproven_launch` and no token.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GuardHookReviewEvidenceV1 {
+    pub policy_binding_valid: bool,
+    pub binding: Option<String>,
+    pub token: Option<String>,
+    pub once_only_reason: Option<String>,
+}

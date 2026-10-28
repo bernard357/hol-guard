@@ -83,8 +83,10 @@ fn case(label: &str, state: Option<&str>, recording_only: bool) -> (GuardHookEnv
             env: [("PATH".to_owned(), "/daemon/bin".to_owned())]
                 .into_iter()
                 .collect(),
+            exact_action_control_digest: None,
         }),
         observe_local_cli: false,
+        record_receipt: false,
         structured_output_config: None,
     };
     (envelope, identity.name)
