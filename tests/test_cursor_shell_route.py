@@ -121,6 +121,41 @@ def test_before_shell_asks_the_resident_about_a_call_naming_the_sink(tmp_path: P
     assert len(calls) == 2
 
 
+@posix_only
+def test_before_shell_bounds_the_sink_check_by_the_hook_deadline(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render
+
+    deadlines: list[object] = []
+
+    def render(*_args: object, deadline: object = None, **_kwargs: object) -> tuple[str, object]:
+        deadlines.append(deadline)
+        return ("document", {"value": None})
+
+    monkeypatch.setattr(native_hook_render, "native_render_cli", render)
+    payload = {**_BEFORE_SHELL, "tool_input": {"command": "guard execute-contained-test --harness cursor"}}
+    route.cursor_shell_route_response(
+        _FailingWorker(),  # type: ignore[arg-type]
+        payload=payload,
+        home_dir=Path("/home/tester"),
+        guard_home=Path("/home/tester/.hol-guard"),
+        workspace=tmp_path,
+        deadline=123.5,
+    )
+    assert deadlines == [123.5]
+
+
+@posix_only
+def test_a_sink_check_that_fails_is_reviewed_as_usual(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard.adapters import zcode_contained_tests
+
+    def unavailable() -> tuple[str, ...]:
+        raise RuntimeError("Guard CLI unavailable")
+
+    monkeypatch.setattr(zcode_contained_tests, "contained_sink_command_prefix", unavailable)
+    payload = {**_BEFORE_SHELL, "tool_input": {"command": "guard execute-contained-test --harness cursor"}}
+    assert _respond(payload, tmp_path) is None
+
+
 def test_windows_is_never_routed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(route.sys, "platform", "win32")
     assert _respond(_PROBE, tmp_path) is None

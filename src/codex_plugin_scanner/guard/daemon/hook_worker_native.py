@@ -419,8 +419,8 @@ class HookWorkerNativeMixin:
                         ),
                         True,
                     )
-            # The resident stamped its route on the edge answer; Python never
-            # picks one. An answer without a stamp keeps its receipt.
+            # The resident stamped its route on the edge answer, and the decoder
+            # refuses an unstamped one; Python never picks a route.
             containment = edge.get("containment_route", "none")
             try:
                 contained = None

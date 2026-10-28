@@ -76,7 +76,13 @@ def cursor_shell_route_response(
         # beforeShellExecution still reviews the call that runs.
         return routed if routed is not None else dict(_ALLOW)
     if workspace is not None and payload.get(_SOURCE_HOOK_FIELD) == _BEFORE_SHELL and _names_sink(payload):
-        return _resident_route(payload, None, home_dir=home_dir, guard_home=guard_home, workspace=workspace)
+        try:
+            return _resident_route(
+                payload, None, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
+            )
+        except Exception:
+            # The call is reviewed as usual, so a sink it does not admit runs nowhere.
+            _LOGGER.warning("Cursor shell sink admission failed", exc_info=True)
     return None
 
 

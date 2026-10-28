@@ -103,6 +103,7 @@ def _edge_result() -> dict[str, object]:
         "event_name": "PreToolUse",
         "payload_kind": "inline",
         "harness_response": {"continue": True},
+        "containment_route": "none",
         "result": {
             "schema": "guard-pre-tool-result.v1",
             "version": 1,
@@ -176,6 +177,13 @@ def test_edge_decoder_accepts_the_stamped_containment_route(route: str) -> None:
 @pytest.mark.parametrize("route", ("allow", None, ["sink"], 1))
 def test_edge_decoder_refuses_a_containment_route_it_does_not_know(route: object) -> None:
     assert _decode_edge({**_edge_result(), "containment_route": route}) is None
+
+
+def test_edge_decoder_refuses_an_edge_without_a_containment_route() -> None:
+    # Read as `none`, an unstamped edge would skip the grant and sink steps.
+    edge = _edge_result()
+    del edge["containment_route"]
+    assert _decode_edge(edge) is None
 
 
 def test_edge_decoder_requires_a_receipt() -> None:
