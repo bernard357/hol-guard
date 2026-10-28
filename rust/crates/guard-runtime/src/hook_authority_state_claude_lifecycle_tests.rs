@@ -293,6 +293,7 @@ fn a_pending_review_answers_the_dialog_by_its_kind() {
                 "session_id": "session", "tool_name": tool, "artifact_id": format!("{tool}-artifact"),
                 "artifact_hash": format!("{tool}-hash"), "command": format!("{tool} run"),
                 "artifact_type": artifact_type, "reason": reason,
+                "saved_at": "2026-10-28T00:00:00+00:00",
             } }),
         );
     }
