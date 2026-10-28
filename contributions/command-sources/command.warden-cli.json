@@ -158,18 +158,106 @@
         "safe_variants": [],
         "native_capability": null,
         "matcher": {
-          "op": "leading-subcommand.v1",
-          "config": {
-            "executables": [
-              "warden",
-              "warden.exe",
-              "warden.cmd"
-            ],
-            "subcommands": [
-              "policy",
-              "apply"
-            ]
-          }
+          "op": "any.v1",
+          "config": {},
+          "matchers": [
+            {
+              "op": "leading-subcommand.v1",
+              "config": {
+                "executables": [
+                  "warden",
+                  "warden.exe",
+                  "warden.cmd"
+                ],
+                "subcommands": [
+                  "policy",
+                  "apply"
+                ],
+                "options_with_values": [
+                  "-r",
+                  "--repo",
+                  "-p",
+                  "--policy"
+                ],
+                "required_flags_anywhere": [
+                  "--repo",
+                  "--policy"
+                ]
+              }
+            },
+            {
+              "op": "leading-subcommand.v1",
+              "config": {
+                "executables": [
+                  "warden",
+                  "warden.exe",
+                  "warden.cmd"
+                ],
+                "subcommands": [
+                  "policy",
+                  "apply"
+                ],
+                "options_with_values": [
+                  "-r",
+                  "--repo",
+                  "-p",
+                  "--policy"
+                ],
+                "required_flags_anywhere": [
+                  "--repo",
+                  "-p"
+                ]
+              }
+            },
+            {
+              "op": "leading-subcommand.v1",
+              "config": {
+                "executables": [
+                  "warden",
+                  "warden.exe",
+                  "warden.cmd"
+                ],
+                "subcommands": [
+                  "policy",
+                  "apply"
+                ],
+                "options_with_values": [
+                  "-r",
+                  "--repo",
+                  "-p",
+                  "--policy"
+                ],
+                "required_flags_anywhere": [
+                  "-r",
+                  "--policy"
+                ]
+              }
+            },
+            {
+              "op": "leading-subcommand.v1",
+              "config": {
+                "executables": [
+                  "warden",
+                  "warden.exe",
+                  "warden.cmd"
+                ],
+                "subcommands": [
+                  "policy",
+                  "apply"
+                ],
+                "options_with_values": [
+                  "-r",
+                  "--repo",
+                  "-p",
+                  "--policy"
+                ],
+                "required_flags_anywhere": [
+                  "-r",
+                  "-p"
+                ]
+              }
+            }
+          ]
         }
       }
     ],
