@@ -293,12 +293,31 @@ fn diag_fetch_head_matrix() {
         "git fetch origin main && git merge-base HEAD FETCH_HEAD",
     ] {
         let result = decide(&root, "omp", command, &controls);
-        let mut value = serde_json::to_value(&result).unwrap();
-        if let Some(object) = value.as_object_mut() {
-            object.remove("message");
-        }
-        let text = value.to_string();
-        lines.push(format!("{command} => {}", &text[..text.len().min(1500)]));
+        let observed: Vec<String> = result
+            .command_extensions
+            .iter()
+            .flat_map(|extensions| {
+                extensions
+                    .observations
+                    .iter()
+                    .map(|o| {
+                        format!(
+                            "{}:{}:{:?}",
+                            o.rule_id, o.match_class, o.effective_segment_indexes
+                        )
+                    })
+                    .chain(
+                        extensions
+                            .permission_observations
+                            .iter()
+                            .map(|o| format!("perm:{}", o.permission_id)),
+                    )
+            })
+            .collect();
+        lines.push(format!(
+            "{command} => {} {} [{}] {observed:?}",
+            result.decision, result.reason_code, result.reason
+        ));
     }
     panic!("{}", lines.join("\n"));
 }
