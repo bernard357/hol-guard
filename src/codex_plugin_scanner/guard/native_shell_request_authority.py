@@ -13,7 +13,8 @@ from typing import Any
 
 from .fork_safety import forget_in_child
 from .native_context import _native_runtime_status_memo, _resolve_digest_home
-from .native_git_execution_safety import _account_home_directory, _process_groups, _tool_environment_snapshot
+from .native_git_execution_safety import _account_home_directory, _process_groups
+from .native_git_execution_safety import _tool_environment_snapshot as _environment_snapshot
 from .native_resident_client import native_resident_client_ready
 from .native_runner_authority import NativeRunnerAuthorityError, native_runner_authority
 
@@ -71,7 +72,7 @@ def shell_request_authority(entry: str, arguments: dict[str, Any]) -> Any:
             "home": str(Path.home()),
             "account_home": _account_home_directory(),
             "groups": _process_groups(),
-            "environment": _tool_environment_snapshot(),
+            "environment": _environment_snapshot(),
             "git_executable": shutil.which("git"),
         }
     payload = native_runner_authority("shell_request_authority", request, home)

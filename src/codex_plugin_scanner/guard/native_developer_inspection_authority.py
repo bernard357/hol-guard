@@ -12,6 +12,7 @@ from typing import Any
 from . import native_git_execution_safety
 from .native_context import _resolve_digest_home
 from .native_direct_tool_context import _facts
+from .native_git_execution_safety import _tool_environment_snapshot as _environment_snapshot
 from .native_runner_authority import native_runner_authority
 from .runtime.shell_execution_context import _context_from_report
 
@@ -38,7 +39,7 @@ def developer_inspection_authority(entry: str, arguments: dict[str, Any]) -> Any
             "home": str(Path.home()),
             "account_home": native_git_execution_safety._account_home_directory(),
             "groups": native_git_execution_safety._process_groups(),
-            "environment": native_git_execution_safety._tool_environment_snapshot(),
+            "environment": _environment_snapshot(),
             "git_executable": shutil.which("git"),
         },
         "direct_facts": _facts(arguments.get("cwd") or home, home),
