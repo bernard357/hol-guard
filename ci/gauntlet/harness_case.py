@@ -43,7 +43,7 @@ from .host_process import clean_environment, realistic_environment, run_process
 from .input_evidence import redact_value
 from .provider import LoopbackCollector
 from .review_fixtures import (
-    GITHUB_REVIEW_CASE,
+    GITHUB_ENABLED_CASES,
     GITHUB_STUB_CASES,
     configure_github_review_controls,
     seed_protected_codex_hooks,
@@ -227,7 +227,7 @@ def run_harness_case(
                 case["extension_control"] = configure_extension_permission_denial(
                     daemon, guard_home, extension_adapter(scenario.commands[0])
                 )
-            if scenario.id == GITHUB_REVIEW_CASE:
+            if scenario.id in GITHUB_ENABLED_CASES:
                 case["extension_control"] = configure_github_review_controls(daemon, guard_home)
             if scenario.id in GIT_ALLOW_CASES:
                 case["extension_control"] = configure_git_allow_controls(daemon, guard_home)

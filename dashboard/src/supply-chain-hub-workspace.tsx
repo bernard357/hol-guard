@@ -98,7 +98,6 @@ export function SupplyChainHubWorkspace(props: {
   return (
     <div className={SUPPLY_CHAIN_WORKSPACE_SHELL_CLASS}>
       <WorkspacePageHeader
-        eyebrow="Supply chain"
         title={hubTitleForTab(tab)}
         tabs={hubTabs}
         activeTab={tab}
@@ -157,7 +156,6 @@ export function SupplyChainHubWorkspace(props: {
         <Suspense fallback={null}>
           <SupplyChainWorkspaceDetails
             snapshot={props.snapshot}
-            onGoHome={props.onGoHome}
             onAuditNavigate={handleAuditNavigate}
             auditSnapshot={auditSession.auditSnapshot}
             auditRunning={auditSession.auditRunning}
