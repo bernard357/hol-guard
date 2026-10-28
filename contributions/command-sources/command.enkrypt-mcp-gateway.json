@@ -1,0 +1,109 @@
+{
+  "schema": "guard.command-extension-source.v1",
+  "extension": {
+    "extension_id": "command.enkrypt-mcp-gateway",
+    "name": "Enkrypt Secure MCP Gateway configuration removal review",
+    "version": "1.0.0",
+    "license": null,
+    "source": "built-in",
+    "required": false,
+    "risk_classes": [
+      "local_write",
+      "policy_bypass"
+    ],
+    "description": "Locally opt-in HOL-authored review for secure-mcp-gateway config remove, which removes a gateway configuration. Independent extension; Enkrypt AI does not maintain, distribute, or endorse it.",
+    "homepage": "https://github.com/enkryptai/secure-mcp-gateway",
+    "executables": [
+      "secure-mcp-gateway"
+    ],
+    "action_classes": [
+      "MCP gateway configuration deletion"
+    ],
+    "aliases": [],
+    "conflicts": [],
+    "dependencies": [],
+    "ecosystem_ids": [],
+    "delegated_protection": null,
+    "icon": {
+      "kind": "none"
+    },
+    "publisher": {
+      "id": "community.kantorcodes",
+      "display_name": "Michael Kantor (HOL)",
+      "url": "https://github.com/kantorcodes"
+    },
+    "permissions": [
+      {
+        "permission_id": "command.enkrypt-mcp-gateway.permission.remove-config",
+        "implementation_version": "1.0.0",
+        "label": "Review MCP gateway configuration removal",
+        "description": "Request review before deleting a named or identified MCP gateway configuration using the official secure-mcp-gateway CLI.",
+        "default_enabled": true,
+        "configurable": true,
+        "typed_capabilities": [],
+        "action_classes": [
+          "MCP gateway configuration deletion"
+        ],
+        "dependencies": [],
+        "conflicts": [],
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "deprecated": false,
+        "safer_guidance": [
+          "Inspect the exact gateway configuration with secure-mcp-gateway config get before deleting it.",
+          "Export the target configuration with secure-mcp-gateway config export so that recovery remains possible."
+        ],
+        "risk_tier": "high",
+        "baseline_floor": "review",
+        "example_command": "secure-mcp-gateway config remove --config-name production-config"
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "command.enkrypt-mcp-gateway.remove-config",
+        "rule_version": "1.0.0",
+        "permission_id": "command.enkrypt-mcp-gateway.permission.remove-config",
+        "title": "MCP gateway configuration removal",
+        "description": "Request review before deleting a named or identified MCP gateway configuration using the official secure-mcp-gateway CLI.",
+        "severity": "high",
+        "risk_classes": [
+          "local_write",
+          "policy_bypass"
+        ],
+        "action_classes": [
+          "MCP gateway configuration deletion"
+        ],
+        "safer_alternatives": [
+          "Inspect the exact gateway configuration with secure-mcp-gateway config get before deleting it.",
+          "Export the target configuration with secure-mcp-gateway config export so that recovery remains possible."
+        ],
+        "default_mode": "review",
+        "safe_variants": [],
+        "native_capability": null,
+        "matcher": {
+          "op": "leading-subcommand.v1",
+          "config": {
+            "executables": [
+              "secure-mcp-gateway",
+              "secure-mcp-gateway.exe",
+              "secure-mcp-gateway.cmd"
+            ],
+            "subcommands": [
+              "config",
+              "remove"
+            ]
+          }
+        }
+      }
+    ],
+    "project_markers": [],
+    "safer_alternatives": [
+      "Inspect the exact gateway configuration with secure-mcp-gateway config get before deleting it.",
+      "Export the target configuration with secure-mcp-gateway config export so that recovery remains possible."
+    ],
+    "reference_urls": [
+      "https://github.com/enkryptai/secure-mcp-gateway/blob/main/CLI-Commands-Reference.md",
+      "https://github.com/enkryptai/secure-mcp-gateway"
+    ]
+  }
+}
