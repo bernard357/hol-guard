@@ -444,12 +444,25 @@ pub(super) fn benign_prompt_text(text: &str) -> bool {
 
 /// `Transfer-Encoding` and `Content-Transfer-Encoding` name how an HTTP or
 /// MIME body is encoded on the wire; a request to transfer data still names
-/// the verb on its own.
+/// the verb on its own. Only the header-name forms are masked, and nothing is
+/// masked once the text names an outside destination, so the header name
+/// cannot hide a request to move data somewhere.
 fn mask_transfer_encoding(value: &str) -> String {
     static ENCODING: OnceLock<Regex> = OnceLock::new();
+    static DESTINATION: OnceLock<Regex> = OnceLock::new();
+    let destination = DESTINATION.get_or_init(|| {
+        Regex::new(r"(?i)\b(?:to|into|onto|at)\s+(?:(?:the|my|our|an?|this|that|remote|external)\s+)*(?:[a-z][a-z0-9+.-]*://|[a-z0-9-]+(?:\.[a-z0-9-]+)+\b|(?:server|endpoint|webhook|host|gist|pastebin|slack|discord|telegram|url|bucket)s?\b)")
+            .expect("bounded transfer destination")
+    });
+    if destination.is_match(value) {
+        return value.to_owned();
+    }
     ENCODING
         .get_or_init(|| {
-            Regex::new(r"(?i)\btransfer(?:-|\s+)encodings?\b").expect("bounded transfer encoding")
+            Regex::new(
+                r"(?i)\b(?:content-)?transfer-encodings?\b|\bchunked\s+transfer[\s-]+encodings?\b",
+            )
+            .expect("bounded transfer encoding")
         })
         .replace_all(value, "wire-encoding")
         .into_owned()

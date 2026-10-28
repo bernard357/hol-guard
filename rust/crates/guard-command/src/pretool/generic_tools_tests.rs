@@ -37,7 +37,7 @@ fn a_search_tool_query_is_not_typed_as_a_prompt() {
             result.reason
         );
         assert!(
-            !result.reason.contains("override trusted instructions"),
+            !result.reason.contains("trusted instructions"),
             "{query}: {}",
             result.reason
         );

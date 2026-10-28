@@ -11,7 +11,7 @@ manager whose lockfile the project commits (`bun.lock`, `package-lock.json` or `
 then run tests or builds as separate commands.";
 
 /// Whether the raised result is a prompt and, if so, whether the native
-/// detector found instruction-override wording in it.
+/// detector found wording that asks to override or reveal its instructions.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PromptStop {
     NotPrompt,
@@ -111,7 +111,7 @@ fn prompt_stop_reason(cause: Option<FloorCause>, injection_detected: bool) -> St
                 }
                 "destructive_shell" => "asks to delete or overwrite local files",
                 "prompt_injection" if injection_detected => {
-                    "asks to override trusted instructions"
+                    "asks to override or reveal trusted instructions"
                 }
                 "prompt_injection" => {
                     "uses wording Guard holds for review, such as a delete, transfer, download or elevated command"

@@ -246,7 +246,7 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
     assert!(
         injection
             .reason
-            .contains("asks to override trusted instructions"),
+            .contains("asks to override or reveal trusted instructions"),
         "{}",
         injection.reason
     );
@@ -261,7 +261,7 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
     assert!(
         !result
             .reason
-            .contains("asks to override trusted instructions"),
+            .contains("asks to override or reveal trusted instructions"),
         "{}",
         result.reason
     );
