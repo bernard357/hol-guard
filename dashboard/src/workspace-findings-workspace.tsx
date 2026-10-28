@@ -29,6 +29,7 @@ import {
   SkillFindingsTable,
   WorkflowFindingsTable,
 } from "./workspace-findings-tables";
+import { ExportPreviewPanel } from "./workspace-export-preview-panel";
 import { FixCell, FixHistory, FixLoadError, FixReview, useWorktreeFixes, type WorktreeFixes } from "./workspace-fix-panel";
 
 export { worktreeStatus, type WorktreeStatus } from "./workspace-findings-status";
@@ -322,6 +323,7 @@ function AssessmentFindings(props: { worktree: WorkspaceWorktree; assessment: Wo
       <FindingsSections findings={findings} dependencyFilesFound={dependencyFilesFound} secretsChecked={!notRun.includes("secrets")} fixes={fixes} />
       <FixReview fixes={fixes} findings={findings} />
       <FixHistory fixes={fixes} findings={findings} />
+      <ExportPreviewPanel worktree={props.worktree} findings={findings} />
     </div>
   );
 }
