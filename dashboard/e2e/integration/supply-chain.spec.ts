@@ -140,7 +140,7 @@ test.describe("Supply chain hub against the live daemon", () => {
     for (const manager of seeded) {
       const card = managerCard(page, manager);
       await expect(card.getByText("PATH broken", { exact: true })).toBeVisible();
-      await expect(card.getByText(/first, so installs skip Guard\.$/)).toBeVisible();
+      await expect(card.getByText(`Another ${manager} runs before Guard's shim, so installs skip Guard.`, { exact: true })).toBeVisible();
     }
   });
 

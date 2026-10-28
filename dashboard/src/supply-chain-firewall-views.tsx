@@ -570,6 +570,7 @@ function activationDetail(protection: PackageManagerProtection): string {
       ? "Guard saved your shell setup. Finish activation, then open a new shell."
       : "Guard installed its shims. Activation is still waiting in this Guard session.";
   }
+  if (protection.path_status === "in_path") return "Guard's shims now check installs from your package managers.";
   return "Installs skip Guard until its shim folder is on PATH.";
 }
 

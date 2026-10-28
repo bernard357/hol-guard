@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-D5dMQPdS.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-BEPxKqiG.js","assets/chunks/feed-health-workspace-By-qwNqW.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-hlS5nPiW.js","assets/chunks/audit-workspace-BIxlfKvJ.js","assets/chunks/workspace-findings-status-BLCsG7Dy.js","assets/chunks/workspace-findings-workspace-B1zg9dGS.js"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/supply-chain-workspace-DUZeVw9D.js","assets/guard-dashboard.js","assets/index.css","assets/chunks/supply-chain-issues-Cf495xGb.js","assets/chunks/feed-health-workspace-C2IC39dg.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/supply-chain-workspace-details-CAC3wJqQ.js","assets/chunks/audit-workspace-D4bn-GPo.js","assets/chunks/workspace-findings-status-BLCsG7Dy.js","assets/chunks/workspace-findings-workspace-B1zg9dGS.js"])))=>i.map(i=>d[i]);
 import { dv as isSupplyChainAuditIncomplete, dw as isSupplyChainAuditEvidence, d7 as GuardHarnessActionError, dx as readString$1, bj as isRecord$1, r as reactExports, j as jsxRuntimeExports, d as HiMiniArrowPath, T as Tag, dy as IconActionButton, aA as HiMiniXCircle, d9 as HiMiniTrash, R as HiMiniShieldCheck, ap as HiMiniWrenchScrewdriver, dz as HiMiniBeaker, f as formatRelativeTime, A as ActionButton, dA as HiMiniBugAnt, dB as ActivationSummary, dC as ActionResultPanel, p as HiMiniMagnifyingGlass, a4 as HiMiniExclamationTriangle, c as HiMiniChevronDown, dD as fetchSupplyChainBundle, a2 as useFocusTrap, s as HiMiniCheckCircle, _ as HiMiniXMark, dE as closeOnEscape, aS as buildApprovalProofCredentials, d5 as GuardModalLayer, dF as ConnectFlowCard, dG as ApprovalProofInline, cx as HiMiniArrowTopRightOnSquare, dH as HiMiniCloudArrowDown, dI as SUPPLY_CHAIN_SYNC_TIMEOUT_MS, bQ as useResolvedApprovalGate, dJ as fetchPackageFirewallStatus, dK as runPackageAudit, dL as resolveSupplyChainAuditFailure, dM as runPackageSync, dN as GuardOperationTimeoutError, dO as startPackageFirewallConnect, al as openPackageFirewallAuthorizeFallback, dP as PACKAGE_FIREWALL_CONNECT_POPUP_BLOCKED_MESSAGE, dQ as repairSupplyChainProtection, dR as runPackageFirewallAction, dS as parseInterceptProofSnapshot, dT as activatePackageFirewallRuntime, dU as EntitlementNotice, aG as ApprovalProofModal, dV as chooseSupplyChainAuditFolder, dW as fetchReceipts, ba as WorkspacePageHeader, dX as lazyWorkspace, dY as __vitePreload } from "../guard-dashboard.js";
 const SEVERITY_RANK = {
   critical: 4,
@@ -921,21 +921,16 @@ function ManagerRow({
     ] })
   ] });
 }
-function shadowingCommand(pathSummary) {
-  const match = pathSummary?.trim().match(/^(\S+) precedes \S+$/);
-  if (!match) return null;
-  return match[1].replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, "~");
-}
 function managerRowNote(shim) {
   if (!shim?.installed) return null;
-  if (shim.activation_state === "restart_required") return "Open a new shell to turn this on.";
-  if (shim.path_broken) {
-    const command = shadowingCommand(shim.path_summary);
-    return command ? `Your shell runs ${command} first, so installs skip Guard.` : "Another copy runs first, so installs skip Guard.";
+  if (shim.activation_state === "restart_required") {
+    return "Open a new shell, and restart AI apps that run it, to turn this on.";
   }
+  if (shim.integrity === "tampered") return "Guard's shim was changed on disk. Repair it to restore checks.";
+  if (shim.path_broken) return `Another ${shim.manager} runs before Guard's shim, so installs skip Guard.`;
   if (shim.activation_state === "repair_required") return "Guard's shim folder is not on PATH yet.";
   if (shim.last_intercept_proof_at) return `Tested ${formatRelativeTime(shim.last_intercept_proof_at)}`;
-  return null;
+  return "Not tested yet. Run a test to confirm installs are checked.";
 }
 function ManagerRowNote({ shim }) {
   const note = managerRowNote(shim);
@@ -1008,7 +1003,7 @@ function FirewallControlsView({
   lastFailed,
   confirmRemoveManager,
   managerFilter,
-  expandUnprotected = false,
+  expandUnprotectedRequest = 0,
   onManagerFilterChange,
   onInstall,
   onRepair,
@@ -1032,7 +1027,8 @@ function FirewallControlsView({
     if (noDetectedManagers) return [];
     return data.supported_managers;
   }, [data, noDetectedManagers]);
-  const query = managerFilter.trim().toLowerCase();
+  const searchable = allManagers.length > SEARCH_THRESHOLD;
+  const query = searchable ? managerFilter.trim().toLowerCase() : "";
   const groups = reactExports.useMemo(() => {
     const byGroup = { fix: [], protected: [], unprotected: [] };
     for (const manager of allManagers) {
@@ -1043,8 +1039,11 @@ function FirewallControlsView({
   }, [allManagers, query, shimsByManager]);
   const [unprotectedOpen, setUnprotectedOpen] = reactExports.useState(false);
   const toggleUnprotected = reactExports.useCallback(() => setUnprotectedOpen((open) => !open), []);
+  reactExports.useEffect(() => {
+    if (expandUnprotectedRequest > 0) setUnprotectedOpen(true);
+  }, [expandUnprotectedRequest]);
   const shownCount = groups.fix.length + groups.protected.length + groups.unprotected.length;
-  const foldUnprotected = !unprotectedOpen && !expandUnprotected && query.length === 0 && groups.unprotected.length > COLLAPSE_THRESHOLD;
+  const foldUnprotected = !unprotectedOpen && query.length === 0 && groups.unprotected.length > COLLAPSE_THRESHOLD;
   const renderRow = (manager, showStatus) => /* @__PURE__ */ jsxRuntimeExports.jsx(
     ManagerRow,
     {
@@ -1080,7 +1079,7 @@ function FirewallControlsView({
     ),
     lastFailed !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(FailureBanner, { failed: lastFailed }),
     lastCompleted !== null && /* @__PURE__ */ jsxRuntimeExports.jsx(ActionResultPanel, { completed: lastCompleted, onDismiss: onDismissResult }),
-    allManagers.length > SEARCH_THRESHOLD && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 sm:min-h-9 sm:w-56", children: [
+    searchable && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 sm:min-h-9 sm:w-56", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(HiMiniMagnifyingGlass, { className: "h-3.5 w-3.5 shrink-0 text-slate-400", "aria-hidden": "true" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "input",
@@ -1107,7 +1106,7 @@ function FirewallControlsView({
           {
             title: "Not protected yet",
             count: groups.unprotected.length,
-            toggle: groups.unprotected.length > COLLAPSE_THRESHOLD && query.length === 0 && !expandUnprotected ? { open: !foldUnprotected, onToggle: toggleUnprotected } : void 0,
+            toggle: groups.unprotected.length > COLLAPSE_THRESHOLD && query.length === 0 ? { open: !foldUnprotected, onToggle: toggleUnprotected } : void 0,
             children: foldUnprotected ? /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "py-3.5 text-sm leading-6 text-slate-600", children: [
               previewNames(groups.unprotected),
               ". Installs from these tools are not checked yet."
@@ -1966,7 +1965,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
   const [activatingRuntime, setActivatingRuntime] = reactExports.useState(false);
   const [confirmRemoveManager, setConfirmRemoveManager] = reactExports.useState(null);
   const [pendingApprovalOp, setPendingApprovalOp] = reactExports.useState(null);
-  const [expandUnprotected, setExpandUnprotected] = reactExports.useState(false);
+  const [expandUnprotectedRequest, setExpandUnprotectedRequest] = reactExports.useState(0);
   const [managerFilter, setManagerFilter] = reactExports.useState("");
   const [interceptProof, setInterceptProof] = reactExports.useState(null);
   const [managerDrawerTarget, setManagerDrawerTarget] = reactExports.useState(null);
@@ -2687,7 +2686,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
         rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       },
       focusUnprotected: () => {
-        setExpandUnprotected(true);
+        setExpandUnprotectedRequest((request) => request + 1);
         setManagerFilter("");
       },
       focusActionable: () => {
@@ -2719,7 +2718,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "package-firewall-heading", className: "text-lg font-semibold tracking-tight text-brand-dark", children: "Package managers" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 max-w-[68ch] text-sm leading-6 text-slate-600", children: "Guard checks every install from these tools before it runs." })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 max-w-[68ch] text-sm leading-6 text-slate-600", children: "Guard checks installs from protected tools before they run." })
           ] }),
           panelLoad.phase === "loaded" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "-ml-3 flex shrink-0 items-center gap-1 sm:ml-0", children: [
             panelLoad.data.entitlement.allowed && /* @__PURE__ */ jsxRuntimeExports.jsx(GlobalActionsBar, { anyPending, pendingOp, onAudit: handleAudit, onSync: handleSync }),
@@ -2753,7 +2752,7 @@ const PackageFirewallPanel = reactExports.forwardRef(function PackageFirewallPan
                 lastCompleted,
                 lastFailed,
                 confirmRemoveManager,
-                expandUnprotected,
+                expandUnprotectedRequest,
                 managerFilter,
                 onManagerFilterChange: handleManagerFilterChange,
                 onInstall: handleInstall,
@@ -3000,15 +2999,15 @@ function useSupplyChainAuditSession({
 }
 const SupplyChainWorkspace = lazyWorkspace(
   "supply-chain-workspace",
-  () => __vitePreload(() => import("./supply-chain-workspace-D5dMQPdS.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
+  () => __vitePreload(() => import("./supply-chain-workspace-DUZeVw9D.js"), true ? __vite__mapDeps([0,1,2,3,4,5,6,7]) : void 0).then((m) => ({ default: m.SupplyChainWorkspace }))
 );
 const SupplyChainWorkspaceDetails = lazyWorkspace(
   "supply-chain-workspace-details",
-  () => __vitePreload(() => import("./supply-chain-workspace-details-hlS5nPiW.js"), true ? __vite__mapDeps([8,1,2,4,6,3,5]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
+  () => __vitePreload(() => import("./supply-chain-workspace-details-CAC3wJqQ.js"), true ? __vite__mapDeps([8,1,2,4,6,3,5]) : void 0).then((m) => ({ default: m.SupplyChainWorkspaceDetails }))
 );
 const AuditWorkspace = lazyWorkspace(
   "audit-workspace",
-  () => __vitePreload(() => import("./audit-workspace-BIxlfKvJ.js"), true ? __vite__mapDeps([9,1,2,6,10]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
+  () => __vitePreload(() => import("./audit-workspace-D4bn-GPo.js"), true ? __vite__mapDeps([9,1,2,6,10]) : void 0).then((m) => ({ default: m.AuditWorkspace }))
 );
 const WorkspaceFindingsWorkspace = lazyWorkspace(
   "workspace-findings-workspace",
@@ -3016,7 +3015,7 @@ const WorkspaceFindingsWorkspace = lazyWorkspace(
 );
 const FeedHealthWorkspace = lazyWorkspace(
   "feed-health-workspace",
-  () => __vitePreload(() => import("./feed-health-workspace-By-qwNqW.js").then((n) => n.c), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
+  () => __vitePreload(() => import("./feed-health-workspace-C2IC39dg.js").then((n) => n.c), true ? __vite__mapDeps([4,1,2]) : void 0).then((m) => ({ default: m.FeedHealthWorkspace }))
 );
 const hubTabs = [
   { value: "supply-chain", label: "Supply Chain" },

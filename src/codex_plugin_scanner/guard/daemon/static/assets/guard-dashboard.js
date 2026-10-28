@@ -25144,6 +25144,7 @@ function activationDetail(protection) {
   if (protection.path_status === "restart_required") {
     return protection.shell_profile_configured ? "Guard saved your shell setup. Finish activation, then open a new shell." : "Guard installed its shims. Activation is still waiting in this Guard session.";
   }
+  if (protection.path_status === "in_path") return "Guard's shims now check installs from your package managers.";
   return "Installs skip Guard until its shim folder is on PATH.";
 }
 function ActivationSummary({
@@ -37262,7 +37263,7 @@ const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePre
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));
 const SupplyChainHubWorkspace = lazyWorkspace(
   "supply-chain-hub-workspace",
-  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace--micBEv8.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
+  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-CF-2s4KS.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
 );
 const PolicyWorkspacePage = lazyWorkspace(
   "policy-workspace-page",

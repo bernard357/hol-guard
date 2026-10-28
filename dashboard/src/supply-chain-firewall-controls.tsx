@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
   HiMiniArrowPath,
@@ -118,7 +118,8 @@ export type FirewallControlsViewProps = {
   confirmRemoveManager: string | null;
   managerFilter: string;
   /** Open the not-yet-protected group, for links that point at it. */
-  expandUnprotected?: boolean;
+  /** Bumped each time a link asks to show every unprotected tool. */
+  expandUnprotectedRequest?: number;
   onManagerFilterChange: (e: ChangeEvent<HTMLInputElement>) => void;
   onInstall: (manager: string) => void;
   onRepair: (manager: string) => void;
@@ -144,7 +145,7 @@ export function FirewallControlsView({
   lastFailed,
   confirmRemoveManager,
   managerFilter,
-  expandUnprotected = false,
+  expandUnprotectedRequest = 0,
   onManagerFilterChange,
   onInstall,
   onRepair,
@@ -171,7 +172,9 @@ export function FirewallControlsView({
     if (noDetectedManagers) return [];
     return data.supported_managers;
   }, [data, noDetectedManagers]);
-  const query = managerFilter.trim().toLowerCase();
+  const searchable = allManagers.length > SEARCH_THRESHOLD;
+  // A query only applies while its box is on screen, so a shrinking roster cannot hide rows behind it.
+  const query = searchable ? managerFilter.trim().toLowerCase() : "";
   const groups = useMemo(() => {
     const byGroup: Record<RosterGroup, string[]> = { fix: [], protected: [], unprotected: [] };
     for (const manager of allManagers) {
@@ -182,9 +185,12 @@ export function FirewallControlsView({
   }, [allManagers, query, shimsByManager]);
   const [unprotectedOpen, setUnprotectedOpen] = useState(false);
   const toggleUnprotected = useCallback(() => setUnprotectedOpen((open) => !open), []);
+  useEffect(() => {
+    if (expandUnprotectedRequest > 0) setUnprotectedOpen(true);
+  }, [expandUnprotectedRequest]);
   const shownCount = groups.fix.length + groups.protected.length + groups.unprotected.length;
   const foldUnprotected =
-    !unprotectedOpen && !expandUnprotected && query.length === 0 && groups.unprotected.length > COLLAPSE_THRESHOLD;
+    !unprotectedOpen && query.length === 0 && groups.unprotected.length > COLLAPSE_THRESHOLD;
 
   const renderRow = (manager: string, showStatus: boolean) => (
     <ManagerRow
@@ -224,7 +230,7 @@ export function FirewallControlsView({
         <ActionResultPanel completed={lastCompleted} onDismiss={onDismissResult} />
       )}
 
-      {allManagers.length > SEARCH_THRESHOLD && (
+      {searchable && (
         <div className="flex min-h-11 w-full min-w-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 sm:min-h-9 sm:w-56">
           <HiMiniMagnifyingGlass className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
           <input
@@ -267,7 +273,7 @@ export function FirewallControlsView({
               title="Not protected yet"
               count={groups.unprotected.length}
               toggle={
-                groups.unprotected.length > COLLAPSE_THRESHOLD && query.length === 0 && !expandUnprotected
+                groups.unprotected.length > COLLAPSE_THRESHOLD && query.length === 0
                   ? { open: !foldUnprotected, onToggle: toggleUnprotected }
                   : undefined
               }

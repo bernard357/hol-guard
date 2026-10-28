@@ -210,30 +210,19 @@ export function ManagerRow({
   );
 }
 
-/**
- * The command a shell runs instead of Guard's shim, from a summary such as
- * "/Users/me/Library/pnpm/npm precedes /…/package-shims/bin/npm". Home is
- * shortened to ~ so the line stays readable; the drawer keeps the full path.
- */
-export function shadowingCommand(pathSummary: string | null | undefined): string | null {
-  const match = pathSummary?.trim().match(/^(\S+) precedes \S+$/);
-  if (!match) return null;
-  return match[1].replace(/^\/(?:Users|home)\/[^/]+(?=\/)/, "~");
-}
-
 /** One plain sentence on what is wrong with this tool, or when it was last tested. */
 export function managerRowNote(shim: PackageShimEntry | undefined): string | null {
   if (!shim?.installed) return null;
-  if (shim.activation_state === "restart_required") return "Open a new shell to turn this on.";
-  if (shim.path_broken) {
-    const command = shadowingCommand(shim.path_summary);
-    return command
-      ? `Your shell runs ${command} first, so installs skip Guard.`
-      : "Another copy runs first, so installs skip Guard.";
+  if (shim.activation_state === "restart_required") {
+    return "Open a new shell, and restart AI apps that run it, to turn this on.";
   }
+  // The PATH summary names Guard's shim and the real binary, not whichever copy actually runs
+  // first, so the row names the tool and leaves the paths to the drawer.
+  if (shim.integrity === "tampered") return "Guard's shim was changed on disk. Repair it to restore checks.";
+  if (shim.path_broken) return `Another ${shim.manager} runs before Guard's shim, so installs skip Guard.`;
   if (shim.activation_state === "repair_required") return "Guard's shim folder is not on PATH yet.";
   if (shim.last_intercept_proof_at) return `Tested ${formatRelativeTime(shim.last_intercept_proof_at)}`;
-  return null;
+  return "Not tested yet. Run a test to confirm installs are checked.";
 }
 
 function ManagerRowNote({ shim }: { shim: PackageShimEntry | undefined }) {

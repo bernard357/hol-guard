@@ -224,7 +224,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
   const [activatingRuntime, setActivatingRuntime] = useState(false);
   const [confirmRemoveManager, setConfirmRemoveManager] = useState<string | null>(null);
   const [pendingApprovalOp, setPendingApprovalOp] = useState<ApprovalOp | null>(null);
-  const [expandUnprotected, setExpandUnprotected] = useState(false);
+  const [expandUnprotectedRequest, setExpandUnprotectedRequest] = useState(0);
   const [managerFilter, setManagerFilter] = useState("");
   const [interceptProof, setInterceptProof] = useState<InterceptProofSnapshot | null>(null);
   const [managerDrawerTarget, setManagerDrawerTarget] = useState<string | null>(null);
@@ -1010,7 +1010,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
         rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       },
       focusUnprotected: () => {
-        setExpandUnprotected(true);
+        setExpandUnprotectedRequest((request) => request + 1);
         setManagerFilter("");
       },
       focusActionable: () => {
@@ -1055,7 +1055,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             Package managers
           </h2>
           <p className="mt-0.5 max-w-[68ch] text-sm leading-6 text-slate-600">
-            Guard checks every install from these tools before it runs.
+            Guard checks installs from protected tools before they run.
           </p>
         </div>
         {panelLoad.phase === "loaded" && (
@@ -1103,7 +1103,7 @@ export const PackageFirewallPanel = forwardRef(function PackageFirewallPanel(
             lastCompleted={lastCompleted}
             lastFailed={lastFailed}
             confirmRemoveManager={confirmRemoveManager}
-            expandUnprotected={expandUnprotected}
+            expandUnprotectedRequest={expandUnprotectedRequest}
             managerFilter={managerFilter}
             onManagerFilterChange={handleManagerFilterChange}
             onInstall={handleInstall}
