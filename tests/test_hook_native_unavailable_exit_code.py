@@ -31,7 +31,7 @@ class TestVerdictExitCodeContract:
         assert native_hook_verdict_exit_code(h, "block") == 1
         assert native_hook_verdict_exit_code(h, "allow") == 0
 
-    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp"))
+    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp", "muse"))
     def test_envelope_driven_deny_rc0(self, h):
         # Deny rides the decision envelope (permissionDecision / decision);
         # a nonzero PREEMPTIVE rc would read as a hook error and permit the
@@ -41,7 +41,7 @@ class TestVerdictExitCodeContract:
         assert native_hook_verdict_exit_code(h, "block", "PermissionRequest") == 0
         assert native_hook_verdict_exit_code(h, "allow", "PreToolUse") == 0
 
-    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp"))
+    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp", "muse"))
     def test_envelope_post_tool_block_rc1(self, h):
         # PostToolUse cannot preempt (the tool already ran) — a blocking
         # verdict flags the violation on the exit status instead.
@@ -87,7 +87,7 @@ class TestUnknownActionFailsClosed:
         assert native_hook_verdict_exit_code(h, action, "PostToolUse") == 1
 
     @pytest.mark.parametrize("action", UNKNOWN)
-    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp"))
+    @pytest.mark.parametrize("h", ("codex", "claude-code", "copilot", "pi", "omp", "muse"))
     def test_envelope_harnesses_flag_an_unknown_action_after_the_fact(self, action, h):
         # The envelope carries the deny before execution, so a preemptive
         # event still exits 0; PostToolUse has nothing left to preempt and
@@ -167,7 +167,7 @@ class TestRustTableParity:
             (
                 "ENVELOPE_HARNESSES",
                 _RC_BLOCK_IS_ZERO_ENVELOPE,
-                {"codex", "claude-code", "copilot", "pi", "omp"},
+                {"codex", "claude-code", "copilot", "pi", "omp", "muse"},
             ),
             (
                 "PREEMPTIVE_EVENTS",
