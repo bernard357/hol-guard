@@ -89,18 +89,26 @@ pub(in crate::pretool) fn clean_environment(
 /// still runs whatever the search path finds first, and the probe is also
 /// where the environment was screened: `GIT_DIR` hands Git a repository
 /// where the route found none, and a loader variable reaches even a trusted
-/// binary, so both questions are asked here instead.
+/// binary, so both questions are asked here instead. The route expanded `~`
+/// against the declared home, so a shell with another home would send Git
+/// somewhere the route never looked; the probe refuses that case too.
 pub(in crate::pretool) fn trusted_launch(
     executable: &str,
     context: crate::pretool::PathContext<'_>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
 ) -> bool {
-    let (Some(home), Some(cwd)) = (context.home_dir, context.cwd) else {
+    let (Some(declared_home), Some(cwd)) = (context.home_dir, context.cwd) else {
         return false;
     };
-    let (Ok(home), Ok(cwd)) = (fs::canonicalize(home), fs::canonicalize(cwd)) else {
+    let (Ok(home), Ok(cwd)) = (fs::canonicalize(declared_home), fs::canonicalize(cwd)) else {
         return false;
     };
+    let shell_home = execution_environment
+        .and_then(|context| context.home.as_deref())
+        .unwrap_or(declared_home);
+    if fs::canonicalize(shell_home).ok().as_deref() != Some(home.as_path()) {
+        return false;
+    }
     home.is_dir()
         && cwd.is_dir()
         && clean_environment(execution_environment, &home, &cwd)

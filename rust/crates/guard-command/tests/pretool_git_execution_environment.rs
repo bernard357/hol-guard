@@ -557,6 +557,24 @@ fn a_route_to_no_repository_still_needs_a_trusted_git() {
         );
     }
 
+    // The route expands `~` against the declared home. A shell whose own
+    // home is elsewhere sends Git to a directory the route never looked at,
+    // which may hold a repository, so that read keeps the review.
+    let from_home = "git -C ~/Code/scratch-notes status --short";
+    let result = evaluate(from_home, &trusted);
+    assert_eq!(
+        result.decision, "allow",
+        "{from_home}: {}",
+        result.reason_code
+    );
+    let other_home = root.join("other-home");
+    crate::pretool_home_layout_reads::repository(&other_home.join("Code").join("scratch-notes"));
+    let mut elsewhere = environment(original_path.clone());
+    elsewhere.home = other_home.to_str().map(str::to_owned);
+    let result = evaluate(from_home, &elsewhere);
+    assert_ne!(result.decision, "allow", "{from_home}");
+    assert_eq!(result.minimum_action, "require-reapproval", "{from_home}");
+
     let shadow = home.join("bin");
     std::fs::create_dir_all(&shadow).unwrap();
     let shadow_executable = if cfg!(windows) { "git.exe" } else { "git" };
