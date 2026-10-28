@@ -1,5 +1,5 @@
-//! `workspace-export-preview --stdin`: what a Guard AI Assistance source export
-//! of named workspace files would contain, computed locally and never sent.
+//! `workspace-export-preview --stdin`: what a source export of named workspace
+//! files would contain, computed locally and never sent.
 //!
 //! The caller names the root-relative files an operation asked for. Each one
 //! is reached from the root one component at a time without following a
