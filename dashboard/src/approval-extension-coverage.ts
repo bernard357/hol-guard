@@ -112,6 +112,17 @@ export function coverageStepLabel(segment: GuardCoveredSegment): string {
   return segment.executable === null ? step : `${step} · ${segment.executable}`;
 }
 
+/** What a step is covered by, named once. */
+export function segmentDetail(segment: GuardCoveredSegment): string | null {
+  const titles = segment.rules.map((rule) => rule.title);
+  const labels = segment.permissions.filter((permission) => permission.configurable).map((item) => item.label);
+  // A permission is often named after its extension, and the link beside it
+  // already shows that name.
+  const linked = new Set(segment.extensions.map((extension) => extension.name));
+  const parts = (titles.length > 0 ? titles : labels).filter((part) => !linked.has(part));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 /** An extension-page link the recommendation card above already shows. */
 export type CoverageLink = { extension_id: string; rule_id: string | null };
 
