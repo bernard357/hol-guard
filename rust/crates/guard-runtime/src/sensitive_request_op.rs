@@ -11,7 +11,7 @@ use guard_command::command_evaluation_controls::{
     authority_failure_for_health, control_layers_from_wire,
 };
 use guard_command::direct_vitest::DirectToolAuthority;
-use guard_command::{Ctx, GitCheck, GitProbe, GitRun, InspectionHost};
+use guard_command::{Ctx, GitCheck, GitProbe, InspectionHost};
 use guard_contracts::{
     CodexToolOutputFactsV1, CompoundGitSegmentV1, HookControlSnapshotV1, RequestContextRequestV1,
     RequestContextSensitiveRequestV1, MAX_REQUEST_CONTEXT_PATH_BYTES,
@@ -74,12 +74,6 @@ impl InspectionHost for SensitiveRequestHost<'_> {
     }
     fn git_binary_trusted(&self, git: &str, cwd: &str) -> bool {
         self.within_budget() && self.inner.git_binary_trusted(git, cwd)
-    }
-    fn run_git(&self, git: &str, args: &[String], cwd: &str) -> GitRun {
-        if !self.within_budget() {
-            return GitRun::Failed("native_request_context_budget_exceeded");
-        }
-        self.inner.run_git(git, args, cwd)
     }
     fn compound_git_chain(&self, segments: &[CompoundGitSegmentV1], complete: bool) -> bool {
         self.within_budget() && self.inner.compound_git_chain(segments, complete)

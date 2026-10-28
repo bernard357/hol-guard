@@ -90,14 +90,13 @@ Unix, so rewriting a `.ps1`, `.bat`, `.cmd` or `.exe` in place was silent on Win
 reads the name the way Win32 opens it — trailing dots and spaces trimmed, so `tool.exe.` does
 not read as extensionless — against the shared `WINDOWS_PROGRAM_EXTENSIONS` list.
 
-The fifteen that remain, each with the check it skips. None is an open hole on its own —
+The fourteen that remain, each with the check it skips. None is an open hole on its own —
 every one sits behind another condition that still holds — but each is a place where Windows
 is enforcing less than macOS and Linux:
 
 | Arm | Skipped on Windows |
 | --- | --- |
 | `hook_adapter_paths.rs::resolve_host` | No `GetFinalPathNameByHandle`, so a junction that aliases into a trusted root still reads as inside it. |
-| `codex_output_pathspecs.rs::executable` | No mode probe; the resolved Git path always reads as executable. Canonicalisation onto the host's own Git binary still applies. |
 | `github_conversation_files.rs::single_link` | Hard-link count skipped; `number_of_links` needs `GetFileInformationByHandle`, which stable `MetadataExt` does not expose. Size and regular-file bounds still apply. |
 | `kubeconfig_trust.rs::outside_agent_trees` | Group/other-writable mode mask skipped; closing it needs an ACL read. The file must still sit outside the agent trees and outside any repository. |
 | `process_probes.rs::trusted_postgres_socket` | Socket-directory ownership walk skipped. Windows clients reach a local server over TCP loopback, where there is no socket directory. |

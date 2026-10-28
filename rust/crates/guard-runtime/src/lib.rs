@@ -158,9 +158,6 @@ mod codex_request_resume_op;
 mod codex_request_resume_store;
 mod codex_sources;
 mod codex_thread_continue_op;
-mod codex_tool_output_git;
-#[cfg(all(test, unix))]
-mod codex_tool_output_vectors_tests;
 mod codex_value;
 #[cfg(all(test, unix))]
 mod codex_vectors_tests;

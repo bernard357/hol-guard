@@ -48,8 +48,6 @@
       "src/codex_output_py.rs",
       "src/codex_output_search.rs",
       "src/codex_output_shlex.rs",
-      "src/codex_output_source_paths.rs",
-      "src/codex_output_source_paths_tests.rs",
       "src/command_argument_semantics.rs",
       "src/command_ascii_comparison.rs",
       "src/command_common_cli_matcher_values.rs",
