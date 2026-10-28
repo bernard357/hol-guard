@@ -44,7 +44,7 @@ pub(super) fn settle(
     };
     let text = |key: &str| result.get(key).and_then(Value::as_str);
     let recording_only = envelope.recording_only;
-    let response = if text("minimum_action") == Some("allow") {
+    let (blocked, harness_response) = if text("minimum_action") == Some("allow") {
         // Watch records only a call the edge fully allowed.
         if (recording_only && text("decision") != Some("allow"))
             || !crate::local_cli_hook_contained::has_block_rules_at(
@@ -55,14 +55,13 @@ pub(super) fn settle(
             return Ok(None);
         }
         let verdict = checked(envelope, result, "allowed").unwrap_or(RuleVerdict::Unverified);
-        match verdict {
-            RuleVerdict::Blocked(name) => {
-                block::block_response(harness, result, &name, recording_only)
-            }
-            RuleVerdict::Unverified => block::unverified_response(harness, result, recording_only),
+        let response = match verdict {
+            RuleVerdict::Blocked(name) => custom_block(harness, result, &name, recording_only),
+            RuleVerdict::Unverified => block::unverified_response(harness, result, recording_only)
+                .or_else(|| block::unverified_response(harness, &Map::new(), recording_only)),
             RuleVerdict::None | RuleVerdict::Allowed => return Ok(None),
-        }
-        .map(|response| (true, response))
+        };
+        (true, response)
     } else if !recording_only
         && text("minimum_action").is_some_and(|action| REVIEW_ACTIONS.contains(&action))
         // Only a CLI with a grant row has a custom rule to read, so a store
@@ -73,29 +72,43 @@ pub(super) fn settle(
         )
     {
         match checked(envelope, result, "review") {
-            Some(RuleVerdict::Blocked(name)) => {
-                block::block_response(harness, result, &name, false)
-                    .map(|response| (true, response))
-            }
+            Some(RuleVerdict::Blocked(name)) => (true, custom_block(harness, result, &name, false)),
             Some(RuleVerdict::Allowed) => {
                 let mut allowed = result.clone();
                 for key in ["decision", "minimum_action", "policy_action"] {
                     allowed.insert(key.to_owned(), json!("allow"));
                 }
-                crate::hook_direct::saved_decision::render(harness, &allowed, "accepted")
-                    .map(|response| (false, response))
+                // An allow too large to render leaves the review standing.
+                let Some(response) =
+                    crate::hook_direct::saved_decision::render(harness, &allowed, "accepted")
+                else {
+                    return Ok(None);
+                };
+                (false, Some(response))
             }
             _ => return Ok(None),
         }
     } else {
         return Ok(None);
     };
-    let (blocked, harness_response) =
-        response.ok_or_else(|| "native_hook_edge_response_invalid".to_owned())?;
+    let harness_response =
+        harness_response.ok_or_else(|| "native_hook_edge_response_invalid".to_owned())?;
     Ok(Some(GuardHookLocalCliRuleV1 {
         blocked,
         harness_response,
     }))
+}
+
+/// The custom block for `result`, or, when the call is too large to render
+/// with it, the same block over none of the edge's own fields.
+fn custom_block(
+    harness: &str,
+    result: &Map<String, Value>,
+    name: &str,
+    recording_only: bool,
+) -> Option<Value> {
+    block::block_response(harness, result, name, recording_only)
+        .or_else(|| block::block_response(harness, &Map::new(), name, recording_only))
 }
 
 /// The rule's verdict under the shared storage hold, or `None` when the hold
@@ -129,7 +142,8 @@ fn checked(
     )
     .ok()?;
     Some(match mode {
-        "allowed" => rule_op::allowed_verdict(&request),
+        // `settle` already found a block rule.
+        "allowed" => rule_op::allowed_verdict_with_block_rules(&request),
         _ => rule_op::review_verdict(&request),
     })
 }

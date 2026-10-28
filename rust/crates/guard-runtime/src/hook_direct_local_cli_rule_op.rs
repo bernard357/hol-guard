@@ -94,6 +94,11 @@ pub(crate) fn allowed_verdict(request: &HookLocalCliRuleRequestV1) -> RuleVerdic
     {
         return RuleVerdict::None;
     }
+    allowed_verdict_with_block_rules(request)
+}
+
+/// `allowed_verdict` once the caller found a custom block rule.
+pub(crate) fn allowed_verdict_with_block_rules(request: &HookLocalCliRuleRequestV1) -> RuleVerdict {
     let check = check(request);
     let launched = match super::launch_for(
         &request.payload,

@@ -236,3 +236,72 @@ fn a_custom_allow_never_settles_a_block() {
         Ok(None)
     );
 }
+
+/// `result` carrying an edge field too large to render beside a custom rule.
+fn oversized(mut result: Value) -> Value {
+    result["padding"] = json!("x".repeat(64 * 1024));
+    result
+}
+
+#[test]
+fn a_custom_block_too_large_to_render_still_blocks() {
+    let (envelope, name) = case("allow-block-large", Some("blocked"), false);
+    let rule = settle(
+        &envelope,
+        "claude-code",
+        "PreToolUse",
+        &oversized(allowed()),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(rule.blocked);
+    assert_eq!(rule.harness_response["approval_reuse_status"], "blocked");
+    assert!(reason(&rule.harness_response).contains(&name));
+    assert!(!reason(&rule.harness_response).contains("xxxx"));
+
+    let (envelope, name) = case("review-block-large", Some("blocked"), false);
+    let rule = settle(
+        &envelope,
+        "claude-code",
+        "PreToolUse",
+        &oversized(review("network_target")),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(rule.blocked);
+    assert!(reason(&rule.harness_response).contains(&name));
+}
+
+#[test]
+fn an_unverified_block_too_large_to_render_still_blocks() {
+    let (envelope, _) = case("allow-unverified-large", Some("blocked"), false);
+    fs::write(
+        &envelope.local_cli_rules.as_ref().unwrap().store_path,
+        b"not a sqlite store",
+    )
+    .unwrap();
+    let rule = settle(
+        &envelope,
+        "claude-code",
+        "PreToolUse",
+        &oversized(allowed()),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(rule.blocked);
+    assert!(reason(&rule.harness_response).contains("could not check"));
+}
+
+#[test]
+fn a_custom_allow_too_large_to_render_leaves_the_review_standing() {
+    let (envelope, _) = case("review-allow-large", Some("allowed"), false);
+    assert_eq!(
+        settle(
+            &envelope,
+            "claude-code",
+            "PreToolUse",
+            &oversized(review("native_command_review_required"))
+        ),
+        Ok(None)
+    );
+}
