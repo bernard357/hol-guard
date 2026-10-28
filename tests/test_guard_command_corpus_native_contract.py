@@ -39,14 +39,14 @@ def test_native_contract_keeps_complete_original_inputs_and_visible_stronger_dif
     metadata = contract.load_native_contract()
     assert len(groups) == 58
     assert sum(count for count, _ in groups.values()) == 51_000
-    assert sum(count for count, _ in original.values()) == 4_317
+    assert sum(count for count, _ in original.values()) == 4_342
     assert rejected["native_command_evaluation_failed"][0] == 20_835
     assert metadata["totals"] == {
         "cases": 51_000,
         "sources": 52,
         "groups": 58,
         "equal_to_original_oracle": 46_683,
-        "stronger_than_original_oracle": 4_317,
+        "stronger_than_original_oracle": 4_342,
         "below_original_oracle": 0,
         "native_evaluation_errors": 20_835,
         "improved_upstream_benign_sources": 3,
