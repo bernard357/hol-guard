@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +21,9 @@ REASON_LIMIT = 6
 # Characters that would otherwise let refusal text open a code span, a link, a
 # table cell or emphasis in the published report.
 _MARKDOWN_ESCAPES = str.maketrans({c: "\\" + c for c in "\\`*_[]|<>#"})
+# A decision class is a short token in a code span; anything longer or stranger
+# than that came from a hook's own answer and is cut down to fit.
+_CLASS_TOKEN_CHARS = 40
 
 
 def _by_round(item: tuple[str, object]) -> tuple[int, str]:
@@ -39,6 +43,25 @@ def _inline(text: str) -> str:
     """
 
     return " ".join(text.split()).translate(_MARKDOWN_ESCAPES)
+
+
+def _class(name: str) -> str:
+    """A decision class as a code span that cannot carry markdown.
+
+    A class is built from the decision a hook answered with, so a backtick or a
+    newline in that answer reaches the report. A code span cannot be escaped
+    from the inside, so the name is reduced to the characters a class is made
+    of and bounded before it is wrapped.
+    """
+
+    token = re.sub(r"[^0-9A-Za-z_-]+", "_", name).strip("_")[:_CLASS_TOKEN_CHARS]
+    return f"`{token or 'unnamed'}`"
+
+
+def _classes(counts: dict[str, int]) -> str:
+    """Decision classes as `name x count` pairs."""
+
+    return ", ".join(f"{_class(name)} x{count}" for name, count in sorted(counts.items())) or "none"
 
 
 def _rows(document: dict[str, object], path: str, label: str) -> list[dict[str, object]]:
@@ -276,7 +299,7 @@ def render_markdown(document: dict[str, object], summary: dict[str, object]) -> 
                 f"round {key} x{count}" for key, count in sorted(detail["per_round"].items(), key=_by_round)
             )
             reasons = "; ".join(
-                f"`{reason['class']}` at round {reason['round']} sample {reason['index']}"
+                f"{_class(str(reason['class']))} at round {reason['round']} sample {reason['index']}"
                 + (f": {_inline(str(reason['detail']))}" if reason["detail"] else "")
                 for reason in detail["reasons"]
             )
@@ -310,7 +333,8 @@ def render_markdown(document: dict[str, object], summary: dict[str, object]) -> 
             "",
             f"p95 delta (median of per-round p95, candidate vs baseline): **{entry['p95_delta_pct']:+.1f}%**. "
             f"Per-round paired deltas: {paired}.",
-            f"Decision classes baseline {entry['baseline']['classes']}, candidate {entry['candidate']['classes']}.",
+            f"Decision classes baseline {_classes(entry['baseline']['classes'])}, "  # type: ignore[arg-type]
+            f"candidate {_classes(entry['candidate']['classes'])}.",  # type: ignore[arg-type]
         ]
         lines += [f"Flag: {flag}." for flag in flags] or ["No noise or parity flags."]
         lines.append("")

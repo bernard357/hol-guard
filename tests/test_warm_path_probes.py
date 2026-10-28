@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -463,3 +464,73 @@ def test_summary_markdown_keeps_refusal_text_from_reshaping_the_report() -> None
     assert reason_line.endswith(
         "Reasons: `error_-32001` at round 1 sample 0: \\# heading \\| cell \\| \\`code\\` \\[link\\](x) \\*bold\\*."
     )
+
+
+def test_hook_refusal_detail_reports_the_reason_not_the_envelope() -> None:
+    stdout = json.dumps(
+        {
+            "systemMessage": "HOL Guard reviewed this call.",
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "install of pkg needs approval",
+            },
+        }
+    )
+
+    assert probes.describe_hook_failure(0, stdout, "") == "exit=0 install of pkg needs approval"
+
+
+def test_hook_refusal_detail_drops_an_answer_it_cannot_read() -> None:
+    # Without a reason to quote the line says only how the sample ended, rather
+    # than the first 240 characters of someone else's JSON.
+    assert probes.describe_hook_failure(0, '{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}', "") == "exit=0"
+    assert probes.describe_hook_failure(1, "not json at all", "") == "exit=1"
+
+
+def test_hook_class_is_a_bounded_token() -> None:
+    wild = json.dumps({"hookSpecificOutput": {"permissionDecision": "deny`\n# heading " + "x" * 200}})
+
+    classification = probes.classify_hook_output(0, wild)
+
+    assert classification.startswith("permission_deny_")
+    assert "`" not in classification and "\n" not in classification
+    assert len(classification) <= len("permission_") + probes._CLASS_TOKEN_CHARS
+
+
+def test_mcp_refusal_detail_keeps_only_known_data_markers() -> None:
+    response = {
+        "error": {
+            "code": -32001,
+            "message": "review deadline",
+            "data": {"guard_timeout": True, "user@example.com": "queued"},
+        }
+    }
+
+    assert probes.describe_mcp_failure(response) == "review deadline [data:guard_timeout]"
+
+
+def test_summary_markdown_keeps_a_decision_class_from_reshaping_the_report() -> None:
+    non_ok = {
+        "count": 1,
+        "first_index": 0,
+        "runs": [[0, 0]],
+        "runs_truncated": False,
+        "reasons": [{"index": 0, "class": "permission_deny`\n# heading", "detail": ""}],
+    }
+    rounds = [
+        {
+            "round": 1,
+            "results": {
+                **_round(1, "b", None, None)["results"],
+                **_refused_round(1, "c", non_ok)["results"],
+            },
+        }
+    ]
+
+    markdown = _refusal_markdown(rounds)
+
+    reason_line = next(line for line in markdown.splitlines() if "Non-allow samples, `c`" in line)
+    assert "Reasons: `permission_deny_heading` at round 1 sample 0." in reason_line
+    classes_line = next(line for line in markdown.splitlines() if line.startswith("Decision classes"))
+    assert classes_line == "Decision classes baseline `ok` x2, candidate `error_-32001` x1, `ok` x1."

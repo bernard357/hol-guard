@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import resource
 import subprocess
 import threading
@@ -45,6 +46,11 @@ _MCP_ALLOW_CLASSES = frozenset({"ok"})
 _NON_OK_DETAIL_CHARS = 240
 _NON_OK_DETAIL_SAMPLES = 5
 _NON_OK_RUN_LIMIT = 20
+_CLASS_TOKEN_CHARS = 40
+# The error data of a refusal is the proxy's own structure, and a key in it can
+# be anything a caller named, so the report carries only the markers that tell
+# one refusal apart from another and never the keys themselves.
+_MCP_DATA_MARKERS = frozenset({"guard_timeout", "guardPolicyAction", "approvalRequests"})
 
 
 def clean_env(python: Path, home: Path) -> dict[str, str]:
@@ -107,6 +113,19 @@ def _run_install(cli: Path, harness: str, env: dict[str, str], home: Path, guard
         )
 
 
+def _class_token(value: str) -> str:
+    """A decision name as a short token safe to print as one word.
+
+    The decision travels from the hook's own JSON, so it is arbitrary text: a
+    sentence, a backtick, a newline. The class is a grouping key and a label in
+    the published report, and neither use survives either, so keep the word
+    characters and bound what is kept.
+    """
+
+    token = re.sub(r"[^0-9A-Za-z_-]+", "_", value).strip("_")[:_CLASS_TOKEN_CHARS]
+    return token or "unnamed"
+
+
 def classify_hook_output(returncode: int, stdout: str) -> str:
     if returncode != 0:
         return f"exit_{returncode}"
@@ -124,9 +143,9 @@ def classify_hook_output(returncode: int, stdout: str) -> str:
     specific = payload.get("hookSpecificOutput")
     permission = specific.get("permissionDecision") if isinstance(specific, dict) else None
     if isinstance(permission, str):
-        return f"permission_{permission}"
+        return f"permission_{_class_token(permission)}"
     decision = payload.get("decision")
-    return f"decision_{decision}" if isinstance(decision, str) else "other_json"
+    return f"decision_{_class_token(decision)}" if isinstance(decision, str) else "other_json"
 
 
 def _claude_pretool_handler(home: Path, workspace: Path) -> list[str] | str:
@@ -206,10 +225,35 @@ def bounded_detail(text: str) -> str:
     return " ".join(text.split())[:_NON_OK_DETAIL_CHARS]
 
 
+def _hook_refusal_message(stdout: str) -> str:
+    """The refusal sentence inside a hook's answer, if it carries one.
+
+    A denial arrives as an envelope: the reason sits under
+    ``hookSpecificOutput``, wrapped in fields that name the event and repeat the
+    decision. Reporting the raw prefix of that JSON fills the one line the
+    report has with field names instead of the sentence that explains the
+    refusal.
+    """
+
+    try:
+        payload = json.loads(stdout)
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    specific = payload.get("hookSpecificOutput")
+    candidates = (
+        specific.get("permissionDecisionReason") if isinstance(specific, dict) else None,
+        payload.get("reason"),
+        payload.get("systemMessage"),
+    )
+    return next((value.strip() for value in candidates if isinstance(value, str) and value.strip()), "")
+
+
 def describe_hook_failure(returncode: int, stdout: str, stderr: str) -> str:
     """Why a hook sample was not an allow, in one bounded line."""
 
-    text = stderr.strip() or stdout.strip()
+    text = stderr.strip() or _hook_refusal_message(stdout)
     return bounded_detail(f"exit={returncode} {text}".strip())
 
 
@@ -218,15 +262,16 @@ def describe_mcp_failure(response: dict[str, object]) -> str:
 
     ``-32001`` is the proxy's single refusal code: a policy block, a missing
     native decision, a failed notification sync and a review timeout all carry
-    it, and only the message and the error data tell them apart.
+    it, and only the message and a known marker in the error data tell them
+    apart.
     """
 
     error = response.get("error")
     if isinstance(error, dict):
         message = str(error.get("message", "")).strip()
         data = error.get("data")
-        keys = ",".join(sorted(str(key) for key in data)) if isinstance(data, dict) else ""
-        return bounded_detail(f"{message} [data:{keys}]" if keys else message)
+        markers = ",".join(sorted(_MCP_DATA_MARKERS.intersection(map(str, data)))) if isinstance(data, dict) else ""
+        return bounded_detail(f"{message} [data:{markers}]" if markers else message)
     result = response.get("result")
     if isinstance(result, dict):
         content = result.get("content")
