@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CbgjldQU.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-BB4Cqcdy.js","assets/chunks/harness-version-label-D4a5Z4Um.js","assets/chunks/connect-guard-cloud-button-B8mPbbPw.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-CQIQ-ZgI.js","assets/chunks/confirm-dialog-mdgDXnzT.js","assets/chunks/extensions-workspace-BUZrkjLc.js","assets/chunks/app-detail-workspace-pqZPiiHy.js","assets/chunks/policy-workspace-page-Cwu5aQv_.js","assets/chunks/about-workspace-MAIZTTE3.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CbgjldQU.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-BypAKYz2.js","assets/chunks/harness-version-label-IvyiWpGn.js","assets/chunks/connect-guard-cloud-button-B8mPbbPw.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-CQIQ-ZgI.js","assets/chunks/confirm-dialog-mdgDXnzT.js","assets/chunks/extensions-workspace-BUZrkjLc.js","assets/chunks/app-detail-workspace-RMeZh9Je.js","assets/chunks/policy-workspace-page-Cwu5aQv_.js","assets/chunks/about-workspace-MAIZTTE3.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
 (function polyfill() {
   const relList = document.createElement("link").relList;
   if (relList && relList.supports && relList.supports("modulepreload")) return;
@@ -37238,13 +37238,13 @@ function useRouteFocus(view, mainSelector = "main#main-content") {
 }
 const HOME_QUEUE_PREVIEW_LIMIT = 50;
 const HomeWorkspace = lazyWorkspace("home-dashboard", () => __vitePreload(() => import("./chunks/home-dashboard-CbgjldQU.js"), true ? __vite__mapDeps([0,1,2,3,4,5]) : void 0).then((m) => ({ default: m.HomeWorkspace })));
-const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() => import("./chunks/fleet-workspace-BB4Cqcdy.js"), true ? __vite__mapDeps([6,7,8,5,9]) : void 0).then((m) => ({ default: m.FleetWorkspace })));
+const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() => import("./chunks/fleet-workspace-BypAKYz2.js"), true ? __vite__mapDeps([6,7,8,5,9]) : void 0).then((m) => ({ default: m.FleetWorkspace })));
 const SettingsWorkspace = lazyWorkspace("settings-workspace", () => __vitePreload(() => import("./chunks/settings-workspace-CQIQ-ZgI.js"), true ? __vite__mapDeps([10,9,5,11,8]) : void 0).then((m) => ({ default: m.SettingsWorkspace })));
 const ExtensionsWorkspace = lazyWorkspace(
   "extensions-workspace",
   () => __vitePreload(() => import("./chunks/extensions-workspace-BUZrkjLc.js"), true ? __vite__mapDeps([12,11]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
 );
-const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePreload(() => import("./chunks/app-detail-workspace-pqZPiiHy.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.AppDetailWorkspace })));
+const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePreload(() => import("./chunks/app-detail-workspace-RMeZh9Je.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.AppDetailWorkspace })));
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));
 const SupplyChainHubWorkspace = lazyWorkspace(
   "supply-chain-hub-workspace",
