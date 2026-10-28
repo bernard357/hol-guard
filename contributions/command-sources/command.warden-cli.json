@@ -30,7 +30,7 @@
     },
     "publisher": {
       "id": "community.kantorcodes",
-      "display_name": "Michael Kantor (HOL)",
+      "display_name": "Michael Kantor",
       "url": "https://github.com/kantorcodes"
     },
     "permissions": [
@@ -117,12 +117,11 @@
               "discover"
             ],
             "allow_leading_options": false,
-            "fail_secure_unknown_options": true,
+            "fail_secure_unknown_options": false,
             "forbidden_flags": [
               "--json"
             ],
             "interspersed_flags": [
-              "--wrap",
               "--json"
             ],
             "interspersed_options_with_values": [],
