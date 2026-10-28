@@ -472,7 +472,7 @@
       "enabled_extensions": [
         "command.warden-cli"
       ],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.warden-cli.wrap-discovered"
     },
@@ -483,7 +483,7 @@
       "enabled_extensions": [
         "command.warden-cli"
       ],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.warden-cli.wrap-discovered"
     },
@@ -507,7 +507,7 @@
       "enabled_extensions": [
         "command.warden-cli"
       ],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.warden-cli.apply-policy"
     },
@@ -518,7 +518,7 @@
       "enabled_extensions": [
         "command.warden-cli"
       ],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.warden-cli.apply-policy"
     },
@@ -527,7 +527,7 @@
       "command": "warden policy apply --repo https://github.com/example/policies --policy strict.yaml",
       "disabled_permissions": [],
       "enabled_extensions": [],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.warden-cli.apply-policy"
     },
