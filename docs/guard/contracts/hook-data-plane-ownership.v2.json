@@ -634,6 +634,7 @@
    "paths": [
     "rust/Cargo.lock",
     "rust/Cargo.toml",
+    "rust/deny.toml",
     "rust/rust-toolchain.toml",
     "rust/.config/nextest.toml",
     "rust/build_support/**",

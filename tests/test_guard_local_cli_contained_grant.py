@@ -1,9 +1,10 @@
-"""An allowed local CLI grant widens the workspace sandbox; it never lifts it.
+"""An allowed local CLI grant widens a sandbox requirement; it never lifts one.
 
 Each hop is pinned: the client presents the resident's contained grant, the
-daemon and the direct CLI hook route an outside-roots review it covers into
-the sandbox sink, and the sink asks the store itself, admits only a plan
-widened by exactly that grant, and refuses one that changed before launch.
+daemon routes a review the resident answers with one into the sandbox sink,
+and the sink asks the store itself, admits only a plan widened by exactly that
+grant, and refuses one that changed before launch. The resident's own answer
+for an outside-roots review is pinned in Rust: an allowed CLI lifts it.
 """
 
 from __future__ import annotations

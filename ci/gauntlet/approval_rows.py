@@ -150,7 +150,7 @@ def connector_class(row: dict[str, Any], envelope: dict[str, Any], observations:
 
 def covered_connector_classes(scenarios: Any) -> set[str]:
     """Classes these cases exercise, read from the cases themselves."""
-    from .connector_fixtures import ECHO_MCP, LANECTL, REMOTE_MCP
+    from .connector_fixtures import APPROVE_SCRIPT, ECHO_MCP, LANECTL, REMOTE_MCP
 
     covered: set[str] = set()
     for scenario in scenarios:
@@ -159,7 +159,7 @@ def covered_connector_classes(scenarios: Any) -> set[str]:
             covered.update({"mcp-tool:stdio", "surface:mcp"})
         if REMOTE_MCP in servers:
             covered.update({"mcp-tool:remote", "surface:mcp"})
-        if any(LANECTL in command for command in scenario.commands):
+        if any(LANECTL in command or APPROVE_SCRIPT in command for command in scenario.commands):
             covered.add("surface:cli")
     return covered
 

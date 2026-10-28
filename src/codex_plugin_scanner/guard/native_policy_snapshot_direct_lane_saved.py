@@ -147,11 +147,19 @@ def with_saved_decision_state(
     if not saved_decision_bound(features):
         return bound
     environment = _environment()
+    if environment is None:
+        return bound
+    # The environment binds on its own, because every resident lane that
+    # resolves a command against the daemon's home and PATH needs it, not only
+    # a saved decision: without it a workspace with a custom block rule sends
+    # back every allowed PreToolUse. A saved decision still needs the control
+    # digest, the integrity state and the integrity key before the resident
+    # answers one, so publishing the environment alone allows nothing new.
+    bound["exact_action_environment"] = environment
     digest = current_extension_control_binding_digest()
     state = _integrity_state(store)
-    if environment is None or state is None or not _state_field_valid(digest):
+    if state is None or not _state_field_valid(digest):
         return bound
-    bound["exact_action_environment"] = environment
     bound["exact_action_control_digest"] = digest
     bound["policy_integrity_state"] = state
     return bound

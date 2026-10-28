@@ -1,17 +1,18 @@
 //! How a local CLI grant refines the hook action.
 //!
-//! `warn` and the generic review due to non-recognition follow the grant:
-//! allowed to `allow`, blocked to `block`. Any other review or
-//! `require-reapproval` carries a risk signal of its own, so a block still
-//! applies but an allow leaves it standing. A command the workspace
-//! sandbox bounds (`sandbox-required`), or a review left only because the
-//! program lives outside the sandbox's executable roots, never leaves the
-//! sandbox on a grant: an allowed CLI widens the sandbox by the grant's
-//! capabilities (`allow-contained-with-grant`), a blocked one is blocked, and
-//! one this device never decided keeps its action, the outside-roots review
-//! naming the connector to set up. A grant answer that cannot be trusted
-//! keeps the action, so nothing here can turn a sandbox requirement into
-//! `allow`.
+//! `warn` and a review due only to non-recognition follow the grant: allowed
+//! to `allow`, blocked to `block`. That includes the review left because the
+//! program lives outside the workspace sandbox's executable roots, which
+//! asks the same question the grant answers, so an allowed CLI runs there as
+//! it does on a harness with no sandbox and as an Always allow on its review
+//! would; one this device never decided keeps the review, naming the
+//! connector to set up. Any other review or `require-reapproval` carries a
+//! risk signal of its own, so a block still applies but an allow leaves it
+//! standing. A command the workspace sandbox bounds (`sandbox-required`)
+//! never leaves the sandbox on a grant: an allowed CLI widens the sandbox by
+//! the grant's capabilities (`allow-contained-with-grant`) and a blocked one
+//! is blocked. A grant answer that cannot be trusted keeps the action, so
+//! nothing here can turn a sandbox requirement into `allow`.
 
 use guard_contracts::LocalCliHookRequestV1;
 use serde_json::{json, Value};
@@ -62,11 +63,7 @@ impl Refined {
 
 /// Whether the action stays inside the workspace sandbox whatever the grant.
 pub(crate) fn sandbox_bound(request: &LocalCliHookRequestV1) -> bool {
-    match request.current_action.as_str() {
-        "sandbox-required" => true,
-        "review" => request.current_reason_code.as_deref() == Some(OUTSIDE_ROOTS_REASON),
-        _ => false,
-    }
+    request.current_action == "sandbox-required"
 }
 
 /// Whether an allowed grant lifts this unbounded action to `allow`: `allow`
@@ -132,7 +129,7 @@ pub(crate) fn refine(
     }
 }
 
-/// The review fields a granted outside-roots command is routed to.
+/// The review fields a granted sandbox-bound command is routed to.
 ///
 /// The caller owns no part of this verdict: it narrows the review it holds to
 /// the surfaces this operation reads, and copies the answer back. A caller
