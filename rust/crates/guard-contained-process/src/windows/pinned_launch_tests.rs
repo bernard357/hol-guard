@@ -23,14 +23,12 @@ fn system_tool(name: &str) -> PathBuf {
 /// A workspace whose `tools\tool.exe` is a private copy of `hostname.exe`.
 fn workspace() -> (tempfile::TempDir, PathBuf) {
     let directory = tempfile::tempdir().unwrap();
-    let root = PathBuf::from(
-        directory
-            .path()
-            .canonicalize()
-            .unwrap()
-            .to_string_lossy()
-            .trim_start_matches(r"\\?\"),
-    );
+    let canonical = directory.path().canonicalize().unwrap();
+    let canonical = canonical.to_string_lossy();
+    let root = match canonical.strip_prefix(r"\\?\UNC\") {
+        Some(share) => PathBuf::from(format!(r"\\{share}")),
+        None => PathBuf::from(canonical.trim_start_matches(r"\\?\")),
+    };
     fs::create_dir(root.join("tools")).unwrap();
     fs::copy(system_tool("hostname.exe"), tool(&root)).unwrap();
     (directory, root)
