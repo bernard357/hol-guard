@@ -100,13 +100,10 @@ read. Thirty-four hold no authority of their own, in these readings:
   which opens the request owner-only, checks its digest and re-authorizes the
   command there.
 
-One more is worth recording without raising it as a finding.
-`grok_hook_response_from_guard` renders the resident's action for Grok, but
-unlike the other two renderings of its kind an action it does not recognise
-falls through to `{"decision": "allow"}` rather than to a deny or a `None`. No
-production caller in `src/` reaches it — only the capability contract listing and
-the tests — so it is latent rather than live. It belongs in the same pass that
-tightens the composers below.
+`grok_hook_response_from_guard`, recorded here in an earlier pass as a latent
+allow-shaped fallthrough, now normalizes an action it does not recognise to the
+review tier before rendering, so it denies like the other two renderings of its
+kind. Nothing is left to tighten there.
 
 ## The findings
 
