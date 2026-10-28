@@ -116,6 +116,9 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         // Git trims whitespace around the name it guesses.
         "git clone 'https://github.com/example-org/ .claude.git'",
         "git clone 'https://github.com/example-org/.claude.git/ '",
+        // Options may follow the repository.
+        "git clone https://github.com/example-org/.claude.git --depth=1",
+        "git clone ../.codex.git --branch main",
         // A word or directory the text cannot fix fails closed.
         "git worktree add $HOME/x origin/main",
         "cd - && git clone https://github.com/example-org/x.git x",

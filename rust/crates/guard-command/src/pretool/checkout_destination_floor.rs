@@ -213,14 +213,18 @@ fn step_words(
     }
     if matches!(arguments[index].as_str(), "clone" | "submodule") {
         // The repository is the first remote-shaped word; no other word is
-        // exempt from screening. When the last word is the repository (or a
-        // local source), Git names the checkout after it in the step's
-        // directory, so that name is screened too.
+        // exempt from screening. With no directory after it, Git names the
+        // checkout after the repository in the step's directory. Options may
+        // follow either operand, so the name Git would guess from every
+        // operand is screened.
         if let Some(position) = words.iter().position(|word| remote_word(word)) {
             words.remove(position);
         }
-        if let Some(last) = arguments.last().filter(|last| !last.starts_with('-')) {
-            words.extend(guessed_directories(last)?);
+        for operand in arguments[index + 1..]
+            .iter()
+            .filter(|word| !word.starts_with('-'))
+        {
+            words.extend(guessed_directories(operand)?);
         }
     }
     if words.iter().any(|word| unresolved_word(word)) {
