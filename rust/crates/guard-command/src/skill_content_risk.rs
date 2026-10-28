@@ -21,7 +21,11 @@ fn many(patterns: &[(&str, &str)]) -> Vec<Regex> {
     patterns.iter().map(|(p, f)| py_regex(p, f)).collect()
 }
 
-static FRONTMATTER: LazyLock<Regex> = LazyLock::new(|| py_regex(r"---\s.*?---", "s"));
+/// One `---` delimited block, read from where it opens.
+static FRONTMATTER: LazyLock<Regex> = LazyLock::new(|| py_regex(r"\A---\s.*?---", "s"));
+/// A block whose first line is a YAML `key:` entry.
+static FRONTMATTER_KEY_OPEN: LazyLock<Regex> =
+    LazyLock::new(|| py_regex(r"\A---[ \t]*\r?\n[ \t]*[\w-]+[ \t]*:", ""));
 static SHELL_COMMAND: LazyLock<Regex> =
     LazyLock::new(|| py_regex(r"```(?:bash|sh|shell|zsh)\s(.*?)```", "s"));
 
@@ -311,11 +315,31 @@ fn check_unicode_controls(content: &str, out: &mut Vec<RiskSignalV2>) {
     ));
 }
 
+/// The `---` blocks that read as frontmatter: the one that opens the file,
+/// and any later one whose first line is a YAML `key:` entry. A Markdown body
+/// that puts `---` thematic breaks around a shell fence is not frontmatter.
+fn frontmatter_blocks(content: &str) -> impl Iterator<Item = &str> {
+    let body = content.trim_start_matches(['\u{feff}', ' ', '\t', '\r', '\n']);
+    let opening = content.len() - body.len();
+    content
+        .char_indices()
+        .map(|(start, _)| start)
+        .filter(move |&start| content[start..].starts_with("---"))
+        .filter(move |&start| {
+            (start >= opening && content[opening..start].bytes().all(|byte| byte == b'-'))
+                || re_search(&FRONTMATTER_KEY_OPEN, &content[start..])
+        })
+        .filter_map(move |start| {
+            FRONTMATTER
+                .find(&content[start..])
+                .ok()
+                .flatten()
+                .map(|block| block.as_str())
+        })
+}
+
 fn check_shell_in_frontmatter(content: &str, out: &mut Vec<RiskSignalV2>) {
-    let hit = FRONTMATTER
-        .find_iter(content)
-        .flatten()
-        .any(|block| re_search(&SHELL_COMMAND, block.as_str()));
+    let hit = frontmatter_blocks(content).any(|block| re_search(&SHELL_COMMAND, block));
     if hit {
         out.push(skill_signal(
             &Sig {
