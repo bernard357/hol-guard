@@ -409,6 +409,18 @@ def test_the_daemon_answers_with_the_edge_grant_in_one_resident_call(
     assert len(fixture.captured) == 1
 
 
+def test_an_edge_granted_allow_off_the_routed_shape_is_the_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _no_second_call(monkeypatch)
+    routed = {**_ROUTED_RESPONSE, "reason_code": "native_allow"}
+    fixture = _GrantRouteFixture(edge=_grant_edge(harness_response=routed, containment_rewrite="routed"))
+    reply, native = _review(fixture, tmp_path)
+    assert native is False
+    assert reply.get("reason_code") == "native_containment_rewrite_invalid"
+    assert reply.get("policy_action") != "allow"
+
+
 def test_a_declined_grant_goes_straight_to_the_review_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _no_second_call(monkeypatch)
     paused: list[object] = []

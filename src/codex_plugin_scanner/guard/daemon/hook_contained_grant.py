@@ -27,7 +27,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..native_hook_containment_route import native_containment_rewrite
+from ..native_hook_containment_route import edge_routed_shape, native_containment_rewrite
+from ..native_hook_decision import NativeHookDecisionError
 from .hook_fail_closed import render_pre_tool
 from .hook_native_exact_action import launch_cwd, launch_path
 from .hook_request_parsing import pre_tool_command
@@ -41,6 +42,7 @@ OUTSIDE_ROOTS_REASON = "native_workspace_containment_executable_outside_roots"
 # receipt, and ``declined`` keeps the review.
 _EDGE_GRANT_ANSWERS = frozenset({"routed", "kept"})
 _EDGE_GRANT_DECLINED = "declined"
+_EDGE_REWRITE_INVALID = "native_containment_rewrite_invalid"
 
 
 def granted_containment_result(
@@ -145,6 +147,9 @@ def edge_granted_containment_response(
         response = edge.get("harness_response")
         if not isinstance(response, Mapping):
             raise ValueError("native_hook_edge_invalid_response")
+        # A routed allow is held to the shape the resident's answer is.
+        if answer == "routed" and not edge_routed_shape(response, payload):
+            raise NativeHookDecisionError(_EDGE_REWRITE_INVALID)
         return {str(key): value for key, value in response.items()}
     if answer == _EDGE_GRANT_DECLINED:
         return None
