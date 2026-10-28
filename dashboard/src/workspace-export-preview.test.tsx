@@ -189,6 +189,8 @@ try {
     previewWorkspaceExport(worktree, Array.from({ length: 201 }, (_, index) => `f${index}`)),
     /up to 200 file paths/,
   );
+  await assert.rejects(previewWorkspaceExport(worktree, ["a".repeat(4097)]), (error: unknown) =>
+    error instanceof ExportPreviewError && error.code === "path_too_long" && /at most 4096 characters/.test(error.message));
   assert.equal(calls.length, sent);
 
   reply = { status: 409, body: { error: "worktree_moved", detail: "private-server-marker" } };

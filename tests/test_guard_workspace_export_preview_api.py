@@ -90,14 +90,16 @@ def test_the_tracked_root_is_previewed_and_a_root_that_now_keys_elsewhere_is_ref
 ) -> None:
     root = tmp_path / "work"
     calls: list[dict[str, object]] = []
-    replies = [_reply(), _reply(worktree_key=digest("moved"))]
+    replies = [_reply(), _reply(worktree_key=digest("moved")), _reply(codebase_key=digest("other repository"))]
     monkeypatch.setattr(export_preview, "_native_request", lambda request: calls.append(request) or replies.pop(0))
     store = seeded_store(tmp_path, root)
     ready = _post(store, BODY)
     moved = _post(store, BODY)
+    repointed = _post(store, BODY)
     assert ready[0] == 200 and ready[1]["status"] == "ready"
     assert moved == (409, {"error": "worktree_moved"})
-    assert calls == [{"root": str(root), "paths": ["app.py"]}] * 2
+    assert repointed == (409, {"error": "worktree_moved"})
+    assert calls == [{"root": str(root), "paths": ["app.py"]}] * 3
 
 
 @pytest.mark.parametrize(

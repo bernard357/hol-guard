@@ -3,6 +3,8 @@ import type { WorktreeKeys } from "./workspace-findings-api";
 
 const EXPORT_PREVIEW_PATH = "/v1/supply-chain/workspace-export-preview";
 export const MAX_EXPORT_PREVIEW_PATHS = 200;
+// The daemon refuses a path longer than this, so the browser says why first.
+export const MAX_EXPORT_PREVIEW_PATH_LENGTH = 4096;
 
 /**
  * `blocked` means a secret survived its redaction in at least one file, so no
@@ -112,6 +114,7 @@ export function parseExportPaths(input: string): string[] {
 export async function previewWorkspaceExport(worktree: WorktreeKeys, paths: string[]): Promise<ExportPreview> {
   if (paths.length === 0) throw new ExportPreviewError("no_paths");
   if (paths.length > MAX_EXPORT_PREVIEW_PATHS) throw new ExportPreviewError("invalid_paths");
+  if (paths.some((path) => path.length > MAX_EXPORT_PREVIEW_PATH_LENGTH)) throw new ExportPreviewError("path_too_long");
   const response = await fetchGuardApi(EXPORT_PREVIEW_PATH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -137,7 +140,7 @@ const EXCLUSION_REASONS: Record<string, string> = {
   special: "A device, pipe or socket, not a file.",
   unreadable: "Could not be read.",
   unstable: "Changed while Guard was reading it.",
-  redaction_failed: "A secret was still found after redaction, so this file blocks the export.",
+  redaction_failed: "Guard could not confirm this file is free of secrets after redaction, so it blocks the export.",
 };
 
 export function exclusionMessage(reason: string): string {
@@ -147,6 +150,7 @@ export function exclusionMessage(reason: string): string {
 const ERROR_MESSAGES: Record<string, string> = {
   no_paths: "Add at least one file path, one per line.",
   invalid_paths: `List up to ${MAX_EXPORT_PREVIEW_PATHS} file paths, one per line.`,
+  path_too_long: `Each file path must be at most ${MAX_EXPORT_PREVIEW_PATH_LENGTH} characters.`,
   worktree_not_found: "This workspace is no longer tracked. Refresh the list.",
   worktree_moved: "This folder now belongs to a different workspace. Refresh the list, then preview again.",
   workspace_export_preview_root_missing: "Guard cannot find this workspace folder. Check that it still exists.",

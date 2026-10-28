@@ -226,8 +226,9 @@ def _preview_export(handler: WorkspaceAssessmentHandler, payload: dict[str, obje
         handler._write_json({"error": error.code}, status=status)
         return
     # The native side keys the root it actually opened. A root that now resolves
-    # elsewhere, through a replaced directory or symlink, is another worktree.
-    if result["worktree_key"] != keys.worktree_key:
+    # elsewhere, through a replaced directory or symlink, or whose Git pointer now
+    # names another repository, is another worktree.
+    if result["worktree_key"] != keys.worktree_key or result["codebase_key"] != keys.codebase_key:
         handler._write_json({"error": "worktree_moved"}, status=409)
         return
     handler._write_json(result)

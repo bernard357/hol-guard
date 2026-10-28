@@ -105,7 +105,7 @@ function PreviewResult({ preview, edited }: { preview: ExportPreview; edited: bo
       {preview.status === "blocked" && (
         <FixNotice
           tone="error"
-          text="A secret was still found after redaction, so this selection cannot be exported. Remove the secret from the file marked below, or take that file off the list."
+          text="Guard could not confirm the file marked below is free of secrets after redaction, so this selection cannot be exported. Remove any secret from that file, or take it off the list."
         />
       )}
       {preview.status === "empty" && (
@@ -226,6 +226,8 @@ export function ExportPreviewPanel(props: { worktree: WorktreeKeys; findings: Wo
       if (mounted.current) setPreview({ input: submitted, result });
     } catch (caught) {
       if (!mounted.current) return;
+      // A failed retry must not leave the previous result on screen as if it still held.
+      setPreview(null);
       setError(caught instanceof ExportPreviewError ? caught.message : new ExportPreviewError("workspace_export_preview_failed").message);
     } finally {
       if (mounted.current) setBusy(false);
