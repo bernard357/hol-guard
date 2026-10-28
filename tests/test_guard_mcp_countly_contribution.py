@@ -63,3 +63,15 @@ def test_countly_unlisted_tools_keep_existing_guard_policy() -> None:
     assert mcp_tool_state(contribution, "apps_update") == "inherit"
     assert mcp_tool_state(contribution, "future_countly_tool") == "inherit"
     assert all(tool["state"] != "allow" for tool in contribution["tools"])
+
+def test_countly_similarly_named_tools_do_not_expand_review_scope() -> None:
+    """Only the four declared application mutations acquire Countly review."""
+    contribution = _payload()
+    for name in (
+        "apps_delete_user_batch",
+        "apps_delete_all",
+        "apps_reset_preview",
+        "apps_create_template",
+        "other_apps_delete",
+    ):
+        assert mcp_tool_state(contribution, name) == "inherit"
