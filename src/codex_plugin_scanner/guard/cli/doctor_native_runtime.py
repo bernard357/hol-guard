@@ -9,7 +9,8 @@ from typing import Literal, TypedDict
 
 from ..adapters.diagnostic_probes import skipped_command_probe
 from ..native_policy_snapshot_constants import NATIVE_RUNTIME_STATE_DIRECTORY
-from ..resident_state_prune import pid_is_alive, probe_owner_lock
+from ..native_resident_watchdog import published_process_alive, published_resident_process
+from ..resident_state_prune import probe_owner_lock
 
 
 class _NativeAvailabilityFields(TypedDict):
@@ -37,6 +38,33 @@ _REASON_MESSAGES = {
 }
 
 
+def _published_generations(state_base: Path, runtime_sha256: str) -> tuple[int, bool]:
+    """Count the generations published for this runtime and say whether one is live.
+
+    Liveness follows the same rule the resident watchdog applies: a published
+    pid counts only while it is still the process the state file named, so a
+    reused pid in state nobody cleaned up is not a running resident.
+
+    Reads only the resident state files; it starts and stops nothing.
+    """
+
+    generations = 0
+    live = False
+    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
+        try:
+            with state_path.open("rb") as handle:
+                state = json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
+            continue
+        generations += 1
+        published = published_resident_process(state)
+        if published is not None and published_process_alive(*published):
+            live = True
+    return generations, live
+
+
 def _resident_owned_elsewhere(state_base: Path, runtime_sha256: str) -> bool:
     """True when a process holds the home-wide owner lock and no live resident runs this runtime.
 
@@ -46,18 +74,7 @@ def _resident_owned_elsewhere(state_base: Path, runtime_sha256: str) -> bool:
 
     if probe_owner_lock(state_base) is not False:
         return False
-    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
-        try:
-            with state_path.open("rb") as handle:
-                state = json.loads(handle.read(_MAX_STATE_BYTES))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
-            continue
-        process_id = state.get("process_id")
-        if isinstance(process_id, int) and pid_is_alive(process_id):
-            return False
-    return True
+    return not _published_generations(state_base, runtime_sha256)[1]
 
 
 def _passive_runtime_sha256() -> str | None:
@@ -89,21 +106,38 @@ def _with_reason(result: NativeAvailabilityResult, reason: str) -> NativeAvailab
     return result
 
 
+def _passive_availability(guard_home: Path | None) -> NativeAvailabilityResult:
+    """Answer as far as reading the installed files allows, without running them.
+
+    Installation is decidable passively: a runtime binary either validates
+    against its recorded identity or it does not, so ``available`` is a real
+    answer rather than a null one. Compatibility is not decidable this way,
+    because the capabilities a build reports can only be read from the build
+    itself, so it stays null and the message names that limit.
+    """
+
+    from ..native_runtime import native_mode
+
+    runtime_sha256 = _passive_runtime_sha256()
+    result: NativeAvailabilityResult = {
+        # ``native_mode`` reads the environment only; it starts nothing.
+        "mode": native_mode(),
+        "available": runtime_sha256 is not None,
+        "compatible": None,
+        "reason_code": "native_status_probe_skipped",
+        "evaluation_verified": False,
+    }
+    # The owner lock and the binary hash are read without running anything.
+    if _owner_busy(guard_home, runtime_sha256):
+        return _with_reason(result, "native_resident_owner_busy")
+    return _with_reason(result, "native_status_probe_skipped")
+
+
 def doctor_native_availability(guard_home: Path | None = None) -> NativeAvailabilityResult:
-    """Use null availability for an unperformed probe, never a false failure."""
+    """Report native availability, never a failure the caller did not let us check."""
     # This only queries the passive scope; its command metadata is not emitted.
     if skipped_command_probe(["hol-guard-runtime", "capabilities", "--json"]) is not None:
-        skipped: NativeAvailabilityResult = {
-            "mode": "unknown",
-            "available": None,
-            "compatible": None,
-            "reason_code": "native_status_probe_skipped",
-            "evaluation_verified": False,
-        }
-        # The owner lock and the binary hash are read without running anything.
-        if guard_home is not None and _owner_busy(guard_home, _passive_runtime_sha256()):
-            return _with_reason(skipped, "native_resident_owner_busy")
-        return skipped
+        return _passive_availability(guard_home)
 
     from ..native_runtime import native_runtime_status
 
@@ -154,20 +188,7 @@ def native_resident_presence(guard_home: Path | None, runtime_sha256: str | None
         return {"live": None, "owner_lock_held": None, "generations": 0}
     state_base = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY
     owner_lock = probe_owner_lock(state_base)
-    live = False
-    generations = 0
-    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
-        try:
-            with state_path.open("rb") as handle:
-                state = json.loads(handle.read(_MAX_STATE_BYTES))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
-            continue
-        generations += 1
-        process_id = state.get("process_id")
-        if isinstance(process_id, int) and pid_is_alive(process_id):
-            live = True
+    generations, live = _published_generations(state_base, runtime_sha256)
     return {
         "live": live,
         # ``probe_owner_lock`` returns None when it could not tell.

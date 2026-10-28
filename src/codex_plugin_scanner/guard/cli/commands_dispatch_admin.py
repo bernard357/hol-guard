@@ -299,12 +299,20 @@ def _run_guard_doctor_command(
         # started or repaired here, so support can ask for it at any time.
         import sys
 
+        from .render import emit_guard_payload
         from .runtime_posture_command import render_runtime_status
 
         with without_command_probes():
             section = native_runtime_section(guard_home)
         if getattr(args, "json", False):
-            _emit("doctor", {"generated_at": _now(), "native_runtime": section}, True)
+            # Both branches honour the caller's stream; a caller that captures
+            # the text report must not have the JSON one land on stdout instead.
+            emit_guard_payload(
+                "doctor",
+                {"generated_at": _now(), "native_runtime": section},
+                True,
+                output_stream=output_stream,
+            )
         else:
             # The doctor renderer describes a harness; this payload describes a
             # runtime, so it is rendered by the command that owns that report.

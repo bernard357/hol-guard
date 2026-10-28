@@ -206,10 +206,15 @@ def run_runtime_status_command(
     reaches no network, and it produces no verdict of its own.
     """
 
+    from ..adapters.diagnostic_probes import without_command_probes
     from .doctor_native_runtime import native_runtime_section
 
     stream = output_stream if output_stream is not None else sys.stdout
-    section = native_runtime_section(context.guard_home)
+    # The read-only contract is enforced here, not assumed: inside this scope a
+    # probe is recorded as skipped instead of launching the runtime, so neither
+    # the capabilities call nor the execute-bit repair behind it can run.
+    with without_command_probes():
+        section = native_runtime_section(context.guard_home)
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "native_runtime": section}
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))
@@ -217,7 +222,7 @@ def run_runtime_status_command(
     else:
         stream.write(render_runtime_status(section))
     availability = section["availability"]
-    # Only a probe that ran and said no is a failure; an unperformed probe is not.
+    # No runtime binary installed is a real failure; an unknown compatibility is not.
     return 1 if isinstance(availability, dict) and availability.get("available") is False else 0
 
 
@@ -231,6 +236,12 @@ def render_runtime_status(section: dict[str, object]) -> str:
         f"compatible: {_tristate(availability.get('compatible'))} "
         f"({availability.get('reason_code', 'unknown')})"
     )
+    if availability.get("compatible") is None:
+        # Say why the answer stops here rather than leaving a bare "unknown".
+        lines.append(
+            "  Compatibility is not reported: this command reads the installed files and "
+            "never runs them. Run `hol-guard doctor <harness>` for the full check."
+        )
     message = availability.get("message")
     if isinstance(message, str) and message:
         lines.append(f"  {message}")

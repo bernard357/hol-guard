@@ -30,12 +30,19 @@ def _guard_args(tmp_path: Path) -> list[str]:
 
 
 def _pin_runtime(monkeypatch: pytest.MonkeyPatch, *, available: bool, reason: str) -> None:
+    """Pin what the installed files say, which is all these surfaces may read.
+
+    ``runtime status`` never runs the binary, so its answer comes from the
+    passive identity check rather than from ``native_runtime_status``; that one
+    is pinned too because the native guard config still consults it.
+    """
+
     identity = NativeRuntimeIdentity(path=Path("hol-guard-runtime"), size=1, mtime_ns=1, sha256="a" * 64)
     status = NativeRuntimeStatus(
         mode="auto", available=available, compatible=available, reason=reason, identity=identity
     )
     monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status)
-    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64 if available else None)
 
 
 def test_status_json_reports_availability_and_resident_presence(
@@ -48,7 +55,7 @@ def test_status_json_reports_availability_and_resident_presence(
     payload = json.loads(capsys.readouterr().out)
     section = payload["native_runtime"]
     assert code == 0
-    assert section["availability"]["reason_code"] == "native_ready"
+    assert section["availability"]["reason_code"] == "native_status_probe_skipped"
     assert section["availability"]["evaluation_verified"] is False
     assert section["resident"]["live"] is False
     assert isinstance(section["daemon_http"], dict)
@@ -203,13 +210,15 @@ def _doctor_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, reason: s
 def test_doctor_native_reports_the_section_without_the_rest_of_the_scan(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    code, _ = _doctor_native(monkeypatch, tmp_path, reason="native_ready", as_json=True)
+    code, out = _doctor_native(monkeypatch, tmp_path, reason="native_ready", as_json=True)
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = json.loads(out)
     assert code == 0
     assert payload["native_runtime"]["availability"]["reason_code"] == "native_ready"
     assert "approval_gate" not in payload
     assert "harnesses" not in payload
+    # The caller asked for the report on its own stream, so none of it leaks to stdout.
+    assert capsys.readouterr().out == ""
 
 
 def test_doctor_native_text_uses_the_runtime_report_not_the_harness_panel(
@@ -220,3 +229,59 @@ def test_doctor_native_text_uses_the_runtime_report_not_the_harness_panel(
     assert code == 0
     assert "Native runtime status (read only)" in out
     assert "Guard doctor" not in out
+
+
+def test_status_neither_runs_the_runtime_nor_restores_its_execute_bit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """``runtime status`` documents itself as read only, so it must hold that line.
+
+    The probe it used to take runs ``capabilities --json`` and, on the way,
+    chmods the bundled binary back to executable. Both are side effects a
+    support command must not have.
+    """
+
+    def _must_not_chmod(path: Path) -> None:
+        raise AssertionError("runtime status must not change the native binary's permissions")
+
+    monkeypatch.setattr(native_runtime, "_restore_bundled_runtime_execute_bit", _must_not_chmod)
+    monkeypatch.setattr(native_runtime, "_capabilities_for_identity", _must_not_chmod)
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+
+    code = main(["guard", "runtime", "status", "--json", *_guard_args(tmp_path)])
+
+    availability = json.loads(capsys.readouterr().out)["native_runtime"]["availability"]
+    assert code == 0
+    assert availability["reason_code"] == "native_status_probe_skipped"
+    # Installation is still answered; only compatibility needs the binary to run.
+    assert availability["available"] is True
+    assert availability["compatible"] is None
+
+
+def test_status_text_says_why_compatibility_is_not_reported(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+
+    code = main(["guard", "runtime", "status", *_guard_args(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Compatibility is not reported" in out
+
+
+def test_doctor_rejects_native_together_with_repair(tmp_path: Path) -> None:
+    """``--repair`` runs the lifecycle gate, which can revive a resident.
+
+    ``--native`` promises a read-only report, so the pair is refused before
+    anything runs rather than silently doing one of the two.
+    """
+
+    guard_home = tmp_path / "home" / "guard"
+
+    with pytest.raises(SystemExit) as caught:
+        main(["guard", "doctor", "--native", "--repair", *_guard_args(tmp_path)])
+
+    assert caught.value.code == 2
+    # Nothing was started on the way to the refusal.
+    assert not (guard_home / "native-runtime").exists()
