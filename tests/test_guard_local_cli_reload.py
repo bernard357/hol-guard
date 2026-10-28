@@ -253,3 +253,15 @@ def test_discovery_never_runs_a_program_whose_identity_changed(tool, monkeypatch
     _, status, _ = local_cli_api._discover_from_command(tool.name, stale, home, home, home / "guard")
     assert status == "failed"
     assert ran == []
+
+
+def test_a_tool_guard_cannot_find_is_not_called_replaced(tmp_path, tool, probes, monkeypatch):
+    _, service = _service(tmp_path, tool)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    try:
+        with pytest.raises(LocalCliApiError) as raised:
+            service.refresh_job({"cli_id": tool.cli_id, "confirm_process_start": True})
+    finally:
+        assert service.close_discovery()
+    assert (raised.value.status, raised.value.code) == (409, "cli_not_on_guard_path")
+    assert probes.calls == []

@@ -31,11 +31,9 @@ export function LocalCliLoadCommands(props: {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
+  // The panel remounts this control for another tool or a changed program,
+  // so unmounting aborts a load that belongs to the previous one.
   useEffect(() => () => controllerRef.current?.abort(), []);
-  useEffect(() => {
-    setError(null);
-    setLoaded(false);
-  }, [item.cli_id]);
 
   const load = useCallback(async () => {
     const controller = new AbortController();

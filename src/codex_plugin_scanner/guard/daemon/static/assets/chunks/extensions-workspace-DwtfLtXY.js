@@ -3412,10 +3412,6 @@ function LocalCliLoadCommands(props) {
   const [loaded, setLoaded] = reactExports.useState(false);
   const controllerRef = reactExports.useRef(null);
   reactExports.useEffect(() => () => controllerRef.current?.abort(), []);
-  reactExports.useEffect(() => {
-    setError(null);
-    setLoaded(false);
-  }, [item.cli_id]);
   const load = reactExports.useCallback(async () => {
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -5240,11 +5236,19 @@ function LocalCliDetail(props) {
         }
       ) : null
     ] }) : null,
-    added || hasSuggestedRules(props.item) ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "mt-8", "aria-labelledby": "custom-extension-commands-heading", children: [
+    added || hasSuggestedRules(props.item) || props.item.surface === "cli" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "mt-8", "aria-labelledby": "custom-extension-commands-heading", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "custom-extension-commands-heading", className: "text-lg font-semibold text-brand-dark", children: detailCatalogHeading(props.item.surface) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 max-w-2xl text-sm leading-6 text-slate-500", children: detailCatalogHelper(props.item.surface) }),
       commandsDirty && hasSuggestedRules(props.item) && !added ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "note", className: "mt-2 max-w-2xl text-sm leading-6 text-brand-dark/75", children: SUGGESTED_RULES_NOTICE }) : null,
-      props.item.surface === "cli" ? /* @__PURE__ */ jsxRuntimeExports.jsx(LocalCliLoadCommands, { item: props.item, disabled: busy, onLoaded: props.onRefresh }) : null,
+      props.item.surface === "cli" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        LocalCliLoadCommands,
+        {
+          item: props.item,
+          disabled: busy,
+          onLoaded: props.onRefresh
+        },
+        `${props.item.cli_id}:${props.item.identity_hash}`
+      ) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         CustomExtensionCommandBrowser,
         {

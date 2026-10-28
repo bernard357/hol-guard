@@ -409,7 +409,7 @@ export function LocalCliDetail(props: {
           ) : null}
         </>
       ) : null}
-      {added || hasSuggestedRules(props.item) ? (
+      {added || hasSuggestedRules(props.item) || props.item.surface === "cli" ? (
         <section className="mt-8" aria-labelledby="custom-extension-commands-heading">
           <h2 id="custom-extension-commands-heading" className="text-lg font-semibold text-brand-dark">
             {detailCatalogHeading(props.item.surface)}
@@ -421,7 +421,8 @@ export function LocalCliDetail(props: {
             <p role="note" className="mt-2 max-w-2xl text-sm leading-6 text-brand-dark/75">{SUGGESTED_RULES_NOTICE}</p>
           ) : null}
           {props.item.surface === "cli" ? (
-            <LocalCliLoadCommands item={props.item} disabled={busy} onLoaded={props.onRefresh} />
+            <LocalCliLoadCommands key={`${props.item.cli_id}:${props.item.identity_hash}`}
+              item={props.item} disabled={busy} onLoaded={props.onRefresh} />
           ) : null}
           <CustomExtensionCommandBrowser
             key={props.item.cli_id}

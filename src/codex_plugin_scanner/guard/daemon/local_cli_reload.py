@@ -85,9 +85,17 @@ def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> Un
             "If it prints help for --help, find it again in Add custom extension using its full path.",
         )
     identity, _, _ = recognize_operator_cli(name, cwd=home_dir, home_dir=home_dir)
+    if identity is None:
+        # Guard's PATH can differ from the agent shell's, so a missing tool is
+        # not evidence that it was removed.
+        raise LocalCliApiError(
+            409,
+            "cli_not_on_guard_path",
+            f"Guard cannot find {name} on its own PATH, which can differ from your agent's. "
+            "Find it again in Add custom extension using its full path.",
+        )
     if (
-        identity is None
-        or identity.kind != "executable"
+        identity.kind != "executable"
         or identity.runner is not None
         or identity.cli_id != item.get("cli_id")
         or identity.identity_hash != item.get("identity_hash")
@@ -95,8 +103,8 @@ def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> Un
         raise LocalCliApiError(
             409,
             "cli_identity_changed",
-            f"The {name} on your PATH is not the program Guard recorded. "
-            "Find it again in Add custom extension to review the new one.",
+            f"The {name} Guard finds on its PATH is not the one it recorded: it is another copy, "
+            "or the program changed. Find it again in Add custom extension using its full path.",
         )
     return identity
 
