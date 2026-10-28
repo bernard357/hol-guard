@@ -35,7 +35,7 @@
           },
           "publisher": {
             "id": "community.kantorcodes",
-            "display_name": "Michael Kantor (HOL)",
+            "display_name": "Michael Kantor",
             "url": "https://github.com/kantorcodes"
           },
           "permissions": [
@@ -122,12 +122,11 @@
                     "discover"
                   ],
                   "allow_leading_options": false,
-                  "fail_secure_unknown_options": true,
+                  "fail_secure_unknown_options": false,
                   "forbidden_flags": [
                     "--json"
                   ],
                   "interspersed_flags": [
-                    "--wrap",
                     "--json"
                   ],
                   "interspersed_options_with_values": [],
@@ -595,6 +594,43 @@
         0
       ],
       "rule_id": "command.warden-cli.apply-policy"
+    },
+    {
+      "id": "warden_wrap_before_discover_not_in_scope",
+      "command": "warden --wrap discover",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.warden-cli.wrap-discovered"
+    },
+    {
+      "id": "warden_wrap_before_discover_permission_disabled",
+      "command": "warden --wrap discover",
+      "disabled_permissions": [
+        "command.warden-cli.permission.wrap-discovered"
+      ],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.warden-cli.wrap-discovered"
+    },
+    {
+      "id": "warden_discover_wrap_with_unknown_trailing_option",
+      "command": "warden discover --wrap --bogus",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.warden-cli.wrap-discovered"
     }
   ],
   "schema": "guard.command-extension-fixtures.v1"
