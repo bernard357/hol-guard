@@ -24,9 +24,12 @@ The initial scoped policy requests review of these exact MCP tool names:
 - `discourse_create_post`
 - `discourse_create_topic`
 - `discourse_update_topic`
+- `discourse_perform_reviewable_action`
 - `discourse_create_private_message`
 - `discourse_reply_private_message`
 - `discourse_invite_to_private_message`
+
+The moderation action is registered only when Discourse MCP write tools and its opt-in moderation toolset are enabled; a selected reviewable action can approve, reject or otherwise change forum content. Guard review is still required before the selected action is submitted.
 
 All other names **inherit** existing Guard policy. The contribution does
 not claim an exhaustive inventory of Discourse's expanding toolsets, and
@@ -43,7 +46,7 @@ remote Tool Execution API tools (`remote_*`). Remote tool calls do
 **not** check `allow_writes` in the MCP server and can have side effects. To
 disable remote discovery, select `--tools_mode discourse_api_only` (or set
 `"tools_mode": "discourse_api_only"` in the profile). This Guard contribution
-only enumerates the six named built-in write tools above; it does not claim
+only enumerates the seven named built-in write tools above; it does not claim
 coverage of dynamically discovered remote tools.
 
 Before allowing a call, confirm the selected Discourse site, target,
