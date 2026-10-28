@@ -50,6 +50,7 @@ fn envelope(digest: Option<&str>, recording_only: bool) -> GuardHookEnvelopeV2 {
             exact_action_control_digest: digest.map(str::to_owned),
         }),
         observe_local_cli: false,
+        record_receipt: false,
         structured_output_config: None,
     }
 }
