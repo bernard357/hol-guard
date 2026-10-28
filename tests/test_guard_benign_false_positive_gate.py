@@ -38,6 +38,7 @@ from tests.benign_fp_gate_mcp import McpCase, mcp_cases, mcp_failure, replay
 from tests.benign_fp_gate_projects import host_tool_path
 from tests.gauntlet_replay import OMP_CONTAINED, cursor_hook_fields, cursor_route_probe, source_ref_payload
 from tests.native_gate_retry import BUDGET_MISS_REASONS, review_with_unavailable_retry
+from tests.outbound_network_guard import outbound_network_attempts
 
 pytestmark = pytest.mark.usefixtures("native_hook_force")
 
@@ -232,17 +233,20 @@ def _review(case: GateCase, fixture: BenignFixture, worker: HookWorker) -> tuple
     if case.harness == "cursor":
         payload.update(cursor_hook_fields(case.tool, payload))
     # Approval baselines stay from before the first attempt, so a retry never hides a row.
-    result = review_with_unavailable_retry(
-        case.case_id,
-        lambda: worker.review_http_payload(
-            payload=payload,
-            params={},
-            default_harness=case.harness,
-            home_dir=fixture.home,
-            guard_home=fixture.guard_home,
-            workspace=fixture.cwd(case.cwd),
-        ),
-    )
+    # Hooks answer from local state: a review that reaches for a remote host fails the case.
+    with outbound_network_attempts() as attempts:
+        result = review_with_unavailable_retry(
+            case.case_id,
+            lambda: worker.review_http_payload(
+                payload=payload,
+                params={},
+                default_harness=case.harness,
+                home_dir=fixture.home,
+                guard_home=fixture.guard_home,
+                workspace=fixture.cwd(case.cwd),
+            ),
+        )
+    assert not attempts, f"{case.case_id}: hook review used the network: {attempts}"
     # Claude's PostToolUse output carries no reason code, so a silent policy
     # warning is visible only in the native receipt the review just wrote.
     receipt = worker._last_native_decision_receipt
