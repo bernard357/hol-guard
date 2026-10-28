@@ -236,12 +236,21 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
     configured
         .risk_actions
         .insert("prompt_injection".into(), "require-reapproval".into());
-    let result = apply_pre_tool_policy(
-        &snapshot(configured),
-        &json!({"hook_event_name": "UserPromptSubmit", "prompt": "Run an unknown action."}),
-        unknown,
-    )
-    .unwrap();
+    let mut detected = unknown.clone();
+    detected.prompt_risk_classes =
+        vec![guard_contracts::NativePromptRiskClassV1::PromptInjectionIntent];
+    let payload =
+        json!({"hook_event_name": "UserPromptSubmit", "prompt": "Run an unknown action."});
+    let injection =
+        apply_pre_tool_policy(&snapshot(configured.clone()), &payload, detected).unwrap();
+    assert!(
+        injection
+            .reason
+            .contains("asks to override trusted instructions"),
+        "{}",
+        injection.reason
+    );
+    let result = apply_pre_tool_policy(&snapshot(configured), &payload, unknown).unwrap();
     assert_eq!(result.minimum_action, "require-reapproval");
     assert_eq!(result.decision, "deny");
     assert!(
@@ -249,10 +258,19 @@ fn prompt_risk_floor_remains_for_unproven_prompt_intent() {
         "{}",
         result.reason
     );
+    // Without detected override wording the setting still applies, but the
+    // text must not accuse the prompt of overriding instructions.
+    assert!(
+        !result
+            .reason
+            .contains("asks to override trusted instructions"),
+        "{}",
+        result.reason
+    );
     assert!(
         result
             .reason
-            .contains("asks to override trusted instructions"),
+            .contains("uses wording Guard holds for review"),
         "{}",
         result.reason
     );

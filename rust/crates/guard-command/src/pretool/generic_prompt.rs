@@ -436,7 +436,22 @@ pub(super) fn benign_prompt_text(text: &str) -> bool {
     // Words inside an unconditional prohibition ("never X or Y") are not
     // requested actions; the strong intent detectors run on the raw prompt.
     !prompt_requests_secret(&remainder)
-        && !risky_action.is_match(&mask_format_options(&mask_negated_clauses(&remainder)))
+        && !risky_action.is_match(&mask_transfer_encoding(&mask_format_options(
+            &mask_negated_clauses(&remainder),
+        )))
+}
+
+/// `Transfer-Encoding` and `Content-Transfer-Encoding` name how an HTTP or
+/// MIME body is encoded on the wire; a request to transfer data still names
+/// the verb on its own, which the exfiltration detectors also read.
+fn mask_transfer_encoding(value: &str) -> String {
+    static ENCODING: OnceLock<Regex> = OnceLock::new();
+    ENCODING
+        .get_or_init(|| {
+            Regex::new(r"(?i)\btransfer(?:-|\s+)encodings?\b").expect("bounded transfer encoding")
+        })
+        .replace_all(value, "wire-encoding")
+        .into_owned()
 }
 
 /// `--format`, `-format` and the `format:` value of `--pretty=format:` choose
