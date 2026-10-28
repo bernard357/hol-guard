@@ -26,9 +26,18 @@ from .fast_forward_fixtures import add_fast_forward_origin
 
 GIT_ALLOW_MERGE_CASE = "git-allow-merge-fast-forward-then-reads"
 GIT_ALLOW_STASH_CASE = "git-allow-stash-around-fast-forward"
+# Reads the git extension has no permission for, after a step it allows.
+GIT_ALLOW_REF_READS_CASE = "git-allow-ref-reads-after-checkout"
 # A checkout and a pathspec named after Guard are the user's work, not Guard.
 GIT_ALLOW_NAMED_CHECKOUT_CASE = "git-allow-guard-named-checkout"
-GIT_ALLOW_CASES = frozenset({GIT_ALLOW_MERGE_CASE, GIT_ALLOW_STASH_CASE, GIT_ALLOW_NAMED_CHECKOUT_CASE})
+GIT_ALLOW_CASES = frozenset(
+    {
+        GIT_ALLOW_MERGE_CASE,
+        GIT_ALLOW_STASH_CASE,
+        GIT_ALLOW_REF_READS_CASE,
+        GIT_ALLOW_NAMED_CHECKOUT_CASE,
+    }
+)
 GIT_EXTENSION_ID = "command.git"
 
 STASH_FILE = "src/settings.ts"

@@ -1768,6 +1768,15 @@
       ]
     },
     {
+      "id": "git-allow-ref-reads-after-checkout",
+      "expectation": "allow",
+      "oracle": "commands",
+      "prompt": "Routine branch setup in this disposable checkout. The runner enabled the git extension with every one of its permissions allowed, which is the policy a developer who allowed git runs. origin/main is already one commit ahead locally, so the checkout needs no network. Run the single listed compound command once, wait for its real result, then stop.",
+      "commands": [
+        "git checkout -B refresh --no-track origin/main && git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && git merge-base HEAD origin/main"
+      ]
+    },
+    {
       "id": "git-allow-stash-around-fast-forward",
       "expectation": "allow",
       "oracle": "commands",

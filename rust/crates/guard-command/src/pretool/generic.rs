@@ -48,6 +48,8 @@ pub fn omp_bash_execution_directory(
 mod omp_bash_cwd_tests;
 #[path = "open_quote.rs"]
 mod open_quote;
+#[path = "process_substitution.rs"]
+mod process_substitution;
 #[path = "generic_pure_eval.rs"]
 mod pure_eval;
 #[path = "generic_read_note.rs"]
@@ -654,6 +656,47 @@ fn evaluate_envelope(
         }
     }
 
+    // `diff <(sort a.txt) b.txt` hands `diff` a pipe to read. Prove the inner
+    // commands and the command around them separately, and keep the projected
+    // answer only when every one of them settles on its own.
+    if let Some(substitution) = signals
+        .command
+        .as_deref()
+        .filter(|_| project_redirects && !search_scope_proven && !apply_patch_proven)
+        .and_then(process_substitution::project)
+    {
+        let raw_text = signals.command.as_deref().unwrap_or_default();
+        let inner_reads = substitution.inner.iter().all(|inner| {
+            let inner_payload = payload_with_command(payload, raw_text, inner);
+            process_substitution::reads_only(&evaluate_envelope(
+                harness,
+                event,
+                &inner_payload,
+                controls,
+                deadline,
+                context,
+                execution_environment,
+                project_redirects,
+            ))
+        });
+        if inner_reads {
+            let projected_payload = payload_with_command(payload, raw_text, &substitution.command);
+            let projected = evaluate_envelope(
+                harness,
+                event,
+                &projected_payload,
+                controls,
+                deadline,
+                context,
+                execution_environment,
+                project_redirects,
+            );
+            if process_substitution::reads_only(&projected) {
+                return projected;
+            }
+        }
+    }
+
     if let Some(projection) = signals
         .command
         .as_deref()
@@ -1174,17 +1217,25 @@ fn git_read_order_settled_by_allow(
     else {
         return false;
     };
-    result.minimum_action == "allow"
-        && result.action.bounded
-        && !result.action.sensitive_target
-        && super::git_read_floor::unsettled_steps_before_reads(
+    if result.minimum_action != "allow" || !result.action.bounded || result.action.sensitive_target
+    {
+        return false;
+    }
+    super::git_read_floor::unsettled_steps_before_reads(
+        model,
+        context,
+        deadline,
+        execution_environment,
+    )
+    .is_some_and(|steps| {
+        super::git_read_after_allow::allow_settles_read_order(
             model,
+            &steps,
             context,
             deadline,
             execution_environment,
         )
-        .is_some()
-        && controls.explicit_allow_covers_command(model, observations, context)
+    }) && controls.explicit_allow_covers_command(model, observations, context)
 }
 
 /// The Git floor's reason when every Git read was proven helper-free on its

@@ -196,6 +196,11 @@ pub(crate) fn coerce_config(merged: &Map<String, Value>, managed: Option<&Manage
         "runtime_detector_debug_trace": coerce::loaded_bool(get("runtime_detector_debug_trace")),
         "runtime_detector_disabled_ids": coerce::string_list(get("runtime_detector_disabled_ids")),
         "sandbox_analysis": coerce::sandbox_analysis(get("sandbox_analysis")),
+        // Only an explicit `false` stops the worker; a value Guard cannot read leaves it on.
+        "workspace_assessment_enabled": !matches!(
+            get("workspace_assessment_enabled"),
+            Some(Value::Bool(false))
+        ),
         "harness_actions": coerce::action_map(get("harnesses")),
         "publisher_actions": coerce::action_map(get("publishers")),
         "artifact_actions": coerce::action_map(get("artifacts")),

@@ -22,6 +22,7 @@ from .fork_safety import forget_in_child
 from .native_approval_errors import FINITE_FAILURE_CODES
 from .native_resident_revival import (
     RESTART_BLOCKED_CODE,
+    HoldKey,
     arm_restart_hold,
     clear_restart_hold,
     is_restart_blocked_frame,
@@ -106,6 +107,13 @@ _LAST_FAILURE_CODE: ContextVar[str | None] = ContextVar(
     "native_resident_client_failure_code",
     default=None,
 )
+# The pool whose restart hold produced the current context's refusal. A caller
+# deciding whether to wait out that hold needs the key it was armed under, not
+# whichever runtime happens to hold the longest one.
+_LAST_HOLD_KEY: ContextVar[HoldKey | None] = ContextVar(
+    "native_resident_client_failure_hold_key",
+    default=None,
+)
 _RESIDENTS_LOCK = threading.Lock()
 _RESIDENTS: dict[tuple[Path, Path], Mapping[str, str]] = {}
 forget_in_child(_RESIDENTS)
@@ -116,9 +124,19 @@ def native_resident_client_failure_code() -> str | None:
     return _LAST_FAILURE_CODE.get()
 
 
+def native_resident_client_failure_hold_key() -> HoldKey | None:
+    """Return the hold key behind the current context's restart refusal."""
+    return _LAST_HOLD_KEY.get()
+
+
 def record_native_resident_client_failure_code(code: str | None) -> None:
     """Record a privacy-safe failure code for the current native client request."""
     _LAST_FAILURE_CODE.set(code)
+
+
+def record_native_resident_client_failure_hold_key(key: HoldKey | None) -> None:
+    """Record the restart hold the current native client request was refused under."""
+    _LAST_HOLD_KEY.set(key)
 
 
 def record_native_resident_error_frame(decoded: Mapping[str, object]) -> None:
@@ -213,6 +231,7 @@ class _PersistentNativeClientPool:
             # The Rust client just refused to respawn a crash-looping resident.
             # Answer the same bounded refusal instead of spawning a client per call.
             _LAST_FAILURE_CODE.set(RESTART_BLOCKED_CODE)
+            _LAST_HOLD_KEY.set(self._hold_key)
             return restart_blocked_frame()
         client = self._lease(deadline_monotonic=deadline_monotonic)
         if client is None:
@@ -225,6 +244,7 @@ class _PersistentNativeClientPool:
                 if is_restart_blocked_frame(response):
                     arm_restart_hold(self._hold_key)
                     _LAST_FAILURE_CODE.set(RESTART_BLOCKED_CODE)
+                    _LAST_HOLD_KEY.set(self._hold_key)
                 else:
                     clear_restart_hold(self._hold_key)
             return response
@@ -298,6 +318,7 @@ class _PersistentNativeClientPool:
                     self._condition.notify_all()
 
     def close(self, *, deadline_monotonic: float | None = None) -> bool:
+        clear_restart_hold(self._hold_key)
         with self._condition:
             self._closed = True
             clients = tuple(self._clients)
@@ -612,6 +633,7 @@ def native_resident_client_request(
 ) -> bytes | None:
     """Send bounded bytes through a persistent Rust client stream."""
     _LAST_FAILURE_CODE.set(None)
+    _LAST_HOLD_KEY.set(None)
     if not payload or (deadline_monotonic is None and (timeout_seconds is None or timeout_seconds <= 0)):
         _LAST_FAILURE_CODE.set("native_client_request_invalid")
         return None
@@ -640,9 +662,11 @@ __all__ = [
     "close_native_resident_clients",
     "close_native_residents",
     "native_resident_client_failure_code",
+    "native_resident_client_failure_hold_key",
     "native_resident_client_ready",
     "native_resident_client_request",
     "record_native_resident_client_failure_code",
+    "record_native_resident_client_failure_hold_key",
     "record_native_resident_error_frame",
     "resident_state_files",
     "retire_native_resident_for_update",

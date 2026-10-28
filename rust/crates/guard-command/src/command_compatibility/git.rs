@@ -31,7 +31,7 @@ const RULES: &[(&str, &str)] = &[
     ("reflog", "command.git.reflog"),
 ];
 
-fn command_index(arguments: &[String]) -> Option<usize> {
+pub(crate) fn command_index(arguments: &[String]) -> Option<usize> {
     let mut index = 0;
     while let Some(argument) = arguments.get(index) {
         let option = argument.split('=').next().unwrap_or(argument);
