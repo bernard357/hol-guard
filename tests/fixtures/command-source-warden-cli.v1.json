@@ -468,6 +468,19 @@
       "rule_id": "command.warden-cli.wrap-discovered"
     },
     {
+      "id": "warden_windows_cmd_discover_wrap",
+      "command": "warden.cmd discover --wrap",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.warden-cli.wrap-discovered"
+    },
+    {
       "id": "warden_discover_only",
       "command": "warden discover",
       "disabled_permissions": [],
@@ -514,6 +527,19 @@
     {
       "id": "warden_apply_policy",
       "command": "warden policy apply --repo https://github.com/example/policies --policy strict.yaml",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.warden-cli.apply-policy"
+    },
+    {
+      "id": "warden_windows_cmd_apply_policy",
+      "command": "warden.cmd policy apply --repo https://github.com/example/policies --policy strict.yaml",
       "disabled_permissions": [],
       "enabled_extensions": [
         "command.warden-cli"
