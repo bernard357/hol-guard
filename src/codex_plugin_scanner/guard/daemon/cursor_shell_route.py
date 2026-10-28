@@ -14,14 +14,17 @@ exact argv this daemon quotes, for this daemon's Guard home, a workspace that
 matches the hook's, and a private snapshot the sink will read. The sink
 re-authorizes the saved call before it runs anything, so admitting the
 command never widens what runs.
+
+The resident reads both: this module reviews a probe through the daemon's
+edge and ships that edge, the call and the sink command it binds to the
+resident's ``cursor_shell_route`` render, which answers as the direct lane
+does.
 """
 
 from __future__ import annotations
 
 import logging
-import shlex
 import sys
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,14 +41,10 @@ _SOURCE_HOOK_FIELD = "cursor_source_hook_event"
 _PROBE_FIELD = "cursor_route_probe"
 _BEFORE_SHELL = "beforeShellExecution"
 _RECEIPT_ONLY_FIELD = "guard_containment_receipt_only"
-_ROUTED_REASON = "native_contained_execution_routed"
-_SINK_ARGS = ("guard", "execute-contained-test")
+_SINK_VERB = "execute-contained-test"
 _ALLOW: dict[str, object] = {"policy_action": "allow"}
-# The sink rewrite reads a Claude-shaped receipt (policy fields beside
-# ``hookSpecificOutput``). Cursor's own rendering has neither, so the probe
-# renders the verdict in Z Code's shape; the hook copies only the rewritten
-# input back to Cursor.
-_RECEIPT_FORMAT = "zcode"
+# The edge fields the resident reads to route a probe.
+_EDGE_FIELDS = ("harness", "event_name", "containment_route", "result")
 
 
 def cursor_shell_route_response(
@@ -63,7 +62,7 @@ def cursor_shell_route_response(
         return None
     if is_cursor_shell_probe(payload):
         try:
-            return _probe_response(
+            routed = _probe_response(
                 worker,
                 payload=payload,
                 home_dir=home_dir,
@@ -72,13 +71,18 @@ def cursor_shell_route_response(
                 deadline=deadline,
             )
         except Exception:
-            # beforeShellExecution still reviews the call that runs.
             _LOGGER.warning("Cursor shell route probe failed", exc_info=True)
-            return dict(_ALLOW)
-    if payload.get(_SOURCE_HOOK_FIELD) == _BEFORE_SHELL and _admitted_sink(
-        payload, home_dir=home_dir, guard_home=guard_home, workspace=workspace
-    ):
-        return {"policy_action": "allow", "reason_code": _ROUTED_REASON}
+            routed = None
+        # beforeShellExecution still reviews the call that runs.
+        return routed if routed is not None else dict(_ALLOW)
+    if workspace is not None and payload.get(_SOURCE_HOOK_FIELD) == _BEFORE_SHELL and _names_sink(payload):
+        try:
+            return _resident_route(
+                payload, None, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
+            )
+        except Exception:
+            # The call is reviewed as usual, so a sink it does not admit runs nowhere.
+            _LOGGER.warning("Cursor shell sink admission failed", exc_info=True)
     return None
 
 
@@ -97,21 +101,10 @@ def is_cursor_shell_probe(payload: Mapping[str, object]) -> bool:
     )
 
 
-def _command(payload: Mapping[str, object]) -> tuple[dict[str, object], str] | None:
+def _names_sink(payload: Mapping[str, object]) -> bool:
     tool_input = payload.get("tool_input")
-    if not isinstance(tool_input, dict):
-        return None
-    command = tool_input.get("command")
-    return (tool_input, command) if isinstance(command, str) else None
-
-
-def _same_directory(value: object, workspace: Path) -> bool:
-    if not isinstance(value, str) or not value:
-        return False
-    try:
-        return Path(value).expanduser().resolve(strict=True) == workspace.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError):
-        return False
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return isinstance(command, str) and _SINK_VERB in command
 
 
 def _probe_response(
@@ -122,23 +115,14 @@ def _probe_response(
     guard_home: Path,
     workspace: Path | None,
     deadline: float | None,
-) -> dict[str, object]:
-    from ..adapters.zcode_contained_tests import route_zcode_containment
-    from ..native_hook_containment_route import edge_containment_route
+) -> dict[str, object] | None:
     from ..native_policy_snapshot_harness_postures import recording_only_for_binding
-    from .hook_fail_closed import render_pre_tool
 
-    call = _command(payload)
-    if workspace is None or call is None:
-        return dict(_ALLOW)
-    # The sink runs in the workspace, so only a call that runs there moves.
-    # Cursor names the directory at the top level and may repeat it in the call.
-    directories = (payload.get("cwd"), call[0].get("cwd"), call[0].get("working_directory"))
-    if any(value not in (None, "") and not _same_directory(value, workspace) for value in directories):
-        return dict(_ALLOW)
+    if workspace is None:
+        return None
     snapshot = worker._native_policy_snapshot(workspace, deadline=deadline)
     if snapshot is None or recording_only_for_binding(snapshot, _CURSOR):
-        return dict(_ALLOW)
+        return None
     edge = worker._review_raw_hook_native(
         payload=dict(payload),
         harness=_CURSOR,
@@ -151,74 +135,37 @@ def _probe_response(
         deadline=deadline,
         policy_snapshot=snapshot,
     )
-    if edge is None or edge.get("harness") != _CURSOR or edge.get("event_name") != _PRE_TOOL_USE:
-        return dict(_ALLOW)
-    result = edge.get("result")
-    if not isinstance(result, Mapping):
-        return dict(_ALLOW)
-    route = edge_containment_route(
-        edge, result, event_name=_PRE_TOOL_USE, recording_only=False, guard_home=guard_home, deadline=deadline
+    if edge is None:
+        return None
+    return _resident_route(
+        payload, edge, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
     )
-    if route != "sink":
-        return dict(_ALLOW)
-    receipt = render_pre_tool(_RECEIPT_FORMAT, result, guard_home=guard_home, deadline=deadline)
-    # The resident decides whether the sink takes the call and writes its
-    # snapshot in the same answer; a call it keeps comes back as the receipt.
-    routed = route_zcode_containment(
-        receipt,
-        harness=_CURSOR,
-        payload=payload,
-        guard_home=guard_home,
-        home_dir=home_dir,
-        workspace=workspace,
-        bridge=True,
-        deadline=deadline,
-    )
-    if routed.get("policy_action") != "allow" or routed.get("reason_code") != _ROUTED_REASON:
-        return dict(_ALLOW)
-    return routed
 
 
-def _admitted_sink(
+def _resident_route(
     payload: Mapping[str, object],
+    edge: Mapping[str, object] | None,
     *,
     home_dir: Path,
     guard_home: Path,
-    workspace: Path | None,
-) -> bool:
-    """Whether a ``beforeShellExecution`` call has the shape of the sink command a probe wrote.
-
-    The hook checks only the argv shape. The sink itself opens the request
-    owner-only, checks its digest and re-authorizes the command, so a request
-    that fails those checks is refused there.
-    """
-
+    workspace: Path,
+    deadline: float | None = None,
+) -> dict[str, object] | None:
     from ..adapters.zcode_contained_tests import contained_sink_command_prefix
+    from ..native_hook_render import native_render_cli
 
-    call = _command(payload)
-    if workspace is None or call is None or "execute-contained-test" not in call[1]:
-        return False
-    try:
-        argv = shlex.split(call[1])
-        prefix = contained_sink_command_prefix()
-        expected_head = (*prefix, *_SINK_ARGS, "--harness", _CURSOR, "--guard-home", str(guard_home))
-        tail = argv[len(expected_head) :]
-        if tuple(argv[: len(expected_head)]) != expected_head or len(tail) != 8:
-            return False
-        flags, values = tail[0::2], tail[1::2]
-        if flags != ["--workspace", "--request-file", "--request-sha256", "--home"]:
-            return False
-        sink_workspace, request_file, request_sha256, sink_home = values
-        if len(request_sha256) != 64 or not set(request_sha256) <= set("0123456789abcdef"):
-            return False
-        if sink_home != str(home_dir) or not _same_directory(sink_workspace, workspace):
-            return False
-        request = Path(request_file)
-        if not request.is_absolute() or request.parent.parent.resolve() != Path(tempfile.gettempdir()).resolve():
-            return False
-    except Exception:
-        return False
-    return True
+    params: dict[str, object] = {
+        "payload": dict(payload),
+        "workspace": str(workspace),
+        "home_dir": str(home_dir),
+        "guard_home": str(guard_home),
+        "sink_command": list(contained_sink_command_prefix()),
+    }
+    if edge is not None:
+        params["edge"] = {key: edge[key] for key in _EDGE_FIELDS if key in edge}
+    rendered = native_render_cli("cursor_shell_route", _CURSOR, params, guard_home=guard_home, deadline=deadline)
+    value = rendered[1].get("value") if rendered is not None and rendered[1] is not None else None
+    return dict(value) if isinstance(value, dict) else None
 
 
 __all__ = ["cursor_shell_route_response", "is_cursor_shell_probe"]

@@ -1,6 +1,6 @@
 //! Cursor's route probe and the contained sink it rewrites a call into.
 
-use super::{admit_sink, probe_answer, route, unreviewed_probe, Route, Scope};
+use super::{admit_sink, daemon_answer, probe_answer, route, unreviewed_probe, Route, Scope};
 use crate::codex_hook_bridge::contain::discard;
 use crate::hook_direct::HookDirectDefer;
 use serde_json::{json, Map, Value};
@@ -238,4 +238,87 @@ fn a_cursor_route_needs_the_bound_sink_command() {
         Scope::new("/repo", HOME, GUARD_HOME, None),
         Err(HookDirectDefer::BindingIncomplete)
     ));
+}
+
+fn daemon_params(
+    workspace: &str,
+    payload: Map<String, Value>,
+    edge: Option<Value>,
+) -> Map<String, Value> {
+    let mut params = object(json!({
+        "payload": payload,
+        "workspace": workspace,
+        "home_dir": HOME,
+        "guard_home": GUARD_HOME,
+        "sink_command": ["/opt/hol guard/bin/python", "-I"],
+    }));
+    if let Some(edge) = edge {
+        params.insert("edge".to_owned(), edge);
+    }
+    params
+}
+
+#[test]
+fn the_daemon_path_routes_a_probe_and_admits_the_sink_it_wrote() {
+    let (_directory, workspace) = workspace();
+    let edge: Value = serde_json::from_slice(&sandboxed_edge("sink")).unwrap();
+    let probe_params = daemon_params(
+        &workspace,
+        probe("make build", &workspace),
+        Some(edge.clone()),
+    );
+    let response = daemon_answer(&probe_params).unwrap().unwrap();
+    let answer = json!({ "harness_response": response });
+    let command = routed_command(&answer).to_owned();
+    let request = request_file(&command);
+
+    assert_eq!(
+        daemon_answer(&daemon_params(&workspace, sink_call(&command), None)).unwrap(),
+        Some(json!({
+            "policy_action": "allow",
+            "reason_code": "native_contained_execution_routed",
+        }))
+    );
+    // A tampered sink call or an ordinary call takes the daemon's review.
+    for payload in [
+        sink_call(&format!("{command} --extra")),
+        object(
+            json!({ "hook_event_name": "PreToolUse", "tool_name": "Shell",
+                       "tool_input": { "command": "make build" } }),
+        ),
+    ] {
+        assert_eq!(
+            daemon_answer(&daemon_params(&workspace, payload.clone(), None)).unwrap(),
+            None,
+            "{payload:?}"
+        );
+    }
+    // A probe outside the workspace never moves into the sandbox.
+    assert_eq!(
+        daemon_answer(&daemon_params(
+            &workspace,
+            probe("make build", "/"),
+            Some(edge)
+        ))
+        .unwrap(),
+        Some(json!({ "policy_action": "allow" }))
+    );
+    discard(Path::new(&request));
+}
+
+#[test]
+fn the_daemon_path_refuses_a_request_missing_its_binding() {
+    let (_directory, workspace) = workspace();
+    let mut no_sink = daemon_params(&workspace, probe("make build", &workspace), Some(json!({})));
+    no_sink.remove("sink_command");
+    let no_edge = daemon_params(&workspace, probe("make build", &workspace), None);
+    let mut bad_sink = no_edge.clone();
+    bad_sink.insert("sink_command".to_owned(), json!([1]));
+    for params in [no_sink, no_edge, bad_sink] {
+        assert_eq!(
+            daemon_answer(&params),
+            Err("native_hook_render_invalid"),
+            "{params:?}"
+        );
+    }
 }

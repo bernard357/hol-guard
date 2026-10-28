@@ -432,8 +432,11 @@ def _assert_containment_routed_by_resident() -> None:
         raise RuntimeError(f"containment adapter writes or quotes the sink request itself: {sorted(imported)}")
     if "native_containment_rewrite(" not in _read(_CONTAINMENT_GRANT):
         raise RuntimeError("a granted containment review is not rewritten by the resident")
-    if "edge_containment_route(" not in _read(_CONTAINMENT_DAEMON):
-        raise RuntimeError("daemon containment does not ask the resident for the route")
+    # The daemon routes by the route the resident stamped on its edge answer
+    # and never asks for, or computes, one of its own.
+    daemon = _read(_CONTAINMENT_DAEMON)
+    if 'edge.get("containment_route"' not in daemon or "native_containment_route" in daemon:
+        raise RuntimeError("daemon containment does not route by the resident's stamped route")
     edge = _read(Path("rust/crates/guard-runtime/src/edge.rs"))
     if "edge_route(" not in edge:
         raise RuntimeError("the resident's PreToolUse edge does not carry its containment route")
@@ -446,28 +449,23 @@ def _assert_containment_routed_by_resident() -> None:
         raise RuntimeError("the edge's containment rewrite is not answered after its self-check")
     if "containment_rewrite(&inputs)" not in _read(Path("rust/crates/guard-runtime/src/edge_containment.rs")):
         raise RuntimeError("the edge's containment rewrite is not the resident's rewrite")
-    daemon = _read(_CONTAINMENT_DAEMON)
     if 'edge.get("containment_rewrite")' not in daemon or "route_zcode_containment(" not in daemon:
         raise RuntimeError("daemon sink routing does not fall back to the resident when the edge did not rewrite")
     transport = ast.parse(_read(_CONTAINMENT_TRANSPORT), filename=str(_CONTAINMENT_TRANSPORT))
-    # The route stamped on the edge is the resident's; without one the
-    # transport asks, and it never reads the result's action itself.
-    from_edge = _top_level_function(transport, "edge_containment_route", _CONTAINMENT_TRANSPORT)
-    if "native_containment_route" not in _ordered_call_names(from_edge) or any(
-        isinstance(node, ast.Constant) and node.value == "sandbox-required" for node in ast.walk(from_edge)
-    ):
-        raise RuntimeError("the edge route is not the resident's answer")
-    for name in ("native_containment_route", "native_containment_sink", "native_containment_rewrite"):
-        fn = _top_level_function(transport, name, _CONTAINMENT_TRANSPORT)
-        raises_outage = any(
-            isinstance(node, ast.Raise)
-            and isinstance(node.exc, ast.Call)
-            and isinstance(node.exc.func, ast.Name)
-            and node.exc.func.id == "NativeHookDecisionError"
-            for node in ast.walk(fn)
-        )
-        if not raises_outage:
-            raise RuntimeError(f"{name} does not fail closed to the host outage")
+    retired = {"native_containment_route", "edge_containment_route", "native_containment_sink"}
+    defined = {node.name for node in transport.body if isinstance(node, ast.FunctionDef)}
+    if defined & retired:
+        raise RuntimeError(f"the containment transport asks for a route again: {sorted(defined & retired)}")
+    rewrite = _top_level_function(transport, "native_containment_rewrite", _CONTAINMENT_TRANSPORT)
+    raises_outage = any(
+        isinstance(node, ast.Raise)
+        and isinstance(node.exc, ast.Call)
+        and isinstance(node.exc.func, ast.Name)
+        and node.exc.func.id == "NativeHookDecisionError"
+        for node in ast.walk(rewrite)
+    )
+    if not raises_outage:
+        raise RuntimeError("native_containment_rewrite does not fail closed to the host outage")
 
 
 def _cli_gate() -> None:

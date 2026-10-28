@@ -102,7 +102,9 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or not isinstance(payload.get("receipt_recorded", False), bool)
     ):
         return None
-    route = payload.get("containment_route", "none")
+    # Every resident stamps its containment route; an edge without one would
+    # skip containment, so it is refused rather than read as `none`.
+    route = payload.get("containment_route")
     if not isinstance(route, str) or route not in {"none", "sink", "grant"}:
         return None
     rewrite = payload.get("containment_rewrite")

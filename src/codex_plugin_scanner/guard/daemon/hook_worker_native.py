@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from ..cli.commands_support_command_activity import hook_post_succeeded
 from ..native_codex_binding_capture import CodexBindingCaptureWriter
-from ..native_hook_containment_route import edge_containment_route
 from ..native_hook_decision import NativeHookDecisionError
 from ..native_policy_snapshot_harness_postures import recording_only_for_binding
 from ..native_resident_client import (
@@ -414,17 +413,10 @@ class HookWorkerNativeMixin:
                         ),
                         True,
                     )
+            # The resident stamped its route on the edge answer, and the decoder
+            # refuses an unstamped one; Python never picks a route.
+            containment = edge.get("containment_route", "none")
             try:
-                # The resident routes the call, as on the CLI path; without its
-                # answer the host gets the outage shape, never a route picked here.
-                containment = edge_containment_route(
-                    edge,
-                    native_result,
-                    event_name=native_event,
-                    recording_only=recording_only,
-                    guard_home=guard_home,
-                    deadline=deadline,
-                )
                 contained = None
                 if containment == "grant":
                     contained = granted_containment_response(
