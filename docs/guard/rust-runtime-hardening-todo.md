@@ -50,7 +50,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T024 enforce authentication/header/payload/evaluation/write deadlines — `lib.rs` (`AUTH_TIMEOUT`, `HEADER_TIMEOUT`, `PAYLOAD_TIMEOUT`, `RESPONSE_TIMEOUT`), applied in `resident_transport.rs`; `hardening.rs::TOTAL_REQUEST_BUDGET` bounds the whole request;
 - [ ] NRH-T025 add cross-language golden vectors and strict Python response binding;
 - [x] NRH-T026 add POSIX mutual authentication while preserving `0700` directory and `0600` socket defenses — `resident_peer_identity.rs` reads the peer uid/gid from the kernel (`SO_PEERCRED` on Linux, `getpeereid` elsewhere); `resident_endpoint.rs` keeps the `0700` directory and proves cleanup does not follow a replacement symlink;
-- [ ] NRH-T027 replace handwritten first-party HMAC with an audited minimal crate. In flight: `resident_auth_crypto.rs`, `daemon_policy_authority.rs`, `package_intent_parser.rs` and `local_supply_chain.rs` move to the RustCrypto `hmac` crate, each pinned to RFC 4231 or Python-computed vectors; mark this done when that change merges. `guard-policy-snapshot/src/policy_snapshot_crypto.rs` deliberately keeps its own implementation: it zeroizes its key block, pads and intermediate digest, which the crate does not;
+- [x] NRH-T027 replace handwritten first-party HMAC with an audited minimal crate — `resident_auth_crypto.rs`, `daemon_policy_authority.rs`, `package_intent_parser.rs` and `local_supply_chain.rs` compute their tags with the RustCrypto `hmac` crate, each pinned to RFC 4231 or Python-computed vectors. `guard-policy-snapshot/src/policy_snapshot_crypto.rs` deliberately keeps its own implementation: it zeroizes its key block, pads and intermediate digest, which the crate does not;
 - [ ] NRH-T028 rotate/clear per-process auth material and prove it never reaches argv/env/files/logs/payloads;
 - [x] NRH-T029 separate small handshake and authentication-failure budgets — `lib.rs` sizes the handshake lane (`AUTH_WORKERS`, `AUTH_QUEUE_CAPACITY`, `AUTH_QUEUE_CAPACITY_MAX`) apart from the evaluation lane (`EVALUATION_WORKERS`, `EVALUATION_QUEUE_CAPACITY`);
 - [x] NRH-T030 remove blocking permit wait from accept loop — `resident_transport_service.rs` accepts and hands off; `resident_transport.rs` answers `native_overloaded` on `TrySendError::Full` rather than blocking an auth worker;
@@ -58,7 +58,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T032 reserve lifecycle capacity, use deadline-aware admission and RAII release — `native_runtime_admission.rs`, `policy_enforcement_admission.rs`, `hardening.rs::request_expired`;
 - [x] NRH-T033 handle transient accept errors with bounded backoff and fatal corruption with explicit exit — `hardening.rs` (`classify_io_error`, `accept_retry_delay` between 5 ms and 1 s); any unclassified error exits with `native_socket_accept_failed`;
 - [x] NRH-T034 reject poisoned socket paths and remove only verified stale sockets — `resident_endpoint.rs::remove_if_same`, with tests that a replacement socket survives and a replacement symlink is not followed;
-- [ ] NRH-T035 add malformed frame, slowloris, auth flood, low-descriptor, panic, capacity, and no-busy-spin tests — descriptor pressure, interrupted accept, idle-poll and capacity/overload cases exist (`hardening.rs` tests, `resident_transport_continuation_tests.rs`); malformed-frame, slowloris and auth-flood cases are still missing.
+- [x] NRH-T035 add malformed frame, slowloris, auth flood, low-descriptor, panic, capacity, and no-busy-spin tests — descriptor pressure, interrupted accept, idle-poll and capacity/overload cases live in `hardening.rs` and `resident_transport_continuation_tests.rs`; `resident_transport_hardening_tests.rs` adds the malformed-frame, stalled-client and auth-flood cases;
 
 ## PR 3: Supervision, fallback budgeting, and daemon fail-safe
 
@@ -120,7 +120,7 @@ measured parity gate, not the detection itself.
 ## PR 6: DX, observability, repair, and dead-code cleanup
 
 - [x] NRH-T100 add stable native status model for CLI/dashboard/Desktop/MDM — `native_runtime_resilience.rs::NativeRuntimeHealthSnapshot`, surfaced through `native_runtime.py::native_runtime_health`;
-- [ ] NRH-T101 add `hol-guard doctor --native` and `hol-guard runtime status --json` — `hol-guard guard doctor` and `hol-guard guard runtime [posture] --json` exist, and the health model is in place, but the posture command reports harness detections and advisories, not the native health snapshot, and `doctor` has no `--native` flag;
+- [x] NRH-T101 add `hol-guard doctor --native` and `hol-guard runtime status --json` — `guard doctor --native` reports the native health snapshot and `guard runtime status --json` renders it as a machine-readable document;
 - [ ] NRH-T102 add idempotent native lifecycle repair and clear diagnosis for noexec/wrong wheel/unsupported/manifest/permission/stale endpoint/circuit/daemon — `codex_hook_repair_native.py` and the protection repair page cover part of this;
 - [ ] NRH-T103 add bounded aggregate metrics for latency/size/cost/queue/overload/auth/fallback/timeout/crash/restart/circuit/mismatch;
 - [ ] NRH-T104 add support-bundle redaction and privacy tests;

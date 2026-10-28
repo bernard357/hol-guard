@@ -508,3 +508,7 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "resident_transport_continuation_tests.rs"]
 mod continuation_tests;
+
+#[cfg(test)]
+#[path = "resident_transport_hardening_tests.rs"]
+mod hardening_tests;
