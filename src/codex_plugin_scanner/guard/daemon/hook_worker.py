@@ -337,6 +337,7 @@ class HookWorker(HookWorkerNativeMixin):
         payload: dict[str, object],
     ) -> dict[str, object]:
         """Present the pending Guard approval when Claude shows a permission prompt."""
+        from ..cli import commands_support  # noqa: F401
         from ..cli._commands_shared import _now
         from ..cli.commands_support_claude_approval import (
             _claude_permission_prompt_additional_context,

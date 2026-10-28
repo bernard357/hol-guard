@@ -106,9 +106,6 @@ def codex_tool_output_native(
     home_dir: str | os.PathLike[str] | None = None,
     exec_context: bool = False,
     body: dict[str, object] | None = None,
-    prompt_text: str | None = None,
-    config_path: str | os.PathLike[str] | None = None,
-    deadline_ms: int = 0,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
 ) -> ToolOutputAnswer:
     """Ask the resident for one Codex tool-output verdict."""
@@ -126,24 +123,6 @@ def codex_tool_output_native(
             action.update({"command": command, "cwd": _anchored(cwd), "home_dir": _anchored(home_dir)})
             if kind == "secret_like_source_name":
                 action["exec_context"] = exec_context
-        elif kind == "prompt_credential_file":
-            action.update(
-                {
-                    "prompt_text": prompt_text or "",
-                    "cwd": _anchored(cwd),
-                    "config_path": str(config_path or ""),
-                    "deadline_ms": int(deadline_ms),
-                }
-            )
-        elif kind == "prompt_attachment":
-            action.update(
-                {
-                    "prompt_text": prompt_text or "",
-                    "home_dir": str(home_dir or ""),
-                    "config_path": str(config_path or ""),
-                    "deadline_ms": int(deadline_ms),
-                }
-            )
         elif kind in {"git_pathspec_identity", "local_content_tail", "git_metadata"}:
             action.update({"command": command, "cwd": _anchored(cwd)})
         else:
@@ -168,11 +147,9 @@ def codex_tool_output_native(
         "action": action,
         "facts": facts,
     }
-    # A harness accepts up to a megabyte of hook input, so a prompt review
-    # carries whatever the user pasted. Holding a prompt to the ordinary
-    # request limit turned a long one into a blocking "native runtime
-    # unavailable" artifact, which is a review the user did not need.
-    large = kind in _POST_TOOL_PAYLOAD_KINDS or kind in {"prompt_credential_file", "prompt_attachment"}
+    # A harness accepts up to a megabyte of hook input, so a post-tool
+    # payload carries whatever the tool returned.
+    large = kind in _POST_TOOL_PAYLOAD_KINDS
     try:
         reply = bound_resident_call(
             _LARGE_CALL if large else _CALL,

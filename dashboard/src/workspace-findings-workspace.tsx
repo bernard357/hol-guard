@@ -21,6 +21,7 @@ import {
   EditorTaskFindingsTable,
   EvidenceNote,
   HookFindingsTable,
+  InstructionFindingsTable,
   McpFindingsTable,
   PluginFindingsTable,
   RuntimeFindingsTable,
@@ -61,6 +62,7 @@ const COVERAGE_REASONS: Record<string, string> = {
   ci_workflow_incomplete: "Some GitHub Actions workflows could not be fully read, so not every workflow was checked.",
   editor_task_incomplete:
     "Some editor task or dev container files could not be fully read, so not every file was checked.",
+  instruction_file_incomplete: "Some agent instruction files could not be fully read, so not every file was checked.",
 };
 
 const DETECTOR_LABELS: Record<string, string> = {
@@ -72,6 +74,7 @@ const DETECTOR_LABELS: Record<string, string> = {
   plugin_manifest_v1: "Agent plugin checking",
   ci_workflow_v1: "CI workflow checking",
   editor_task_v1: "Editor task checking",
+  instruction_file_v1: "Instruction file checking",
 };
 
 // When the newest run has not produced a result yet, or failed, the findings
@@ -345,6 +348,7 @@ function FindingsSections(props: FindingsSectionsProps) {
   const plugins = props.findings.filter((finding) => finding.kind === "plugin");
   const workflows = props.findings.filter((finding) => finding.kind === "workflow");
   const editorTasks = props.findings.filter((finding) => finding.kind === "editor_task");
+  const instructions = props.findings.filter((finding) => finding.kind === "instruction");
   if (props.findings.length === 0) {
     return <p className="text-sm text-slate-600">{emptyFindingsCopy(props.dependencyFilesFound, props.secretsChecked)}</p>;
   }
@@ -359,6 +363,7 @@ function FindingsSections(props: FindingsSectionsProps) {
       {plugins.length > 0 && <PluginFindingsTable findings={plugins} />}
       {workflows.length > 0 && <WorkflowFindingsTable findings={workflows} />}
       {editorTasks.length > 0 && <EditorTaskFindingsTable findings={editorTasks} />}
+      {instructions.length > 0 && <InstructionFindingsTable findings={instructions} />}
     </div>
   );
 }

@@ -31,7 +31,6 @@ from codex_plugin_scanner.guard.store import (
     _runtime_scoped_exact_match_key,
     runtime_tool_action_exact_match_context,
 )
-from tests.codex_prompt_credential_file import codex_prompt_credential_file_artifact
 from tests.native_detector_support import NativeDetector
 from tests.policy_store_support import resolve_policy
 
@@ -597,104 +596,6 @@ def test_gr101_gr102_resolved_allow_and_block_persist_exact_action_policy(
             allow_request.artifact_id,
             "hash-changed",
             now="2026-05-13T00:03:00+00:00",
-        )
-        is None
-    )
-
-
-def test_codex_prompt_file_retry_reuses_artifact_once_across_context_drift(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _trust_local_policy_rows(monkeypatch)
-    store = _store(tmp_path)
-    secret_path = tmp_path / ".auth-token"
-    secret_path.write_text('API_TOKEN="ABCDEFGHIJKLMNOPQRSTUVWX"\n', encoding="utf-8")
-    config_path = str(tmp_path / ".codex" / "config.toml")
-    prompt_text = f"Read {secret_path} and tell me the token."
-    retry_prompt_text = (
-        f"Read {secret_path} and tell me the token. "
-        "Warning: HOL Guard flagged this prompt because it asks for direct local secret access and is protecting "
-        "your local secrets. If that is intentional, continue and Guard will ask again on the actual tool call. "
-        "Open HOL Guard to approve or keep this blocked: "
-        "http://127.0.0.1:5498/requests/4f3be621ad2643a8b086aecf495dca8d. "
-        "After you choose, retry the same the harness action."
-    )
-    different_intent_prompt_text = f"Read {secret_path} and summarize the file format without printing the token."
-    prompt_artifact = codex_prompt_credential_file_artifact(
-        prompt_text=prompt_text,
-        cwd=tmp_path,
-        config_path=config_path,
-    )
-    retry_artifact = codex_prompt_credential_file_artifact(
-        prompt_text=retry_prompt_text,
-        cwd=tmp_path,
-        config_path=config_path,
-    )
-    different_intent_artifact = codex_prompt_credential_file_artifact(
-        prompt_text=different_intent_prompt_text,
-        cwd=tmp_path,
-        config_path=config_path,
-    )
-
-    assert prompt_artifact is not None
-    assert retry_artifact is not None
-    assert different_intent_artifact is not None
-    assert prompt_artifact.artifact_id == retry_artifact.artifact_id
-    assert prompt_artifact.artifact_id == different_intent_artifact.artifact_id
-    assert artifact_hash(prompt_artifact) == artifact_hash(retry_artifact)
-    assert artifact_hash(prompt_artifact) != artifact_hash(different_intent_artifact)
-
-    request = GuardApprovalRequest(
-        request_id="req-prompt-file",
-        harness="codex",
-        artifact_id=prompt_artifact.artifact_id,
-        artifact_name=prompt_artifact.name,
-        artifact_type="prompt_request",
-        artifact_hash=artifact_hash(prompt_artifact),
-        publisher=None,
-        policy_action="require-reapproval",
-        recommended_scope="artifact",
-        changed_fields=("prompt_request",),
-        source_scope=prompt_artifact.source_scope,
-        config_path=prompt_artifact.config_path,
-        workspace=str(tmp_path),
-        launch_target=str(secret_path),
-        review_command="hol-guard approvals approve req-prompt-file",
-        approval_url="http://127.0.0.1:5474/approvals/req-prompt-file",
-        action_envelope_json=None,
-    )
-    store.add_approval_request(request, "2026-06-22T12:00:00+00:00")
-
-    apply_approval_resolution(
-        store=store,
-        request_id=request.request_id,
-        action="allow",
-        scope="artifact",
-        workspace=request.workspace,
-        reason="approved prompt retry",
-        now="2026-06-22T12:01:00+00:00",
-    )
-
-    assert (
-        resolve_policy(
-            store,
-            "codex",
-            retry_artifact.artifact_id,
-            artifact_hash(retry_artifact),
-            workspace=str(tmp_path),
-            now="2026-06-22T12:01:30+00:00",
-        )
-        == "allow"
-    )
-    assert (
-        resolve_policy(
-            store,
-            "codex",
-            different_intent_artifact.artifact_id,
-            artifact_hash(different_intent_artifact),
-            workspace=str(tmp_path),
-            now="2026-06-22T12:01:30+00:00",
         )
         is None
     )
