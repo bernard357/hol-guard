@@ -196,6 +196,10 @@ pub(crate) fn coerce_config(merged: &Map<String, Value>, managed: Option<&Manage
         "runtime_detector_debug_trace": coerce::loaded_bool(get("runtime_detector_debug_trace")),
         "runtime_detector_disabled_ids": coerce::string_list(get("runtime_detector_disabled_ids")),
         "sandbox_analysis": coerce::sandbox_analysis(get("sandbox_analysis")),
+        "workspace_assessment_enabled": match get("workspace_assessment_enabled") {
+            None => true,
+            other => coerce::loaded_bool(other),
+        },
         "harness_actions": coerce::action_map(get("harnesses")),
         "publisher_actions": coerce::action_map(get("publishers")),
         "artifact_actions": coerce::action_map(get("artifacts")),
