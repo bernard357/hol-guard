@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from codex_plugin_scanner.guard import native_daemon_route, native_resident_decision
-from codex_plugin_scanner.guard.daemon import hook_native_exact_action as bridge
+from tests import native_review_evidence_support as bridge
 from tests.native_launch_evidence_helpers import native_launch_evidence
 
 
@@ -148,7 +148,7 @@ def test_actual_previous_runtime_cannot_supply_incomplete_identity(tmp_path, var
     child = r"""
 import sys
 from pathlib import Path
-from codex_plugin_scanner.guard.daemon.hook_native_exact_action import _OPERATION, NativeExactActionError
+from tests.native_review_evidence_support import _OPERATION, NativeExactActionError
 from codex_plugin_scanner.guard.native_daemon_route import _decide
 from codex_plugin_scanner.guard.native_runtime import native_runtime_status
 from codex_plugin_scanner.guard.native_resident_client import close_native_residents
@@ -171,6 +171,7 @@ print('previous runtime withheld exact identity')
     environment = {**os.environ, "HOL_GUARD_NATIVE": "force", "HOL_GUARD_NATIVE_BINARY": previous}
     completed = subprocess.run(
         [sys.executable, "-c", child, str(tmp_path / "old-native"), feature],
+        cwd=Path(__file__).resolve().parents[1],
         env=environment,
         text=True,
         capture_output=True,

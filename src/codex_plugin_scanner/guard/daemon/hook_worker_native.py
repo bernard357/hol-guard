@@ -452,6 +452,7 @@ class HookWorkerNativeMixin:
                     claimed_saved_allow_hash=claimed_saved_allow_hash,
                     claimed_approval_request_id=claimed_approval_request_id,
                     local_cli_rule=cast("Mapping[str, object] | None", edge.get("local_cli_rule")),
+                    review_evidence=cast("Mapping[str, object] | None", edge.get("review_evidence")),
                 )
                 return (_record_native_pre_activity(self, native_harness, payload, response, accepted_receipt), True)
             # The edge settled the custom extension rules; a block it found

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from codex_plugin_scanner.guard.store import GuardStore
 from tests import native_launch_evidence_helpers
 from tests.native_launch_evidence_helpers import _inventory, _permission, native_exact_action, native_launch_evidence
 from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
+from tests.native_review_evidence_support import resident_review_evidence, with_review_evidence
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
 _HARNESS = "claude-code"
@@ -407,10 +409,10 @@ def _hook_worker(
 ) -> tuple[HookWorker, GuardStore]:
     from codex_plugin_scanner.guard.config import update_guard_settings
 
-    def review_raw_hook_native(*_args: object, **_kwargs: object) -> dict[str, object]:
+    def review_raw_hook_native(*_args: object, **kwargs: object) -> dict[str, object]:
         bound_receipt = copy.deepcopy(receipt)
         bound_receipt["decision_id"] = hashlib.sha256(canonical_receipt_bytes(bound_receipt)).hexdigest()
-        return {
+        edge = {
             "schema": "guard-hook-edge-result.v2",
             "authority": "rust",
             "harness": _HARNESS,
@@ -425,6 +427,7 @@ def _hook_worker(
             },
             "receipt": bound_receipt,
         }
+        return with_review_evidence(edge, **kwargs)
 
     monkeypatch.setattr("codex_plugin_scanner.guard.daemon.hook_worker.review_raw_hook_native", review_raw_hook_native)
     store = GuardStore(tmp_path / "guard-home")
@@ -558,14 +561,16 @@ def test_native_review_derives_the_exact_action_token_once(
     result, receipt = _verdict()
     worker, store = _hook_worker(tmp_path, monkeypatch, result, receipt)
     calls: list[str | None] = []
-    real_evidence = hook_native_review_approval.native_review_evidence
+    real_evidence = hook_native_review_approval.review_evidence_parts
 
-    def counting_evidence(**kwargs: Any) -> tuple[bool, str | None, str | None, str | None]:
-        evidence = real_evidence(**kwargs)
-        calls.append(evidence[2])
-        return evidence
+    def counting_evidence(
+        evidence: Mapping[str, object] | None,
+    ) -> tuple[bool, str | None, str | None, str | None] | None:
+        parts = real_evidence(evidence)
+        calls.append(None if parts is None else parts[2])
+        return parts
 
-    monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
+    monkeypatch.setattr(hook_native_review_approval, "review_evidence_parts", counting_evidence)
     payload: dict[str, object] = {
         "hook_event_name": "PreToolUse",
         "session_id": "once",
@@ -698,16 +703,17 @@ def test_saved_block_wins_over_a_pending_once_approval(
     monkeypatch.setattr(hook_native_review_approval, "native_review_claimed_allow", lambda *_a, **_k: True)
     monkeypatch.setattr(hook_native_review_approval, "native_review_matching_allow", lambda *_a, **_k: True)
     result, receipt = _verdict()
+    review = {
+        "harness": _HARNESS,
+        "payload": {"tool_name": "Bash", "tool_input": {"command": "cat package.json"}, "cwd": str(workspace)},
+        "native_result": result,
+        "native_receipt": receipt,
+        "workspace": workspace,
+        "guard_home": tmp_path / "guard-home",
+        "home_dir": workspace.parent / "home",
+    }
     response = hook_native_review_approval.pause_native_pre_tool_for_approval(
-        store,
-        harness=_HARNESS,
-        payload={"tool_name": "Bash", "tool_input": {"command": "cat package.json"}, "cwd": str(workspace)},
-        native_result=result,
-        native_receipt=receipt,
-        workspace=workspace,
-        guard_home=tmp_path / "guard-home",
-        home_dir=workspace.parent / "home",
-        claimed_saved_allow_hash="once-hash",
+        store, **review, review_evidence=resident_review_evidence(**review), claimed_saved_allow_hash="once-hash"
     )
     assert response["policy_action"] == "block"
     assert response["approval_reuse_status"] == "blocked"
