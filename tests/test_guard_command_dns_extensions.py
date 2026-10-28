@@ -150,10 +150,13 @@ def test_dns_observer_and_help_commands_remain_safe(tmp_path: Path) -> None:
             "block",
         ),
         # A heredoc delimiter is an ordinary word, so `--help` names one the
-        # way `EOF` does. The command keeps its review behind an approval
-        # card, which is what the same deletion reaches without a heredoc and
-        # with an `EOF`-delimited one; what it must never reach is the safe
-        # `--help` classification the redirection target could stand in for.
+        # way `EOF` does. A heredoc leaves the command unmodeled, so no rule
+        # matches it and it carries no action class; the DNS extension still
+        # owns `aws` and raises the floor to its own review. The same deletion
+        # without a heredoc is modelled and carries the rule, which is what the
+        # review case below asserts. What the heredoc form must never reach is
+        # the safe `--help` classification the redirection target could stand
+        # in for.
         (
             "aws route53 delete-hosted-zone --id Z123 << --help\npayload\n--help",
             "command.dns.aws.zone-deletion",
@@ -171,6 +174,21 @@ def test_help_redirection_target_does_not_hide_dns_command(
     assert payload["minimum_action"] == minimum_action
     assert rules == []
     assert payload["classification"]["action_class"] is None
+
+    if minimum_action == "review":
+        # The review the heredoc form keeps is the extension's own floor, not
+        # a rule match. Pin the contrast so a shape that quietly stopped
+        # reaching the extension at all could not pass as this case: the same
+        # deletion, written without the heredoc, is modelled and names the rule.
+        modelled = inspect_command(
+            "aws route53 delete-hosted-zone --id Z123", cwd=tmp_path, home_dir=tmp_path
+        )
+        assert modelled["status"] == "review"
+        assert modelled["controlling_rule_id"] == rule_id
+        assert any(
+            isinstance(rule, dict) and rule.get("rule_id") == rule_id for rule in modelled["rules"]
+        )
+        assert modelled["classification"]["action_class"] == "AWS DNS destructive command"
 
 
 def test_lumped_dns_extension_is_not_registered() -> None:
