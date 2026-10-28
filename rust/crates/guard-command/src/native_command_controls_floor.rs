@@ -127,10 +127,12 @@ pub(super) fn explain_home_redirect(
     }
 }
 
-/// The command with every output redirect into the home folder pointed at a
-/// relative file, or `None` when it writes to no such path. The shell-aware
-/// redirect scan skips quoted text and heredoc bodies, so a `> ~/notes` that
-/// is only an argument's words is not a redirect.
+/// The command with every output redirect into the home folder pointed at
+/// the project instead, or `None` when it writes to no such path. The
+/// shell-aware redirect scan skips quoted text and heredoc bodies, so a
+/// `> ~/notes` that is only an argument's words is not a redirect. Only the
+/// home prefix is replaced, so the rest of the target, such as a `$(...)`
+/// that fails evaluation on its own, stays in the probe.
 fn without_home_redirects(text: &str) -> Option<String> {
     let heredocs = crate::shell_structure::extract_heredocs(text);
     let masked = crate::shell_structure::mask_complete_heredocs(text, &heredocs);
@@ -138,10 +140,22 @@ fn without_home_redirects(text: &str) -> Option<String> {
     let mut chars: Vec<char> = text.chars().collect();
     let mut found = false;
     for redirect in redirects.iter().rev() {
-        if !redirect.operator.contains('>') || !names_home(&redirect.target) {
+        if !redirect.operator.contains('>') {
             continue;
         }
-        let replacement = format!("{} guard-home-redirect.out", redirect.operator);
+        let span: String = chars[redirect.start..redirect.end].iter().collect();
+        let Some(rest) = span.strip_prefix(redirect.operator.as_str()) else {
+            continue;
+        };
+        let target = rest.trim_start();
+        let Some(projected) = project_home_target(target) else {
+            continue;
+        };
+        let replacement = format!(
+            "{}{}{projected}",
+            redirect.operator,
+            &rest[..rest.len() - target.len()]
+        );
         chars
             .splice(redirect.start..redirect.end, replacement.chars())
             .for_each(drop);
@@ -150,12 +164,40 @@ fn without_home_redirects(text: &str) -> Option<String> {
     found.then(|| chars.into_iter().collect())
 }
 
-fn names_home(target: &str) -> bool {
+/// The redirect target as written with its home prefix replaced by the
+/// project folder, or `None` when the shell would not expand it to the home
+/// folder: single quotes keep every character literal, and double quotes keep
+/// `~` literal while still expanding `$HOME`.
+fn project_home_target(target: &str) -> Option<String> {
     static HOME: OnceLock<Regex> = OnceLock::new();
-    HOME.get_or_init(|| {
-        Regex::new(r"^(?:~|\$HOME\b|\$\{HOME\})(?:/|$)").expect("bounded home redirect target")
-    })
-    .is_match(target)
+    let (quote, inner) = match target.strip_prefix('"') {
+        Some(inner) => ("\"", inner),
+        None if target.starts_with('\'') => return None,
+        None => ("", target),
+    };
+    let captures = HOME
+        .get_or_init(|| {
+            Regex::new(r#"^(?:(~)|\$HOME|\$\{HOME\})(?:/|"|$)"#)
+                .expect("bounded home redirect target")
+        })
+        .captures(inner)?;
+    if !quote.is_empty() && captures.get(1).is_some() {
+        return None;
+    }
+    let prefix = if captures.get(1).is_some() {
+        1
+    } else if inner.starts_with("${") {
+        7
+    } else {
+        5
+    };
+    let rest = &inner[prefix..];
+    let path = if rest.is_empty() || rest == "\"" {
+        format!("./guard-home-redirect.out{rest}")
+    } else {
+        format!(".{rest}")
+    };
+    Some(format!("{quote}{path}"))
 }
 
 pub(super) const HOME_REDIRECT_REASON: &str = "HOL Guard could not match this command to the installed extension controls, so it stays blocked. It writes to a path under the home folder (`~` or `$HOME`), which the shell only works out when the command runs. Write the output inside the project or a temporary folder instead, or use the built-in edit tool for a file in the home folder.";

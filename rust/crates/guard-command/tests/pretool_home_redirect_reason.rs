@@ -92,4 +92,22 @@ fn a_redirect_into_the_home_folder_stays_blocked_and_says_why() {
         }
     }
     assert!(independent > 0, "no command failed evaluation on its own");
+
+    // A quoted `~` is a literal folder name the shell never expands.
+    for command in ["echo x > '~/notes.txt'", "echo x > \"~/notes.txt\""] {
+        let result = evaluate(&root, command);
+        assert!(
+            !result.reason.contains(HOME_TEXT),
+            "{command}: {}",
+            result.reason
+        );
+    }
+
+    // The rest of the target stays in the probe, so a substitution that fails
+    // on its own keeps the reason it gets inside the project.
+    let baseline = evaluate(&root, "echo x > ./$(./missing.sh)");
+    if baseline.reason_code == "native_command_extension_evaluation_failed" {
+        let result = evaluate(&root, "echo x > ~/$(./missing.sh)");
+        assert_eq!(result.reason, baseline.reason);
+    }
 }
