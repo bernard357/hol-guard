@@ -8,6 +8,8 @@ says so rather than passing them off as the hook's.
 
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ import pytest
 
 from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard import native_runtime
-from codex_plugin_scanner.guard.cli import doctor_native_runtime
+from codex_plugin_scanner.guard.cli import commands_dispatch_admin, doctor_native_runtime
 from codex_plugin_scanner.guard.cli.runtime_posture_command import render_runtime_status
 from codex_plugin_scanner.guard.native_runtime import NativeRuntimeIdentity, NativeRuntimeStatus
 
@@ -103,9 +105,7 @@ def test_status_output_does_not_disclose_the_binary_path_or_hash(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     identity = NativeRuntimeIdentity(path=Path("/private/user/native-secret"), size=1, mtime_ns=1, sha256="d" * 64)
-    status = NativeRuntimeStatus(
-        mode="auto", available=True, compatible=True, reason="native_ready", identity=identity
-    )
+    status = NativeRuntimeStatus(mode="auto", available=True, compatible=True, reason="native_ready", identity=identity)
     monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status)
     monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "d" * 64)
 
@@ -143,12 +143,67 @@ def test_render_reports_a_held_owner_lock() -> None:
     assert "accepted 3, rejected 0" in rendered
 
 
+def _pin_availability(monkeypatch: pytest.MonkeyPatch, reason: str) -> None:
+    """Pin the probe doctor reads, not the runtime the config loader needs.
+
+    ``native_runtime_status`` also answers for the native guard config, so
+    replacing it would stop ``doctor`` booting at all. These two tests only care
+    which report the ``--native`` branch produces.
+    """
+
+    monkeypatch.setattr(
+        doctor_native_runtime,
+        "doctor_native_availability",
+        lambda _guard_home=None: {
+            "mode": "auto",
+            "available": True,
+            "compatible": True,
+            "reason_code": reason,
+            "evaluation_verified": False,
+        },
+    )
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: None)
+
+
+def _doctor_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, reason: str, as_json: bool) -> tuple[int, str]:
+    """Run doctor's ``--native`` branch with the probe pinned.
+
+    The branch is called directly rather than through ``main``: doctor loads the
+    native guard config before it dispatches, so a machine without the native
+    runtime never reaches this code. ``runtime status`` is the surface that
+    still answers there, and its own tests cover that path.
+    """
+
+    monkeypatch.setattr(
+        doctor_native_runtime,
+        "doctor_native_availability",
+        lambda _guard_home=None: {
+            "mode": "auto",
+            "available": True,
+            "compatible": True,
+            "reason_code": reason,
+            "evaluation_verified": False,
+        },
+    )
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: None)
+    args = argparse.Namespace(native=True, json=as_json, harness=None, harnesses=False, notifications=False)
+    stream = io.StringIO()
+    code = commands_dispatch_admin._run_guard_doctor_command(
+        args,
+        guard_home=tmp_path / "guard",
+        workspace=tmp_path,
+        context=object(),
+        store=object(),
+        config=object(),
+        output_stream=stream,
+    )
+    return code, stream.getvalue()
+
+
 def test_doctor_native_reports_the_section_without_the_rest_of_the_scan(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    _pin_runtime(monkeypatch, available=True, reason="native_ready")
-
-    code = main(["guard", "doctor", "--native", "--json", *_guard_args(tmp_path)])
+    code, _ = _doctor_native(monkeypatch, tmp_path, reason="native_ready", as_json=True)
 
     payload = json.loads(capsys.readouterr().out)
     assert code == 0
@@ -158,13 +213,10 @@ def test_doctor_native_reports_the_section_without_the_rest_of_the_scan(
 
 
 def test_doctor_native_text_uses_the_runtime_report_not_the_harness_panel(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _pin_runtime(monkeypatch, available=True, reason="native_ready")
+    code, out = _doctor_native(monkeypatch, tmp_path, reason="native_ready", as_json=False)
 
-    code = main(["guard", "doctor", "--native", *_guard_args(tmp_path)])
-
-    out = capsys.readouterr().out
     assert code == 0
     assert "Native runtime status (read only)" in out
     assert "Guard doctor" not in out

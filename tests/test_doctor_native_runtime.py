@@ -238,9 +238,7 @@ def test_the_section_does_not_serialize_the_binary_path_or_hash(
     from codex_plugin_scanner.guard.cli import doctor_native_runtime
 
     identity = NativeRuntimeIdentity(path=Path("/private/user/native-secret"), size=1, mtime_ns=1, sha256="c" * 64)
-    status = NativeRuntimeStatus(
-        mode="auto", available=True, compatible=True, reason="native_ready", identity=identity
-    )
+    status = NativeRuntimeStatus(mode="auto", available=True, compatible=True, reason="native_ready", identity=identity)
     monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status)
     monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "c" * 64)
 
