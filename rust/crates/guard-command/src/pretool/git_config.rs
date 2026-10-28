@@ -176,22 +176,32 @@ pub(super) fn execution_free_paging(
         context.cwd.map(str::to_owned),
         stdout_piped,
     );
+    // Every other operation reaches this probe because nothing else proves
+    // it, so a probe that cannot answer leaves it unproven and it keeps its
+    // review. `rev-parse` and `ls-files` are plumbing already proven as exact
+    // safe reads without this probe; they run it only to settle what a later
+    // read in the same chain depends on. Collapsing an unanswerable probe
+    // into a refusal for those two would withdraw a proof they already hold,
+    // so it leaves that proof standing and settles nothing instead.
+    let keeps_its_own_proof = matches!(operation, "rev-parse" | "ls-files");
     super::git_probe::memoized(key, || {
-        Some(
-            probe(
-                executable,
-                arguments,
-                remaining,
-                Paging {
-                    operation: &pager_operation,
-                    stdout_piped,
-                },
-                context,
-                deadline,
-                execution_environment,
-            )
-            .unwrap_or(false),
-        )
+        let answer = probe(
+            executable,
+            arguments,
+            remaining,
+            Paging {
+                operation: &pager_operation,
+                stdout_piped,
+            },
+            context,
+            deadline,
+            execution_environment,
+        );
+        match answer {
+            Some(proven) => Some(proven),
+            None if keeps_its_own_proof => None,
+            None => Some(false),
+        }
     })
 }
 
