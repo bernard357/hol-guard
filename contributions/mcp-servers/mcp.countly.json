@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "guard.mcp-server-contribution.v1",
+  "id": "mcp.countly",
+  "version": "1.0.0",
+  "name": "Countly MCP",
+  "description": "Opt-in review coverage for administrative actions in Countly's official MCP server. Off until enabled locally.",
+  "trustClass": "external",
+  "activation": "opt-in",
+  "publisher": {
+    "id": "countly",
+    "displayName": "Countly",
+    "url": "https://github.com/Countly/countly-mcp-server"
+  },
+  "icon": {
+    "kind": "none"
+  },
+  "homepage": "https://github.com/Countly/countly-mcp-server",
+  "license": "MIT",
+  "launch": {
+    "kind": "package-launcher",
+    "command": "npx",
+    "package": "countly-mcp-server"
+  },
+  "riskClasses": [
+    "remote-state-mutation",
+    "irreversible-data-deletion",
+    "external-notification"
+  ],
+  "tools": [
+    {
+      "name": "apps_list",
+      "state": "inherit"
+    },
+    {
+      "name": "apps_get_by_name",
+      "state": "inherit"
+    },
+    {
+      "name": "apps_create",
+      "state": "review"
+    },
+    {
+      "name": "apps_update",
+      "state": "review"
+    },
+    {
+      "name": "apps_delete",
+      "state": "review"
+    },
+    {
+      "name": "apps_reset",
+      "state": "review"
+    },
+    {
+      "name": "dashboards_create",
+      "state": "review"
+    },
+    {
+      "name": "dashboards_update",
+      "state": "review"
+    },
+    {
+      "name": "dashboards_delete",
+      "state": "review"
+    },
+    {
+      "name": "hooks_test",
+      "state": "review"
+    },
+    {
+      "name": "hooks_create",
+      "state": "review"
+    },
+    {
+      "name": "hooks_update",
+      "state": "review"
+    },
+    {
+      "name": "hooks_delete",
+      "state": "review"
+    },
+    {
+      "name": "email_reports_send",
+      "state": "review"
+    },
+    {
+      "name": "other",
+      "state": "inherit"
+    }
+  ],
+  "referenceUrls": [
+    "https://github.com/Countly/countly-mcp-server",
+    "https://github.com/Countly/countly-mcp-server/blob/main/src/lib/tools-config.ts",
+    "https://github.com/Countly/countly-mcp-server/blob/main/README.md"
+  ],
+  "saferAlternatives": [
+    "Use apps_list or apps_get_by_name to verify the target before changing, deleting or resetting an app.",
+    "Keep destructive Countly actions on review or block unless the operator explicitly enables their use."
+  ]
+}
