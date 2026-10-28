@@ -1,0 +1,112 @@
+{
+  "schema": "guard.command-extension-source.v1",
+  "extension": {
+    "extension_id": "command.enkrypt-gateway",
+    "name": "Enkrypt Secure MCP Gateway bulk config removal review",
+    "version": "1.0.0",
+    "license": null,
+    "source": "built-in",
+    "required": false,
+    "risk_classes": [
+      "local_write"
+    ],
+    "description": "Locally opt-in HOL-authored review of Enkrypt Secure MCP Gateway bulk server configuration removal. The gateway is independently maintained by Enkrypt AI; this policy is not its release or endorsement.",
+    "homepage": "https://github.com/enkryptai/secure-mcp-gateway",
+    "executables": [
+      "secure-mcp-gateway"
+    ],
+    "action_classes": [
+      "MCP gateway server configuration removal"
+    ],
+    "aliases": [],
+    "conflicts": [],
+    "dependencies": [],
+    "ecosystem_ids": [],
+    "delegated_protection": null,
+    "icon": {
+      "kind": "none"
+    },
+    "publisher": {
+      "id": "community.kantorcodes",
+      "display_name": "Michael Kantor (HOL)",
+      "url": "https://github.com/kantorcodes"
+    },
+    "permissions": [
+      {
+        "permission_id": "command.enkrypt-gateway.permission.bulk-config-removal",
+        "implementation_version": "1.0.0",
+        "label": "Bulk MCP gateway server configuration removal",
+        "description": "Review removal of every server registration in one Enkrypt gateway configuration.",
+        "default_enabled": true,
+        "configurable": true,
+        "typed_capabilities": [],
+        "action_classes": [
+          "MCP gateway server configuration removal"
+        ],
+        "dependencies": [],
+        "conflicts": [],
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "deprecated": false,
+        "safer_guidance": [
+          "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+        ],
+        "risk_tier": "high",
+        "baseline_floor": "review",
+        "example_command": "secure-mcp-gateway config remove-all-servers --config-name production-config"
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "command.enkrypt-gateway.bulk-config-removal",
+        "rule_version": "1.0.0",
+        "permission_id": "command.enkrypt-gateway.permission.bulk-config-removal",
+        "title": "Remove all MCP gateway servers",
+        "description": "Review removal of every server registration in one Enkrypt gateway configuration.",
+        "severity": "high",
+        "risk_classes": [
+          "local_write"
+        ],
+        "action_classes": [
+          "MCP gateway server configuration removal"
+        ],
+        "safer_alternatives": [
+          "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+        ],
+        "default_mode": "review",
+        "safe_variants": [],
+        "native_capability": null,
+        "matcher": {
+          "op": "leading-subcommand.v1",
+          "config": {
+            "executables": [
+              "secure-mcp-gateway",
+              "secure-mcp-gateway.exe",
+              "secure-mcp-gateway.cmd"
+            ],
+            "subcommands": [
+              "config",
+              "remove-all-servers"
+            ],
+            "options_with_values": [
+              "--config-name",
+              "--config-id"
+            ],
+            "interleaved_options_with_values": [
+              "--config-name",
+              "--config-id"
+            ]
+          }
+        }
+      }
+    ],
+    "project_markers": [],
+    "safer_alternatives": [
+      "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+    ],
+    "reference_urls": [
+      "https://github.com/enkryptai/secure-mcp-gateway/blob/main/CLI-Commands-Reference.md",
+      "https://github.com/enkryptai/secure-mcp-gateway/blob/main/pyproject.toml"
+    ]
+  }
+}

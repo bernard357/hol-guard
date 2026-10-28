@@ -1,0 +1,444 @@
+{
+  "build": {
+    "base": "packaged",
+    "schema": "guard.command-extension-build.v1",
+    "sources": [
+      {
+        "schema": "guard.command-extension-source.v1",
+        "extension": {
+          "extension_id": "command.enkrypt-gateway",
+          "name": "Enkrypt Secure MCP Gateway bulk config removal review",
+          "version": "1.0.0",
+          "license": null,
+          "source": "built-in",
+          "required": false,
+          "risk_classes": [
+            "local_write"
+          ],
+          "description": "Locally opt-in HOL-authored review of Enkrypt Secure MCP Gateway bulk server configuration removal. The gateway is independently maintained by Enkrypt AI; this policy is not its release or endorsement.",
+          "homepage": "https://github.com/enkryptai/secure-mcp-gateway",
+          "executables": [
+            "secure-mcp-gateway"
+          ],
+          "action_classes": [
+            "MCP gateway server configuration removal"
+          ],
+          "aliases": [],
+          "conflicts": [],
+          "dependencies": [],
+          "ecosystem_ids": [],
+          "delegated_protection": null,
+          "icon": {
+            "kind": "none"
+          },
+          "publisher": {
+            "id": "community.kantorcodes",
+            "display_name": "Michael Kantor (HOL)",
+            "url": "https://github.com/kantorcodes"
+          },
+          "permissions": [
+            {
+              "permission_id": "command.enkrypt-gateway.permission.bulk-config-removal",
+              "implementation_version": "1.0.0",
+              "label": "Bulk MCP gateway server configuration removal",
+              "description": "Review removal of every server registration in one Enkrypt gateway configuration.",
+              "default_enabled": true,
+              "configurable": true,
+              "typed_capabilities": [],
+              "action_classes": [
+                "MCP gateway server configuration removal"
+              ],
+              "dependencies": [],
+              "conflicts": [],
+              "implied_permissions": [],
+              "introduced_version": "1.0.0",
+              "deprecated": false,
+              "safer_guidance": [
+                "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+              ],
+              "risk_tier": "high",
+              "baseline_floor": "review",
+              "example_command": "secure-mcp-gateway config remove-all-servers --config-name production-config"
+            }
+          ],
+          "rules": [
+            {
+              "rule_id": "command.enkrypt-gateway.bulk-config-removal",
+              "rule_version": "1.0.0",
+              "permission_id": "command.enkrypt-gateway.permission.bulk-config-removal",
+              "title": "Remove all MCP gateway servers",
+              "description": "Review removal of every server registration in one Enkrypt gateway configuration.",
+              "severity": "high",
+              "risk_classes": [
+                "local_write"
+              ],
+              "action_classes": [
+                "MCP gateway server configuration removal"
+              ],
+              "safer_alternatives": [
+                "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+              ],
+              "default_mode": "review",
+              "safe_variants": [],
+              "native_capability": null,
+              "matcher": {
+                "op": "leading-subcommand.v1",
+                "config": {
+                  "executables": [
+                    "secure-mcp-gateway",
+                    "secure-mcp-gateway.exe",
+                    "secure-mcp-gateway.cmd"
+                  ],
+                  "subcommands": [
+                    "config",
+                    "remove-all-servers"
+                  ],
+                  "options_with_values": [
+                    "--config-name",
+                    "--config-id"
+                  ],
+                  "interleaved_options_with_values": [
+                    "--config-name",
+                    "--config-id"
+                  ]
+                }
+              }
+            }
+          ],
+          "project_markers": [],
+          "safer_alternatives": [
+            "Inspect the exact configuration and servers with secure-mcp-gateway config list-servers, export or back up the configuration, and require independent approval before remove-all-servers."
+          ],
+          "reference_urls": [
+            "https://github.com/enkryptai/secure-mcp-gateway/blob/main/CLI-Commands-Reference.md",
+            "https://github.com/enkryptai/secure-mcp-gateway/blob/main/pyproject.toml"
+          ]
+        }
+      }
+    ],
+    "trust": {
+      "classes": {
+        "external": [
+          "command.aether-vault",
+          "command.agentbridge",
+          "command.agenticjobs",
+          "command.agi-memory",
+          "command.ai-dev",
+          "command.answerloops",
+          "command.appimg",
+          "command.blitcp",
+          "command.blkcp",
+          "command.claude-tmux",
+          "command.cloudg",
+          "command.codesage",
+          "command.codex-migrate",
+          "command.cogext",
+          "command.crisp-tui",
+          "command.cs",
+          "command.ctty",
+          "command.dataman",
+          "command.dearmour",
+          "command.digline",
+          "command.dispat",
+          "command.enkrypt-gateway",
+          "command.errand",
+          "command.faf-cli",
+          "command.formicx",
+          "command.genclave",
+          "command.gitsync",
+          "command.google-workspace.gog",
+          "command.google-workspace.gws",
+          "command.hashdup",
+          "command.keibidrop",
+          "command.kelados",
+          "command.kim",
+          "command.kindling",
+          "command.kintsua",
+          "command.kranz",
+          "command.librarybridge",
+          "command.macscope",
+          "command.mcp-agenthub",
+          "command.mcp-architecture-intelligence-platform",
+          "command.mcp-asdecided",
+          "command.mcp-aseprite",
+          "command.mcp-authyouragent",
+          "command.mcp-ccm",
+          "command.mcp-cf-mail-mcp",
+          "command.mcp-ci-guard",
+          "command.mcp-clipugc",
+          "command.mcp-compose-bridge",
+          "command.mcp-contribos",
+          "command.mcp-dchub",
+          "command.mcp-debuganything",
+          "command.mcp-enola",
+          "command.mcp-evernode-mcp",
+          "command.mcp-fablecut",
+          "command.mcp-fetchsandbox",
+          "command.mcp-filesystem",
+          "command.mcp-ftp",
+          "command.mcp-g-krusch",
+          "command.mcp-google-workspace.gmail",
+          "command.mcp-instapods",
+          "command.mcp-insumer",
+          "command.mcp-kranz",
+          "command.mcp-krusch",
+          "command.mcp-krusch-agentic-proxy",
+          "command.mcp-krusch-context-mcp",
+          "command.mcp-krusch-git",
+          "command.mcp-lattice-talk",
+          "command.mcp-loomdesk",
+          "command.mcp-mail-server",
+          "command.mcp-melra",
+          "command.mcp-musiccontext",
+          "command.mcp-openscreenshot",
+          "command.mcp-ops-brain",
+          "command.mcp-pc-control",
+          "command.mcp-plim",
+          "command.mcp-pr-ui-compare",
+          "command.mcp-reaper",
+          "command.mcp-repo-notebook",
+          "command.mcp-run",
+          "command.mcp-seahorse",
+          "command.mcp-seq-mcp",
+          "command.mcp-setup-doctor",
+          "command.mcp-tether",
+          "command.mcp-thingery",
+          "command.mcp-vome-home-assistant",
+          "command.mcp-x-reader",
+          "command.mcp-xahau-mcp",
+          "command.netdoctor",
+          "command.noodle",
+          "command.ollama",
+          "command.omairc",
+          "command.probe",
+          "command.pyrig",
+          "command.remote.essh",
+          "command.repo2nb",
+          "command.repopy",
+          "command.repro-surgeon",
+          "command.rls-saboteur",
+          "command.routed",
+          "command.rungs",
+          "command.salesforce.sf",
+          "command.shellroute",
+          "command.showtime",
+          "command.skill-base",
+          "command.skill-sunset",
+          "command.skills-check-updates",
+          "command.snoboard",
+          "command.storage-clearer",
+          "command.syngraphe",
+          "command.theourgia",
+          "command.tui-runner",
+          "command.uivoid",
+          "command.vaultsync",
+          "command.vttforge",
+          "command.where-are-we",
+          "command.xencode",
+          "command.xrpl-muse-skill"
+        ],
+        "first-party": [
+          "command.container-runtime",
+          "command.data-protection",
+          "command.encoded-execution",
+          "command.filesystem",
+          "command.git",
+          "command.guard-self-protection",
+          "command.kubernetes-secrets",
+          "command.package.go",
+          "command.package.jvm",
+          "command.package.node",
+          "command.package.php",
+          "command.package.python",
+          "command.package.ruby",
+          "command.package.rust",
+          "command.package.system",
+          "command.shell-mutations",
+          "command.system",
+          "command.windows"
+        ],
+        "trusted-library": [
+          "command.api-gateway",
+          "command.backup.borg",
+          "command.backup.rclone",
+          "command.backup.restic",
+          "command.backup.velero",
+          "command.cdn",
+          "command.cicd.circleci",
+          "command.cicd.github",
+          "command.cicd.gitlab",
+          "command.cloud.aws",
+          "command.cloud.azure",
+          "command.cloud.digitalocean",
+          "command.cloud.gcp",
+          "command.database.mongodb",
+          "command.database.mysql",
+          "command.database.postgresql",
+          "command.database.redis",
+          "command.database.sqlite",
+          "command.database.supabase",
+          "command.dns.aws",
+          "command.dns.azure",
+          "command.dns.gcp",
+          "command.email",
+          "command.feature-flags",
+          "command.framework.laravel",
+          "command.github",
+          "command.infrastructure-as-code",
+          "command.kubernetes-operations",
+          "command.load-balancer",
+          "command.messaging.kafka",
+          "command.messaging.nats",
+          "command.messaging.rabbitmq",
+          "command.monitoring",
+          "command.payment",
+          "command.platform.heroku",
+          "command.platform.netlify",
+          "command.platform.vercel",
+          "command.remote.rsync",
+          "command.remote.scp",
+          "command.remote.ssh",
+          "command.search.elasticsearch",
+          "command.storage.aws-s3",
+          "command.storage.azure-blob",
+          "command.storage.google-cloud",
+          "command.storage.minio"
+        ]
+      },
+      "publishers": {
+        "hol": {
+          "displayName": "HOL",
+          "id": "hol"
+        },
+        "hol-curated": {
+          "displayName": "HOL curated library",
+          "id": "hol-curated"
+        }
+      },
+      "schemaVersion": "guard.extension-trust-class-map.v1"
+    }
+  },
+  "cases": [
+    {
+      "id": "enkrypt_all_servers_by_name",
+      "command": "secure-mcp-gateway config remove-all-servers --config-name production-config",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_all_servers_by_id",
+      "command": "secure-mcp-gateway config remove-all-servers --config-id f957f1b2-c77a",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_windows_exe",
+      "command": "secure-mcp-gateway.exe config remove-all-servers --config-name staging",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_windows_cmd",
+      "command": "secure-mcp-gateway.cmd config remove-all-servers --config-name staging",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_read_servers",
+      "command": "secure-mcp-gateway config list-servers --config-name production-config",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_get_server",
+      "command": "secure-mcp-gateway config get-server --config-name staging --server-name web",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_different_remove_server",
+      "command": "secure-mcp-gateway config remove-server --config-name staging --server-name web",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_unrelated_cli",
+      "command": "echo hello",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "allow",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_extension_disabled",
+      "command": "secure-mcp-gateway config remove-all-servers --config-name staging",
+      "disabled_permissions": [],
+      "enabled_extensions": [],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_permission_disabled",
+      "command": "secure-mcp-gateway config remove-all-servers --config-name staging",
+      "disabled_permissions": [
+        "command.enkrypt-gateway.permission.bulk-config-removal"
+      ],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "block",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    }
+  ],
+  "schema": "guard.command-extension-fixtures.v1"
+}
