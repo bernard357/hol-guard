@@ -51,6 +51,18 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _policy_binding_failed(harness: str, native_result: Mapping[str, object], guard_home: Path) -> dict[str, object]:
+    failed = dict(native_result)
+    failed.update(
+        decision="deny",
+        minimum_action="block",
+        policy_action="block",
+        reason_code="native_review_policy_binding_invalid",
+        reason="HOL Guard could not bind this review to its native policy.",
+    )
+    return render_pre_tool(harness, failed, guard_home=guard_home)
+
+
 def pause_native_pre_tool_for_approval(
     store: object,
     *,
@@ -66,30 +78,12 @@ def pause_native_pre_tool_for_approval(
     claimed_saved_allow_hash: str | None = None,
     claimed_approval_request_id: str | None = None,
 ) -> dict[str, object]:
+    try:
+        native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
+    except ValueError:
+        return _policy_binding_failed(harness, native_result, guard_home)
     launch_target = _native_review_launch_target(payload)
     tool_name = _native_review_tool_name(payload)
-    # One resident ask checks the receipt's policy binding and answers both the
-    # retry binding and the exact-action token. The saved-decision lookup and
-    # the queued request must bind the identical token, so it is derived once.
-    valid, identity, exact_token, once_only_reason = native_review_evidence(
-        harness=harness,
-        payload=payload,
-        native_result=native_result,
-        native_receipt=native_receipt,
-        workspace=workspace,
-        home_dir=home_dir,
-        guard_home=guard_home,
-    )
-    if not valid:
-        failed = dict(native_result)
-        failed.update(
-            decision="deny",
-            minimum_action="block",
-            policy_action="block",
-            reason_code="native_review_policy_binding_invalid",
-            reason="HOL Guard could not bind this review to its native policy.",
-        )
-        return render_pre_tool(harness, failed, guard_home=guard_home)
     # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
     custom = native_local_cli_grant_response(
         store,
@@ -101,6 +95,21 @@ def pause_native_pre_tool_for_approval(
     )
     if custom is not None and custom[0]:
         return custom[1]
+    # A matching custom grant never uses the evidence below, so it settles first.
+    # One resident ask re-checks the receipt's policy binding and answers both
+    # the retry binding and the exact-action token. The saved-decision lookup
+    # and the queued request must bind the identical token, so it is derived once.
+    valid, identity, exact_token, once_only_reason = native_review_evidence(
+        harness=harness,
+        payload=payload,
+        native_result=native_result,
+        native_receipt=native_receipt,
+        workspace=workspace,
+        home_dir=home_dir,
+        guard_home=guard_home,
+    )
+    if not valid:
+        return _policy_binding_failed(harness, native_result, guard_home)
     saved = native_saved_decision_response(
         store,
         harness=harness,
