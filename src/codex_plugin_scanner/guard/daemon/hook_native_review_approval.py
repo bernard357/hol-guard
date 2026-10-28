@@ -381,7 +381,7 @@ def queue_native_pre_tool_review(
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if live_wait is not None and isinstance(stored, dict):
-        from .native_review_codex_live_wait import bind_codex_live_wait
+        from .hook_native_review_codex_live_wait import bind_codex_live_wait
 
         bind_codex_live_wait(
             store, request_id=request_id, metadata=live_wait[0], workspace=workspace, now=datetime.now(tz=timezone.utc)
@@ -424,7 +424,7 @@ def _codex_live_wait(
     workspace: Path | None,
 ) -> tuple[dict[str, object], dict[str, object]] | None:
     """The waiting bridge's metadata and the snapshot it earns, when it can be resumed."""
-    from .native_review_codex_live_wait import codex_live_wait_metadata, codex_live_wait_snapshot
+    from .hook_native_review_codex_live_wait import codex_live_wait_metadata, codex_live_wait_snapshot
 
     now = datetime.now(tz=timezone.utc)
     metadata = codex_live_wait_metadata(payload=payload, guard_home=guard_home, workspace=workspace, now=now)
