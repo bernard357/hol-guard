@@ -1,8 +1,9 @@
 """Refuse and record outbound network use from Python while a block runs.
 
-Loopback and Unix sockets stay open: the daemon and the native resident talk
-over them. Anything else is refused before it leaves the host and recorded, so
-a test can assert the block never tried. Subprocesses, the native runtime
+Connects, datagram sends and name lookups are covered. Loopback and Unix
+sockets stay open: the daemon and the native resident talk over them. Anything
+else is refused before it leaves the host and recorded, so a test can assert
+the block never tried. Subprocesses, the native runtime
 among them, are outside this guard.
 """
 
@@ -36,6 +37,9 @@ def outbound_network_attempts() -> Iterator[list[str]]:
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
     real_getaddrinfo = socket.getaddrinfo
+    real_sendto = socket.socket.sendto
+    # Windows sockets have no sendmsg.
+    real_sendmsg = getattr(socket.socket, "sendmsg", None)
 
     def refuse(what: str) -> None:
         attempts.append(what)
@@ -51,6 +55,23 @@ def outbound_network_attempts() -> Iterator[list[str]]:
             refuse(f"connect {address[0]}:{address[1]}")
         return real_connect_ex(self, address)
 
+    def check_destination(self: socket.socket, address: object) -> None:
+        if self.family in _INET and isinstance(address, tuple) and not _local(address[0]):
+            refuse(f"send {address[0]}:{address[1]}")
+
+    def sendto(self: socket.socket, data: object, *rest: object) -> int:
+        # sendto(data, address) or sendto(data, flags, address).
+        if rest:
+            check_destination(self, rest[-1])
+        return real_sendto(self, data, *rest)
+
+    def sendmsg(self: socket.socket, buffers: object, *rest: object, **kwargs: object) -> int:
+        # The destination is the fourth argument, positional or by name.
+        address = kwargs.get("address", rest[2] if len(rest) > 2 else None)
+        check_destination(self, address)
+        assert real_sendmsg is not None
+        return real_sendmsg(self, buffers, *rest, **kwargs)
+
     def getaddrinfo(host: object, *args: object, **kwargs: object) -> object:
         if not _local(host):
             refuse(f"resolve {host}")
@@ -59,5 +80,8 @@ def outbound_network_attempts() -> Iterator[list[str]]:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(socket.socket, "connect", connect)
         patch.setattr(socket.socket, "connect_ex", connect_ex)
+        patch.setattr(socket.socket, "sendto", sendto)
+        if real_sendmsg is not None:
+            patch.setattr(socket.socket, "sendmsg", sendmsg)
         patch.setattr(socket, "getaddrinfo", getaddrinfo)
         yield attempts
