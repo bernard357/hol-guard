@@ -98,6 +98,8 @@ fn wholly_unproven_chains_keep_the_generic_reason() {
     for command in [
         "npm install && make build",
         "cd /nonexistent-guard-dir && git push",
+        // Unflattened shell control has no modeled steps but can hold several.
+        "while true; do git status; npm install; done",
     ] {
         let (action, _, reason) = decision(command);
         assert_eq!(action, "review", "{command}");

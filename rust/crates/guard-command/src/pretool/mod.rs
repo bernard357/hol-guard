@@ -1235,8 +1235,10 @@ fn evaluate_single_command(
             "HOL Guard could not match this command to the installed extension controls, so it stays blocked. A command that runs a script or another program (such as `bash script.sh`, `env`, `xargs`, `node -e` or a `$(...)` that runs one) cannot be matched. Run the program directly, or use a built-in tool. If an ordinary command keeps getting this, ask the user to run `hol-guard doctor`.",
         ));
     }
-    // Advice to split the command only helps a command with steps to split.
-    let generic = if model.segments.len() > 1 {
+    // Advice to split the command only helps a command with steps to split. A
+    // construct the parser could not flatten has no segments at all, and may
+    // still hold several commands, so only a single modeled step drops it.
+    let generic = if model.segments.len() != 1 {
         "HOL Guard requires review because this command could not be confirmed read-only. Splitting it into simpler commands can let the read-only parts run without review."
     } else {
         "HOL Guard requires review because this command could not be confirmed read-only."
