@@ -64,6 +64,22 @@ const CONFIG_STABLE_STEPS: &[&str] = &[
 /// leaves unsettled may replace a file a configuration include names.
 const TREE_PRESERVING_STEPS: &[&str] = &["add", "branch", "commit", "fetch", "push", "tag"];
 
+/// `git worktree` actions that write no file at a new path. Removing a linked
+/// worktree deletes files, which can drop configuration but never adds a
+/// program to it; `add` and `move` write where an absolute include may point.
+const TREE_PRESERVING_WORKTREE_ACTIONS: &[&str] = &["list", "lock", "prune", "remove", "unlock"];
+
+/// Global options that take the next argument as their value.
+const GLOBAL_VALUE_OPTIONS: &[&str] = &[
+    "-C",
+    "-c",
+    "--config-env",
+    "--git-dir",
+    "--namespace",
+    "--super-prefix",
+    "--work-tree",
+];
+
 /// The Git ref reads and Docker listings in `model` that the steps before
 /// them leave covered.
 ///
@@ -120,7 +136,7 @@ pub(crate) fn git_reads_after_allowed_steps(
 /// `steps`, the earlier steps it could not prove leave a later read's
 /// configuration as Guard read it. A step that may rewrite tracked files
 /// settles it only when no configuration include reaches the work tree, so no
-/// file it checks out becomes configuration the read obeys. A Git step with a
+/// file it checks out becomes configuration the read obeys. Such a step with a
 /// leading option may act on another repository, whose files an absolute
 /// include could name, so it never settles. Steps outside Git keep the Allow's
 /// judgment.
@@ -131,24 +147,24 @@ pub(crate) fn allow_settles_read_order(
     deadline: Option<std::time::Instant>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
 ) -> bool {
-    let routed_elsewhere = |index: &usize| {
-        model.segments.get(*index).is_none_or(|segment| {
-            git_segment(segment)
-                && segment
-                    .arguments
-                    .first()
-                    .is_none_or(|argument| argument.starts_with('-'))
-        })
-    };
-    if steps.iter().any(routed_elsewhere) {
-        return false;
+    let mut first = None;
+    for &index in steps {
+        let Some(segment) = model.segments.get(index) else {
+            return false;
+        };
+        if !git_segment(segment) || preserves_tree(&segment.arguments) {
+            continue;
+        }
+        if segment
+            .arguments
+            .first()
+            .is_none_or(|argument| argument.starts_with('-'))
+        {
+            return false;
+        }
+        first = Some(first.map_or(index, |current: usize| current.min(index)));
     }
-    let rewrites_tree = |index: &usize| {
-        model.segments.get(*index).is_some_and(|segment| {
-            git_segment(segment) && !leading_operation_in(segment, TREE_PRESERVING_STEPS)
-        })
-    };
-    let Some(first) = steps.iter().copied().filter(rewrites_tree).min() else {
+    let Some(first) = first else {
         return true;
     };
     // The directory the floor probed its reads in.
@@ -185,6 +201,28 @@ fn read_directory(model: &CanonicalCommandV1, context: PathContext<'_>) -> Optio
         return None;
     }
     Some(cwd)
+}
+
+/// Whether a Git step, wherever its global options route it, rewrites no
+/// tracked file.
+fn preserves_tree(arguments: &[String]) -> bool {
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        if GLOBAL_VALUE_OPTIONS.contains(&argument.as_str()) {
+            index += 2;
+        } else if argument.starts_with('-') {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    match arguments.get(index).map(String::as_str) {
+        Some("worktree") => arguments
+            .get(index + 1)
+            .is_some_and(|action| TREE_PRESERVING_WORKTREE_ACTIONS.contains(&action.as_str())),
+        Some(operation) => TREE_PRESERVING_STEPS.contains(&operation),
+        None => false,
+    }
 }
 
 /// Whether the segment's first argument, with no global option before it, is
