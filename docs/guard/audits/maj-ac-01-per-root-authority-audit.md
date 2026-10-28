@@ -110,11 +110,11 @@ tightens the composers below.
 
 ## The findings
 
-Two sites settled a verdict in Python that the resident did not give. The
-second is closed - PR #6320 deleted it, and its row is gone from the baseline,
-so a scan of current main reports 60 sites rather than the 61 this audit read.
-It is written up below because the reason it could be deleted rather than ported
-is the useful part.
+Two sites settled a verdict in Python that the resident did not give. Both are
+closed. PR #6320 deleted the second, and its row is gone from the baseline. The
+first now renders the resident's `review_settlement`, so its row reads
+`renders-native`. They are written up below because how each was closed is the
+useful part.
 
 ### `_script_free_watch`
 
@@ -177,10 +177,10 @@ approval for a byte-identical request. Both are nonetheless the shape MAJ-AC-01
 was written to catch.
 
 **Fix for `_script_free_watch`:** have the resident carry the answer. The
-widening belongs beside the facts it reads, in `supply_chain_package_eval`,
-surfaced as a field on the evaluation result that `native_package_review_response`
-reads the way it reads `decision`. Tracked separately so this audit can land on
-its own.
+resident's package evaluation now returns a `review_settlement` (`allow`,
+`review`, `block` or `guide`, with its reason) that already folds in the
+script-free watch, and `native_package_review_response` renders it the way it
+renders `decision`. `_script_free_watch` is deleted.
 
 **Fix for the protect resume: delete it.** This audit assumed the shim's inline
 approval left no decision row for the resident to read, so the rewrite had to be

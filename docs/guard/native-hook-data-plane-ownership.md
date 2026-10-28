@@ -489,6 +489,17 @@ group is private to its owner; the resident reads the files and answers with
 the integrity state. An unavailable resident reports the installation as
 unverified. `codex_hook_manifest.py` keeps only that authentication step.
 
+A Codex hook source's inventory is walked there as well
+(`codex-hook-identity-v2`, the `inventory` entry). Python sent one handler and
+one argv question per hook and assembled the records itself; it now sends the
+source's events in the order the file wrote them, with its manifest, legacy and
+self-install bindings, and the resident answers with every record, its
+ownership and identity, and every shape issue, from the same walk native hook
+detection runs. `codex_hook_inventory.py` checks each field of the answer and
+keeps no walk of its own. A resident without the feature, or an answer that is
+not an inventory, leaves the source with one identity issue and no records, so
+install stops before it activates.
+
 What a local CLI's `--help` means is read in the resident
 (`local-cli-help-parse-v1`, in `local_cli_help.rs`). Python ran the prose
 grammar: which line opens a command section and which closes it, when an

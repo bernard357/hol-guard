@@ -1,5 +1,5 @@
-import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as hasSuggestedRules, bV as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bW as bulkCommandState, H as HiMiniChevronRight, bX as fetchLocalCliApi, bY as ExtensionBrandMark, c as HiMiniChevronDown, bZ as fetchMcpProviderActions, b_ as connectorSetupReady, b$ as shortIdentity, c0 as customExtensionDisplayName, c1 as previewLocalCliMutation, c2 as applyLocalCliMutation, c3 as LOCAL_CLI_CAPABILITIES, c4 as readJson, c5 as enrollablePackageScriptCommands, c6 as seenSuggestionMeta, c7 as HiMiniPlus, c8 as looksLikeProjectRelocatePaste, c9 as packageScriptFilterNeedle, e as HiMiniCheck, ca as initialAddCommand, cb as suggestedPackageScriptExtensions, cc as filterExtensionSuggestions, cd as suggestedHarnessExtensions, ce as suggestedSeenExtensions, cf as keepsPackageScriptCatalog, cg as prefillSuggestedStates, ch as recognizeLocalCli, ci as preferredPackageScriptExtension, cj as looksLikePackageScriptPaste, ck as enrollmentCommandStates, cl as isBulkApproveGateReady, cm as HiMiniArrowLeft, cn as fetchLocalCliList, co as normalizeLocalCliList, cp as unreviewedToolChangeCount, cq as connectorSetupMatch, cr as refreshMcpInventory, cs as connectorGroupOutcome, ct as allowedEarlierVersion, cu as startGuardCloudConnect, cv as extensionEffectiveState, cw as permissionEffectiveState, cx as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cy as fetchExtensionControlApi, cz as permissionForRule, cA as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cB as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, cC as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cD as startCancelableDiscoveryJob, cE as waitForMcpDiscoveryJob, cF as isLocalCliId, bc as guardAwareHref, cG as localCliHref, bi as isGuardDemoMode, cH as fetchPluginUpdatesApi, cI as filterCodexHostApps, cJ as connectorWorkspaceItems, cK as customExtensionNeedsReview, cL as profileSetupCommand, cM as customExtensionBadge, aM as HiMiniAdjustmentsHorizontal, cN as extensionDisplayName, cO as catalogRowSecondLine, cP as extensionStateLabel, cQ as HiMiniGlobeAlt, cR as HiMiniFunnel, cS as discoveryFailureMessage, ba as WorkspacePageHeader, cT as refreshCodexHostInventory, cU as CODEX_HOST_FALLBACK, cV as CONFIGURED_CONNECTIONS_FALLBACK, cW as loadCurrentDashboardBuild, cX as canonicalExtensionId, cY as extensionDetailHref, cZ as DEFAULT_EXTENSION_DETAIL_URL_STATE, c_ as addCustomExtensionPrefillHref, c$ as acknowledgeDegradedExtensionControlAuthority, d0 as recoverExtensionControlAuthority, d1 as connectorSetupLinkFromSearch, d2 as readExtensionDetailUrlState, d3 as parseProtectionRoute, d4 as addCustomExtensionHref } from "../guard-dashboard.js";
-import { u as useConfirmDialog } from "./confirm-dialog-mdgDXnzT.js";
+import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as hasSuggestedRules, bV as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bW as bulkCommandState, H as HiMiniChevronRight, bX as fetchLocalCliApi, bY as ExtensionBrandMark, c as HiMiniChevronDown, bZ as fetchMcpProviderActions, b_ as connectorSetupReady, b$ as shortIdentity, c0 as customExtensionDisplayName, c1 as previewLocalCliMutation, c2 as applyLocalCliMutation, c3 as LOCAL_CLI_CAPABILITIES, c4 as refreshMcpInventory, c5 as DiscoveryFailure, c6 as readJson, c7 as enrollablePackageScriptCommands, c8 as seenSuggestionMeta, c9 as HiMiniPlus, ca as looksLikeProjectRelocatePaste, cb as packageScriptFilterNeedle, e as HiMiniCheck, cc as initialAddCommand, cd as suggestedPackageScriptExtensions, ce as filterExtensionSuggestions, cf as suggestedHarnessExtensions, cg as suggestedSeenExtensions, ch as keepsPackageScriptCatalog, ci as prefillSuggestedStates, cj as recognizeLocalCli, ck as preferredPackageScriptExtension, cl as looksLikePackageScriptPaste, cm as enrollmentCommandStates, cn as isBulkApproveGateReady, co as HiMiniArrowLeft, cp as fetchLocalCliList, cq as normalizeLocalCliList, cr as unreviewedToolChangeCount, cs as connectorSetupMatch, ct as connectorGroupOutcome, cu as allowedEarlierVersion, cv as startGuardCloudConnect, cw as extensionEffectiveState, cx as permissionEffectiveState, cy as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cz as fetchExtensionControlApi, cA as permissionForRule, cB as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cC as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, cD as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cE as startCancelableDiscoveryJob, cF as waitForMcpDiscoveryJob, cG as isLocalCliId, bc as guardAwareHref, cH as localCliHref, bi as isGuardDemoMode, cI as fetchPluginUpdatesApi, cJ as filterCodexHostApps, cK as connectorWorkspaceItems, cL as customExtensionNeedsReview, cM as profileSetupCommand, cN as customExtensionBadge, aM as HiMiniAdjustmentsHorizontal, cO as extensionDisplayName, cP as catalogRowSecondLine, cQ as extensionStateLabel, cR as HiMiniGlobeAlt, cS as HiMiniFunnel, cT as discoveryFailureMessage, ba as WorkspacePageHeader, cU as refreshCodexHostInventory, cV as CODEX_HOST_FALLBACK, cW as CONFIGURED_CONNECTIONS_FALLBACK, cX as loadCurrentDashboardBuild, cY as canonicalExtensionId, cZ as extensionDetailHref, c_ as DEFAULT_EXTENSION_DETAIL_URL_STATE, c$ as addCustomExtensionPrefillHref, d0 as acknowledgeDegradedExtensionControlAuthority, d1 as recoverExtensionControlAuthority, d2 as connectorSetupLinkFromSearch, d3 as readExtensionDetailUrlState, d4 as parseProtectionRoute, d5 as addCustomExtensionHref } from "../guard-dashboard.js";
+import { u as useConfirmDialog } from "./confirm-dialog-QOlb635L.js";
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -1776,7 +1776,7 @@ function emptyCommandCopy(surface) {
   if (surface === "package-scripts") {
     return "Guard has not loaded scripts from package.json yet. Paste npm run, a project folder, or package.json.";
   }
-  return "Guard has not loaded commands for this tool yet. Find the tool again to read its --help output.";
+  return "Guard has not loaded commands for this tool yet.";
 }
 function CustomExtensionCommandRow(props) {
   const handleChange = reactExports.useCallback((state) => {
@@ -3394,6 +3394,81 @@ function LocalCliCapabilities(props) {
         onConfirm: confirm
       }
     ) : null
+  ] });
+}
+const CLI_FAILURE_COPY = {
+  catalog_limit_reached: "This tool lists more commands than Guard can keep. Commands and choices already saved were kept.",
+  discovery_failed: "Loading stopped on an unexpected error. Commands and choices already saved were kept. Try again; if it keeps failing, restart Guard."
+};
+function loadCommandsFailureMessage(caught) {
+  if (caught instanceof DiscoveryFailure) return CLI_FAILURE_COPY[caught.code] ?? caught.message;
+  if (caught instanceof LocalCliApiError) return caught.message;
+  return "Guard could not load this tool's commands. Try again.";
+}
+function LocalCliLoadCommands(props) {
+  const { item, onLoaded } = props;
+  const [busy, setBusy] = reactExports.useState(false);
+  const [error, setError] = reactExports.useState(null);
+  const [loaded, setLoaded] = reactExports.useState(false);
+  const controllerRef = reactExports.useRef(null);
+  reactExports.useEffect(() => () => controllerRef.current?.abort(), []);
+  const load = reactExports.useCallback(async () => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setBusy(true);
+    setError(null);
+    setLoaded(false);
+    try {
+      await refreshMcpInventory(item.cli_id, controller.signal);
+      if (controller.signal.aborted) return;
+      await onLoaded();
+      setLoaded(true);
+    } catch (caught) {
+      if (!controller.signal.aborted) setError(loadCommandsFailureMessage(caught));
+    } finally {
+      setBusy(false);
+      if (controllerRef.current === controller) controllerRef.current = null;
+    }
+  }, [item.cli_id, onLoaded]);
+  if (item.kind !== "executable") {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-2xl text-sm leading-6 text-brand-dark/75", children: "Guard does not run scripts on its own. To list this script's commands, find it again in Add custom extension using its full path." });
+  }
+  const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 max-w-2xl", "aria-busy": busy, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm leading-6 text-brand-dark/75", children: [
+      "Guard runs ",
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("code", { className: "rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark", children: [
+        item.name,
+        " --help"
+      ] }),
+      " from an empty temporary folder, then the same for each command it lists. A program that ignores --help may do its normal work instead, so load commands only for tools you trust. Loading adds commands and never changes a choice you already made."
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 flex flex-wrap items-center gap-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => void load(),
+          disabled: props.disabled || busy,
+          className: "inline-flex min-h-11 items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark disabled:cursor-wait disabled:opacity-50",
+          children: busy ? "Loading commands…" : hasCommands ? "Check for new commands" : "Load commands"
+        }
+      ),
+      busy ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: () => controllerRef.current?.abort(),
+          className: "min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark",
+          children: "Cancel"
+        }
+      ) : null
+    ] }),
+    error ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "alert", className: "mt-3 text-sm leading-6 text-red-700", children: error }) : null,
+    loaded && !hasCommands ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { role: "status", className: "mt-3 text-sm leading-6 text-brand-dark/75", children: [
+      item.name,
+      " --help did not list any commands. Guard keeps reviewing it as one tool."
+    ] }) : null
   ] });
 }
 async function forgetLocalCli(item) {
@@ -5161,10 +5236,19 @@ function LocalCliDetail(props) {
         }
       ) : null
     ] }) : null,
-    added || hasSuggestedRules(props.item) ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "mt-8", "aria-labelledby": "custom-extension-commands-heading", children: [
+    added || hasSuggestedRules(props.item) || props.item.surface === "cli" ? /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "mt-8", "aria-labelledby": "custom-extension-commands-heading", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "custom-extension-commands-heading", className: "text-lg font-semibold text-brand-dark", children: detailCatalogHeading(props.item.surface) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 max-w-2xl text-sm leading-6 text-slate-500", children: detailCatalogHelper(props.item.surface) }),
       commandsDirty && hasSuggestedRules(props.item) && !added ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { role: "note", className: "mt-2 max-w-2xl text-sm leading-6 text-brand-dark/75", children: SUGGESTED_RULES_NOTICE }) : null,
+      props.item.surface === "cli" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+        LocalCliLoadCommands,
+        {
+          item: props.item,
+          disabled: busy,
+          onLoaded: props.onRefresh
+        },
+        `${props.item.cli_id}:${props.item.identity_hash}`
+      ) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         CustomExtensionCommandBrowser,
         {

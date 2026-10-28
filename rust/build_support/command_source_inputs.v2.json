@@ -754,6 +754,7 @@
       "src/supply_chain_package_eval/registry_install_tree.rs",
       "src/supply_chain_package_eval/request_payload.rs",
       "src/supply_chain_package_eval/result_models.rs",
+      "src/supply_chain_package_eval/review_settlement.rs",
       "src/supply_chain_package_eval/review_triggers.rs",
       "src/supply_chain_package_eval/runtime_contracts.rs",
       "src/supply_chain_package_eval/saved_policy.rs",
