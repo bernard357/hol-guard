@@ -215,13 +215,19 @@ fn a_ref_read_keeps_the_review_of_a_step_nobody_allowed() {
     }
     assert!(reviewed_steps > 0, "no step waits for review by default");
     let allowed = every_permission("enabled");
-    let result = decide(
-        &root,
-        "omp",
+    // A container start runs code an allowed checkout may just have changed.
+    for command in [
         "hol-guard hooks remove && git rev-parse HEAD",
-        &allowed,
-    );
-    assert_ne!(result.decision, "allow", "{}", result.reason_code);
+        "git checkout -B refresh origin/main && docker start web",
+        "git reset --hard origin/main && docker container start web",
+    ] {
+        let result = decide(&root, "omp", command, &allowed);
+        assert_ne!(
+            result.decision, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
+    }
 }
 
 #[test]

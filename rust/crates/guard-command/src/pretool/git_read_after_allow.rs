@@ -87,7 +87,7 @@ pub(crate) fn git_reads_after_allowed_steps(
         let read = if git {
             ref_read(model, segment, proof_context)
         } else {
-            super::docker_reads::proven_segment(model, segment, proof_context)
+            docker_listing(model, segment, proof_context)
         };
         if !read {
             break;
@@ -102,6 +102,19 @@ fn git_segment(segment: &crate::CommandSegmentV1) -> bool {
         .executable
         .as_deref()
         .is_some_and(|executable| super::executable_basename(executable) == "git")
+}
+
+/// A Docker listing the Docker proof admits. That proof also admits `docker
+/// start`, which runs a container whose bind mount may hold the files an
+/// allowed checkout just changed, so a start never qualifies here.
+fn docker_listing(
+    model: &CanonicalCommandV1,
+    segment: &crate::CommandSegmentV1,
+    context: PathContext<'_>,
+) -> bool {
+    let words: Vec<&str> = segment.arguments.iter().map(String::as_str).collect();
+    !super::docker_start::start_shaped(&words)
+        && super::docker_reads::proven_segment(model, segment, context)
 }
 
 fn ref_read(
