@@ -125,8 +125,7 @@ _DIAGNOSES: dict[str, tuple[str, str]] = {
         "`uv tool install --force hol-guard`.",
     ),
     "native_status_reason_unavailable": (
-        "The runtime returned a status Guard could not read, so the reason it gave is not "
-        "reported here.",
+        "The runtime returned a status Guard could not read, so the reason it gave is not reported here.",
         "Run `hol-guard guard doctor <harness>` for the full check.",
     ),
 }
@@ -136,8 +135,7 @@ _UNAVAILABLE: dict[CandidateState, tuple[str, str]] = {
         "Guard found its native runtime, but the file is owned by another account or is "
         "writable by one. Guard refuses to run a binary that someone else can replace, so "
         "protection stays off rather than running code it does not trust.",
-        "Reinstall hol-guard as the account that runs it, without `sudo`: "
-        "`uv tool install --force hol-guard`.",
+        "Reinstall hol-guard as the account that runs it, without `sudo`: `uv tool install --force hol-guard`.",
     ),
     "not_executable": (
         "Guard's native runtime is in place but carries no execute permission, so it cannot "
@@ -260,8 +258,7 @@ def native_runtime_candidates() -> list[NativeRuntimeCandidate]:
 
     override = os.environ.get(_NATIVE_BINARY_ENV)
     return [
-        {"slot": _candidate_slot(path, override), "state": _candidate_state(path)}
-        for path in _runtime_candidates()
+        {"slot": _candidate_slot(path, override), "state": _candidate_state(path)} for path in _runtime_candidates()
     ]
 
 
@@ -294,7 +291,11 @@ def native_runtime_diagnosis(
     candidates = native_runtime_candidates()
     if available is False:
         states = {candidate["state"] for candidate in candidates}
-        state = next((item for item in _UNAVAILABLE_ORDER if item in states), "absent")
+        state: CandidateState = "absent"
+        for candidate_state in _UNAVAILABLE_ORDER:
+            if candidate_state in states:
+                state = candidate_state
+                break
         summary, action = _UNAVAILABLE[state]
         return {"summary": summary, "action": action, "candidates": candidates}
     # Identity validation never tests the execute bit, so a runtime missing it
