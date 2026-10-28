@@ -235,6 +235,7 @@ mod tests {
             },
             recording_only: false,
             local_cli_rules: None,
+            observe_local_cli: false,
         }
     }
 

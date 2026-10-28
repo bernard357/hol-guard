@@ -27,6 +27,8 @@ _RESPONSE_FEATURE = "hook-harness-response-v1"
 # Python no longer re-checks the edge result or receipt; only a resident that
 # checks its own answer may be trusted with it.
 _SELF_CHECK_FEATURE = "edge-self-check-v1"
+# The resident records the CLI an answered PreToolUse launches, off the answer path.
+_LOCAL_CLI_OBSERVATION_FEATURE = "edge-local-cli-observation-v1"
 _UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
 _LOCAL_CLI_RULE_FEATURE = "edge-local-cli-rule-v1"
@@ -109,6 +111,7 @@ def _encode_hook_envelope(
     request_id: str | None = None,
     recording_only: bool = False,
     local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 
@@ -142,6 +145,8 @@ def _encode_hook_envelope(
         envelope["recording_only"] = True
     if local_cli_rules is not None:
         envelope["local_cli_rules"] = dict(local_cli_rules)
+    if observe_local_cli:
+        envelope["observe_local_cli"] = True
     if execution_context_supported:
         # Direct CLI calls capture locally; daemon workers explicitly pass
         # None when caller context is unavailable instead of using daemon env.
@@ -178,6 +183,7 @@ def review_raw_hook_native(
     runtime_status: NativeRuntimeStatus | None = None,
     request_id: str | None = None,
     local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
 ) -> dict[str, Any] | None:
     """Return a typed Rust edge result, or fail closed without reinterpretation."""
     record_native_resident_client_failure_code(None)
@@ -236,6 +242,7 @@ def review_raw_hook_native(
         request_id=request_id,
         recording_only=observe_mode,
         local_cli_rules=local_cli_rules,
+        observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
     )
     if encoded is None:
         return record_native_hook_result("native_fail_safe", None)

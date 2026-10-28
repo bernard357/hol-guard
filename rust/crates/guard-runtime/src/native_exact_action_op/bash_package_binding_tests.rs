@@ -380,6 +380,7 @@ fn bash_package_binding_omp_preview_uses_the_hosts_tool_directory() {
         event: "PreToolUse".into(),
         recording_only: false,
         local_cli_rules: None,
+        observe_local_cli: false,
         deadline_budget_ms: Some(1000),
         policy_generation: 0,
         policy_snapshot: json!({}),

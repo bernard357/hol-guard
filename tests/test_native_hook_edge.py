@@ -497,6 +497,77 @@ def test_a_custom_rule_check_gets_its_own_allowance_past_the_review_deadline(
     assert captured["deadline_monotonic"] == deadline + (5.0 if rules else 0.0)
 
 
+@pytest.mark.parametrize(("advertised", "asked"), [(True, True), (True, False), (False, True)])
+def test_the_envelope_asks_for_a_cli_observation_only_from_a_resident_that_records_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    advertised: bool,
+    asked: bool,
+) -> None:
+    runtime = tmp_path / "hol-guard-runtime"
+    runtime.write_bytes(b"runtime")
+    identity = NativeRuntimeIdentity(
+        path=runtime,
+        size=runtime.stat().st_size,
+        mtime_ns=runtime.stat().st_mtime_ns,
+        sha256="a" * 64,
+    )
+    capabilities = NativeRuntimeCapabilities(
+        protocol_version=1,
+        runtime_version="test",
+        rule_digest="b" * 64,
+        build_sha="c" * 40,
+        target="test",
+        features=(
+            "hook-envelope-v2",
+            "hook-harness-response-v1",
+            "edge-self-check-v1",
+            "native-resident-client-v1",
+            "pre-tool-generic-authority-v1",
+            "git-execution-context-v1",
+            *(["edge-local-cli-observation-v1"] if advertised else []),
+        ),
+    )
+    monkeypatch.setattr(
+        "codex_plugin_scanner.guard.native_hook_edge.native_runtime_status",
+        lambda: NativeRuntimeStatus(
+            mode="auto",
+            available=True,
+            compatible=True,
+            reason="ready",
+            identity=identity,
+            capabilities=capabilities,
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_client(**kwargs: object) -> bytes:
+        captured.update(kwargs)
+        return json.dumps(_edge_result(), separators=(",", ":")).encode()
+
+    monkeypatch.setattr("codex_plugin_scanner.guard.native_hook_edge.native_resident_client_request", fake_client)
+    assert (
+        review_raw_hook_native(
+            payload={"hook_event_name": "PreToolUse", "tool_input": {"command": "pwd"}},
+            harness="claude",
+            event="PreToolUse",
+            guard_home=tmp_path,
+            home_dir=tmp_path,
+            cwd=tmp_path,
+            source_ref_external_allowed=False,
+            observe_mode=False,
+            deadline=None,
+            policy_snapshot={"generation": 1},
+            observe_local_cli=asked,
+        )
+        == _edge_result()
+    )
+    encoded = captured["payload"]
+    assert isinstance(encoded, bytes)
+    # An older resident would refuse the field, so it is sent only when advertised.
+    assert json.loads(encoded).get("observe_local_cli") is ((advertised and asked) or None)
+
+
 @pytest.mark.parametrize(
     ("features", "resident_called"),
     (

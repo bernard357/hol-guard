@@ -93,7 +93,14 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
         ResidentRequestV1::Edge(request) => {
             let policy_store =
                 policy_store.ok_or_else(|| "native_policy_snapshot_unavailable".to_owned())?;
-            crate::edge::evaluate_envelope_with_store(*request, policy_store)
+            // The launch is read before the envelope moves, and observed only
+            // once the answer stands; the observer never delays or fails it.
+            let observation = crate::local_cli_observer::edge_candidate(&request);
+            let answer = crate::edge::evaluate_envelope_with_store(*request, policy_store);
+            if answer.is_ok() {
+                crate::local_cli_observer::offer(observation);
+            }
+            answer
         }
         ResidentRequestV1::Operation(request) => match *request {
             ResidentOperationV1::ArchiveAcquisition(request) => {

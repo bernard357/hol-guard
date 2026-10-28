@@ -72,16 +72,6 @@ class _Reply:
     contained_route: Mapping[str, str] | None = None
 
 
-def observe_unlisted_cli(
-    *, store: GuardStore, command: str, cwd: Path, home_dir: Path | None, path: str | None = None
-) -> None:
-    """Record the CLIs a command launches without consulting any grant."""
-
-    native_local_cli_hook(
-        store, command=command, cwd=cwd, home_dir=home_dir, current_action="allow", grant_allowed=False, path=path
-    )
-
-
 def native_local_cli_hook(
     store: GuardStore,
     *,

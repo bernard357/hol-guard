@@ -422,6 +422,7 @@ fn answer(
         },
         recording_only,
         local_cli_rules: None,
+        observe_local_cli: false,
     };
     let (edge, fence_wait) = fence::evaluate(envelope, policy_store)?;
     // Removed again unless the answer that runs it is returned.
@@ -543,6 +544,17 @@ fn answer(
         answered["harness_response"] = blocked;
         snapshot = None;
     }
+    // The daemon observed the command line when it drained this record.
+    let observation = if pre_tool {
+        crate::local_cli_observer::direct_candidate(
+            &evidence_payload,
+            &workspace,
+            &request_home,
+            &guard_home,
+        )
+    } else {
+        None
+    };
     let mut evidence = json!({
         "event": event,
         "harness": request.harness,
@@ -561,6 +573,7 @@ fn answer(
     if let Some(snapshot) = snapshot {
         snapshot.keep();
     }
+    crate::local_cli_observer::offer(observation);
     Ok(answered)
 }
 

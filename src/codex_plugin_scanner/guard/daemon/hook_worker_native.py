@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -29,7 +28,6 @@ from .hook_availability_policy import availability_harness_response
 from .hook_contained_grant import granted_containment_response
 from .hook_evidence_dispatch import run_hook_evidence
 from .hook_fail_closed import render_pre_tool, render_recording_only_pre_tool
-from .hook_native_cli_observer import observe_native_pre_tool_cli
 from .hook_native_review_approval import (
     pause_native_pre_tool_for_approval,
 )
@@ -431,6 +429,7 @@ class HookWorkerNativeMixin:
                 policy_snapshot=policy_snapshot,
                 **({"request_id": probe[1]} if probe is not None else {}),
                 local_cli_rules=True,
+                observe_local_cli=True,
             )
             refreshed = (
                 None
@@ -550,8 +549,6 @@ class HookWorkerNativeMixin:
             # The edge already carries Guard's Claude Code notice outside Watch.
             return (_edge_harness_response(edge), True)
         if native_event == "PreToolUse":
-            with suppress(Exception):
-                observe_native_pre_tool_cli(self.store, payload=payload, workspace=workspace, home_dir=home_dir)
             if recording_only:
                 action = str(native_result.get("minimum_action") or "")
                 if action != "allow" or native_result.get("decision") != "allow":
