@@ -289,8 +289,8 @@ def test_non_ok_summary_keeps_position_and_bounded_distinct_reasons() -> None:
     ]
 
 
-def test_non_ok_summary_bounds_reason_text_and_run_count() -> None:
-    observed = [(1.0, "error_-32001", "x" * 1000)] + [
+def test_non_ok_summary_bounds_reason_count_and_run_count() -> None:
+    observed = [(1.0, "error_-32001", probes.bounded_detail("x" * 1000))] + [
         (1.0, "ok" if index % 2 else "error_-32001", "") for index in range(1, 80)
     ]
 
@@ -334,3 +334,132 @@ def test_summary_markdown_names_why_samples_were_refused() -> None:
         "Reasons: `error_-32001` at round 1 sample 1: no native decision." in markdown
     )
     assert "Non-allow samples, `b`" not in markdown
+
+
+def test_hook_failure_detail_is_one_bounded_line() -> None:
+    traceback = 'Traceback (most recent call last):\n  File "x", line 1\n' + "pad " * 200
+
+    detail = probes.describe_hook_failure(2, "", traceback)
+
+    assert "\n" not in detail
+    assert detail.startswith('exit=2 Traceback (most recent call last): File "x", line 1 pad')
+    assert len(detail) == probes._NON_OK_DETAIL_CHARS
+
+
+def test_mcp_failure_detail_is_bounded_where_it_is_produced() -> None:
+    response = {"error": {"code": -32001, "message": "review\ndeadline " + "x" * 1000}}
+
+    detail = probes.describe_mcp_failure(response)
+
+    assert detail.startswith("review deadline xxx")
+    assert len(detail) == probes._NON_OK_DETAIL_CHARS
+
+
+def test_reasons_differing_past_the_bound_do_not_crowd_out_a_distinct_one() -> None:
+    shared = "guard refused: " + "x" * probes._NON_OK_DETAIL_CHARS
+    observed = [(1.0, "error_-32001", probes.bounded_detail(f"{shared}{suffix}")) for suffix in "abcde"]
+    observed.append((1.0, "error_-32001", "sync failed"))
+
+    detail = probes.summarize_non_ok(observed, allow_classes=frozenset({"ok"}))
+
+    assert [reason["index"] for reason in detail["reasons"]] == [0, 5]
+    assert detail["reasons"][1]["detail"] == "sync failed"
+
+
+def _refused_round(index: int, label: str, non_ok: dict) -> dict:
+    entry = _round(index, label, None, None)
+    phase = entry["results"][label]["mcp"]
+    phase["classes"] = {"ok": 1, "error_-32001": int(non_ok["count"])}
+    phase["non_allow"] = int(non_ok["count"])
+    phase["non_ok"] = non_ok
+    return entry
+
+
+def _refusal_markdown(rounds: list[dict]) -> str:
+    document = {
+        "runner": {"platform": "linux", "cpu_model": "x", "logical_cpus": 2, "image_os": "u", "image_version": "1"},
+        "config": {"rounds": len(rounds), "paths": ["mcp"]},
+        "targets": [
+            {"label": "b", "sha": "1", "wheel_version": "3.15.2"},
+            {"label": "c", "sha": "2", "wheel_version": "4"},
+        ],
+        "rounds": rounds,
+    }
+    return summary_module.render_markdown(document, summary_module.build_summary(document, "b", "c"))
+
+
+def test_summary_markdown_orders_ten_rounds_by_number() -> None:
+    rounds = []
+    for index in range(1, 11):
+        non_ok = {
+            "count": index,
+            "first_index": 0,
+            "runs": [[0, index - 1]],
+            "runs_truncated": False,
+            "reasons": [],
+        }
+        rounds.append(
+            {
+                "round": index,
+                "results": {
+                    **_round(index, "b", None, None)["results"],
+                    **_refused_round(index, "c", non_ok)["results"],
+                },
+            }
+        )
+
+    markdown = _refusal_markdown(rounds)
+
+    assert "(round 1 x1, round 2 x2, round 3 x3" in markdown
+    assert "round 9 x9, round 10 x10)" in markdown
+    assert "Sample runs: round 1 0-0, round 2 0-1" in markdown
+    assert "round 9 0-8, round 10 0-9." in markdown
+
+
+def test_summary_markdown_marks_rounds_whose_runs_were_cut_short() -> None:
+    non_ok = {
+        "count": 60,
+        "first_index": 0,
+        "runs": [[0, 0], [2, 2]],
+        "runs_truncated": True,
+        "reasons": [],
+    }
+    rounds = [
+        {
+            "round": 1,
+            "results": {
+                **_round(1, "b", None, None)["results"],
+                **_refused_round(1, "c", non_ok)["results"],
+            },
+        }
+    ]
+
+    markdown = _refusal_markdown(rounds)
+
+    assert "Sample runs: round 1 0-0,2-2 and later positions not recorded." in markdown
+
+
+def test_summary_markdown_keeps_refusal_text_from_reshaping_the_report() -> None:
+    non_ok = {
+        "count": 1,
+        "first_index": 0,
+        "runs": [[0, 0]],
+        "runs_truncated": False,
+        "reasons": [{"index": 0, "class": "error_-32001", "detail": "# heading\n| cell | `code` [link](x) *bold*"}],
+    }
+    rounds = [
+        {
+            "round": 1,
+            "results": {
+                **_round(1, "b", None, None)["results"],
+                **_refused_round(1, "c", non_ok)["results"],
+            },
+        }
+    ]
+
+    markdown = _refusal_markdown(rounds)
+
+    reason_line = next(line for line in markdown.splitlines() if "Non-allow samples, `c`" in line)
+    assert reason_line.endswith(
+        "Reasons: `error_-32001` at round 1 sample 0: \\# heading \\| cell \\| \\`code\\` \\[link\\](x) \\*bold\\*."
+    )

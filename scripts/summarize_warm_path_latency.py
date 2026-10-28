@@ -17,6 +17,28 @@ _PATH_TITLES = {"hook": "Warm benign PreToolUse hook (process spawn to exit)", "
 NOISE_SPREAD = 0.15
 # Distinct refusal reasons carried into the summary for one target.
 REASON_LIMIT = 6
+# Characters that would otherwise let refusal text open a code span, a link, a
+# table cell or emphasis in the published report.
+_MARKDOWN_ESCAPES = str.maketrans({c: "\\" + c for c in "\\`*_[]|<>#"})
+
+
+def _by_round(item: tuple[str, object]) -> tuple[int, str]:
+    """Order round keys by their number, so round 10 follows round 9."""
+
+    key = item[0]
+    return (int(key), key) if key.lstrip("-").isdigit() else (sys.maxsize, key)
+
+
+def _inline(text: str) -> str:
+    """Refusal text as one escaped markdown fragment.
+
+    A hook's stderr is arbitrary: a traceback, a wrapped message, a line that
+    starts with a pipe or a hash. Collapsing it to one line and escaping the
+    characters markdown reads keeps a refusal a readable sentence instead of a
+    new heading, table or link in the job summary.
+    """
+
+    return " ".join(text.split()).translate(_MARKDOWN_ESCAPES)
 
 
 def _rows(document: dict[str, object], path: str, label: str) -> list[dict[str, object]]:
@@ -87,11 +109,14 @@ def _non_allow_detail(rows: list[dict[str, object]]) -> dict[str, object]:
 
     A pooled count cannot tell a warm-up window apart from a steady refusal, and
     one class can cover several reasons, so the per-round counts, the sample runs
-    and the first distinct reasons are carried through to the summary.
+    and the first distinct reasons are carried through to the summary. A round
+    whose runs the probe itself cut short is named, so a report that shows only
+    the early positions says so rather than reading as the whole picture.
     """
 
     per_round: dict[str, int] = {}
     runs: dict[str, list[list[int]]] = {}
+    truncated: list[str] = []
     reasons: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
     for r in rows:
@@ -102,13 +127,20 @@ def _non_allow_detail(rows: list[dict[str, object]]) -> dict[str, object]:
         per_round[label] = int(detail["count"])
         if detail["runs"]:
             runs[label] = detail["runs"]  # type: ignore[assignment]
+        if detail.get("runs_truncated"):
+            truncated.append(label)
         for reason in detail["reasons"]:  # type: ignore[union-attr]
             key = (str(reason["class"]), str(reason["detail"]))
             if key in seen:
                 continue
             seen.add(key)
             reasons.append({"round": r["round"], **reason})
-    return {"per_round": per_round, "runs": runs, "reasons": reasons[:REASON_LIMIT]}
+    return {
+        "per_round": per_round,
+        "runs": runs,
+        "runs_truncated": truncated,
+        "reasons": reasons[:REASON_LIMIT],
+    }
 
 
 def summarize_label(rows: list[dict[str, object]]) -> dict[str, object]:
@@ -240,15 +272,22 @@ def render_markdown(document: dict[str, object], summary: dict[str, object]) -> 
             if not s["non_allow"]:
                 continue
             detail = s["non_allow_detail"]
-            per_round = ", ".join(f"round {key} x{count}" for key, count in sorted(detail["per_round"].items()))
+            per_round = ", ".join(
+                f"round {key} x{count}" for key, count in sorted(detail["per_round"].items(), key=_by_round)
+            )
             reasons = "; ".join(
                 f"`{reason['class']}` at round {reason['round']} sample {reason['index']}"
-                + (f": {reason['detail']}" if reason["detail"] else "")
+                + (f": {_inline(str(reason['detail']))}" if reason["detail"] else "")
                 for reason in detail["reasons"]
             )
+            cut = set(detail["runs_truncated"])
             runs = ", ".join(
-                "round {key} {spans}".format(key=key, spans=",".join(f"{first}-{last}" for first, last in value))
-                for key, value in sorted(detail["runs"].items())
+                "round {key} {spans}{more}".format(
+                    key=key,
+                    spans=",".join(f"{first}-{last}" for first, last in value),
+                    more=" and later positions not recorded" if key in cut else "",
+                )
+                for key, value in sorted(detail["runs"].items(), key=_by_round)
             )
             lines.append(
                 f"Non-allow samples, `{summary[role]}`: {s['non_allow']}"

@@ -181,7 +181,7 @@ def summarize_non_ok(observed: list[tuple[float, str, str]], *, allow_classes: f
         if (label, detail) in seen:
             continue
         seen.add((label, detail))
-        reasons.append({"index": index, "class": label, "detail": detail[:_NON_OK_DETAIL_CHARS]})
+        reasons.append({"index": index, "class": label, "detail": detail})
         if len(reasons) >= _NON_OK_DETAIL_SAMPLES:
             break
     runs = _index_runs(indexes)
@@ -194,11 +194,23 @@ def summarize_non_ok(observed: list[tuple[float, str, str]], *, allow_classes: f
     }
 
 
+def bounded_detail(text: str) -> str:
+    """One bounded line of refusal text.
+
+    Every refusal is bounded where it is produced rather than where it is
+    reported, so a hook or proxy that answers with a traceback on each of
+    hundreds of samples never leaves whole messages in the sample list, and the
+    deduplication that follows compares what the artifact will actually show.
+    """
+
+    return " ".join(text.split())[:_NON_OK_DETAIL_CHARS]
+
+
 def describe_hook_failure(returncode: int, stdout: str, stderr: str) -> str:
     """Why a hook sample was not an allow, in one bounded line."""
 
     text = stderr.strip() or stdout.strip()
-    return f"exit={returncode} {text}".strip()
+    return bounded_detail(f"exit={returncode} {text}".strip())
 
 
 def describe_mcp_failure(response: dict[str, object]) -> str:
@@ -214,12 +226,12 @@ def describe_mcp_failure(response: dict[str, object]) -> str:
         message = str(error.get("message", "")).strip()
         data = error.get("data")
         keys = ",".join(sorted(str(key) for key in data)) if isinstance(data, dict) else ""
-        return f"{message} [data:{keys}]" if keys else message
+        return bounded_detail(f"{message} [data:{keys}]" if keys else message)
     result = response.get("result")
     if isinstance(result, dict):
         content = result.get("content")
         if isinstance(content, list):
-            return " ".join(str(item.get("text", "")) for item in content if isinstance(item, dict)).strip()
+            return bounded_detail(" ".join(str(item.get("text", "")) for item in content if isinstance(item, dict)))
     return ""
 
 
@@ -435,7 +447,7 @@ def _warm_up_mcp(argv: list[str], env: dict[str, str], cwd: Path, stderr_path: P
     return {
         "initialize_class": "ok" if isinstance(init.get("result"), dict) else classify_mcp_response(init),
         "call_class": call_class,
-        "call_detail": call_detail[:_NON_OK_DETAIL_CHARS],
+        "call_detail": call_detail,
         "elapsed_ms": (time.perf_counter_ns() - started) / 1e6,
     }
 
