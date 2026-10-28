@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -330,8 +331,16 @@ def test_compound_git_and_filesystem_inspection_requires_host_binary_proof(live_
     )
 
     # The native proof resolves Git on the search path and requires it to sit in
-    # a trusted install location. The Rust suite covers a planted Git.
-    assert artifact is None
+    # a trusted install location. The Rust suite covers a planted Git; here the
+    # host's own Git decides, so ask the same question before requiring either
+    # answer.
+    host_git = shutil.which("git")
+    assert host_git is not None, "the suite needs a Git on the search path"
+    if native_trusted_absolute_path(Path(host_git), cwd=workspace, home_dir=home):
+        assert artifact is None
+    else:
+        assert artifact is not None
+        assert artifact["policy_action"] != "allow"
 
 
 @pytest.mark.xfail(
