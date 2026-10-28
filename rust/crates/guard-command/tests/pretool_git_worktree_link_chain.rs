@@ -157,3 +157,92 @@ fn other_links_after_a_worktree_add_stay_reviewed() {
         assert_reviewed(&home, &repository, &format!("{add} {tail}"));
     }
 }
+
+/// The commit is read whole whatever directory the command runs in: from a
+/// subdirectory, a tracked link or directory at the checkout root is still
+/// seen as taken.
+#[test]
+fn a_link_from_a_subdirectory_still_sees_every_tracked_name() {
+    let (_cleanup, home, repository) = repository("subdirectory");
+    let app = repository.display();
+    let cwd = repository.join("dashboard");
+    let add = "git worktree add -b br-x ../../app-x origin/main";
+    assert_allowed(
+        &home,
+        &cwd,
+        &format!("{add} && ln -s {app}/node_modules ../../app-x/node_modules"),
+    );
+    for tail in [
+        format!("&& ln -s {app}/node_modules ../../app-x/linked"),
+        format!("&& ln -s {app}/node_modules ../../app-x/dashboard"),
+        format!("&& ln -s {app}/node_modules ../../app-x/.gitignore"),
+    ] {
+        assert_reviewed(&home, &cwd, &format!("{add} {tail}"));
+    }
+}
+
+/// A commit can track `dashboard/` beside `Dashboard/node_modules`, a link
+/// out of the checkout. A case-insensitive filesystem checks both out into
+/// one directory, where `ln` would write through that link, so a folder name
+/// another tracked entry shares under a different case is not a proven
+/// parent. The colliding entries are written straight to the index, so the
+/// fixture builds on either kind of filesystem.
+#[test]
+fn a_folder_sharing_its_name_under_another_case_takes_no_link() {
+    let (_cleanup, home, repository) = repository("case-collision");
+    let app = repository.display();
+    let blob = git_output(&home, &repository, &["hash-object", "-w", ".gitignore"]);
+    for (mode, path) in [
+        ("120000", "Dashboard/node_modules"),
+        ("100644", "web/index.js"),
+        ("100644", "WEB.md"),
+    ] {
+        git(
+            &home,
+            &repository,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("{mode},{blob},{path}"),
+            ],
+        );
+    }
+    git(&home, &repository, &["commit", "--quiet", "-m", "collide"]);
+    git(
+        &home,
+        &repository,
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    let add = "git worktree add -b br-x ../app-x origin/main";
+    for tail in [
+        format!("&& ln -s {app}/dashboard/node_modules ../app-x/dashboard/node_modules"),
+        format!("&& ln -s {app}/node_modules ../app-x/Dashboard/node_modules"),
+        format!("&& ln -s {app}/node_modules ../app-x/web.md"),
+    ] {
+        assert_reviewed(&home, &repository, &format!("{add} {tail}"));
+    }
+    // A folder no other entry collides with still takes the link.
+    assert_allowed(
+        &home,
+        &repository,
+        &format!("{add} && ln -s {app}/node_modules ../app-x/web/node_modules"),
+    );
+}
+
+fn git_output(home: &Path, repository: &Path, arguments: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repository)
+        .env("HOME", home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {arguments:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}

@@ -8,13 +8,14 @@
 use std::path::Path;
 use std::time::Instant;
 
-use super::hooks::tree_entry;
 use super::{git_query_with_args, prepared_git_command};
 
 /// Whether `parent` (`""` for the checkout root) is a directory the commit
 /// tracks, reached through tracked directories only, and the commit tracks
 /// no entry named `name` in it under any letter case. A tracked symbolic
-/// link on the way is refused: `ln` would follow it out of the checkout.
+/// link on the way is refused: `ln` would follow it out of the checkout. So
+/// is a folder another entry of its tree names under a different case, which
+/// a case-insensitive checkout merges with that entry.
 /// `None` is doubt.
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn tracked_directory_with_free_name(
@@ -34,29 +35,82 @@ pub(in super::super) fn tracked_directory_with_free_name(
     }
     let (base, _binary, _cwd, _home) =
         prepared_git_command(executable, context, execution_environment)?;
-    let tree = if parent.is_empty() {
-        format!("{commit}^{{tree}}")
-    } else {
-        // Git looks a path up through trees only, so an entry reached through
-        // a tracked link or submodule is not listed at all.
-        if tree_entry(&base, leading, commit, parent, deadline)?.as_deref() != Some("040000") {
+    // Each level is listed by object name, so the probe's working directory
+    // filters nothing out, and the walk sees every entry a case-insensitive
+    // checkout would merge into one directory.
+    let mut tree = format!("{commit}^{{tree}}");
+    let components = parent.split('/').filter(|component| !component.is_empty());
+    for component in components {
+        if matches!(component, "." | "..") || !component.is_ascii() {
             return Some(false);
         }
-        format!("{commit}:{parent}")
-    };
+        let entries = tree_entries(&base, leading, &tree, deadline)?;
+        let mut colliding = entries
+            .iter()
+            .filter(|entry| may_collide(&entry.name, component));
+        // One entry may take this name, spelled exactly, and it must be a
+        // directory: a link or submodule there would lead out of the tree.
+        match (colliding.next(), colliding.next()) {
+            (Some(entry), None) if entry.name == component.as_bytes() && entry.mode == "040000" => {
+                tree = entry.object.clone();
+            }
+            _ => return Some(false),
+        }
+    }
+    if !name.is_ascii() {
+        return Some(false);
+    }
+    let entries = tree_entries(&base, leading, &tree, deadline)?;
+    Some(!entries.iter().any(|entry| may_collide(&entry.name, name)))
+}
+
+struct TreeEntry {
+    mode: String,
+    object: String,
+    name: Vec<u8>,
+}
+
+/// Every entry of one tree object, as `ls-tree -z` prints it.
+fn tree_entries(
+    base: &std::process::Command,
+    leading: &[String],
+    tree: &str,
+    deadline: Instant,
+) -> Option<Vec<TreeEntry>> {
     let (status, listing) = git_query_with_args(
-        &base,
+        base,
         leading,
-        &["ls-tree", "-z", "--name-only", &tree],
+        &["ls-tree", "-z", "--full-tree", tree],
         deadline,
         super::super::git_probe::LISTING_LIMIT,
     )?;
     if !status.success() {
         return None;
     }
-    Some(
-        !listing
-            .split(|byte| *byte == 0)
-            .any(|entry| entry.eq_ignore_ascii_case(name.as_bytes())),
-    )
+    listing
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .map(|record| {
+            let tab = record.iter().position(|byte| *byte == b'\t')?;
+            let header = std::str::from_utf8(&record[..tab]).ok()?;
+            let mut fields = header.split(' ');
+            let (Some(mode), Some(_kind), Some(object), None) =
+                (fields.next(), fields.next(), fields.next(), fields.next())
+            else {
+                return None;
+            };
+            Some(TreeEntry {
+                mode: mode.to_owned(),
+                object: object.to_owned(),
+                name: record[tab + 1..].to_vec(),
+            })
+        })
+        .collect()
+}
+
+/// Whether a case-insensitive filesystem could store `entry` and the ASCII
+/// `wanted` as one name. Unicode case folding and normalization can map a
+/// non-ASCII name onto an ASCII one, so any such entry counts as colliding.
+fn may_collide(entry: &[u8], wanted: &str) -> bool {
+    !entry.is_ascii() || entry.eq_ignore_ascii_case(wanted.as_bytes())
 }
