@@ -100,11 +100,7 @@ class MuseHarnessAdapter(HarnessAdapter):
     @staticmethod
     def _muse_config_dir(context: HarnessContext) -> Path:
         xdg = os.environ.get("XDG_CONFIG_HOME")
-        if (
-            isinstance(xdg, str)
-            and xdg.strip()
-            and context.home_dir.resolve() == Path.home().resolve()
-        ):
+        if isinstance(xdg, str) and xdg.strip() and context.home_dir.resolve() == Path.home().resolve():
             return Path(xdg.strip()) / "muse"
         return context.home_dir / ".config" / "muse"
 

@@ -319,9 +319,7 @@ class TestMuseHookRender:
 
 
 class TestMuseApprovalResume:
-    def test_approval_wait_allows_the_identical_call(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_approval_wait_allows_the_identical_call(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "codex_plugin_scanner.guard.approvals.wait_for_approval_requests",
             lambda **kwargs: {
@@ -340,15 +338,16 @@ class TestMuseApprovalResume:
             },
         }
         updated = apply_muse_pretool_approval_wait(
-            response, event_name="PreToolUse", store=object(), timeout_seconds=5  # type: ignore[arg-type]
+            response,
+            event_name="PreToolUse",
+            store=object(),
+            timeout_seconds=5,  # type: ignore[arg-type]
         )
         assert updated["policy_action"] == "allow"
         # The resumed answer renders as silence: Muse runs the original call.
         assert muse_bridge_response(updated, event_name="PreToolUse") == ("", "", 0)
 
-    def test_approval_wait_denial_keeps_the_call_blocked(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_approval_wait_denial_keeps_the_call_blocked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "codex_plugin_scanner.guard.approvals.wait_for_approval_requests",
             lambda **kwargs: {
@@ -361,7 +360,10 @@ class TestMuseApprovalResume:
             "primary_approval_request_id": "req-1",
         }
         updated = apply_muse_pretool_approval_wait(
-            response, event_name="PreToolUse", store=object(), timeout_seconds=5  # type: ignore[arg-type]
+            response,
+            event_name="PreToolUse",
+            store=object(),
+            timeout_seconds=5,  # type: ignore[arg-type]
         )
         assert updated["policy_action"] == "block"
         stdout, _stderr, _exit_code = muse_bridge_response(updated, event_name="PreToolUse")
@@ -377,7 +379,10 @@ class TestMuseApprovalResume:
             "primary_approval_request_id": "req-1",
         }
         updated = apply_muse_pretool_approval_wait(
-            response, event_name="PreToolUse", store=object(), timeout_seconds=5  # type: ignore[arg-type]
+            response,
+            event_name="PreToolUse",
+            store=object(),
+            timeout_seconds=5,  # type: ignore[arg-type]
         )
         assert updated["policy_action"] == "review"
 
