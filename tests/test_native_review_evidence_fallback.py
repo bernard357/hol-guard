@@ -112,20 +112,19 @@ def _pause(
 _REVIEW = {"decision": "deny", "minimum_action": "review", "policy_action": "review"}
 
 
-def test_a_review_whose_policy_binding_fails_is_denied_before_any_grant(
+def test_a_custom_block_settles_before_the_policy_binding_is_checked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from codex_plugin_scanner.guard.daemon import hook_native_review_approval as review
 
-    monkeypatch.setattr(review, "native_review_evidence", lambda **_k: pytest.fail("no ask before the binding holds"))
-    monkeypatch.setattr(review, "render_pre_tool", lambda _harness, verdict, **_k: dict(verdict))
+    monkeypatch.setattr(review, "native_review_evidence", lambda **_k: pytest.fail("a custom block needs no evidence"))
 
-    # The verdict claims extension policy and no receipt proves it.
+    # The verdict claims extension policy and no receipt proves it; the block
+    # denies either way, so no resident ask checks the binding first.
     custom = {"blocked": True, "harness_response": {"decision": "deny", "source": "custom"}}
     response = _pause(review, tmp_path, {**_REVIEW, "command_extensions": {"uncertainty_count": 0}}, custom)
 
-    assert response["reason_code"] == "native_review_policy_binding_invalid"
-    assert response["policy_action"] == "block"
+    assert response == {"decision": "deny", "source": "custom"}
 
 
 def test_a_matching_custom_grant_settles_without_the_evidence_ask(

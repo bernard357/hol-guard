@@ -79,20 +79,17 @@ def pause_native_pre_tool_for_approval(
     local_cli_rule: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Answer a native review; ``local_cli_rule`` is the edge's custom extension rule."""
-    try:
-        native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
-    except ValueError:
-        return _policy_binding_failed(harness, native_result, guard_home)
     launch_target = _native_review_launch_target(payload)
     tool_name = _native_review_tool_name(payload)
     # Custom-extension and saved exact-action blocks win over any allow or pending once approval.
     custom = None if local_cli_rule is None else cast("dict[str, object]", local_cli_rule["harness_response"])
     if local_cli_rule is not None and local_cli_rule["blocked"] is True:
         return cast("dict[str, object]", custom)
-    # A matching custom grant never uses the evidence below, so it settles first.
-    # One resident ask re-checks the receipt's policy binding and answers both
-    # the retry binding and the exact-action token. The saved-decision lookup
-    # and the queued request must bind the identical token, so it is derived once.
+    # A custom block denies whatever the policy binding holds, so it settles
+    # before the binding is checked. One resident ask checks the receipt's
+    # policy binding and answers both the retry binding and the exact-action
+    # token. The saved-decision lookup and the queued request must bind the
+    # identical token, so it is derived once.
     valid, identity, exact_token, once_only_reason = native_review_evidence(
         harness=harness,
         payload=payload,
