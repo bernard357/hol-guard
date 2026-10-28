@@ -397,6 +397,7 @@ impl CompiledNativeCommandControls {
         }
         strengthen(&mut result, floor, reason);
         self.enforce_quarantine(command, tool, &mut result);
+        floor::explain_home_redirect(&mut result, command);
         floor::explain_expired_deadline(&mut result, deadline);
         let global_lockdown = self
             .binding

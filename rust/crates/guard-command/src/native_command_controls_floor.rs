@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use guard_contracts::{NativeCommandPermissionObservationV1, PreToolResultV1};
+use regex::Regex;
 
 use crate::native_command_program::{NativeCommandProgram, ProgramRule};
 use crate::CanonicalCommandV1;
@@ -92,6 +94,32 @@ pub(super) fn explain_expired_deadline(result: &mut PreToolResultV1, deadline: O
         result.reason = EXPIRED_DEADLINE_REASON.to_owned();
     }
 }
+
+/// A redirect into the home folder names a path the shell expands when the
+/// command runs, so Guard cannot match it and keeps the block, inside a loop
+/// as well as on its own. The agent is told about that redirect rather than
+/// about a script it never ran.
+pub(super) fn explain_home_redirect(
+    result: &mut PreToolResultV1,
+    command: Option<&CanonicalCommandV1>,
+) {
+    if result.reason_code == "native_command_extension_evaluation_failed"
+        && command.is_some_and(|command| redirects_into_home(&command.normalized_text))
+    {
+        result.reason = HOME_REDIRECT_REASON.to_owned();
+    }
+}
+
+fn redirects_into_home(text: &str) -> bool {
+    static HOME: OnceLock<Regex> = OnceLock::new();
+    HOME.get_or_init(|| {
+        Regex::new(r#"(?:^|[^<>])>[>|]?[ \t]*"?(?:~|\$HOME\b|\$\{HOME\})(?:[/"\s;&|)]|$)"#)
+            .expect("bounded home redirect")
+    })
+    .is_match(text)
+}
+
+pub(super) const HOME_REDIRECT_REASON: &str = "HOL Guard could not match this command to the installed extension controls, so it stays blocked. It writes to a path under the home folder (`~` or `$HOME`), which the shell only works out when the command runs. Write the output inside the project or a temporary folder instead, or use the built-in edit tool for a file in the home folder.";
 
 pub(super) const EXPIRED_DEADLINE_REASON: &str = "HOL Guard ran out of time checking this command against the installed extension controls, so it stays blocked. This is usually temporary while the machine is busy: run the same command again in a moment. If it keeps happening, run each chained step as its own command, or ask the user to run `hol-guard doctor`.";
 
