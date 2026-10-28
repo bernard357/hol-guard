@@ -1207,11 +1207,15 @@ function DraftControl(props) {
 function PermissionPolicyRow(props) {
   const managed = managedPermissionState(props.effective, props.permission.permission_id);
   const provenance = controlProvenance(props.effective, "permission", props.permission.permission_id);
-  const example = props.permission.example_command ?? (props.extension.executables[0]?.trim() || props.permission.label);
+  const example = props.permission.example_command ?? props.extension.executables[0]?.trim();
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("article", { id: `pattern-${props.permission.permission_id}`, className: "guard-pattern-row", "data-permission-id": props.permission.permission_id, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-sm font-semibold text-brand-dark", children: props.permission.label }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "guard-pattern-example mt-1", children: example }),
+      props.permission.description ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1 text-xs leading-5 text-brand-dark/80", children: props.permission.description }) : null,
+      example ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-xs text-brand-dark/70", children: [
+        "Example: ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "guard-pattern-example", children: example })
+      ] }) : null,
       !props.permission.configurable ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-2 text-xs leading-5 text-brand-dark", children: [
         "Why this cannot be changed: ",
         props.permission.fixed_reason ?? "Guard marks this safety permission as immutable."
