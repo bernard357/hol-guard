@@ -7,11 +7,11 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from .approval_scope_selection import resolve_request_scope_selection
 from .approval_scope_support import (
     APPROVAL_SCOPE_CONTRACT_VERSION,
     IneligibleApprovalScopeError,
     request_scope_contract,
-    resolve_request_scope_selection,
 )
 from .continuation_snapshot import canonical_continuation_correlation_id
 from .models import DECISION_SCOPE_VALUES
