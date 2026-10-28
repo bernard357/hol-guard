@@ -1,4 +1,4 @@
-use super::github_api_path_after_repository;
+use super::{github_api_path_after_repository, names_guard_outside_message};
 use crate::github_command_capabilities::api_endpoint_index;
 
 fn arguments(text: &str) -> Vec<String> {
@@ -66,5 +66,36 @@ fn the_endpoint_is_found_by_the_api_argument_parser() {
         ),
     ] {
         assert_eq!(api_endpoint_index(&arguments(text)), index, "{text}");
+    }
+}
+
+fn segment(command: &str) -> crate::CommandSegmentV1 {
+    crate::parse_command(&crate::CommandModelRequestV1 {
+        command: command.to_owned(),
+        dialect: "posix".to_owned(),
+        transport: "shell_string".to_owned(),
+        extraction_provenance: "guard-shell".to_owned(),
+    })
+    .unwrap()
+    .segments
+    .remove(0)
+}
+
+#[test]
+fn global_options_before_api_keep_the_repository_exemption() {
+    for command in [
+        "gh api --method POST repos/example-org/hol-guard/actions/runs/1/approve",
+        "gh --hostname github.com api --method POST repos/example-org/hol-guard/actions/runs/1/approve",
+        "gh --hostname=github.com api repos/example-org/hol-guard/dispatches",
+        "gh -R example-org/app api repos/example-org/hol-guard/actions/runs/1",
+    ] {
+        assert!(!names_guard_outside_message(&segment(command)), "{command}");
+    }
+    for command in [
+        "gh --hostname github.com api repos/example-org/app/contents/.hol-guard/config",
+        "gh --hostname github.com api repos/example-org/app/actions/runs/1 -f name=hol-guard",
+        "gh --hostname api repos/example-org/hol-guard/actions/runs/1",
+    ] {
+        assert!(names_guard_outside_message(&segment(command)), "{command}");
     }
 }

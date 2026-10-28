@@ -53,7 +53,7 @@ def test_stub_gh_records_exactly_the_expected_calls_offline(tmp_path: Path):
     assert filesystem_checks(fixture, "blocked-extension", GITHUB_DELETE_CASE)["extension-executed-absent"] is False
 
 
-def test_guard_named_repository_case_records_its_one_call(tmp_path: Path):
+def test_guard_named_repository_case_records_its_calls(tmp_path: Path):
     scenario = SCENARIOS[GITHUB_GUARD_NAMED_REPOSITORY_CASE]
     assert scenario.commands == GUARD_NAMED_REPOSITORY_COMMANDS
     assert scenario.expectation == "allow"
@@ -65,7 +65,7 @@ def test_guard_named_repository_case_records_its_one_call(tmp_path: Path):
     path = f"{fixture.root / 'bin'}{os.pathsep}{os.environ['PATH']}"
     for command in GUARD_NAMED_REPOSITORY_COMMANDS:
         subprocess.run(["/bin/sh", "-c", command], env={"PATH": path}, capture_output=True, check=True, timeout=10)
-    assert len(GUARD_NAMED_REPOSITORY_CALLS) == 1
+    assert len(GUARD_NAMED_REPOSITORY_CALLS) == 2
     assert filesystem_checks(fixture, "commands", GITHUB_GUARD_NAMED_REPOSITORY_CASE)[check] is True
 
 

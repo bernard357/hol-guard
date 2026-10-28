@@ -874,6 +874,12 @@ fn repository_selector_is_safe(selector: &str) -> bool {
 }
 
 fn strip_global_options(args: &[String]) -> Vec<String> {
+    global_options_end(args).map_or_else(Vec::new, |index| args[index..].to_vec())
+}
+
+/// The index of the first argument after `gh`'s global options, or `None`
+/// when a global option is missing its value.
+pub(crate) fn global_options_end(args: &[String]) -> Option<usize> {
     let mut index = 0;
     while index < args.len() {
         let token = &args[index];
@@ -893,11 +899,11 @@ fn strip_global_options(args: &[String]) -> Vec<String> {
             continue;
         }
         if index + 1 >= args.len() {
-            return Vec::new();
+            return None;
         }
         index += 2;
     }
-    args[index..].to_vec()
+    Some(index)
 }
 
 fn group_subcommand(args: &[String]) -> Option<String> {

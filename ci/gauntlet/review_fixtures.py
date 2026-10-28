@@ -92,8 +92,15 @@ EXPECTED_GH_CALLS = (
 )
 DELETE_COMMAND = "gh repo delete example-org/example-repo --yes"
 _GUARD_NAMED_RUN = "repos/example-org/hol-guard/actions/runs/123/approve"
-GUARD_NAMED_REPOSITORY_COMMANDS = (f"gh api --method POST {_GUARD_NAMED_RUN}",)
-GUARD_NAMED_REPOSITORY_CALLS = (("api", "--method", "POST", _GUARD_NAMED_RUN),)
+_GUARD_NAMED_NEXT_RUN = "repos/example-org/hol-guard/actions/runs/124/approve"
+GUARD_NAMED_REPOSITORY_COMMANDS = (
+    f"gh api --method POST {_GUARD_NAMED_RUN}",
+    f"gh --hostname github.com api --method POST {_GUARD_NAMED_NEXT_RUN}",
+)
+GUARD_NAMED_REPOSITORY_CALLS = (
+    ("api", "--method", "POST", _GUARD_NAMED_RUN),
+    ("--hostname", "github.com", "api", "--method", "POST", _GUARD_NAMED_NEXT_RUN),
+)
 
 
 def gh_stub_script(log: Path) -> str:

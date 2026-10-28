@@ -337,7 +337,8 @@ fn github_api_endpoint(segment: &crate::CommandSegmentV1) -> Option<&String> {
     if crate::command_compatibility::basename(segment) != "gh" {
         return None;
     }
-    let (first, rest) = segment.arguments.split_first()?;
+    let start = crate::github_command_capabilities::global_options_end(&segment.arguments)?;
+    let (first, rest) = segment.arguments[start..].split_first()?;
     if first != "api" {
         return None;
     }

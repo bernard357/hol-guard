@@ -202,6 +202,8 @@ const GUARD_NAMED_REPOSITORY_API_CALLS: &[&str] = &[
     "gh api --method POST repos/example-org/hol-guard/actions/runs/123/approve",
     "gh api -X POST /repos/example-org/hol-guard/actions/runs/123/approve",
     "gh api repos/example-org/hol-guard/actions/runs/123",
+    // A global option before `api` does not hide the endpoint.
+    "gh --hostname github.com api --method POST repos/example-org/hol-guard/actions/runs/123/approve",
 ];
 
 #[test]
