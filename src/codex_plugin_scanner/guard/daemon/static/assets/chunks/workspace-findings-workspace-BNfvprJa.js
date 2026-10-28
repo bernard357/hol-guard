@@ -974,7 +974,10 @@ function ExportPreviewPanel(props) {
       error,
       preview: preview?.result ?? null,
       edited: preview !== null && preview.input !== input,
-      onInput: setInput,
+      onInput: (value) => {
+        setInput(value);
+        setError(null);
+      },
       onPreview: () => void run(),
       onClose: () => setOpen(false)
     }

@@ -255,7 +255,11 @@ export function ExportPreviewPanel(props: { worktree: WorktreeKeys; findings: Wo
       error={error}
       preview={preview?.result ?? null}
       edited={preview !== null && preview.input !== input}
-      onInput={setInput}
+      onInput={(value) => {
+        // An error about the old list does not describe the edited one.
+        setInput(value);
+        setError(null);
+      }}
       onPreview={() => void run()}
       onClose={() => setOpen(false)}
     />
