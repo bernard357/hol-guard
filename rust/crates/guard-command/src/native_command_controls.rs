@@ -458,6 +458,9 @@ impl CompiledNativeCommandControls {
         // GitHub permission-only owners run last so they never hide an
         // ungranted rule.
         covered.extend(self.github_granted_segments(permission_observations));
+        // A `cd` into the checkout a `git worktree add` of this command
+        // creates is covered when the Git and GitHub steps after it are.
+        covered.extend(crate::pretool::entered_checkouts(command, context));
         // A Git ref read after covered steps keeps the proof it has alone.
         covered.extend(crate::pretool::git_reads_after_allowed_steps(
             command, context, &benign, &covered,

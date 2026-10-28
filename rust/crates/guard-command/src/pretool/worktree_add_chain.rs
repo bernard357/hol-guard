@@ -344,3 +344,64 @@ pub(crate) fn new_checkout_route(
             == Some(destination))
     .then_some(position)
 }
+
+/// The `cd` segments that enter exactly the checkout an earlier
+/// `git worktree add` of the same command creates, when every command after
+/// them is `git` or `gh`.
+///
+/// Entering the new checkout is what `git -C <path>` does for one step, so an
+/// extension Allow that covers the add and each Git or GitHub step after it
+/// covers the `cd` as well; those steps keep their own rules and floors.
+/// Their repository is the same one either way, because a linked worktree
+/// shares it. Any other command after the `cd` would have its paths judged
+/// against the shell's directory instead of the checkout, so it leaves the
+/// `cd` uncovered and the command keeps its review.
+pub(crate) fn entered_checkouts(
+    model: &CanonicalCommandV1,
+    context: super::super::PathContext<'_>,
+) -> Vec<usize> {
+    let mut entered = Vec::new();
+    if model.confidence != "exact" || model.path_overridden || !model.wrapper_chain.is_empty() {
+        return entered;
+    }
+    let is = |segment: &CommandSegmentV1, names: &[&str]| {
+        segment.executable.as_deref().is_some_and(|value| {
+            let basename = super::super::executable_basename(value);
+            names.iter().any(|name| *name == basename)
+        })
+    };
+    for (add, segment) in model.segments.iter().enumerate() {
+        // The add resolves its destination against the reported cwd, which
+        // is the shell's directory only until something changes it.
+        if is(segment, &["cd", "pushd", "popd"]) {
+            break;
+        }
+        if segment.pipeline_index != 0 || !is(segment, &["git"]) {
+            continue;
+        }
+        let Some((_, destination, _)) = super::planned_checkout(segment, context) else {
+            continue;
+        };
+        let after = after_creation(model, add);
+        let Some(next) = model.segments.get(after) else {
+            continue;
+        };
+        if next.executable.as_deref() != Some("cd") || next.pipeline_index != 0 {
+            continue;
+        }
+        let joined = super::separator_between(model, after - 1, after)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|separator| matches!(separator, "&&" | ";"));
+        let rest_is_git = model.segments[after + 1..]
+            .iter()
+            .all(|later| later.pipeline_index > 0 || is(later, &["git", "gh"]));
+        if joined
+            && rest_is_git
+            && super::chain_route::cd_target(next, context).as_ref() == Some(&destination)
+        {
+            entered.push(after);
+        }
+    }
+    entered
+}

@@ -223,6 +223,7 @@ pub(crate) use script_content::{
     sole_program_sources, sourced_program_sources, sourcing_bounded_sources,
 };
 pub(crate) use segment_proof::{benign_command_segments, without_stderr_merge};
+pub(crate) use worktree_add::entered_checkouts;
 pub(crate) use worktree_add::new_checkout_route;
 pub(crate) use worktree_add::verified_leading_cd;
 
