@@ -363,7 +363,9 @@ def _envelope_payload() -> list[object]:
     return ["d"] + [item for key in adapter._ENVELOPE_KEYS for item in (key, None)]
 
 
-def _refusing_once(monkeypatch: pytest.MonkeyPatch, code: str) -> list[dict[str, object]]:
+def _refusing_once(
+    monkeypatch: pytest.MonkeyPatch, code: str, *, hold_key: tuple[str, str] | None = None
+) -> list[dict[str, object]]:
     """A resident that drops the first round trip with ``code``, then answers."""
 
     answers = iter([None, _envelope_payload()])
@@ -372,6 +374,7 @@ def _refusing_once(monkeypatch: pytest.MonkeyPatch, code: str) -> list[dict[str,
         payload = next(answers)
         if payload is None:
             adapter.record_native_resident_client_failure_code(code)
+            adapter.record_native_resident_client_failure_hold_key(hold_key)
             return None
         return _good(request, payload=payload)
 
@@ -386,7 +389,7 @@ def test_a_bounded_restart_hold_is_waited_out_inside_the_budget(monkeypatch: pyt
     revival.arm_restart_hold(("runtime", "state"))
     slept: list[float] = []
     monkeypatch.setattr(adapter.time, "sleep", slept.append)
-    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE, hold_key=("runtime", "state"))
 
     envelope = adapter.native_action_envelope(
         "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 5
@@ -403,7 +406,7 @@ def test_a_restart_hold_longer_than_the_budget_still_fails_closed(monkeypatch: p
     revival.arm_restart_hold(("runtime", "state"))
     slept: list[float] = []
     monkeypatch.setattr(adapter.time, "sleep", slept.append)
-    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE, hold_key=("runtime", "state"))
 
     with pytest.raises(adapter.NativeHookAdapterError) as error:
         adapter.native_action_envelope(
@@ -412,6 +415,51 @@ def test_a_restart_hold_longer_than_the_budget_still_fails_closed(monkeypatch: p
 
     assert error.value.code == "native_hook_adapter_unavailable"
     assert len(seen) == 1
+    assert slept == []
+
+
+def test_another_runtimes_longer_hold_does_not_spend_this_hooks_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Two runtimes are held at once and the unrelated one was armed later, so
+    # its hold outlasts this hook's. Waiting on that one would overrun a budget
+    # that is comfortably long enough for the hold this request actually hit.
+    revival._HOLDS.clear()
+    now = adapter.time.monotonic()
+    revival.arm_restart_hold(("runtime", "state"), now=now - revival.RESTART_HOLD_SECONDS + 0.2)
+    revival.arm_restart_hold(("other-runtime", "other-state"), now=now)
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE, hold_key=("runtime", "state"))
+
+    envelope = adapter.native_action_envelope(
+        "codex",
+        "PreToolUse",
+        {},
+        workspace=None,
+        home_dir=None,
+        deadline=now + 0.2 + adapter._RETRY_MIN_SECONDS,
+    )
+
+    assert envelope is not None
+    assert len(seen) == 2
+    assert slept and slept[0] == pytest.approx(0.2, abs=0.05)
+
+
+def test_a_refusal_without_a_recorded_hold_waits_for_nobody(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only the pool that armed a hold records its key. Without one there is no
+    # hold this request can be said to be inside, so the retry is the ordinary
+    # dropped-round-trip one and borrows no time from another runtime's pacing.
+    revival._HOLDS.clear()
+    revival.arm_restart_hold(("other-runtime", "other-state"))
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE)
+
+    envelope = adapter.native_action_envelope(
+        "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 5
+    )
+
+    assert envelope is not None
+    assert len(seen) == 2
     assert slept == []
 
 

@@ -46,7 +46,12 @@ from .native_context import (
 )
 from .native_execution import _resident_request
 from .native_hook_adapter_wire import _Tagger, _TooLargeError, _UnrepresentableError
-from .native_resident_client import native_resident_client_failure_code, record_native_resident_client_failure_code
+from .native_resident_client import (
+    native_resident_client_failure_code,
+    native_resident_client_failure_hold_key,
+    record_native_resident_client_failure_code,
+    record_native_resident_client_failure_hold_key,
+)
 from .native_resident_revival import RESTART_BLOCKED_CODE, restart_hold_seconds_remaining
 
 HOOK_ADAPTER_FEATURE = "hook-adapter-v1"
@@ -262,6 +267,7 @@ def _send(request: dict[str, object], home: Path, deadline: float | None) -> tup
     except (TypeError, ValueError):
         raise NativeHookAdapterError("native_hook_adapter_request_invalid") from None
     record_native_resident_client_failure_code(None)
+    record_native_resident_client_failure_hold_key(None)
     response = _resident_request(
         operation="hook_adapter",
         request=request,
@@ -283,14 +289,17 @@ def _retry_delay(deadline: float | None) -> float | None:
     of it plus an attempt waits it out instead of reporting the runtime
     unavailable while seconds of its own budget are still unspent. That is what
     a digest handoff looks like from here, and failing it closed costs a hook
-    its answer for no reason.
+    its answer for no reason. The wait is measured against the hold this request
+    was refused under, which the client records with the code; another runtime's
+    pacing is none of this hook's business and must not spend its budget.
     """
 
     code = native_resident_client_failure_code()
     if code == _CLIENT_TIMED_OUT:
         return None
+    key = native_resident_client_failure_hold_key()
     remaining = math.inf if deadline is None else deadline - time.monotonic()
-    hold = restart_hold_seconds_remaining() if code == RESTART_BLOCKED_CODE else 0.0
+    hold = restart_hold_seconds_remaining(key) if code == RESTART_BLOCKED_CODE and key is not None else 0.0
     return hold if remaining >= hold + _RETRY_MIN_SECONDS else None
 
 

@@ -84,22 +84,29 @@ def restart_hold_active(key: HoldKey, *, now: float | None = None) -> bool:
         return True
 
 
-def restart_hold_seconds_remaining(*, now: float | None = None) -> float:
-    """How long the longest armed hold still has to run.
+def restart_hold_seconds_remaining(key: HoldKey, *, now: float | None = None) -> float:
+    """How long ``key``'s armed hold still has to run.
 
-    A caller that holds no key of its own still has to know whether waiting is
-    worth it: a hold is bounded at ``RESTART_HOLD_SECONDS``, so a caller with
-    more budget than that can wait for the pacing to lapse instead of failing
-    closed on a refusal that is about to expire. Taking the longest armed hold
-    keeps the answer safe for a caller whose runtime it cannot name.
+    Pacing is armed per runtime and state root, so only the hold belonging to
+    the pool that refused says whether waiting is worth it. Reading the longest
+    armed hold instead would spend a caller's budget on an unrelated runtime's
+    pacing, or push it past its own budget and fail it closed while the hold it
+    actually hit was about to lapse. A lapsed entry is dropped here, the same
+    way an active check drops it, so a lookup never walks expired history.
     """
 
     if not _HOLDS:
         return 0.0  # The usual case: no lock and no lookup on the request path.
     current = time.monotonic() if now is None else now
     with _HOLD_LOCK:
-        remaining = max((until - current for until in _HOLDS.values()), default=0.0)
-    return min(max(remaining, 0.0), RESTART_HOLD_SECONDS)
+        until = _HOLDS.get(key)
+        if until is None:
+            return 0.0
+        if until <= current:
+            del _HOLDS[key]
+            return 0.0
+        remaining = until - current
+    return min(remaining, RESTART_HOLD_SECONDS)
 
 
 def clear_restart_hold(key: HoldKey) -> None:
@@ -198,5 +205,6 @@ __all__ = [
     "reset_native_resident_restart_pacing",
     "restart_blocked_frame",
     "restart_hold_active",
+    "restart_hold_seconds_remaining",
     "revive_native_resident",
 ]
