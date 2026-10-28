@@ -419,7 +419,7 @@
       "enabled_extensions": [
         "command.upctl"
       ],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.upctl.account-purge"
     },
@@ -439,7 +439,7 @@
       "command": "upctl all purge",
       "disabled_permissions": [],
       "enabled_extensions": [],
-      "expected_action": "allow",
+      "expected_action": "review",
       "expected_effective_segments": [],
       "rule_id": "command.upctl.account-purge"
     },
@@ -453,7 +453,9 @@
         "command.upctl"
       ],
       "expected_action": "block",
-      "expected_effective_segments": [],
+      "expected_effective_segments": [
+        0
+      ],
       "rule_id": "command.upctl.account-purge"
     }
   ],
