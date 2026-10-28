@@ -1,0 +1,45 @@
+{
+  "actionClasses": [
+    "MCP client configuration rewrite",
+    "security policy application"
+  ],
+  "activation": "opt-in",
+  "description": "Locally opt-in HOL-authored review for Warden CLI commands that rewrite MCP client configuration or apply a security policy. Warden maintains neither this Guard extension nor its releases.",
+  "ecosystemIds": [],
+  "executables": [
+    "warden"
+  ],
+  "generated": true,
+  "homepage": "https://github.com/flyingsquirrel0419/warden-cli",
+  "icon": {
+    "kind": "none"
+  },
+  "id": "command.warden-cli",
+  "license": null,
+  "name": "Warden CLI local policy change review",
+  "nativeSource": {
+    "digest": "76977b97349e63a404a346c7c19a5c5e54c64c33a8df5fa64086f573e9c03741",
+    "path": "contributions/command-sources/command.warden-cli.json",
+    "schemaVersion": "guard.command-extension-source.v1"
+  },
+  "publisher": {
+    "displayName": "Michael Kantor (HOL)",
+    "id": "community.kantorcodes",
+    "url": "https://github.com/kantorcodes"
+  },
+  "referenceUrls": [
+    "https://github.com/flyingsquirrel0419/warden-cli/blob/main/src/cli/commands/discover.ts",
+    "https://github.com/flyingsquirrel0419/warden-cli/blob/main/src/cli/commands/policy.ts"
+  ],
+  "riskClasses": [
+    "local_write",
+    "policy_bypass"
+  ],
+  "saferAlternatives": [
+    "Run warden discover without --wrap to preview target MCP server configurations.",
+    "Inspect the signed policy repository and target policy before applying a local security-policy change."
+  ],
+  "schemaVersion": "guard.extension-contribution.v2",
+  "trustClass": "external",
+  "version": "1.0.0"
+}
