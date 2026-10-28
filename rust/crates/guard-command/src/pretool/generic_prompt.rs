@@ -285,9 +285,10 @@ pub(super) fn exfil_prompt_intent(values: &[String]) -> bool {
         .map(|pattern| Regex::new(pattern).expect("bounded exfiltration prompt intent"))
         .collect()
     });
-    values
-        .iter()
-        .any(|value| patterns.iter().any(|pattern| pattern.is_match(value)))
+    values.iter().any(|value| {
+        let value = mask_transfer_encoding(value);
+        patterns.iter().any(|pattern| pattern.is_match(&value))
+    })
 }
 
 pub(super) fn destructive_prompt_intent(values: &[String]) -> bool {
@@ -443,7 +444,7 @@ pub(super) fn benign_prompt_text(text: &str) -> bool {
 
 /// `Transfer-Encoding` and `Content-Transfer-Encoding` name how an HTTP or
 /// MIME body is encoded on the wire; a request to transfer data still names
-/// the verb on its own, which the exfiltration detectors also read.
+/// the verb on its own.
 fn mask_transfer_encoding(value: &str) -> String {
     static ENCODING: OnceLock<Regex> = OnceLock::new();
     ENCODING
