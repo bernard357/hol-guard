@@ -184,6 +184,69 @@ fn credential_stores_and_policy_directories_stay_out_even_when_named() {
 }
 
 #[test]
+fn policy_directories_match_without_case() {
+    let dir = tempfile::tempdir().unwrap();
+    for path in [".GIT/config", "Node_Modules/pkg/index.js"] {
+        write(dir.path(), path, b"value\n");
+    }
+
+    let result = run(dir.path(), &[".GIT/config", "Node_Modules/pkg/index.js"]);
+    let reasons = reasons(&result);
+    assert_eq!(reasons[".GIT/config"], "policy_directory");
+    assert_eq!(reasons["Node_Modules/pkg/index.js"], "policy_directory");
+    assert_eq!(result["file_count"], 0);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_names_with_a_trailing_dot_or_space_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), ".env", b"value\n");
+    write(dir.path(), "node_modules/pkg/index.js", b"value\n");
+
+    let named = [".env.", ".env ", "node_modules./pkg/index.js"];
+    let result = run(dir.path(), &named);
+    let reasons = reasons(&result);
+    for path in named {
+        assert_eq!(reasons[path], "invalid_path", "{path:?}");
+    }
+    assert_eq!(result["file_count"], 0);
+}
+
+#[test]
+fn files_left_out_after_reading_still_spend_the_byte_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.dat", b"\x00\x01\x02\x03bin");
+    write(dir.path(), "b.txt", b"12345678");
+
+    let mut limited = request(dir.path(), &["a.dat", "b.txt"]);
+    limited.max_total_bytes = 10;
+    let result = preview(&limited).unwrap();
+    let reasons = reasons(&result);
+    assert_eq!(reasons["a.dat"], "not_text");
+    assert_eq!(reasons["b.txt"], "byte_budget");
+    assert_eq!(result["status"], "empty");
+}
+
+#[test]
+fn every_occurrence_of_a_secret_is_replaced_and_counted_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let token = github_token();
+    let source = format!("A = {token}\nB = {token}\n");
+    write(dir.path(), "app.py", source.as_bytes());
+
+    let result = run(dir.path(), &["app.py"]);
+    assert_eq!(result["status"], "ready");
+    assert_eq!(result["redactions"], 1);
+    let exported = format!("A = {REDACTION_MARKER}\nB = {REDACTION_MARKER}\n");
+    assert_eq!(
+        result["files"][0]["export_sha256"],
+        sha256(exported.as_bytes())
+    );
+    assert!(!result.to_string().contains(&token));
+}
+
+#[test]
 fn size_limits_and_binary_content_exclude_files() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "a.txt", b"12345678");
