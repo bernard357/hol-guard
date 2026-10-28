@@ -172,13 +172,27 @@ runs no package code and `may_allow` still gates it; the second needs a resolved
 approval for a byte-identical request. Both are nonetheless the shape MAJ-AC-01
 was written to catch.
 
-**Fix:** have the resident carry the answer. For `_script_free_watch` the
+**Fix for `_script_free_watch`:** have the resident carry the answer. The
 widening belongs beside the facts it reads, in `supply_chain_package_eval`,
 surfaced as a field on the evaluation result that `native_package_review_response`
-reads the way it reads `decision`. For the protect resume, the match test and
-its conclusion belong in the resident's re-evaluation, which already receives
-the approval state. Both are tracked separately so this audit can land on its
-own.
+reads the way it reads `decision`. Tracked separately so this audit can land on
+its own.
+
+**Fix for the protect resume: delete it.** This audit assumed the shim's inline
+approval left no decision row for the resident to read, so the rewrite had to be
+ported into the re-evaluation. A probe against a pinned runtime showed the
+opposite. "Allow once" at the prompt resolves at artifact scope with no
+remembered rule; `approval_resolution_plan_op.rs` maps that pair to
+`persistence = "once"`, so `apply_approval_resolution` writes a real
+approval-gate row with an expiry. `is_fresh_artifact_approval` in
+`package_policy_resolve_approvals.rs` accepts exactly that row shape together
+with the resolved request's `resolution_scope == "artifact"`, claims the one
+shot, and the resident answers `allow` on the re-evaluation by itself. The
+Python rewrite therefore only ever fired where the resident had already decided
+to keep the install paused — it was residue that happened to be shaped like an
+authority rule. PR #6320 removes the `elif` and
+`_package_shim_approval_matches_fresh_request` outright and pins the resident's
+own allow with an integration test.
 
 ## Keeping it true
 
