@@ -129,7 +129,7 @@ const EXCLUSION_REASONS: Record<string, string> = {
   sensitive: "Credential or key file. Guard never exports these.",
   policy_directory: "Inside a folder Guard never exports, such as .git or node_modules.",
   oversize: "Larger than one file may be.",
-  byte_budget: "Would take the export past its size limit.",
+  byte_budget: "Past the total size Guard reads for one preview. List fewer files.",
   not_text: "Not a text file.",
   not_found: "No file at this path.",
   not_a_file: "A folder or other entry, not a file.",
