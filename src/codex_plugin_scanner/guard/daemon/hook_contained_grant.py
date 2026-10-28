@@ -23,6 +23,7 @@ A resident edge that answered the grant itself marks its answer
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -141,6 +142,8 @@ def edge_granted_containment_response(
 
     The decoder accepts a grant mark only on a grant route, so a marked edge
     already ran the grant step, the receipt render and the rewrite this would.
+    An unmarked edge is asked as before while the hook's ``time.monotonic()``
+    deadline has time left.
     """
     answer = edge.get("containment_rewrite")
     if answer in _EDGE_GRANT_ANSWERS:
@@ -152,6 +155,10 @@ def edge_granted_containment_response(
             raise NativeHookDecisionError(_EDGE_REWRITE_INVALID)
         return {str(key): value for key, value in response.items()}
     if answer == _EDGE_GRANT_DECLINED:
+        return None
+    # An edge that spent the hook's time on its own grant step leaves none to
+    # ask again in: the review stands, as when no grant routes the call.
+    if deadline is not None and deadline <= time.monotonic():
         return None
     return granted_containment_response(
         store,

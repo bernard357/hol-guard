@@ -8,9 +8,12 @@
 //! and carries the daemon's `local_cli_rules`, the edge runs the same steps
 //! itself, with the request the daemon would have sent:
 //!
-//! - the grant refinement `local_cli_hook_op::decide_refined`, under the
-//!   shared storage hold, for the command, its launch directory, the
-//!   daemon's home and environment and the agent's `PATH`;
+//! - the resident's `LocalCliHook` step `local_cli_hook_op::run_refined`,
+//!   under the shared storage hold, for the command, its launch directory,
+//!   the daemon's home and environment and the agent's `PATH`: it records
+//!   the launch, which refreshes a package script's command catalog, then
+//!   reads the grant, so a grant is matched against the catalog the daemon's
+//!   call would have written;
 //! - an allowed grant copies `contained_route` over the result, and the
 //!   receipt is rendered with `pre_tool`, as the resident renders it;
 //! - `containment_rewrite` turns that receipt into the routed allow.
@@ -51,6 +54,7 @@ const STORAGE_GATE_WAIT: Duration = Duration::from_secs(2);
 /// `local_cli_rules`; the rest is the answer's way back.
 const GRANT_WAIT: Duration = Duration::from_secs(4);
 const REQUEST_ID: &str = "edge-local-cli-grant";
+const STORE_SOURCE: &str = "default";
 const RECEIPT_ONLY: &str = "receipt_only";
 
 /// The edge's answer to a grant-routed `PreToolUse`, replacing
@@ -129,16 +133,13 @@ pub(crate) fn granted(request: &GrantRequest<'_>) -> Option<Granted> {
         Ok(None) => return Some(Granted::Declined),
         Err(()) => return None,
     };
-    // Only a CLI with a grant row can be allowed; an unreadable store counts
-    // as holding one, so the step below decides it.
-    if !has_grant_rows_at(&local.store_path, &local.guard_home) {
-        return Some(Granted::Declined);
-    }
     let wait = request
         .deadline
         .checked_duration_since(Instant::now())
         .filter(|left| !left.is_zero())?;
-    let refined = decided(local, wait)?;
+    let Some(refined) = decided(local, wait)? else {
+        return Some(Granted::Declined);
+    };
     if refined.action != ALLOW_CONTAINED_WITH_GRANT || refined.contained_grant.is_none() {
         return Some(Granted::Declined);
     }
@@ -197,8 +198,8 @@ fn local_request(
         request_id: REQUEST_ID.to_owned(),
         store_path: rules.store_path.clone(),
         guard_home: source.guard_home.clone(),
-        // Nothing is recorded here, so the store's source is never read.
-        source: String::new(),
+        // `GuardStore.guard_source` is not read by the observation writes.
+        source: STORE_SOURCE.to_owned(),
         busy_timeout_ms: u64::from(timeout_ms).clamp(1, crate::guard_store_op::MAX_BUSY_TIMEOUT_MS),
         command: command.to_owned(),
         cwd,
@@ -221,26 +222,39 @@ fn deadline(envelope: &GuardHookEnvelopeV2, started: Instant) -> Instant {
     started + Duration::from_millis(budget) + GRANT_WAIT
 }
 
-/// The grant refinement under the shared storage hold, or `None` when the
-/// hold cannot be taken, the store cannot be read, or the answer does not
-/// arrive within `wait`.
+/// The `LocalCliHook` step under the shared storage hold, as the daemon's
+/// resident call runs it, with the store files put back into private mode
+/// after it. `Some(None)` when the store holds no grant row, so no grant can
+/// route the call; `None` when the hold cannot be taken, the step fails, or
+/// its answer does not arrive within `wait`.
 fn decided(
     request: LocalCliHookRequestV1,
     wait: Duration,
-) -> Option<crate::local_cli_hook_contained::Refined> {
+) -> Option<Option<crate::local_cli_hook_contained::Refined>> {
     let gate_wait = wait.min(STORAGE_GATE_WAIT);
     let (sender, receiver) = mpsc::sync_channel(1);
     // An abandoned step finishes on its own and its answer is dropped.
     std::thread::Builder::new()
         .name(REQUEST_ID.to_owned())
         .spawn(move || {
-            let Ok(_hold) = crate::hook_evidence_store_gate::hold_storage_gate(
-                Path::new(&request.guard_home),
-                gate_wait,
-            ) else {
-                return;
+            let guard_home = Path::new(&request.guard_home);
+            let answer = {
+                let Ok(_hold) =
+                    crate::hook_evidence_store_gate::hold_storage_gate(guard_home, gate_wait)
+                else {
+                    return;
+                };
+                // Read under the hold, so a writer adding a grant finishes
+                // first. An unreadable store counts as holding a row, so the
+                // step decides it.
+                if has_grant_rows_at(&request.store_path, &request.guard_home) {
+                    crate::local_cli_hook_op::run_refined(&request).map(Some)
+                } else {
+                    Ok(None)
+                }
             };
-            let _ = sender.send(crate::local_cli_hook_op::decide_refined(&request));
+            crate::hook_direct::saved_decision::consume::repair_store_permissions(guard_home);
+            let _ = sender.send(answer);
         })
         .ok()?;
     receiver.recv_timeout(wait).ok()?.ok()

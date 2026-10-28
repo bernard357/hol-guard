@@ -126,7 +126,7 @@ impl Fixture {
             .unwrap();
     }
 
-    fn command_grant(&self, cli_id: &str, command_id: &str, state: &str) {
+    pub(crate) fn command_grant(&self, cli_id: &str, command_id: &str, state: &str) {
         self.connection
             .execute(
                 "insert into local_cli_command_grant values (?1, ?2, ?3)",
@@ -152,7 +152,7 @@ impl Fixture {
             .unwrap()
     }
 
-    fn commands(&self, cli_id: &str) -> Vec<(String, String)> {
+    pub(crate) fn commands(&self, cli_id: &str) -> Vec<(String, String)> {
         let mut statement = self
             .connection
             .prepare(

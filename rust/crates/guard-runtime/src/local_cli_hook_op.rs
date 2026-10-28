@@ -128,8 +128,7 @@ pub(crate) fn observe_only(request: &LocalCliHookRequestV1) -> Result<(), &'stat
 }
 
 /// The grant refinement alone, recording nothing: what the workspace sink
-/// asks again right before it widens a sandbox by a grant, and what the edge
-/// asks for a grant-routed call, whose launch is recorded off the answer path.
+/// asks again right before it widens a sandbox by a grant.
 pub(crate) fn decide_refined(request: &LocalCliHookRequestV1) -> Result<Refined, &'static str> {
     let package = checked_package(request)?;
     Ok(refined(request, &package))

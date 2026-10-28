@@ -11,6 +11,7 @@ when the envelope also carries the daemon's local CLI rules.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -218,7 +219,9 @@ class _SinkRouteFixture(HookWorkerNativeMixin):
         raise AssertionError("a PreToolUse sink route reads no structured view")
 
 
-def _review(fixture: _SinkRouteFixture, tmp_path: Path) -> tuple[dict[str, object], bool]:
+def _review(
+    fixture: _SinkRouteFixture, tmp_path: Path, *, deadline: float | None = None
+) -> tuple[dict[str, object], bool]:
     return fixture._review_native_edge_with_snapshot(
         payload=dict(_PAYLOAD),
         harness="claude-code",
@@ -227,7 +230,7 @@ def _review(fixture: _SinkRouteFixture, tmp_path: Path) -> tuple[dict[str, objec
         home_dir=tmp_path / "home",
         guard_home=tmp_path / "guard",
         workspace=tmp_path,
-        deadline=None,
+        deadline=deadline,
         policy_snapshot={"mode": "enforce"},
         recording_only=False,
     )
@@ -451,3 +454,23 @@ def test_an_unmarked_grant_route_asks_for_the_grant_as_before(tmp_path: Path, mo
     assert native is True
     assert reply == _ROUTED_RESPONSE
     assert [call["workspace"] for call in asked] == [tmp_path]
+
+
+def test_an_unmarked_grant_route_past_the_deadline_keeps_the_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The edge's grant step may run past the review's budget; asking again
+    # then would render with a spent deadline, and the call would get the
+    # fixed deny instead of its review.
+    _no_second_call(monkeypatch)
+    paused: list[object] = []
+
+    def pause(_store: object, **kwargs: object) -> dict[str, object]:
+        paused.append(kwargs["native_result"])
+        return {"paused": True}
+
+    monkeypatch.setattr(hook_worker_native, "pause_native_pre_tool_for_approval", pause)
+    reply, native = _review(_GrantRouteFixture(edge=_grant_edge()), tmp_path, deadline=time.monotonic() - 1.0)
+    assert native is True
+    assert reply == {"paused": True}
+    assert paused == [_OUTSIDE_ROOTS]

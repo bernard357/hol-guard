@@ -249,3 +249,34 @@ fn a_grant_step_out_of_time_is_not_answered() {
     assert_eq!(answered, None);
     assert_eq!(response, Some(review()));
 }
+
+/// The grant step records the launch first, as the daemon's resident call
+/// does, so the package script's command catalog exists when the grant is
+/// read. Without it the command matched no catalog, and the CLI's grant
+/// widened the sandbox for a command the user had blocked.
+#[test]
+fn a_blocked_command_is_read_against_the_catalog_the_launch_records() {
+    let fixture = Fixture::new("edge-grant-command-blocked");
+    allowed(&fixture);
+    let identity = fixture.identity();
+    fixture.command_grant(&identity.cli_id, "build", "block");
+    let mut response = Some(review());
+
+    let answered = answer(
+        &envelope(&fixture),
+        "claude-code",
+        &outside_roots(),
+        Instant::now(),
+        &mut response,
+    );
+
+    assert_eq!(answered, Some(DECLINED));
+    assert_eq!(response, Some(review()));
+    assert!(
+        fixture
+            .commands(&identity.cli_id)
+            .iter()
+            .any(|(id, _)| id == "build"),
+        "the launch recorded the catalog"
+    );
+}
