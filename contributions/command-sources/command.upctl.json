@@ -89,6 +89,13 @@
             "subcommands": [
               "all",
               "purge"
+            ],
+            "options_with_values": [
+              "--config",
+              "--output",
+              "-o",
+              "--client-timeout",
+              "-t"
             ]
           }
         }
