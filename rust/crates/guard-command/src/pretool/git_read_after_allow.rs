@@ -11,6 +11,10 @@
 //! not depend on anything such a step changes. It names no file, runs in the
 //! same directory, and the Git floor still probes the configuration it runs
 //! under. This module counts it as covered when the steps before it are.
+//!
+//! The same holds for a Docker listing Guard proves on its own (`docker ps`,
+//! `docker images`, `docker logs`): none of them reads a project file, so a
+//! Git step before it cannot change what it does.
 
 use super::PathContext;
 use crate::CanonicalCommandV1;
@@ -38,7 +42,8 @@ const REF_READS: &[&str] = &[
     "reflog",
 ];
 
-/// The Git ref reads in `model` that the steps before them leave covered.
+/// The Git ref reads and Docker listings in `model` that the steps before
+/// them leave covered.
 ///
 /// `benign` holds the segments the native benign proof covers and `covered`
 /// every segment covered so far, by that proof, an enabled permission or a
@@ -79,7 +84,12 @@ pub(crate) fn git_reads_after_allowed_steps(
             }
             break;
         }
-        if !git || !ref_read(model, segment, proof_context) {
+        let read = if git {
+            ref_read(model, segment, proof_context)
+        } else {
+            super::docker_reads::proven_segment(model, segment, proof_context)
+        };
+        if !read {
             break;
         }
         added.push(index);

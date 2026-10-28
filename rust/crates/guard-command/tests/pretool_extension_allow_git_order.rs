@@ -170,6 +170,8 @@ const REF_READS_AFTER_ALLOWED_STEPS: &[&str] = &[
     "git restore src/index.ts && git rev-parse HEAD",
     "git fetch upstream main && git merge-base HEAD FETCH_HEAD",
     "git commit -am 'Update index' && git push && git rev-parse HEAD",
+    "git checkout -B refresh origin/main && docker ps",
+    "git reset --hard origin/main && git rev-parse HEAD && docker images",
 ];
 
 #[test]
