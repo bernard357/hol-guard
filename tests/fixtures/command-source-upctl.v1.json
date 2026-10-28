@@ -544,6 +544,19 @@
       "rule_id": "command.upctl.account-purge"
     },
     {
+      "id": "upctl_windows_cmd_purge",
+      "command": "upctl.cmd all purge --include sandbox*",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
       "id": "upctl_help_disclosure",
       "command": "upctl all purge --help",
       "disabled_permissions": [],
@@ -559,6 +572,17 @@
     {
       "id": "upctl_list_safe",
       "command": "upctl all list --include sandbox*",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_global_config_list_unchanged",
+      "command": "upctl --config /tmp/upctl.yaml all list",
       "disabled_permissions": [],
       "enabled_extensions": [
         "command.upctl"
