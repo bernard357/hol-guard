@@ -199,7 +199,7 @@ fn a_link_that_could_hide_an_instruction_file_leaves_the_scan_incomplete() {
         ("AGENTS.md", outside.path().join("AGENTS.md")),
         (".cursor", outside.path().to_path_buf()),
         (".github", outside.path().to_path_buf()),
-        ("vendor/tool", outside.path().to_path_buf()),
+        ("packages/tool", outside.path().to_path_buf()),
     ] {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join(link);
