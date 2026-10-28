@@ -123,7 +123,9 @@
                   ],
                   "allow_leading_options": false,
                   "fail_secure_unknown_options": true,
-                  "forbidden_flags": [],
+                  "forbidden_flags": [
+                    "--json"
+                  ],
                   "interspersed_flags": [
                     "--wrap",
                     "--json"
@@ -479,6 +481,28 @@
     {
       "id": "warden_discover_json",
       "command": "warden discover --json",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.warden-cli.wrap-discovered"
+    },
+    {
+      "id": "warden_discover_json_wrap",
+      "command": "warden discover --json --wrap",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.warden-cli"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.warden-cli.wrap-discovered"
+    },
+    {
+      "id": "warden_discover_wrap_json",
+      "command": "warden discover --wrap --json",
       "disabled_permissions": [],
       "enabled_extensions": [
         "command.warden-cli"
