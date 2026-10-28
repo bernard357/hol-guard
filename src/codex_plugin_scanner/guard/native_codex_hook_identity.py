@@ -185,8 +185,12 @@ def _entry_wire(entry: Mapping[str, object], tokens: _ScalarTokens) -> dict[str,
             wire["events"] = [
                 [_key_spelling(name), tokens.wire_at(groups, _EVENT_GROUPS_DEPTH)] for name, groups in hooks.items()
             ]
+        # The resident digests the request as it re-serializes it, and that
+        # leaves an empty binding list out, so an empty list is not sent.
         for key in _BINDING_KEYS:
-            wire[key] = wire_codex_hook_bindings(cast("Sequence[Mapping[str, object]]", entry.get(key, ())))
+            bindings = wire_codex_hook_bindings(cast("Sequence[Mapping[str, object]]", entry.get(key, ())))
+            if bindings:
+                wire[key] = bindings
     return wire
 
 

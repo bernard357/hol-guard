@@ -98,6 +98,29 @@ def test_an_argv_request_sends_only_the_command(monkeypatch: pytest.MonkeyPatch)
     ]
 
 
+def test_an_inventory_request_leaves_out_empty_binding_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The resident digests the request it re-serializes, which drops an empty list."""
+
+    sent = _resident(monkeypatch, lambda _request: {"identities": [{"records": [], "issues": []}]})
+    binding = {"event": "Stop", "group": {"matcher": None}, "handler": {"type": "command", "command": "x"}}
+    entry = {
+        "kind": "inventory",
+        "source_scope": "global",
+        "source_hooks_enabled": True,
+        "source_format": "json",
+        "hooks": {"Stop": []},
+        "authenticated_bindings": [],
+        "legacy_bindings": [binding],
+        "self_bindings": (),
+    }
+    bridge.native_codex_hook_identity([entry], required_feature=bridge.CODEX_HOOK_INVENTORY_FEATURE)
+    (wire,) = sent[0]["entries"]
+    assert "authenticated_bindings" not in wire
+    assert "self_bindings" not in wire
+    assert wire["legacy_bindings"] == [binding]
+    assert wire["events"] == [["Stop", []]]
+
+
 def test_an_argv_answer_of_null_is_not_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     _resident(monkeypatch, lambda _request: {"identities": [{"argv": None}]})
     assert _argv("sh -c 'echo $HOME'") is None
