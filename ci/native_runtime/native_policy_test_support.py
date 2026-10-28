@@ -1,4 +1,7 @@
-"""Helpers for exercising the native resident with an authenticated policy."""
+"""Helpers for exercising the native resident with an authenticated policy.
+
+Self-contained so scripts can load it by path (`scripts/ci` shadows `ci` there).
+"""
 
 from __future__ import annotations
 
@@ -9,9 +12,12 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from .native_policy_snapshot import get_native_policy_snapshot_publisher
-from .native_policy_snapshot_constants import POLICY_SNAPSHOT_UNRECOVERABLE_ERRORS, TRANSIENT_PUBLICATION_ERRORS
-from .store import GuardStore
+from codex_plugin_scanner.guard.native_policy_snapshot import get_native_policy_snapshot_publisher
+from codex_plugin_scanner.guard.native_policy_snapshot_constants import (
+    POLICY_SNAPSHOT_UNRECOVERABLE_ERRORS,
+    TRANSIENT_PUBLICATION_ERRORS,
+)
+from codex_plugin_scanner.guard.store import GuardStore
 
 _STARTUP_ERROR_CODES = (
     POLICY_SNAPSHOT_UNRECOVERABLE_ERRORS

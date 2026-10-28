@@ -511,8 +511,8 @@ def test_post_tool_review_only_trusts_a_resident_that_checks_its_own_answer(
     resident_called: bool,
 ) -> None:
     from ci.native_runtime import post_tool_review
+    from ci.native_runtime.post_tool_review import HookReviewRequest
     from codex_plugin_scanner.guard import native_runtime
-    from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest
 
     runtime = tmp_path / "hol-guard-runtime"
     runtime.write_bytes(b"runtime")
