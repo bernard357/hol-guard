@@ -148,8 +148,8 @@ fn an_allowed_refresh_runs_its_reads_without_review() {
             let result = decide(&root, harness, command, &controls);
             if result.decision != "allow" {
                 failures.push(format!(
-                    "{harness}: {command}: {} {}",
-                    result.decision, result.reason_code
+                    "{harness}: {command}: {} {} {}",
+                    result.decision, result.reason_code, result.reason
                 ));
             }
         }
@@ -168,6 +168,8 @@ const REF_READS_AFTER_ALLOWED_STEPS: &[&str] = &[
     "git branch -D stale && git branch --show-current",
     "git reset --hard origin/main && git rev-parse HEAD",
     "git restore src/index.ts && git rev-parse HEAD",
+    "git fetch upstream main && git rev-parse HEAD",
+    "git push origin HEAD:feature && git merge-base HEAD origin/main",
     "git fetch upstream main && git merge-base HEAD FETCH_HEAD",
     "git commit -am 'Update index' && git push && git rev-parse HEAD",
     "git checkout -B refresh origin/main && docker ps",
