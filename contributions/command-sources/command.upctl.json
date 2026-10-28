@@ -96,6 +96,13 @@
               "-o",
               "--client-timeout",
               "-t"
+            ],
+            "interleaved_options_with_values": [
+              "--config",
+              "--output",
+              "-o",
+              "--client-timeout",
+              "-t"
             ]
           }
         }
