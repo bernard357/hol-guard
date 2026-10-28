@@ -14,7 +14,6 @@ import pytest
 
 from codex_plugin_scanner.guard.approval_scope_support import request_scope_contract
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution
-from codex_plugin_scanner.guard.daemon.hook_native_exact_action import native_exact_action
 from codex_plugin_scanner.guard.daemon.hook_native_saved_approval import (
     EXACT_ACTION_CONTEXT_TOKEN_KEY,
     native_saved_decision_response,
@@ -23,7 +22,7 @@ from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
 from codex_plugin_scanner.guard.models import GuardAction, PolicyDecision
 from codex_plugin_scanner.guard.store import GuardStore
 from tests import native_launch_evidence_helpers
-from tests.native_launch_evidence_helpers import _inventory, _permission, native_launch_evidence
+from tests.native_launch_evidence_helpers import _inventory, _permission, native_exact_action, native_launch_evidence
 from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
@@ -119,6 +118,8 @@ def test_camel_case_harness_payload_offers_the_same_inventory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     # ZCode, Devin and Grok send ``toolInput``; the daemon receives that shape unchanged.
+    # The resident reads the tool name from the payload, as the daemon always did,
+    # so the camelCase payload names the same tool the snake_case one does.
     workspace = _wrangler_workspace(tmp_path, monkeypatch)
     expected = _inventory("npx wrangler --version", workspace)
     assert expected is not None, native_launch_evidence_helpers.LAST_UNAVAILABLE_REASON
@@ -127,7 +128,7 @@ def test_camel_case_harness_payload_offers_the_same_inventory(
         harness=_HARNESS,
         tool_name="Bash",
         payload={
-            "toolName": "run_terminal_command",
+            "toolName": "Bash",
             "toolInput": {"command": "npx wrangler --version"},
             "cwd": str(workspace),
         },
@@ -551,27 +552,20 @@ def test_native_review_derives_the_exact_action_token_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     """The saved lookup and the queued request share one derivation of the same token."""
-    from codex_plugin_scanner.guard.daemon import hook_native_review_approval, hook_native_saved_approval
+    from codex_plugin_scanner.guard.daemon import hook_native_review_approval
 
     workspace = _wrangler_workspace(tmp_path, monkeypatch)
     result, receipt = _verdict()
     worker, store = _hook_worker(tmp_path, monkeypatch, result, receipt)
     calls: list[str | None] = []
-    real = hook_native_saved_approval.native_exact_action
     real_evidence = hook_native_review_approval.native_review_evidence
 
-    def counting(**kwargs: Any) -> tuple[str | None, str | None]:
-        decision = real(**kwargs)
-        calls.append(decision[0])
-        return decision
-
-    def counting_evidence(**kwargs: Any) -> tuple[str | None, str | None, str | None]:
+    def counting_evidence(**kwargs: Any) -> tuple[bool, str | None, str | None, str | None]:
         evidence = real_evidence(**kwargs)
-        calls.append(evidence[1])
+        calls.append(evidence[2])
         return evidence
 
     monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
-    monkeypatch.setattr(hook_native_saved_approval, "native_exact_action", counting)
     payload: dict[str, object] = {
         "hook_event_name": "PreToolUse",
         "session_id": "once",
@@ -601,35 +595,21 @@ def test_native_review_derives_the_exact_action_token_once(
     assert stored == _token("cat package.json", workspace, payload_extra={"session_id": "other"})
 
 
-def test_precomputed_token_binds_the_saved_decision_lookup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
-) -> None:
-    """A supplied token (including None) replaces derivation inside the saved review lookup."""
-    from codex_plugin_scanner.guard.daemon import hook_native_saved_approval
-    from codex_plugin_scanner.guard.daemon.hook_native_saved_approval import native_saved_review_response
-
-    workspace = _wrangler_workspace(tmp_path, monkeypatch)
-    result, receipt = _verdict()
+def test_the_saved_decision_lookup_binds_the_derived_token(tmp_path: Path) -> None:
+    """The saved lookup reads only the token the review derived; no token keeps the review."""
+    result, _receipt = _verdict()
     store = GuardStore(tmp_path / "guard-home")
-    monkeypatch.setattr(
-        hook_native_saved_approval,
-        "native_exact_action",
-        lambda **_kwargs: pytest.fail("a precomputed token must not be re-derived"),
-    )
     kwargs: dict[str, Any] = {
         "harness": _HARNESS,
-        "tool_name": "Bash",
         "artifact_id": _ARTIFACT_ID,
-        "payload": {"tool_name": "Bash", "tool_input": {"command": "cat package.json"}, "cwd": str(workspace)},
         "native_result": result,
-        "native_receipt": receipt,
-        "workspace": workspace,
-        "home_dir": tmp_path / "home",
+        "workspace": tmp_path,
     }
-    assert native_saved_review_response(store, precomputed_token=None, **kwargs) is None
     token = "a" * 64
     _save(store, token, "block")
-    blocked = native_saved_review_response(store, precomputed_token=token, **kwargs)
+    assert native_saved_decision_response(store, token=None, **kwargs) is None
+    assert native_saved_decision_response(store, token="b" * 64, **kwargs) is None
+    blocked = native_saved_decision_response(store, token=token, **kwargs)
     assert blocked is not None and blocked["reason_code"] == "saved_exact_action_block"
 
 

@@ -218,7 +218,7 @@ fn envelope_map(query: &ActionEnvelopeQueryV1) -> Result<(OMap, OMap), Failure> 
 }
 
 #[path = "hook_adapter_review_request.rs"]
-mod review_request;
+pub(crate) mod review_request;
 
 #[cfg(test)]
 #[path = "hook_adapter_op_tests.rs"]
