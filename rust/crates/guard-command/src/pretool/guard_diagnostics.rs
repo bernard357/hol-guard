@@ -33,6 +33,13 @@
 //! queue snapshot also applies a due Watch-posture revert, which only moves a
 //! posture back to protected and never weakens one.
 //!
+//! `hol-guard runtime` and `hol-guard runtime posture` print the executables
+//! the configured MCP servers would launch and the advisory coverage Guard
+//! already holds for them. Nothing is started, no running process is
+//! enumerated and no setting, approval or policy changes; the bare form runs
+//! the same read. `posture` is the subcommand's only verb, so no write verb
+//! hides behind these shapes.
+//!
 //! Like every other bare-name proof here, the inherited `PATH` is a host trust
 //! input: Rust has no resolved executable identity. A launcher sitting in the
 //! working directory is the one shadow this proof can see, so it fails closed
@@ -122,6 +129,10 @@ pub(super) fn safe_hol_guard_arguments(arguments: &[String]) -> bool {
             | ["daemon", "status", "--json"]
             | ["dashboard"]
             | ["dashboard", "--json"]
+            | ["runtime"]
+            | ["runtime", "--json"]
+            | ["runtime", "posture"]
+            | ["runtime", "posture", "--json"]
     ) || help_request(&words)
         || command_inspection(&words)
         || approval_inspection(&words)
@@ -245,15 +256,24 @@ fn help_request(words: &[&str]) -> bool {
 /// the list would go stale every time the CLI grows one, and `hol-guard command
 /// test --help` would ask for approval while `hol-guard command --help` stays
 /// silent. A verb only has to be shaped like one, which keeps out flags, paths
-/// and anything a value could carry.
+/// and anything a value could carry. Nested verbs are read the same way to the
+/// parser's own depth, so `hol-guard command controls patterns --help` prints
+/// its usage as quietly as the shallower paths do.
 fn help_path(words: &[&str]) -> bool {
     match words {
         [] => true,
-        [subcommand] => HELP_SUBCOMMANDS.contains(subcommand),
-        [subcommand, verb] => HELP_SUBCOMMANDS.contains(subcommand) && subcommand_verb(verb),
-        _ => false,
+        [subcommand, verbs @ ..] => {
+            HELP_SUBCOMMANDS.contains(subcommand)
+                && verbs.len() <= MAX_HELP_VERBS
+                && verbs.iter().all(|verb| subcommand_verb(verb))
+        }
     }
 }
+
+/// How deep a help path may go below its subcommand. Guard's deepest nest is
+/// two verbs below the subcommand (`command controls patterns`), and a path
+/// longer than the parser has is a usage error, not a run.
+const MAX_HELP_VERBS: usize = 2;
 
 fn subcommand_verb(word: &str) -> bool {
     word.starts_with(|first: char| first.is_ascii_alphabetic())

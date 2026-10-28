@@ -282,6 +282,32 @@ fn launches_resolve_the_way_the_shell_would() {
     assert!(launches("npm test && python3 -V && echo node").is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn asking_the_runtime_for_its_version_is_not_a_launch() {
+    let root = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    executable(&bin.join("node"));
+    let search = bin.to_string_lossy().into_owned();
+    let launches =
+        |command: &str| runtime_launches(command, Some(root.path()), root.path(), Some(&search));
+    for probe in ["node -v", "node --version", "exec node --version"] {
+        assert!(launches(probe).is_empty(), "{probe}");
+    }
+    // Anything that can read a script, an input or a module is still a launch.
+    for command in [
+        "node",
+        "node -v a.js",
+        "node -e 'require(\"zlib\")'",
+        "node -p process.version",
+        "node --version-check a.js",
+        "node -v && node a.js",
+    ] {
+        assert_eq!(launches(command), [bin.join("node")], "{command}");
+    }
+}
+
 #[test]
 fn runtime_names_cover_node_and_its_windows_spelling_only() {
     assert!(is_runtime_name("node"));
