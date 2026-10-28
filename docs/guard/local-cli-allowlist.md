@@ -34,7 +34,7 @@ A CLI extension binds to the tool's verified file identity. If that file changes
 
 Guard identifies the tool behind an agent's command the same way wherever the review is answered. A script that starts with `#!/usr/bin/env bash` resolves `bash` on the `PATH` of the Guard daemon that recorded it, so an allow keeps applying however the harness reaches Guard.
 
-An allowed tool outside the workspace runs as allowed, with the network and home access it normally has, on every harness. That matches what **Always allow** on its review card would do. Guard runs a tool in the workspace sandbox only when Guard would have sandboxed the command anyway, such as a project's own build. The allow then widens that sandbox only by the access you turn on under **Access on this device**.
+An allowed tool outside the workspace runs as allowed, with the network and home access it normally has, on every harness. That matches what **Always allow** on its review card would do. The tool is resolved against the daemon's own home and `PATH` wherever the review is answered: the daemon publishes those with its policy, and a resident that does not hold them yet hands the review back to the daemon instead of resolving the tool against its own. The answer is the same either way; only the hop changes. Guard runs a tool in the workspace sandbox only when Guard would have sandboxed the command anyway, such as a project's own build. The allow then widens that sandbox only by the access you turn on under **Access on this device**.
 
 Compound commands, wrappers, redirects, and environment overrides are not covered. An allow grant does not override Guard's built-in blocks for destructive or wrapped commands.
 

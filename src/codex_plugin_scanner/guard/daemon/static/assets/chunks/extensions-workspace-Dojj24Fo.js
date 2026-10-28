@@ -3405,6 +3405,7 @@ function loadCommandsFailureMessage(caught) {
   if (caught instanceof LocalCliApiError) return caught.message;
   return "Guard could not load this tool's commands. Try again.";
 }
+const PATH_ENTRY_CODES = /* @__PURE__ */ new Set(["cli_not_on_guard_path", "cli_identity_changed", "cli_reload_needs_path"]);
 const BARE_PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const SCRIPT_SUFFIXES = /* @__PURE__ */ new Set([
   ".bash",
@@ -3450,7 +3451,7 @@ function LocalCliLoadCommands(props) {
       setLoaded(true);
     } catch (caught) {
       if (controller.signal.aborted) return;
-      if (caught instanceof LocalCliApiError && caught.code === "cli_not_on_guard_path") setAskPath(true);
+      if (caught instanceof LocalCliApiError && PATH_ENTRY_CODES.has(caught.code)) setAskPath(true);
       setError(loadCommandsFailureMessage(caught));
     } finally {
       setBusy(false);

@@ -5,7 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { DiscoveryFailure } from "../discovery-failure";
 import { LocalCliApiError, normalizeLocalCliItem } from "../local-cli-api";
-import { LocalCliLoadCommands, loadCommandsFailureMessage, loadCommandsNeedsPath } from "./local-cli-load-commands";
+import {
+  LocalCliLoadCommands,
+  PATH_ENTRY_CODES,
+  loadCommandsFailureMessage,
+  loadCommandsNeedsPath,
+} from "./local-cli-load-commands";
 
 const raw = {
   cli_id: "local-cli.lanectl-abcdef12",
@@ -72,3 +77,14 @@ assert.match(loadCommandsFailureMessage(new DiscoveryFailure("discovery_failed",
 assert.equal(loadCommandsFailureMessage(new DiscoveryFailure("cli_help_unreadable", "help text")), "help text");
 assert.equal(loadCommandsFailureMessage(new LocalCliApiError("cli_identity_changed", "not the program Guard recorded")), "not the program Guard recorded");
 assert.match(loadCommandsFailureMessage(new TypeError("Failed to fetch")), /Try again/);
+
+// Every failure of the daemon's own PATH lookup offers the full path next: it
+// can miss the tool, or find another program of that name. The daemon checks
+// the identity of whatever the path resolves to before it probes anything.
+for (const code of ["cli_not_on_guard_path", "cli_identity_changed", "cli_reload_needs_path"]) {
+  assert.ok(PATH_ENTRY_CODES.has(code), code);
+}
+// A path the operator mistyped, or a tool that is really gone, is not one.
+for (const code of ["cli_path_invalid", "cli_path_not_found", "cli_help_unreadable"]) {
+  assert.ok(!PATH_ENTRY_CODES.has(code), code);
+}

@@ -116,6 +116,12 @@ pub(crate) fn candidate(
 /// execution environment the hook stamped, which the daemon read the `PATH`
 /// from when it drained the record, over the home and environment the
 /// daemon published (`launch_env`).
+///
+/// Without a published environment it keeps resolving against the resident's
+/// own home and variables, as every direct observation did before the daemon
+/// published one. An observation only records which local CLI a launch named,
+/// never a decision, so a resident-resolved record stays better than no record
+/// at all, and the `PATH` the hook stamped wins either way.
 pub(crate) fn direct_candidate(
     payload: &Map<String, Value>,
     workspace: &str,

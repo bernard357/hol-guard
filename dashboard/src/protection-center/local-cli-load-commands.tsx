@@ -15,6 +15,9 @@ export function loadCommandsFailureMessage(caught: unknown): string {
   return "Guard could not load this tool's commands. Try again.";
 }
 
+/** Failures a full path can get past, both from the daemon's own PATH lookup. */
+export const PATH_ENTRY_CODES = new Set(["cli_not_on_guard_path", "cli_identity_changed", "cli_reload_needs_path"]);
+
 const BARE_PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const SCRIPT_SUFFIXES = new Set([
   ".bash", ".bat", ".cmd", ".fish", ".js", ".mjs", ".cjs", ".ts", ".pl", ".ps1", ".py", ".rb", ".sh", ".zsh",
@@ -67,8 +70,10 @@ export function LocalCliLoadCommands(props: {
       setLoaded(true);
     } catch (caught) {
       if (controller.signal.aborted) return;
-      // Guard's PATH can differ from the agent's; the full path still works.
-      if (caught instanceof LocalCliApiError && caught.code === "cli_not_on_guard_path") setAskPath(true);
+      // Guard's PATH can differ from the agent's, so the name it looks up can
+      // miss the tool or find another program of that name; the full path
+      // still works, and the daemon re-checks the identity before any probe.
+      if (caught instanceof LocalCliApiError && PATH_ENTRY_CODES.has(caught.code)) setAskPath(true);
       setError(loadCommandsFailureMessage(caught));
     } finally {
       setBusy(false);
