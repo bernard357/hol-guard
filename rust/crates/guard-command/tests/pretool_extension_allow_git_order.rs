@@ -272,3 +272,33 @@ fn an_allowed_refresh_that_configures_git_itself_still_waits_for_review() {
         );
     }
 }
+
+// TEMPORARY diagnostic matrix; removed before merge.
+#[test]
+fn diag_fetch_head_matrix() {
+    let (root, _cleanup) = checkout("diag", false);
+    let controls = every_permission("enabled");
+    let mut lines = Vec::new();
+    for command in [
+        "git merge-base HEAD FETCH_HEAD",
+        "git rev-parse FETCH_HEAD",
+        "git status --short && git merge-base HEAD FETCH_HEAD",
+        "git fetch upstream main && git merge-base HEAD FETCH_HEAD",
+        "git fetch upstream main && git merge-base HEAD main",
+        "git fetch upstream main && git merge-base HEAD origin/main",
+        "git fetch upstream main && git rev-parse FETCH_HEAD",
+        "git fetch upstream main && git log -1 FETCH_HEAD",
+        "git push origin HEAD:feature && git merge-base HEAD FETCH_HEAD",
+        "git push origin HEAD:feature && git rev-parse FETCH_HEAD",
+        "git fetch origin main && git merge-base HEAD FETCH_HEAD",
+    ] {
+        let result = decide(&root, "omp", command, &controls);
+        let mut value = serde_json::to_value(&result).unwrap();
+        if let Some(object) = value.as_object_mut() {
+            object.remove("message");
+        }
+        let text = value.to_string();
+        lines.push(format!("{command} => {}", &text[..text.len().min(1500)]));
+    }
+    panic!("{}", lines.join("\n"));
+}
