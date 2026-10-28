@@ -22,7 +22,7 @@ from ..action_lattice import normalize_guard_action
 _BLOCKING_ACTIONS = frozenset({"review", "require-reapproval", "sandbox-required", "block"})
 _RC_BLOCK_IS_ONE = frozenset({"opencode", "superagent"})
 _RC_BLOCK_IS_TWO = frozenset({"cursor", "devin", "kimi", "hermes"})
-_RC_BLOCK_IS_ZERO_ENVELOPE = frozenset({"codex", "claude-code", "copilot", "pi", "omp"})
+_RC_BLOCK_IS_ZERO_ENVELOPE = frozenset({"codex", "claude-code", "copilot", "pi", "omp", "muse"})
 _PREEMPTIVE_EVENTS = frozenset({"PreToolUse", "UserPromptSubmit", "PermissionRequest"})
 
 

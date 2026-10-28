@@ -11,7 +11,8 @@
         "zcode",
         "claude-code",
         "omp",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -1016,7 +1017,8 @@
         "zcode",
         "claude-code",
         "omp",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {

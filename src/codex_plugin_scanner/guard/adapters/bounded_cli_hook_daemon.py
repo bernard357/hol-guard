@@ -96,6 +96,27 @@ def _rendered_bridge_answer(
     A resident that cannot render it leaves the fixed fail-closed payload for
     this harness and event, as an unreachable daemon would.
     """
+    if harness.strip().lower().replace("_", "-") == "muse":
+        from .muse_hook_render import apply_muse_pretool_approval_wait, muse_bridge_response
+
+        answer: dict[str, object] = dict(parsed)
+        try:
+            from ..config import load_guard_config
+            from ..store import GuardStore
+
+            remaining = max(0, int(deadline - time.monotonic()))
+            configured = load_guard_config(guard_home).approval_wait_timeout_seconds
+            wait_seconds = min(configured, remaining)
+            if wait_seconds > 0:
+                answer = apply_muse_pretool_approval_wait(
+                    answer,
+                    event_name=event_name,
+                    store=GuardStore(guard_home),
+                    timeout_seconds=wait_seconds,
+                )
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+            answer = dict(parsed)
+        return muse_bridge_response(answer, event_name=event_name, guard_home=guard_home, deadline=deadline)
     from ..native_hook_render import native_cli_hook_emit
 
     rendered = native_cli_hook_emit(

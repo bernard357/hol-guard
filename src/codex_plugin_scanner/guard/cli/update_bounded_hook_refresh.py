@@ -6,7 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from ..adapters import copilot, devin, hermes, kimi, openclaw_support, zcode
+from ..adapters import copilot, devin, hermes, kimi, muse, openclaw_support, zcode
 from ..adapters.base import HarnessContext
 from ..adapters.bounded_cli_hook_bridge import _render_bounded_hook_script, bounded_hook_script_path
 from ..store import GuardStore
@@ -22,6 +22,7 @@ _BOUNDED_HOOK_TIMEOUTS: tuple[tuple[str, str, float], ...] = (
     ("copilot", "Copilot", copilot._GUARD_HOOK_INTERNAL_TIMEOUT_SECONDS),
     ("openclaw", "OpenClaw", openclaw_support._GUARD_PRETOOL_INTERNAL_TIMEOUT_SECONDS),
     ("hermes", "Hermes", hermes._GUARD_PRETOOL_INTERNAL_TIMEOUT_SECONDS),
+    ("muse", "Muse", muse._GUARD_HOOK_INTERNAL_TIMEOUT_SECONDS),
 )
 
 

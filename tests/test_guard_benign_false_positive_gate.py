@@ -48,7 +48,14 @@ _CASES_PATH = Path(__file__).parent / "fixtures" / "benign_false_positive_gate.j
 _DOCUMENT = json.loads(_CASES_PATH.read_text(encoding="utf-8"))
 _PENDING_FIX: dict[str, str] = _DOCUMENT["pending_fix"]
 
-_SHELL_TOOL = {"codex": "Bash", "zcode": "Bash", "claude-code": "Bash", "omp": "bash", "cursor": "Shell"}
+_SHELL_TOOL = {
+    "codex": "Bash",
+    "zcode": "Bash",
+    "claude-code": "Bash",
+    "omp": "bash",
+    "cursor": "Shell",
+    "muse": "bash",
+}
 _READ_TOOL = {"zcode": "Read", "claude-code": "Read", "omp": "read", "cursor": "Read"}
 _GLOB_TOOL = {"claude-code": "Glob", "omp": "glob"}
 _GREP_TOOL = {"claude-code": "Grep", "omp": "grep"}

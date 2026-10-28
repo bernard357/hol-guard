@@ -22,6 +22,7 @@
   "grok",
   "hermes",
   "kimi",
+  "muse",
   "omp",
   "openclaw",
   "opencode",
@@ -77,6 +78,10 @@
   "kimi": {
    "pre_tool_use": "installed_canonical",
    "post_tool_use": "installed_canonical"
+  },
+  "muse": {
+   "pre_tool_use": "installed_cli_bridge",
+   "post_tool_use": "installed_cli_bridge"
   },
   "omp": {
    "pre_tool_use": "installed_canonical",

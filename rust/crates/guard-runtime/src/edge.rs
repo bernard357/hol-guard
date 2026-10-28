@@ -122,6 +122,7 @@ fn canonical_harness(value: &str) -> Result<String, String> {
         "oh-my-pi" => "omp",
         "zai" | "z-code" | "zai-zcode" => "zcode",
         "devin-cli" | "cognition-devin" => "devin",
+        "muse-code" => "muse",
         _ => normalized.as_str(),
     };
     if !canonical
@@ -143,6 +144,7 @@ fn canonical_harness(value: &str) -> Result<String, String> {
             | "grok"
             | "hermes"
             | "kimi"
+            | "muse"
             | "omp"
             | "openclaw"
             | "opencode"

@@ -37,7 +37,9 @@ _DIAGNOSTIC_DRAIN_TIMEOUT_SECONDS = 0.25
 # Harnesses whose bounded hook bridge prints this command's output to the
 # harness as is. Their daemon route renders the review into the harness's own
 # wire format, so the CLI renders it the same way.
-_BRIDGE_RENDERED_HARNESSES = frozenset({"cline", "copilot", "devin", "grok", "hermes", "kimi", "openclaw", "zcode"})
+_BRIDGE_RENDERED_HARNESSES = frozenset(
+    {"cline", "copilot", "devin", "grok", "hermes", "kimi", "muse", "openclaw", "zcode"}
+)
 _RENDER_FAILURE_REASON = "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal."
 # What writing a finished answer is allowed to take when the review itself has
 # already used the hook's whole budget.
@@ -74,6 +76,10 @@ def _bridge_hook_output(
     writes for an outage; nothing reads the answer in Python.
     """
 
+    if canonical == "muse":
+        from ..adapters.muse_hook_render import muse_bridge_response
+
+        return muse_bridge_response(response, event_name=event_name, guard_home=guard_home, deadline=deadline)
     if canonical == "hermes":
         # The Hermes bridge renders its daemon reply natively; so does the CLI.
         return hermes_bridge_response(response, event_name=event_name, guard_home=guard_home, deadline=deadline)
