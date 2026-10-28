@@ -63,7 +63,7 @@ pub(crate) const HOOK_DIRECT_SAVED_DECISION_FEATURE: &str = "hook-direct-saved-d
 pub(crate) const HOOK_DIRECT_CONNECTOR_NOTICE_FEATURE: &str = "hook-direct-connector-notice-v1";
 /// The resident takes the bound managed-policy view, resolves an Oh My Pi
 /// `PostToolUse`'s structured output mediation from it, and answers the hook
-/// with the mediation the daemon would have attached.
+/// with the mediation the edge attaches on the daemon path.
 pub(crate) const HOOK_DIRECT_STRUCTURED_OUTPUT_FEATURE: &str = "hook-direct-structured-output-v1";
 const HOOK_DIRECT_RESULT_SCHEMA: &str = "guard-hook-direct-result.v1";
 /// The harnesses whose allow the daemon returns as the edge rendered it.
@@ -95,7 +95,7 @@ const ENCRYPTED_PAYLOAD_FIELD: &str = "guard_payload_ref";
 const SOURCE_REFERENCE_FIELD: &str = "guard_source_ref";
 /// The model-visible content an Oh My Pi `PostToolUse` carries, which
 /// structured output mediation scans.
-const STRUCTURED_OUTPUT_FIELD: &str = "structured_output_json";
+pub(crate) const STRUCTURED_OUTPUT_FIELD: &str = "structured_output_json";
 const PAYLOAD_REFERENCE_FIELDS: [&str; 2] = [ENCRYPTED_PAYLOAD_FIELD, SOURCE_REFERENCE_FIELD];
 const EVENT_NAME_FIELDS: [&str; 6] = [
     "event",
@@ -132,8 +132,8 @@ const POST_TOOL_EVENT_NAMES: [&str; 7] = [
     "aftermcpexecution",
 ];
 /// The daemon's budget when the caller sends none, and its upper bound.
-const DEFAULT_DEADLINE_BUDGET_MS: u64 = 750;
-const MAX_DEADLINE_BUDGET_MS: u64 = 9_000;
+pub(crate) const DEFAULT_DEADLINE_BUDGET_MS: u64 = 750;
+pub(crate) const MAX_DEADLINE_BUDGET_MS: u64 = 9_000;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -332,9 +332,9 @@ fn answer(
     let (snapshot, binding) = policy_store
         .admit_direct_hook_or_subdirectory(&workspace)
         .map_err(HookDirectDefer::Lane)?;
-    // The daemon resolves what the managed policy requires of this hook's
-    // structured output from the config it loads. The resident resolves the
-    // same thing from the view the publisher bound, and mediates once the
+    // The edge resolves what the managed policy requires of this hook's
+    // structured output from the view the daemon sends. The resident resolves
+    // the same thing from the view the publisher bound, and mediates once the
     // edge has decided; without a resolvable view it has nothing to mediate
     // against and leaves the hook to the daemon.
     let structured_resolution = structured_mediation
@@ -423,6 +423,7 @@ fn answer(
         recording_only,
         local_cli_rules: None,
         observe_local_cli: false,
+        structured_output_config: None,
     };
     let (edge, fence_wait) = fence::evaluate(envelope, policy_store)?;
     // Removed again unless the answer that runs it is returned.
@@ -594,7 +595,7 @@ mod lifecycle;
 #[path = "hook_direct_local_cli.rs"]
 pub(crate) mod local_cli;
 #[path = "hook_direct_pi.rs"]
-mod pi;
+pub(crate) mod pi;
 #[path = "hook_direct_saved_decision.rs"]
 pub(crate) mod saved_decision;
 #[path = "hook_direct_workspace.rs"]

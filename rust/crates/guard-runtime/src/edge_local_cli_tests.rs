@@ -85,6 +85,7 @@ fn case(label: &str, state: Option<&str>, recording_only: bool) -> (GuardHookEnv
                 .collect(),
         }),
         observe_local_cli: false,
+        structured_output_config: None,
     };
     (envelope, identity.name)
 }

@@ -73,6 +73,7 @@ fn policy_store(request: &NativeBashCaptureV1) -> (PolicySnapshotStore, GuardHoo
         recording_only: false,
         local_cli_rules: None,
         observe_local_cli: false,
+        structured_output_config: None,
     };
     (store, envelope)
 }

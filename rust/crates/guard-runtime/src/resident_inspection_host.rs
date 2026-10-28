@@ -4,13 +4,11 @@
 //! and the environment is answered from the request's observed facts and the
 //! resident's own git safety checks; nothing here runs on Python's side.
 
-use guard_command::{GitCheck, GitProbe, GitRun, InspectionHost};
+use guard_command::{GitCheck, GitProbe, InspectionHost};
 use guard_contracts::{
     CodexToolOutputFactsV1, CompoundGitSegmentV1, GitExecutionSafetyCheckV1,
     GitExecutionSafetyRequestV1, GIT_EXECUTION_SAFETY_REQUEST_SCHEMA,
 };
-
-use crate::codex_tool_output_git::run_pathspec_git;
 
 pub(crate) struct ResidentInspectionHost<'a> {
     pub(crate) facts: &'a CodexToolOutputFactsV1,
@@ -88,10 +86,6 @@ impl InspectionHost for ResidentInspectionHost<'_> {
             GitCheck::StatusConfig => GitExecutionSafetyCheckV1::StatusConfig,
         };
         self.decide_git(check, cwd, arguments, None)
-    }
-
-    fn run_git(&self, git: &str, args: &[String], cwd: &str) -> GitRun {
-        run_pathspec_git(git, args, cwd, &self.facts.environment)
     }
 
     fn compound_git_chain(&self, segments: &[CompoundGitSegmentV1], complete: bool) -> bool {

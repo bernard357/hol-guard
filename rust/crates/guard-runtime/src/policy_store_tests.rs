@@ -354,6 +354,7 @@ fn restarted_resident_applies_installed_policy_without_request_time_io() {
         recording_only: false,
         local_cli_rules: None,
         observe_local_cli: false,
+        structured_output_config: None,
     };
     let result = crate::edge::evaluate_envelope_with_store(envelope, &restarted).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
@@ -392,6 +393,7 @@ fn authenticated_edge_preserves_clean_default_warning() {
         recording_only: false,
         local_cli_rules: None,
         observe_local_cli: false,
+        structured_output_config: None,
     };
     let result = crate::edge::evaluate_envelope_with_store(envelope, &store).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
@@ -433,6 +435,7 @@ fn authenticated_observe_edge_preserves_intrinsic_pretool_floor() {
         recording_only: false,
         local_cli_rules: None,
         observe_local_cli: false,
+        structured_output_config: None,
     };
     let result = crate::edge::evaluate_envelope_with_store(envelope, &store).unwrap();
     let result: GuardHookEdgeResultV2 = serde_json::from_slice(&result).unwrap();
@@ -490,7 +493,6 @@ fn authority_fingerprint_detects_same_size_in_place_rewrite() {
     file.seek(SeekFrom::Start(offset as u64)).unwrap();
     file.write_all(&[replacement]).unwrap();
     file.sync_all().unwrap();
-
     let after = authority_fingerprint(&path).unwrap();
     assert_ne!(before, after);
     assert!(!store.test_authorities_unchanged());

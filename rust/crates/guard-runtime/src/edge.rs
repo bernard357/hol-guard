@@ -58,8 +58,7 @@ pub(crate) fn execution_intent_digest(envelope: &GuardHookEnvelopeV2) -> Result<
 /// Derive a stable opaque identity when the harness omitted a request ID.
 /// The digest covers semantic request inputs only. Transport deadlines,
 /// object field order, and event-alias spelling are deliberately excluded.
-/// Raw request material remains inside the resident and never appears in an
-/// approval result.
+/// Raw request material stays in the resident, never in an approval result.
 pub(crate) fn request_identity(envelope: &GuardHookEnvelopeV2) -> Result<(String, String), String> {
     let harness = canonical_harness(&envelope.harness)?;
     let event = authoritative_event(envelope)?;
@@ -293,6 +292,7 @@ fn evaluate_validated_envelope(
     policy_snapshot: Option<&AdmittedPolicySnapshot>,
     origin_store: Option<&crate::policy_store::PolicySnapshotStore>,
 ) -> Result<Vec<u8>, String> {
+    let started = Instant::now();
     let harness = canonical_harness(&envelope.harness)?;
     let event_name = authoritative_event(&envelope)?;
     let kind = payload_kind(&envelope.raw_payload)?;
@@ -465,7 +465,7 @@ fn evaluate_validated_envelope(
         receipt,
     };
     edge_result_check::check(&edge)?;
-    crate::encode_response(&edge)
+    crate::encode_response(&crate::edge_structured::attached(&envelope, edge, started))
 }
 
 /// Evaluate a resident hook envelope against the already-installed in-memory
@@ -497,4 +497,4 @@ pub(crate) fn evaluate_envelope_with_snapshot(
 
 #[cfg(test)]
 #[path = "edge_tests.rs"]
-mod tests;
+pub(crate) mod tests;

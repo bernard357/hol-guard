@@ -1828,6 +1828,38 @@
    "native_replacements": [
     "rust/crates/guard-command/src/github_capability_interaction.rs"
    ]
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/runtime/structured_data_sensitivity.py",
+   "module": "codex_plugin_scanner.guard.runtime.structured_data_sensitivity",
+   "source_sha256": "923a670b3e9a8500fb980bd7583354d9fd8c8a4db19ef1228313319a874a9c02",
+   "forbidden_symbols": [
+    "_scan_credential_content",
+    "_scan_credential_window",
+    "DeclaredField",
+    "DeclaredSchema"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/content_sensitivity.rs",
+    "rust/crates/guard-runtime/src/content_sensitivity_op.rs"
+   ]
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/runtime/structured_output_mediation.py",
+   "module": "codex_plugin_scanner.guard.runtime.structured_output_mediation",
+   "source_sha256": "f75a612d86365e85f4e37c0ef395d92622414c29e9d552667b54b6a9c19fce20",
+   "forbidden_symbols": [
+    "StructuredContentMediation",
+    "StructuredOutputBinding",
+    "StructuredOutputResolution",
+    "mediate_native_post_tool_content",
+    "resolve_managed_structured_output_resolution"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/content_sensitivity.rs",
+    "rust/crates/guard-runtime/src/content_sensitivity_op.rs",
+    "rust/crates/guard-runtime/src/edge_structured.rs"
+   ]
   }
  ],
  "retired_test_paths": [
@@ -1942,34 +1974,6 @@
     "_SAMPLE_SECRET_VALUE_PATTERN",
     "_secret_content_match_is_sample",
     "_extract_secret_assignment_value"
-   ],
-   "native_replacements": [
-    "rust/crates/guard-command/src/content_sensitivity.rs",
-    "rust/crates/guard-runtime/src/content_sensitivity_op.rs"
-   ]
-  },
-  {
-   "path": "src/codex_plugin_scanner/guard/runtime/structured_data_sensitivity.py",
-   "source_sha256": "923a670b3e9a8500fb980bd7583354d9fd8c8a4db19ef1228313319a874a9c02",
-   "forbidden_symbols": [
-    "_scan_credential_content",
-    "_scan_credential_window",
-    "_typed_value",
-    "_PATH_SEGMENT"
-   ],
-   "native_replacements": [
-    "rust/crates/guard-command/src/content_sensitivity.rs",
-    "rust/crates/guard-runtime/src/content_sensitivity_op.rs"
-   ]
-  },
-  {
-   "path": "src/codex_plugin_scanner/guard/runtime/structured_output_mediation.py",
-   "source_sha256": "f75a612d86365e85f4e37c0ef395d92622414c29e9d552667b54b6a9c19fce20",
-   "forbidden_symbols": [
-    "_has_safe_numbers",
-    "_reject_constant",
-    "_setting_at_path",
-    "_valid_policy_hash"
    ],
    "native_replacements": [
     "rust/crates/guard-command/src/content_sensitivity.rs",

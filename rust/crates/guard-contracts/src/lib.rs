@@ -373,6 +373,14 @@ pub struct GuardHookEnvelopeV2 {
     /// verdict, receipt, or request identity.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub observe_local_cli: bool,
+    /// The managed-policy view the daemon holds for a Pi or Oh My Pi
+    /// `PostToolUse`: `managed_policy_status`, `managed_policy_hash`,
+    /// `managed_locked_settings` and `managed_policy`, the shape the
+    /// structured-output resolution reads. The edge answers the structured
+    /// content mediation from it. It never changes the verdict, receipt, or
+    /// request identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_output_config: Option<Value>,
 }
 
 /// Where the daemon's custom extension rules live and what a command's
