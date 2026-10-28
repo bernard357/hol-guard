@@ -87,13 +87,10 @@ fn is_digest(value: &str) -> bool {
 }
 
 fn now_unix() -> Result<u64, String> {
-    u64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| "native_resident_clock_invalid".to_owned())?
-            .as_secs(),
-    )
-    .map_err(|_| "native_resident_clock_invalid".to_owned())
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "native_resident_clock_invalid".to_owned())?
+        .as_secs())
 }
 
 /// Take the record lock without waiting. A retirement that collides with
