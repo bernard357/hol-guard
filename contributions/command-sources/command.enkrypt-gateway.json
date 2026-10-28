@@ -97,7 +97,8 @@
               "--config-id"
             ],
             "forbidden_flags_before_delimiter": [
-              "--help"
+              "--help",
+              "-h"
             ]
           }
         }
