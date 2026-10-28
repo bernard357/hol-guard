@@ -176,6 +176,21 @@ fn watch_records_a_would_be_block_over_an_earlier_warning() {
 }
 
 #[test]
+fn watch_records_the_finding_behind_a_stronger_intrinsic_review() {
+    let found = finding("22.1.0", json!([rule("CVE-1", "critical", "22.5.0")])).unwrap();
+    let observed = raise(result("review"), &found, "block", true);
+    validate_pre_tool_result_matrix(&observed).unwrap();
+    assert_eq!(observed.minimum_action, "review");
+    assert_eq!(observed.reason_code, "native_test");
+    assert!(observed.reason.contains("would have required block"));
+    assert!(observed.reason.ends_with("Also: native test"));
+    let quiet = raise(result("review"), &found, "warn", true);
+    assert_eq!(quiet.reason, "native test");
+    let enforced = raise(result("require-reapproval"), &found, "review", false);
+    assert_eq!(enforced.reason, "native test");
+}
+
+#[test]
 fn strict_blocks_and_a_stronger_result_keeps_its_own_reason() {
     let found = finding("22.1.0", json!([rule("CVE-1", "critical", "22.5.0")])).unwrap();
     for start in [

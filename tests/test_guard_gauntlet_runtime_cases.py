@@ -152,9 +152,12 @@ def test_watch_mode_lets_an_affected_launch_finish_and_records_what_strict_would
     command = _command(AFFECTED_CASE)
     result = _review(home, workspace, guard_home, command)
     assert not _denied(result), result
-    assert f"{FINDING_REASON}_observed" in str(result), result
     if not _SANDBOX_HOST:
+        # Without a sandbox the launch is reviewed for that reason first; the
+        # native result keeps that code and records the finding in its text
+        # (covered beside raise() in Rust).
         return
+    assert f"{FINDING_REASON}_observed" in str(result), result
     ran = subprocess.run(["/bin/sh", "-c", command], cwd=workspace, capture_output=True, text=True, check=True)
     assert ran.stdout == OUTPUT
     assert (workspace / LAUNCH_RECORD).is_file()
