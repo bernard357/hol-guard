@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard import native_hook_containment_route
 from codex_plugin_scanner.guard.adapters import zcode_contained_tests
 from codex_plugin_scanner.guard.daemon import hook_contained_grant, hook_worker_native
 from codex_plugin_scanner.guard.daemon.hook_worker_native import HookWorkerNativeMixin
@@ -390,7 +389,6 @@ def _no_second_call(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("the edge already answered the grant route")
 
     monkeypatch.setattr(hook_contained_grant, "granted_containment_response", second_call)
-    monkeypatch.setattr(native_hook_containment_route, "native_containment_route", second_call)
 
 
 @pytest.mark.parametrize(
