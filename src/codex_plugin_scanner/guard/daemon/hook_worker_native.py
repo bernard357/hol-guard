@@ -20,7 +20,7 @@ from ..native_runtime import NativeRuntimeStatus
 from .hook_availability_policy import availability_harness_response
 from .hook_contained_grant import edge_granted_containment_response
 from .hook_evidence_dispatch import run_hook_evidence
-from .hook_fail_closed import render_recording_only_pre_tool
+from .hook_fail_closed import render_pre_tool, render_recording_only_pre_tool
 from .hook_native_review_approval import (
     pause_native_pre_tool_for_approval,
 )
@@ -471,7 +471,11 @@ class HookWorkerNativeMixin:
                 )
             from ..adapters.zcode_contained_tests import route_zcode_containment
 
-            rendered = _edge_harness_response(edge)
+            rendered = (
+                render_pre_tool(native_harness, native_result, guard_home=guard_home, deadline=deadline)
+                if native_result and not isinstance(edge.get("harness_response"), dict)
+                else _edge_harness_response(edge)
+            )
             # The edge rewrote the sink route itself when it says so; an edge
             # that did not is asked, and no answer is the outage response. Its
             # routed allow is held to the shape the resident's answer is.

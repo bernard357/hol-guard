@@ -80,6 +80,7 @@ fn outside_roots() -> Value {
         "command_extensions": {
             "binding": {"uncertainty_count": 0, "observations_digest": "sha256:fixture"},
             "observations": [],
+                "permission_observations": [],
         },
     })
 }

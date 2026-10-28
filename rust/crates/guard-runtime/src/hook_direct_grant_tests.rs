@@ -88,6 +88,7 @@ fn edge(route: &str) -> Value {
             "command_extensions": {
                 "binding": {"uncertainty_count": 0, "observations_digest": "sha256:fixture"},
                 "observations": [],
+                "permission_observations": [],
             },
         },
         "harness_response": {
