@@ -46,6 +46,12 @@ fn read_only_loops_match_their_unrolled_form() {
         // long as the pattern's own text reads as a path.
         ("for f in *.ts; do echo $f; done", "echo *.ts"),
         ("for d in */; do echo $d; done", "echo */"),
+        // Double quotes round a whole reference stop the shell splitting the
+        // name into fields; they do not change which names the loop reads, so
+        // the written-out text spells the same pattern without them.
+        ("for f in *.md; do head -5 \"$f\"; done", "head -5 *.md"),
+        ("for f in *.md; do wc -l \"$f\"; done", "wc -l *.md"),
+        ("for d in */; do echo \"$d\"; done", "echo */"),
         // The body talks about the name without binding it, so the loop
         // variable still holds the header word.
         (
@@ -130,8 +136,9 @@ fn unsupported_loops_fall_back_to_review() {
         // proven: with a file named `x secret.pem .json` beside it,
         // `cat bak-$f` reads `secret.pem` while `cat bak-*.json` does not.
         "for f in *.json; do cat bak-$f; done",
+        "for f in *.json; do cat \"bak-$f\"; done",
+        "for f in *.md; do head -5 \"$f.bak\"; done",
         "for f in src/*.ts; do cat $f.bak; done",
-        "for f in *.ts; do wc -l \"$f\"; done",
         "for f in *.ts; do echo ${f}x; done",
         "for f in a b; do $f; done",
         "for f in a b; do echo hi > $f; done",

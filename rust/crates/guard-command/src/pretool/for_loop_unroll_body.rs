@@ -438,7 +438,9 @@ const MARKER: char = '\u{1}';
 /// `cat bak-$f` becomes `cat bak-*.json`, whose matches are proven while the
 /// loop's own `*.json` matches never are, so a name holding whitespace splits
 /// in the body into words that pattern never matched. A reference inside a
-/// larger word, or inside quotes, keeps its review.
+/// larger word keeps its review. A reference the body quotes on its own is
+/// read here as the whole word it is, because `unquote_whole_references` has
+/// already taken the quotes off.
 pub(crate) fn references_stand_alone(item: &str) -> bool {
     let chars: Vec<char> = item.chars().collect();
     chars.iter().enumerate().all(|(index, &current)| {
@@ -452,6 +454,34 @@ pub(crate) fn references_stand_alone(item: &str) -> bool {
 /// of the item itself.
 fn word_boundary(character: Option<char>) -> bool {
     character.is_none_or(|character| character.is_whitespace() || character == '|')
+}
+
+/// Take the quotes off a reference the body quotes as a whole word of its own.
+///
+/// Every word the loop header admits is one whitespace-free run of characters
+/// the shell does nothing with, so `"$f"` and `$f` hand the body the same
+/// single word. Writing the bare word out is what lets the glob proof read the
+/// pattern the loop expands; left inside quotes it would stand for a name the
+/// shell never matches.
+pub(crate) fn unquote_whole_references(item: &str) -> String {
+    let chars: Vec<char> = item.chars().collect();
+    let mut out = String::with_capacity(item.len());
+    let mut index = 0usize;
+    while let Some(&current) = chars.get(index) {
+        if current == '"'
+            && chars.get(index + 1) == Some(&MARKER)
+            && chars.get(index + 2) == Some(&'"')
+            && word_boundary(index.checked_sub(1).map(|before| chars[before]))
+            && word_boundary(chars.get(index + 3).copied())
+        {
+            out.push(MARKER);
+            index += 3;
+            continue;
+        }
+        out.push(current);
+        index += 1;
+    }
+    out
 }
 
 pub(crate) fn substitute(item: &str, word: &str) -> Option<String> {

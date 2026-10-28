@@ -8,7 +8,10 @@
 #[path = "for_loop_unroll_body.rs"]
 pub(super) mod body;
 
-use body::{body_items, rebinds, redirect_tail, references_stand_alone, substitute};
+use body::{
+    body_items, rebinds, redirect_tail, references_stand_alone, substitute,
+    unquote_whole_references,
+};
 
 const MAX_WORDS: usize = 32;
 const MAX_WORD_BYTES: usize = 256;
@@ -64,12 +67,21 @@ pub(super) fn unroll(command: &str) -> Option<String> {
     // A glob reaches the body as the names the shell expanded it to, one
     // argument each, while the unrolled text hands the body the pattern. The
     // two are the same work only while the body reads the loop variable as a
-    // whole word of its own.
-    if words.iter().any(|word| word.contains(['*', '?', '[']))
-        && !items.iter().all(|(text, _)| references_stand_alone(text))
-    {
-        return None;
-    }
+    // whole word of its own, and only while the pattern reaches the unrolled
+    // text bare, which is why a reference the body quotes on its own loses its
+    // quotes first.
+    let items = if words.iter().any(|word| word.contains(['*', '?', '['])) {
+        let items: Vec<(String, &'static str)> = items
+            .into_iter()
+            .map(|(text, separator)| (unquote_whole_references(&text), separator))
+            .collect();
+        if !items.iter().all(|(text, _)| references_stand_alone(text)) {
+            return None;
+        }
+        items
+    } else {
+        items
+    };
     let mut out = prefix;
     for word in &words {
         for (text, separator) in &items {
