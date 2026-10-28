@@ -82,8 +82,6 @@ mod codex_output_shlex;
 mod codex_output_source_paths;
 mod codex_output_splitters;
 mod codex_output_wrappers;
-mod codex_prompt_attachment;
-pub mod codex_prompt_credential_file;
 pub mod command_compatibility;
 mod command_contained_routine_candidates;
 mod command_critical_floors;
