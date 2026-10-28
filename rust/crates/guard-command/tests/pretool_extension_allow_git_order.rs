@@ -157,6 +157,69 @@ fn an_allowed_refresh_runs_its_reads_without_review() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// Reads the Git extension has no permission for, each after a step the user
+/// allowed. Guard proves the read on its own, and the step before it changes
+/// nothing the read looks up, so the Allow on that step carries the command.
+const REF_READS_AFTER_ALLOWED_STEPS: &[&str] = &[
+    "git push origin HEAD:feature && git rev-parse HEAD",
+    "git push -u origin HEAD && git rev-parse --short HEAD",
+    "git checkout main && git pull --ff-only && git rev-parse --short HEAD",
+    "git checkout -B refresh origin/main && git rev-parse --abbrev-ref HEAD",
+    "git branch -D stale && git branch --show-current",
+    "git reset --hard origin/main && git rev-parse HEAD",
+    "git restore src/index.ts && git rev-parse HEAD",
+    "git fetch upstream main && git merge-base HEAD FETCH_HEAD",
+    "git commit -am 'Update index' && git push && git rev-parse HEAD",
+];
+
+#[test]
+fn a_ref_read_after_an_allowed_step_runs_without_review() {
+    let (root, _cleanup) = checkout("ref-reads", false);
+    let controls = every_permission("enabled");
+    let mut failures = Vec::new();
+    for harness in ["omp", "zcode", "codex", "claude-code"] {
+        for command in REF_READS_AFTER_ALLOWED_STEPS {
+            let result = decide(&root, harness, command, &controls);
+            if result.decision != "allow" {
+                failures.push(format!(
+                    "{harness}: {command}: {} {}",
+                    result.decision, result.reason_code
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_ref_read_keeps_the_review_of_a_step_nobody_allowed() {
+    let (root, _cleanup) = checkout("ref-reads-unallowed", false);
+    let defaults = fixture::github_controls("default");
+    let mut reviewed_steps = 0;
+    for command in REF_READS_AFTER_ALLOWED_STEPS {
+        let step = command.split(" && ").next().unwrap();
+        if decide(&root, "omp", step, &defaults).decision == "allow" {
+            continue;
+        }
+        reviewed_steps += 1;
+        let result = decide(&root, "omp", command, &defaults);
+        assert_ne!(
+            result.decision, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
+    }
+    assert!(reviewed_steps > 0, "no step waits for review by default");
+    let allowed = every_permission("enabled");
+    let result = decide(
+        &root,
+        "omp",
+        "hol-guard hooks remove && git rev-parse HEAD",
+        &allowed,
+    );
+    assert_ne!(result.decision, "allow", "{}", result.reason_code);
+}
+
 #[test]
 fn a_refresh_without_an_allow_still_waits_for_review() {
     let (root, _cleanup) = checkout("default", false);

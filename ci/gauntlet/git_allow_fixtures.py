@@ -26,7 +26,9 @@ from .fast_forward_fixtures import add_fast_forward_origin
 
 GIT_ALLOW_MERGE_CASE = "git-allow-merge-fast-forward-then-reads"
 GIT_ALLOW_STASH_CASE = "git-allow-stash-around-fast-forward"
-GIT_ALLOW_CASES = frozenset({GIT_ALLOW_MERGE_CASE, GIT_ALLOW_STASH_CASE})
+# Reads the git extension has no permission for, after a step it allows.
+GIT_ALLOW_REF_READS_CASE = "git-allow-ref-reads-after-checkout"
+GIT_ALLOW_CASES = frozenset({GIT_ALLOW_MERGE_CASE, GIT_ALLOW_STASH_CASE, GIT_ALLOW_REF_READS_CASE})
 GIT_EXTENSION_ID = "command.git"
 
 STASH_FILE = "src/settings.ts"

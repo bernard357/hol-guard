@@ -118,6 +118,7 @@ pub(crate) mod git_listing_reads;
 mod git_local_writes;
 mod git_probe;
 mod git_push;
+mod git_read_after_allow;
 mod git_remote_config;
 mod git_remote_ops;
 mod git_routes;
@@ -211,6 +212,7 @@ pub use generic::{bounded_task_metadata_output, evaluate_pre_tool_envelope};
 pub use git_push::{
     install_git_push_verdict, push_environment_git, GitPushRequest, GitPushVerdict,
 };
+pub(crate) use git_read_after_allow::git_reads_after_allowed_steps;
 pub use safe_scalar::PsqlEnvironment;
 #[cfg_attr(not(unix), allow(unused_imports))]
 pub(crate) use script_content::launch_loopback_ports;
