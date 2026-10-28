@@ -248,7 +248,10 @@ def test_an_unmediated_allow_is_withheld_once_a_policy_is_activated() -> None:
     load, reads = _loader(_config())
     response = {"decision": "allow"}
     withheld = withhold_stale_forward(response, view=view, load_config=load, deadline=None, allowed=True)
-    assert withheld == {"decision": "allow", MEDIATION_FIELD: _mediation("withhold", "structured_binding_changed")}
+    # Nothing was mediated, so the withhold names no native decision.
+    expected = _mediation("withhold", "structured_binding_changed")
+    del expected["native_decision_id"]
+    assert withheld == {"decision": "allow", MEDIATION_FIELD: expected}
     assert reads == [1]
 
 

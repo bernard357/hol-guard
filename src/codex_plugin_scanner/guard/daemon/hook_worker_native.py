@@ -217,7 +217,6 @@ class HookWorkerNativeMixin:
         event_name: str,
         guard_home: Path,
         workspace: Path | None,
-        view: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         """Withhold a managed structured destination when native proof is absent.
 
@@ -228,9 +227,9 @@ class HookWorkerNativeMixin:
 
         if not withholds_structured_destination(harness=harness, event_name=event_name):
             return response
-        # A caller that already read the managed policy for this hook passes
-        # that view; the edge never answered, so nothing resolved it.
-        resolved = view if view is not None else read_structured_view(lambda: self._load_config(guard_home, workspace))
+        # The edge never answered, so nothing resolved the policy. Read it
+        # again: one activated while the edge was tried must still apply.
+        resolved = read_structured_view(lambda: self._load_config(guard_home, workspace))
         if not structured_destination_required(resolved, harness=harness):
             return response
         return withhold_structured_destination(response)
@@ -369,7 +368,6 @@ class HookWorkerNativeMixin:
                     event_name=event_name,
                     guard_home=guard_home,
                     workspace=workspace,
-                    view=structured_view,
                 ),
                 False,
             )
@@ -391,7 +389,6 @@ class HookWorkerNativeMixin:
                     event_name=event_name,
                     guard_home=guard_home,
                     workspace=workspace,
-                    view=structured_view,
                 ),
                 False,
             )

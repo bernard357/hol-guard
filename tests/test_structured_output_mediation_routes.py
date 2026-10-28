@@ -11,6 +11,7 @@ tests cover what only the daemon does.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,10 @@ def test_a_forward_is_withheld_when_the_config_changed_after_the_scan(tmp_path: 
 def test_an_unmediated_allow_is_withheld_when_a_policy_is_activated_during_the_review(tmp_path: Path) -> None:
     fixture = _NativeRouteFixture(_config(status="absent", locked=()), config_after_edge=_config())
     response, _native_used = _review(fixture, tmp_path)
-    assert response["structured_content_mediation"] == _mediation("withhold", "structured_binding_changed")
+    # Nothing was mediated, so the withhold names no native decision.
+    expected = _mediation("withhold", "structured_binding_changed")
+    del expected["native_decision_id"]
+    assert response["structured_content_mediation"] == expected
     assert response["decision"] == "allow"
     assert fixture.reads == 2
 
@@ -196,6 +200,24 @@ def test_native_unavailable_required_structured_route_withholds_model_output(
         "action": "withhold",
         "reason_code": "structured_native_edge_unavailable",
     }
+
+
+@dataclass
+class _UnavailableAfterTryFixture(_NativeRouteFixture):
+    """An edge that is tried, so the config can change, and never answers."""
+
+    def _review_raw_hook_native(self, **_kwargs: object) -> None:
+        self.answered = True
+
+
+def test_native_unavailable_route_reads_a_policy_activated_while_the_edge_was_tried(tmp_path: Path) -> None:
+    fixture = _without_native_edge(
+        _UnavailableAfterTryFixture(_config(status="absent", locked=()), config_after_edge=_config())
+    )
+    response, native_used = _review(fixture, tmp_path)
+    assert native_used is False
+    assert response["structured_content_mediation"]["reason_code"] == "structured_native_edge_unavailable"  # type: ignore[index]
+    assert fixture.reads == 2
 
 
 def test_native_route_load_error_sends_an_unreadable_view_the_edge_withholds_under(tmp_path: Path) -> None:
