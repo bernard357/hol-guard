@@ -94,6 +94,13 @@
                   "subcommands": [
                     "all",
                     "purge"
+                  ],
+                  "options_with_values": [
+                    "--config",
+                    "--output",
+                    "-o",
+                    "--client-timeout",
+                    "-t"
                   ]
                 }
               }
@@ -363,6 +370,71 @@
     {
       "id": "upctl_account_purge",
       "command": "upctl all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_config_before_purge",
+      "command": "upctl --config /tmp/upctl.yaml all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_output_short_before_purge",
+      "command": "upctl -o json all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_output_long_before_purge",
+      "command": "upctl --output json all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_timeout_short_before_purge",
+      "command": "upctl -t 60s all purge",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.upctl"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [
+        0
+      ],
+      "rule_id": "command.upctl.account-purge"
+    },
+    {
+      "id": "upctl_timeout_long_before_purge",
+      "command": "upctl --client-timeout 60s all purge",
       "disabled_permissions": [],
       "enabled_extensions": [
         "command.upctl"
