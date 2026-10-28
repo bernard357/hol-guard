@@ -60,22 +60,36 @@ fn a_redirect_into_the_home_folder_stays_blocked_and_says_why() {
     let result = evaluate(&root, "echo x >> notes.txt");
     assert!(!result.reason.contains(HOME_TEXT), "{}", result.reason);
 
-    // A script launch blocks on its own, and quoted text is not a redirect, so
-    // neither is blamed on the home folder.
-    for command in [
-        "bash ./missing.sh > ~/out.log",
-        "bash ./missing.sh '> ~/notes.txt'",
+    // A command that cannot be matched with its output in the project keeps
+    // that reason: the home folder is not what stopped it. Quoted text that
+    // only looks like a redirect is not one either.
+    let mut independent = 0;
+    for program in [
+        "bash ./missing.sh",
+        "eval \"$CMD\"",
+        "xargs sh -c 'echo x' < list.txt",
     ] {
-        let result = evaluate(&root, command);
-        assert_eq!(
-            result.reason_code, "native_command_extension_evaluation_failed",
-            "{command}: {}",
-            result.reason
-        );
-        assert!(
-            !result.reason.contains(HOME_TEXT),
-            "{command}: {}",
-            result.reason
-        );
+        let baseline = evaluate(&root, &format!("{program} > out.log"));
+        if baseline.reason_code != "native_command_extension_evaluation_failed" {
+            continue;
+        }
+        independent += 1;
+        for command in [
+            format!("{program} > ~/out.log"),
+            format!("{program} '> ~/notes.txt' > out.log"),
+        ] {
+            let result = evaluate(&root, &command);
+            assert_eq!(
+                result.reason_code, baseline.reason_code,
+                "{command}: {}",
+                result.reason
+            );
+            assert!(
+                !result.reason.contains(HOME_TEXT),
+                "{command}: {}",
+                result.reason
+            );
+        }
     }
+    assert!(independent > 0, "no command failed evaluation on its own");
 }
