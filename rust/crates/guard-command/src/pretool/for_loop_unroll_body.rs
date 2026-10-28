@@ -418,10 +418,41 @@ fn reference(chars: &[(usize, char)], i: &mut usize, name: &str, argument: bool)
             format!("${ident}")
         });
     }
-    (ident == name).then(|| MARKER.to_owned())
+    (ident == name).then(|| MARKER.to_string())
 }
 
-const MARKER: &str = "\u{1}";
+/// Where the loop variable stood in the body, kept out of the shell's own
+/// character set so no written word can collide with it.
+const MARKER: char = '\u{1}';
+
+/// Whether every reference to the loop variable is a whole unquoted word.
+///
+/// The shell splits an unquoted expansion into fields and expands what comes
+/// out as a pattern, so each name a glob matches reaches the body as its own
+/// argument. The proofs that expand a pattern own that rule, and they see it
+/// only while the reference is the whole word: `cat $f` is written out as
+/// `cat *.json`, so the glob proof reads exactly the names the loop reads,
+/// and it refuses a directory holding a name that would split.
+///
+/// Glued into a larger word the written-out text spells a different pattern.
+/// `cat bak-$f` becomes `cat bak-*.json`, whose matches are proven while the
+/// loop's own `*.json` matches never are, so a name holding whitespace splits
+/// in the body into words that pattern never matched. A reference inside a
+/// larger word, or inside quotes, keeps its review.
+pub(crate) fn references_stand_alone(item: &str) -> bool {
+    let chars: Vec<char> = item.chars().collect();
+    chars.iter().enumerate().all(|(index, &current)| {
+        current != MARKER
+            || (word_boundary(index.checked_sub(1).map(|before| chars[before]))
+                && word_boundary(chars.get(index + 1).copied()))
+    })
+}
+
+/// Whether the character beside a reference ends the word, counting the ends
+/// of the item itself.
+fn word_boundary(character: Option<char>) -> bool {
+    character.is_none_or(|character| character.is_whitespace() || character == '|')
+}
 
 pub(crate) fn substitute(item: &str, word: &str) -> Option<String> {
     // Every pipeline stage must start with a plain word: no marker, no

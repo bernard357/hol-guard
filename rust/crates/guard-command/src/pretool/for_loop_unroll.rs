@@ -8,7 +8,7 @@
 #[path = "for_loop_unroll_body.rs"]
 pub(super) mod body;
 
-use body::{body_items, rebinds, redirect_tail, substitute};
+use body::{body_items, rebinds, redirect_tail, references_stand_alone, substitute};
 
 const MAX_WORDS: usize = 32;
 const MAX_WORD_BYTES: usize = 256;
@@ -59,6 +59,15 @@ pub(super) fn unroll(command: &str) -> Option<String> {
     let (items, _, tail) = body_items(rest, name, &["done"])?;
     let tail = redirect_tail(tail)?;
     if items.is_empty() || items.iter().any(|(text, _)| rebinds(text, name)) {
+        return None;
+    }
+    // A glob reaches the body as the names the shell expanded it to, one
+    // argument each, while the unrolled text hands the body the pattern. The
+    // two are the same work only while the body reads the loop variable as a
+    // whole word of its own.
+    if words.iter().any(|word| word.contains(['*', '?', '[']))
+        && !items.iter().all(|(text, _)| references_stand_alone(text))
+    {
         return None;
     }
     let mut out = prefix;
@@ -168,7 +177,9 @@ fn safe_value(value: &str) -> bool {
 /// the pattern own that rule: `read_globs` admits a match only when its name
 /// holds no whitespace, and refuses a match of a directoryless pattern that
 /// begins with `-` or holds the `name=value` an operand would read as an
-/// assignment rather than as a file.
+/// assignment rather than as a file. Those proofs read the pattern the body
+/// is handed, so the body has to read the loop variable as a whole word of
+/// its own; `references_stand_alone` holds it to that.
 fn pattern_value(value: &str) -> bool {
     value.len() <= MAX_WORD_BYTES
         && value.contains(['*', '?', '['])

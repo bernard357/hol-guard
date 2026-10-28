@@ -125,6 +125,14 @@ fn unsupported_loops_fall_back_to_review() {
         "for f in src/../../*.ts; do echo $f; done",
         "for f in \"src/*.ts\"; do echo $f; done",
         "for f in 'src/*.ts'; do echo $f; done",
+        // A glob glued into a larger word writes out a pattern the loop never
+        // expanded, so the names the loop's own pattern matches are never
+        // proven: with a file named `x secret.pem .json` beside it,
+        // `cat bak-$f` reads `secret.pem` while `cat bak-*.json` does not.
+        "for f in *.json; do cat bak-$f; done",
+        "for f in src/*.ts; do cat $f.bak; done",
+        "for f in *.ts; do wc -l \"$f\"; done",
+        "for f in *.ts; do echo ${f}x; done",
         "for f in a b; do $f; done",
         "for f in a b; do echo hi > $f; done",
         "for f in a b; do f=x; echo $f; done",
