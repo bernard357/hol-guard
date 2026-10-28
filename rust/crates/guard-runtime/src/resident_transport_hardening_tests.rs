@@ -87,6 +87,15 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+/// `PendingRequest` holds a live stream and has no `Debug`, so a refused header
+/// is read out of the `Err` arm rather than through `expect_err`.
+fn header_error(stream: ScriptedStream, context: &str) -> String {
+    match read_request_header_inner(Box::new(stream)) {
+        Ok(_) => panic!("{context}"),
+        Err(error) => error,
+    }
+}
+
 #[test]
 fn another_protocols_magic_is_refused_before_its_payload_is_read() {
     let body = br#"{"operation":"pre_tool_decide"}"#;
@@ -94,7 +103,7 @@ fn another_protocols_magic_is_refused_before_its_payload_is_read() {
     frame.extend_from_slice(body);
     let stream = ScriptedStream::new(frame);
 
-    let error = read_request_header_inner(Box::new(stream)).expect_err("magic must not match");
+    let error = header_error(stream, "magic must not match");
 
     assert_eq!(error, "native_frame_version_mismatch");
 }
@@ -106,7 +115,7 @@ fn a_truncated_header_never_becomes_a_request() {
     frame.truncate(crate::FRAME_HEADER_BYTES - 1);
     let stream = ScriptedStream::new(frame);
 
-    let error = read_request_header_inner(Box::new(stream)).expect_err("header is short");
+    let error = header_error(stream, "header is short");
 
     // The last byte never arrives, so the read ends on the header timeout
     // instead of waiting for a peer that has stopped sending.
@@ -117,7 +126,7 @@ fn a_truncated_header_never_becomes_a_request() {
 fn a_frame_that_declares_no_payload_is_refused() {
     let stream = ScriptedStream::new(frame_header(crate::REQUEST_MAGIC, b"", 0));
 
-    let error = read_request_header_inner(Box::new(stream)).expect_err("empty frame");
+    let error = header_error(stream, "empty frame");
 
     assert_eq!(error, "native_request_too_large");
 }
@@ -127,7 +136,7 @@ fn a_length_past_the_request_ceiling_is_refused_without_reading_it() {
     let length = u32::try_from(crate::MAX_NATIVE_REQUEST_BYTES + 1).expect("ceiling fits in u32");
     let stream = ScriptedStream::new(frame_header(crate::REQUEST_MAGIC, b"", length));
 
-    let error = read_request_header_inner(Box::new(stream)).expect_err("oversize frame");
+    let error = header_error(stream, "oversize frame");
 
     // Nothing is allocated for the declared length and no payload byte is
     // read, so a header claiming more than the ceiling costs the header only.
