@@ -1,7 +1,7 @@
 //! Managed-policy composition: a managed requirement only ever strengthens
 //! the local configuration it is composed into.
 
-use super::{apply_managed_policy, ManagedInput};
+use super::{apply_managed_policy, strongest_actions, strongest_security_value, ManagedInput};
 use serde_json::{json, Map, Value};
 
 fn policy(settings: Value, locked: &[&str]) -> ManagedInput {
@@ -94,4 +94,38 @@ fn managed_watch_auto_revert_lock_keeps_hours() {
     );
     let composed = compose(json!({"watch_auto_revert_hours": 0}), &policy);
     assert_eq!(composed["watch_auto_revert_hours"], 24);
+}
+
+const LATTICE: [&str; 6] = [
+    "allow",
+    "warn",
+    "review",
+    "require-reapproval",
+    "sandbox-required",
+    "block",
+];
+
+#[test]
+fn managed_composition_takes_the_stronger_action_for_every_pair() {
+    for (left_rank, left) in LATTICE.iter().enumerate() {
+        for (right_rank, right) in LATTICE.iter().enumerate() {
+            let expected = json!(LATTICE[left_rank.max(right_rank)]);
+            let (left, right) = (json!(left), json!(right));
+            assert_eq!(strongest_actions(Some(&left), &right), expected);
+            assert_eq!(strongest_security_value(Some(&left), &right), expected);
+        }
+    }
+}
+
+#[test]
+fn sandbox_required_is_never_downgraded_and_unknown_actions_block() {
+    let sandbox = json!("sandbox-required");
+    for weaker in ["allow", "warn", "review", "require-reapproval"] {
+        let weaker = json!(weaker);
+        assert_eq!(strongest_actions(Some(&sandbox), &weaker), sandbox);
+        assert_eq!(strongest_security_value(Some(&weaker), &sandbox), sandbox);
+    }
+    let unknown = json!("future-action");
+    assert_eq!(strongest_actions(Some(&sandbox), &unknown), json!("block"));
+    assert_eq!(strongest_actions(None, &unknown), json!("block"));
 }
