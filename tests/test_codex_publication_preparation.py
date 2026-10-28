@@ -21,7 +21,7 @@ def _context(tmp_path, monkeypatch):
 
 
 def _tree(root: Path):
-    return {
+    tree = {
         str(path.relative_to(root)): (
             path.stat().st_mode,
             path.stat().st_ino,
@@ -30,6 +30,14 @@ def _tree(root: Path):
         )
         for path in root.rglob("*")
     }
+    # The resident appends payload-free phase lines as it answers a native
+    # request; that diagnostic log is not state the preparation writes. Keep
+    # its path, mode and inode; ignore its time and body.
+    for relative_path, metadata in tree.items():
+        path = Path(relative_path)
+        if path.name == "managed-resident-phases.v1.log" and path.parent.name == "native-runtime":
+            tree[relative_path] = (*metadata[:2], None, None)
+    return tree
 
 
 def test_preparation_missing_authority_never_enrolls(tmp_path, monkeypatch):

@@ -46,6 +46,9 @@ const MANAGED_EVENTS: [&str; 4] = [
     "PostToolUse",
 ];
 
+/// Each packaged-file role with the last identity the manifest gave it.
+type RoleIdentities = Vec<(String, Map<String, Value>)>;
+
 pub(crate) fn evaluate_codex_hook_manifest_verify_request(
     request: &CodexHookManifestVerifyRequestV1,
 ) -> Result<Vec<u8>, String> {
@@ -368,14 +371,14 @@ impl Verifier<'_> {
         &mut self,
         manifest: &Map<String, Value>,
         expected: &CodexHookManifestExpectedV1,
-    ) -> Result<Vec<(String, Map<String, Value>)>, Failure> {
+    ) -> Result<RoleIdentities, Failure> {
         let Value::Array(items) = field(manifest, "packaged_files") else {
             return Err(fail(
                 "codex_hook_manifest_packaged_files_invalid",
                 "The Codex hook manifest has no valid packaged-file identities; repair the installation.",
             ));
         };
-        let mut by_role: Vec<(String, Map<String, Value>)> = Vec::new();
+        let mut by_role: RoleIdentities = Vec::new();
         for item in items {
             let Some(identity) = item.as_object() else {
                 continue;
