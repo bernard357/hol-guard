@@ -118,6 +118,8 @@ def test_camel_case_harness_payload_offers_the_same_inventory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     # ZCode, Devin and Grok send ``toolInput``; the daemon receives that shape unchanged.
+    # The resident reads the tool name from the payload, as the daemon always did,
+    # so the camelCase payload names the same tool the snake_case one does.
     workspace = _wrangler_workspace(tmp_path, monkeypatch)
     expected = _inventory("npx wrangler --version", workspace)
     assert expected is not None, native_launch_evidence_helpers.LAST_UNAVAILABLE_REASON
@@ -126,7 +128,7 @@ def test_camel_case_harness_payload_offers_the_same_inventory(
         harness=_HARNESS,
         tool_name="Bash",
         payload={
-            "toolName": "run_terminal_command",
+            "toolName": "Bash",
             "toolInput": {"command": "npx wrangler --version"},
             "cwd": str(workspace),
         },
