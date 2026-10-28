@@ -1,0 +1,560 @@
+"""Guard Surface Server runtime helpers."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
+from urllib.parse import ParseResult, parse_qsl, urlencode, urlparse, urlunparse
+
+from ..approvals import first_approval_url, queue_blocked_approvals
+from ..codex_resume import seed_request_resume_record
+from ..models import GuardArtifact, HarnessDetection
+from ..schemas import build_surface_server_contract
+from ..schemas.surface_server import (
+    CURRENT_PROTOCOL_VERSION,
+    SCHEMA_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+)
+from ..store import GuardStore
+
+SERVER_METHODS = (
+    "initialize",
+    "session/list",
+    "session/start",
+    "session/attach",
+    "session/resume",
+    "session/archive",
+    "operation/start",
+    "operation/status",
+    "operation/resume",
+    "approval/list",
+    "approval/get",
+    "approval/respond",
+    "approval/subscribe",
+    "receipt/list",
+    "receipt/get",
+    "policy/get",
+)
+SERVER_NOTIFICATIONS = (
+    "session/started",
+    "session/attached",
+    "operation/started",
+    "operation/waitingApproval",
+    "operation/resumed",
+    "operation/completed",
+    "item/completed",
+    "approval/requested",
+    "approval/resolved",
+    "receipt/created",
+    "policy/changed",
+)
+
+
+class GuardSurfaceRuntime:
+    """Shared runtime contract used by the daemon and CLI."""
+
+    def __init__(self, store: GuardStore) -> None:
+        self.store = store
+
+    def initialize_client(
+        self,
+        *,
+        client_name: str,
+        client_title: str | None,
+        version: str | None,
+        surface: str,
+        capabilities: tuple[str, ...],
+        supported_protocol_versions: tuple[str, ...] = (),
+        include_sessions: bool = True,
+    ) -> dict[str, object]:
+        negotiated_version = _negotiate_protocol_version(supported_protocol_versions)
+        client_id = uuid.uuid4().hex
+        contract = build_surface_server_contract()
+        protocol_payload = contract.get("protocol")
+        protocol_bundle: dict[str, object] = (
+            {str(key): value for key, value in protocol_payload.items()} if isinstance(protocol_payload, dict) else {}
+        )
+        protocol_bundle["negotiated_version"] = negotiated_version
+        response: dict[str, object] = {
+            "protocol_version": negotiated_version,
+            "schema_version": SCHEMA_VERSION,
+            "schema": contract,
+            "client_id": client_id,
+            "protocol": protocol_bundle,
+            "server_capabilities": {
+                "methods": list(SERVER_METHODS),
+                "notifications": list(SERVER_NOTIFICATIONS),
+                "surfaces": ["cli", "approval-center", "harness-adapter", "cloud-dashboard", "agent-sdk"],
+            },
+            "client": {
+                "client_name": client_name,
+                "client_title": client_title,
+                "version": version,
+                "surface": surface,
+                "capabilities": list(capabilities),
+            },
+        }
+        if include_sessions:
+            response["sessions"] = self.store.list_guard_sessions(limit=20)
+        return response
+
+    def start_session(
+        self,
+        *,
+        harness: str,
+        surface: str,
+        workspace: str | None,
+        client_name: str,
+        client_title: str | None = None,
+        client_version: str | None = None,
+        capabilities: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        session = self.store.upsert_guard_session(
+            session_id=uuid.uuid4().hex,
+            harness=harness,
+            surface=surface,
+            status="active",
+            client_name=client_name,
+            client_title=client_title,
+            client_version=client_version,
+            workspace=workspace,
+            capabilities=list(capabilities),
+            now=_now(),
+        )
+        self.store.add_event("session/started", {"session": session}, _now())
+        return session
+
+    def attach_client(
+        self,
+        *,
+        client_id: str,
+        surface: str,
+        session_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+        lease_seconds: int = 60,
+    ) -> dict[str, object]:
+        if session_id is not None and self.store.get_guard_session(session_id) is None:
+            raise ValueError(f"Unknown guard session: {session_id}")
+        attachment = self.store.attach_guard_client(
+            client_id=client_id,
+            surface=surface,
+            session_id=session_id,
+            metadata=metadata or {},
+            lease_seconds=lease_seconds,
+            now=_now(),
+        )
+        if session_id is not None:
+            self._set_session_status(session_id, "attached")
+        self.store.add_event("session/attached", {"attachment": attachment}, _now())
+        return attachment
+
+    def renew_client(
+        self,
+        *,
+        client_id: str,
+        lease_id: str,
+        lease_seconds: int = 60,
+    ) -> dict[str, object]:
+        attachment = self.store.renew_guard_client_attachment(
+            client_id=client_id,
+            lease_id=lease_id,
+            lease_seconds=lease_seconds,
+            now=_now(),
+        )
+        if attachment is None:
+            raise ValueError(f"Unknown guard client lease: {client_id}")
+        self.store.add_event("session/attached", {"attachment": attachment}, _now())
+        return attachment
+
+    def has_live_surface(self, surface: str) -> bool:
+        return len(self.store.list_guard_client_attachments(surface=surface)) > 0
+
+    def has_surface_opened(self, surface: str, open_key: str) -> bool:
+        return self.store.has_guard_surface_open(surface=surface, open_key=open_key)
+
+    def record_surface_open(self, *, surface: str, open_key: str) -> None:
+        self.store.record_guard_surface_open(surface=surface, open_key=open_key, now=_now())
+
+    def resume_session(self, session_id: str) -> dict[str, object]:
+        session = self.store.get_guard_session(session_id)
+        if session is None:
+            raise ValueError(f"Unknown guard session: {session_id}")
+        attachments = self.store.list_guard_client_attachments(session_id=session_id)
+        operations = self.store.list_guard_operations(session_id=session_id)
+        return {
+            "session": session,
+            "attachments": attachments,
+            "operations": operations,
+        }
+
+    def start_operation(
+        self,
+        *,
+        session_id: str,
+        operation_type: str,
+        harness: str,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if self.store.get_guard_session(session_id) is None:
+            raise ValueError(f"Unknown guard session: {session_id}")
+        operation = self.store.upsert_guard_operation(
+            operation_id=uuid.uuid4().hex,
+            session_id=session_id,
+            harness=harness,
+            operation_type=operation_type,
+            status="started",
+            approval_request_ids=[],
+            resume_token=None,
+            metadata=metadata or {},
+            now=_now(),
+        )
+        self._set_session_status(session_id, "active")
+        self.store.add_event("operation/started", {"operation": operation}, _now())
+        return operation
+
+    def queue_blocked_operation(
+        self,
+        *,
+        session_id: str,
+        operation_type: str,
+        harness: str,
+        metadata: dict[str, object] | None,
+        detection: dict[str, object],
+        evaluation: dict[str, object],
+        approval_center_url: str,
+        browser_url: str | None = None,
+        approval_surface_policy: str,
+        open_key: str | None,
+        opener: Callable[[str], object],
+        redaction_level: str = "full",
+    ) -> dict[str, object]:
+        if self.store.get_guard_session(session_id) is None:
+            raise ValueError(f"Unknown guard session: {session_id}")
+        queued_at = _now()
+        continuation_operation: dict[str, object] = {
+            "created_at": queued_at,
+            "harness": harness,
+            "metadata": metadata or {},
+            "status": "waiting_on_approval",
+            "updated_at": queued_at,
+        }
+        parsed_detection = _parse_detection(detection)
+        queued = queue_blocked_approvals(
+            detection=parsed_detection,
+            evaluation=evaluation,
+            store=self.store,
+            approval_center_url=approval_center_url,
+            now=queued_at,
+            redaction_level=redaction_level,
+            continuation_operation=continuation_operation,
+        )
+        operation = self.start_operation(
+            session_id=session_id,
+            operation_type=operation_type,
+            harness=harness,
+            metadata=metadata,
+        )
+        self.add_item(
+            operation_id=str(operation["operation_id"]),
+            item_type="approval_requested",
+            payload={"approval_requests": queued},
+        )
+        waiting_operation = self.mark_waiting_on_approval(
+            str(operation["operation_id"]),
+            [str(item["request_id"]) for item in queued if isinstance(item.get("request_id"), str)],
+        )
+        for item in queued:
+            request_id = item.get("request_id")
+            if isinstance(request_id, str):
+                seed_request_resume_record(self.store, request_id=request_id, now=_now())
+        approval_open_key = self._approval_surface_open_key(
+            queued,
+            fallback=open_key or str(waiting_operation["operation_id"]),
+        )
+        review_url = first_approval_url(
+            queued,
+            harness=harness,
+            approval_center_url=approval_center_url,
+            request_id=_request_id_from_open_key(approval_open_key),
+        )
+        surface = self.ensure_surface(
+            surface="approval-center",
+            approval_center_url=approval_center_url,
+            browser_url=_browser_url_for_review(browser_url, review_url),
+            approval_surface_policy=approval_surface_policy,
+            open_key=approval_open_key,
+            opener=opener,
+        )
+        return {
+            "operation": waiting_operation,
+            "approval_requests": queued,
+            "surface": surface,
+        }
+
+    def update_operation_status(
+        self,
+        *,
+        operation_id: str,
+        status: str,
+        approval_request_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        if status == "waiting_on_approval":
+            return self.mark_waiting_on_approval(operation_id, approval_request_ids or [])
+        return self.mark_operation_outcome(operation_id, status)
+
+    def mark_waiting_on_approval(self, operation_id: str, approval_request_ids: list[str]) -> dict[str, object]:
+        current = self.store.get_guard_operation(operation_id)
+        if current is None:
+            raise ValueError(f"Unknown guard operation: {operation_id}")
+        operation = self.store.upsert_guard_operation(
+            operation_id=operation_id,
+            session_id=str(current["session_id"]),
+            harness=str(current["harness"]),
+            operation_type=str(current["operation_type"]),
+            status="waiting_on_approval",
+            approval_request_ids=approval_request_ids,
+            resume_token=uuid.uuid4().hex,
+            metadata=dict(current["metadata"]) if isinstance(current["metadata"], dict) else {},
+            now=_now(),
+        )
+        self.store.add_event("operation/waitingApproval", {"operation": operation}, _now())
+        return operation
+
+    def mark_operation_outcome(self, operation_id: str, status: str) -> dict[str, object]:
+        current = self.store.get_guard_operation(operation_id)
+        if current is None:
+            raise ValueError(f"Unknown guard operation: {operation_id}")
+        operation = self.store.upsert_guard_operation(
+            operation_id=operation_id,
+            session_id=str(current["session_id"]),
+            harness=str(current["harness"]),
+            operation_type=str(current["operation_type"]),
+            status=status,
+            approval_request_ids=list(current["approval_request_ids"])
+            if isinstance(current["approval_request_ids"], list)
+            else [],
+            resume_token=str(current["resume_token"]) if current["resume_token"] is not None else None,
+            metadata=dict(current["metadata"]) if isinstance(current["metadata"], dict) else {},
+            now=_now(),
+        )
+        event_name = "operation/completed" if status in {"completed", "blocked", "failed"} else "operation/resumed"
+        self.store.add_event(event_name, {"operation": operation}, _now())
+        return operation
+
+    def add_item(self, *, operation_id: str, item_type: str, payload: dict[str, object]) -> dict[str, object]:
+        if self.store.get_guard_operation(operation_id) is None:
+            raise ValueError(f"Unknown guard operation: {operation_id}")
+        item = self.store.add_guard_operation_item(
+            item_id=uuid.uuid4().hex,
+            operation_id=operation_id,
+            item_type=item_type,
+            lifecycle="completed",
+            payload=payload,
+            now=_now(),
+        )
+        self.store.add_event("item/completed", {"item": item}, _now())
+        return item
+
+    def ensure_surface(
+        self,
+        *,
+        surface: str,
+        approval_center_url: str,
+        browser_url: str | None = None,
+        approval_surface_policy: str,
+        open_key: str,
+        opener: Callable[[str], object],
+        force_open: bool = False,
+    ) -> dict[str, object]:
+        if approval_surface_policy in {"notify-only", "never-auto-open", "attention-aware"} and not force_open:
+            if approval_surface_policy == "attention-aware":
+                return {"surface": surface, "opened": False, "reason": "attention-deferred", "open_key": open_key}
+            return {"surface": surface, "opened": False, "reason": "policy-disabled", "open_key": open_key}
+        if (
+            approval_surface_policy == "auto-open-once"
+            and not force_open
+            and self.has_surface_opened(surface, open_key)
+        ):
+            return {"surface": surface, "opened": False, "reason": "already-opened", "open_key": open_key}
+        if self.has_live_surface(surface):
+            return {"surface": surface, "opened": False, "reason": "live-client", "open_key": open_key}
+        try:
+            opened = opener(browser_url or approval_center_url)
+        except Exception:
+            return {"surface": surface, "opened": False, "reason": "open-failed", "open_key": open_key}
+        if opened is False:
+            return {"surface": surface, "opened": False, "reason": "open-failed", "open_key": open_key}
+        if approval_surface_policy == "auto-open-once":
+            self.record_surface_open(surface=surface, open_key=open_key)
+        return {"surface": surface, "opened": True, "reason": "opened", "open_key": open_key}
+
+    def _approval_surface_open_key(self, queued: list[dict[str, object]], *, fallback: str) -> str:
+        request_keys = _approval_request_open_keys(queued)
+        for _request_id, open_key in request_keys:
+            if not self.has_surface_opened("approval-center", open_key):
+                return open_key
+        if request_keys:
+            return request_keys[0][1]
+        return fallback
+
+    def _set_session_status(self, session_id: str, status: str) -> None:
+        current = self.store.get_guard_session(session_id)
+        if current is None:
+            raise ValueError(f"Unknown guard session: {session_id}")
+        self.store.upsert_guard_session(
+            session_id=session_id,
+            harness=str(current["harness"]),
+            surface=str(current["surface"]),
+            status=status,
+            client_name=str(current["client_name"]),
+            client_title=str(current["client_title"]) if current["client_title"] is not None else None,
+            client_version=str(current["client_version"]) if current["client_version"] is not None else None,
+            workspace=str(current["workspace"]) if current["workspace"] is not None else None,
+            capabilities=[str(item) for item in current["capabilities"] if isinstance(item, str)]
+            if isinstance(current["capabilities"], list)
+            else [],
+            now=_now(),
+        )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _negotiate_protocol_version(supported_protocol_versions: tuple[str, ...]) -> str:
+    if not supported_protocol_versions:
+        return CURRENT_PROTOCOL_VERSION
+    supported = tuple(value for value in supported_protocol_versions if isinstance(value, str))
+    compatible_versions = [
+        version
+        for version in SUPPORTED_PROTOCOL_VERSIONS
+        if version in supported or any(_major(version) == _major(candidate) for candidate in supported)
+    ]
+    if compatible_versions:
+        return sorted(compatible_versions, key=_version_key, reverse=True)[0]
+    raise ValueError("unsupported_protocol_version")
+
+
+def _major(version: str) -> str:
+    return version.split(".", maxsplit=1)[0]
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _parse_detection(payload: dict[str, object]) -> HarnessDetection:
+    artifacts_payload = payload.get("artifacts")
+    config_paths_payload = payload.get("config_paths")
+    warnings_payload = payload.get("warnings")
+    if not isinstance(artifacts_payload, list) or not isinstance(config_paths_payload, list):
+        raise ValueError("invalid_detection_payload")
+    artifacts = tuple(_parse_artifact(item) for item in artifacts_payload if isinstance(item, dict))
+    warnings = (
+        tuple(str(item) for item in warnings_payload if isinstance(item, str))
+        if isinstance(warnings_payload, list)
+        else ()
+    )
+    return HarnessDetection(
+        harness=str(payload.get("harness") or ""),
+        installed=bool(payload.get("installed")),
+        command_available=bool(payload.get("command_available")),
+        config_paths=tuple(str(item) for item in config_paths_payload if isinstance(item, str)),
+        artifacts=artifacts,
+        warnings=warnings,
+    )
+
+
+def _browser_url_for_review(browser_url: str | None, review_url: str | None) -> str | None:
+    if review_url is None:
+        return browser_url
+    if browser_url is None:
+        return review_url
+    try:
+        parsed_browser = urlparse(browser_url)
+        parsed_review = urlparse(review_url)
+    except ValueError:
+        return browser_url
+    if not parsed_review.scheme or not parsed_review.netloc:
+        return browser_url
+    if not parsed_browser.scheme or not parsed_browser.netloc:
+        return review_url
+    if _same_origin(parsed_browser, parsed_review):
+        return urlunparse(
+            parsed_review._replace(fragment=_merged_fragment(parsed_review.fragment, parsed_browser.fragment))
+        )
+    if _same_local_approval_port(parsed_browser, parsed_review):
+        return urlunparse(
+            parsed_review._replace(fragment=_merged_fragment(parsed_review.fragment, parsed_browser.fragment))
+        )
+    return review_url
+
+
+def _approval_request_open_keys(queued: list[dict[str, object]]) -> list[tuple[str, str]]:
+    request_keys: list[tuple[str, str]] = []
+    for item in queued:
+        request_id = item.get("request_id")
+        if isinstance(request_id, str) and request_id.strip():
+            stripped = request_id.strip()
+            request_keys.append((stripped, f"approval-request:{stripped}"))
+    return request_keys
+
+
+def _request_id_from_open_key(open_key: str) -> str | None:
+    prefix = "approval-request:"
+    if open_key.startswith(prefix):
+        request_id = open_key[len(prefix) :].strip()
+        if request_id:
+            return request_id
+    return None
+
+
+def _same_origin(left: ParseResult, right: ParseResult) -> bool:
+    return (left.scheme, left.netloc) == (right.scheme, right.netloc)
+
+
+def _same_local_approval_port(left: ParseResult, right: ParseResult) -> bool:
+    left_host = left.hostname
+    right_host = right.hostname
+    local_hosts = {"0.0.0.0", "::", "127.0.0.1", "::1", "localhost"}
+    if left_host not in local_hosts or right_host not in local_hosts:
+        return False
+    try:
+        return left.port == right.port
+    except ValueError:
+        return False
+
+
+def _merged_fragment(primary_fragment: str, extra_fragment: str) -> str:
+    primary_pairs = parse_qsl(primary_fragment, keep_blank_values=True)
+    extra_pairs = parse_qsl(extra_fragment, keep_blank_values=True)
+    extra_keys = {key for key, _value in extra_pairs}
+    merged_pairs = [(key, value) for key, value in primary_pairs if key not in extra_keys]
+    merged_pairs.extend(extra_pairs)
+    return urlencode(merged_pairs)
+
+
+def _parse_artifact(payload: dict[str, object]) -> GuardArtifact:
+    args_payload = payload.get("args")
+    metadata_payload = payload.get("metadata")
+    return GuardArtifact(
+        artifact_id=str(payload.get("artifact_id") or ""),
+        name=str(payload.get("name") or ""),
+        harness=str(payload.get("harness") or ""),
+        artifact_type=str(payload.get("artifact_type") or "artifact"),
+        source_scope=str(payload.get("source_scope") or "project"),
+        config_path=str(payload.get("config_path") or ""),
+        command=str(payload.get("command")) if isinstance(payload.get("command"), str) else None,
+        args=(
+            tuple(str(item) for item in args_payload if isinstance(item, str)) if isinstance(args_payload, list) else ()
+        ),
+        url=str(payload.get("url")) if isinstance(payload.get("url"), str) else None,
+        transport=str(payload.get("transport")) if isinstance(payload.get("transport"), str) else None,
+        publisher=str(payload.get("publisher")) if isinstance(payload.get("publisher"), str) else None,
+        metadata=(
+            {str(key): value for key, value in metadata_payload.items() if isinstance(key, str)}
+            if isinstance(metadata_payload, dict)
+            else {}
+        ),
+    )

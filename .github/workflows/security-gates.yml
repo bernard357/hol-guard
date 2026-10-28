@@ -1,0 +1,205 @@
+name: Security Gates
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: hol-guard-security-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_HTTP_TIMEOUT: "120"
+
+jobs:
+  privileged-workflow-policy:
+    name: Privileged workflow policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: ./.github/actions/stage-command-projections
+      - name: Install policy dependencies
+        run: uv sync --frozen --extra dev
+      - name: Validate workflow policy code
+        run: |
+          uv run --no-sync ruff check scripts/check_privileged_workflows.py tests/test_privileged_workflow_policy.py tests/test_workflow_token_permissions.py
+          uv run --no-sync ruff format --check scripts/check_privileged_workflows.py tests/test_privileged_workflow_policy.py tests/test_workflow_token_permissions.py
+      - name: Run workflow permission regressions
+        run: uv run --no-sync pytest -q tests/test_privileged_workflow_policy.py tests/test_workflow_token_permissions.py
+      - name: Enforce least-privilege permissions and immutable toolchains
+        run: uv run --no-sync python scripts/check_privileged_workflows.py
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          version: "0.9.26"
+          enable-cache: true
+          cache-dependency-glob: .github/workflows/security-gates.yml
+          cache-suffix: semgrep
+      - name: Run Semgrep
+        run: uvx --from semgrep semgrep --config p/owasp-top-ten --error src/codex_plugin_scanner/guard
+
+  release-scan:
+    name: Trivy release scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - name: Run Trivy on release surfaces
+        run: >
+          docker run --rm
+          -v "$PWD:/workdir"
+          ghcr.io/aquasecurity/trivy@sha256:85e87be1a96459c38a4eea47dc64eb2d342bb14cd4b4cef96adcf6ff03378b7c
+          fs
+          --scanners vuln,misconfig,secret
+          --severity HIGH,CRITICAL
+          --ignorefile /workdir/.trivyignore
+          --skip-dirs /workdir/tests/fixtures
+          --skip-files /workdir/.clusterfuzzlite/Dockerfile
+          --exit-code 1
+          --quiet
+          /workdir
+
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Cache pinned Gitleaks binary
+        id: gitleaks-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/gitleaks-bin
+          key: gitleaks-${{ runner.os }}-${{ runner.arch }}-go1.23-v8.24.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        if: steps.gitleaks-cache.outputs.cache-hit != 'true'
+        with:
+          go-version: "1.23"
+          cache: false
+      - name: Install Gitleaks
+        if: steps.gitleaks-cache.outputs.cache-hit != 'true'
+        run: |
+          GOBIN="$RUNNER_TEMP/gitleaks-bin" go install github.com/zricethezav/gitleaks/v8@v8.24.2
+      - name: Add Gitleaks to PATH
+        run: echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+      - name: Verify Gitleaks fixture exclusion scope
+        run: python3 scripts/ci/check_gitleaks_fixture_scope.py
+      - name: Determine Gitleaks scope
+        id: gitleaks-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          EVENT_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ] && [ -n "$PR_HEAD_SHA" ]; then
+            echo "mode=git" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$PR_BASE_SHA" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" = "merge_group" ] && [ -n "$MERGE_GROUP_BASE_SHA" ]; then
+            echo "mode=git" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$MERGE_GROUP_BASE_SHA" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$EVENT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            echo "mode=git" >> "$GITHUB_OUTPUT"
+            echo "base_sha=$BEFORE_SHA" >> "$GITHUB_OUTPUT"
+            echo "head_sha=$EVENT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=dir" >> "$GITHUB_OUTPUT"
+          fi
+      # The denylist lives only in the runner environment or a repository secret, never in
+      # the tree; the check skips when neither is set and never prints a matched token. It
+      # scans the same commit range as Gitleaks, so pull-request, merge-group and push runs
+      # all check their commit messages as well as the tree.
+      - name: Private token check
+        env:
+          GUARD_PRIVATE_TOKEN_DENYLIST_SECRET: ${{ secrets.GUARD_PRIVATE_TOKEN_DENYLIST }}
+          SCOPE_MODE: ${{ steps.gitleaks-scope.outputs.mode }}
+          BASE_SHA: ${{ steps.gitleaks-scope.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.gitleaks-scope.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$SCOPE_MODE" = "git" ]; then
+            python3 scripts/ci/check_private_tokens.py --range "$BASE_SHA..$HEAD_SHA"
+          else
+            python3 scripts/ci/check_private_tokens.py
+          fi
+      - name: Prepare isolated Gitleaks commit range
+        id: gitleaks-range
+        if: steps.gitleaks-scope.outputs.mode == 'git'
+        env:
+          BASE_SHA: ${{ steps.gitleaks-scope.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.gitleaks-scope.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+
+          scan_repo="${RUNNER_TEMP}/gitleaks-range-repository"
+          rm -rf "$scan_repo"
+          git clone --no-hardlinks --no-checkout . "$scan_repo"
+          git -C "$scan_repo" checkout --detach "$HEAD_SHA"
+
+          while IFS= read -r ref; do
+            [ -z "$ref" ] || git -C "$scan_repo" update-ref -d "$ref"
+          done < <(git -C "$scan_repo" for-each-ref --format='%(refname)')
+
+          git -C "$scan_repo" update-ref refs/gitleaks/base "$BASE_SHA"
+          git -C "$scan_repo" update-ref refs/gitleaks/head "$HEAD_SHA"
+
+          mapfile -t refs < <(git -C "$scan_repo" for-each-ref --format='%(refname)' | sort)
+          expected=(refs/gitleaks/base refs/gitleaks/head)
+          if [ "${refs[*]}" != "${expected[*]}" ]; then
+            printf 'Unexpected refs in isolated Gitleaks repository: %s\n' "${refs[*]}" >&2
+            exit 1
+          fi
+
+          echo "repository=$scan_repo" >> "$GITHUB_OUTPUT"
+          echo "log_opts=${BASE_SHA}..${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Run Gitleaks on isolated commit range
+        if: steps.gitleaks-scope.outputs.mode == 'git'
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        run: >-
+          gitleaks git
+          --verbose
+          --log-opts="${{ steps.gitleaks-range.outputs.log_opts }}"
+          --no-banner
+          --redact
+          --exit-code 1
+          "${{ steps.gitleaks-range.outputs.repository }}"
+      - name: Run Gitleaks on working tree
+        if: steps.gitleaks-scope.outputs.mode == 'dir'
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        run: gitleaks dir --no-banner --redact --exit-code 1 .

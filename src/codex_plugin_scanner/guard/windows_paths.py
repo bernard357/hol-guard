@@ -1,0 +1,538 @@
+"""Trusted Windows system-path discovery that does not consume ambient variables."""
+
+from __future__ import annotations
+
+import ctypes
+import importlib
+import ntpath
+import os
+import stat
+import time
+import uuid
+from collections.abc import Callable
+from contextlib import suppress
+from ctypes import wintypes
+from pathlib import Path
+
+_WINDOWS_PATH_BUFFER_SIZE = 32_768
+_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+_WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_OPEN_EXISTING = 3
+_WINDOWS_ERROR_INVALID_PARAMETER = 87
+_WINDOWS_ERROR_SHARING_VIOLATION = 32
+_WINDOWS_LOCK_OPEN_ATTEMPTS = 6
+_WINDOWS_LOCK_RETRY_SECONDS = 0.01
+_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000
+_WINDOWS_PROCESS_TERMINATE = 0x00000001
+_WINDOWS_SYNCHRONIZE = 0x00100000
+_WINDOWS_WAIT_OBJECT_0 = 0x00000000
+_WINDOWS_WAIT_TIMEOUT = 0x00000102
+_WINDOWS_WAIT_FAILED = 0xFFFFFFFF
+_FOLDERID_PROFILE = uuid.UUID("5e6c858f-0e22-4760-9afe-ea3317b67173").bytes_le
+_FOLDERID_ROAMING_APPDATA = uuid.UUID("3eb685db-65f9-4cf6-a03a-e3ef65729f3d").bytes_le
+
+
+class _Guid(ctypes.Structure):
+    _fields_ = [("bytes", ctypes.c_ubyte * 16)]
+
+
+class _WindowsByHandleFileInformation(ctypes.Structure):
+    _fields_ = [
+        ("dwFileAttributes", wintypes.DWORD),
+        ("ftCreationTime", wintypes.FILETIME),
+        ("ftLastAccessTime", wintypes.FILETIME),
+        ("ftLastWriteTime", wintypes.FILETIME),
+        ("dwVolumeSerialNumber", wintypes.DWORD),
+        ("nFileSizeHigh", wintypes.DWORD),
+        ("nFileSizeLow", wintypes.DWORD),
+        ("nNumberOfLinks", wintypes.DWORD),
+        ("nFileIndexHigh", wintypes.DWORD),
+        ("nFileIndexLow", wintypes.DWORD),
+    ]
+
+
+def open_windows_locked_regular_descriptor(
+    path: Path | str,
+    *,
+    expected_resolved_path: Path | str | None = None,
+) -> int:
+    """Open one regular file while denying concurrent write/delete access.
+
+    The returned CRT descriptor owns the native handle.  ``FILE_SHARE_READ``
+    deliberately excludes write and delete sharing, so the pathname cannot be
+    replaced and an existing writer cannot coexist while trusted bytes are
+    hashed. An expected canonical path additionally binds the native handle to
+    that physical path, including when an ancestor junction changes at open.
+    """
+
+    try:
+        msvcrt = importlib.import_module("msvcrt")
+        handle, close_handle = _open_windows_locked_handle(path, expected_resolved_path=expected_resolved_path)
+        try:
+            return int(
+                msvcrt.open_osfhandle(
+                    handle,
+                    os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
+                )
+            )
+        except BaseException:
+            _ = close_handle(handle)
+            raise
+    except (AttributeError, ImportError, RuntimeError, TypeError, ValueError) as exc:
+        raise OSError("windows_locked_file_unavailable") from exc
+
+
+def _open_windows_locked_handle(
+    path: Path | str,
+    *,
+    expected_resolved_path: Path | str | None,
+) -> tuple[int, Callable[[int], object]]:
+    if os.name != "nt":
+        raise OSError("windows_locked_file_unavailable")
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if win_dll is None:
+        raise OSError("windows_locked_file_unavailable")
+    handle: object | None = None
+    close_handle = None
+    try:
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        create_file = kernel32.CreateFileW
+        create_file.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        create_file.restype = wintypes.HANDLE
+        get_information = kernel32.GetFileInformationByHandle
+        get_information.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_WindowsByHandleFileInformation),
+        ]
+        get_information.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        invalid_handle = ctypes.c_void_p(-1).value
+        for attempt in range(_WINDOWS_LOCK_OPEN_ATTEMPTS):
+            handle = create_file(
+                str(path),
+                _WINDOWS_GENERIC_READ,
+                _WINDOWS_FILE_SHARE_READ,
+                None,
+                _WINDOWS_OPEN_EXISTING,
+                _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT | _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+                None,
+            )
+            if handle not in {None, invalid_handle}:
+                break
+            last_error = ctypes.get_last_error()
+            sharing_violation = last_error == _WINDOWS_ERROR_SHARING_VIOLATION
+            handle = None
+            if not sharing_violation or attempt + 1 == _WINDOWS_LOCK_OPEN_ATTEMPTS:
+                raise OSError("windows_locked_file_open_failed")
+            time.sleep(_WINDOWS_LOCK_RETRY_SECONDS)
+        information = _WindowsByHandleFileInformation()
+        if not get_information(handle, ctypes.byref(information)):
+            raise OSError("windows_locked_file_inspection_failed")
+        attributes = int(information.dwFileAttributes)
+        is_directory = bool(attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY)
+        if attributes & _FILE_ATTRIBUTE_REPARSE_POINT or is_directory:
+            raise OSError("windows_locked_file_not_regular")
+        if expected_resolved_path is not None:
+            get_final_path = kernel32.GetFinalPathNameByHandleW
+            get_final_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+            get_final_path.restype = wintypes.DWORD
+            buffer = ctypes.create_unicode_buffer(_WINDOWS_PATH_BUFFER_SIZE)
+            length = int(get_final_path(handle, buffer, len(buffer), 0))
+            if length <= 0 or length >= len(buffer):
+                raise OSError("windows_locked_file_final_path_unavailable")
+            # FILE_NAME_NORMALIZED | VOLUME_NAME_DOS resolves junction targets.
+            # Never resolve the expected path here: its pre-open identity is
+            # the boundary against which this opened handle must be checked.
+            if _canonical_windows_path(buffer.value) != _canonical_windows_path(expected_resolved_path):
+                raise OSError("windows_locked_file_path_changed")
+        handle_value = handle if isinstance(handle, int) else getattr(handle, "value", None)
+        if not isinstance(handle_value, int):
+            raise OSError("windows_locked_file_handle_invalid")
+        handle = None
+        return handle_value, close_handle
+    except (AttributeError, ImportError, RuntimeError, TypeError, ValueError) as exc:
+        raise OSError("windows_locked_file_unavailable") from exc
+    finally:
+        if handle is not None and close_handle is not None:
+            with suppress(OSError, RuntimeError, TypeError, ValueError):
+                _ = close_handle(handle)
+
+
+def _canonical_windows_path(path: Path | str) -> str:
+    value = ntpath.normpath(os.fspath(path))
+    if value[:8].upper() == "\\\\?\\UNC\\":
+        value = "\\\\" + value[8:]
+    elif value.startswith("\\\\?\\"):
+        value = value[4:]
+    if not ntpath.isabs(value) or not ntpath.splitdrive(value)[0]:
+        raise OSError("windows_locked_file_expected_path_not_absolute")
+    # Case-sensitive Windows directories can contain distinct names which
+    # normcase would conflate. Both operands must already be canonical paths.
+    return value
+
+
+def windows_command_line_to_argv(command: str) -> list[str] | None:
+    """Parse one native Windows command line with the operating-system ABI."""
+
+    if os.name != "nt" or not command:
+        return None
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if win_dll is None:
+        return None
+    try:
+        shell32 = win_dll("shell32", use_last_error=True)
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        argument_count = ctypes.c_int()
+        command_line_to_argv = shell32.CommandLineToArgvW
+        command_line_to_argv.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        command_line_to_argv.restype = ctypes.POINTER(wintypes.LPWSTR)
+        local_free = kernel32.LocalFree
+        local_free.argtypes = [ctypes.c_void_p]
+        local_free.restype = ctypes.c_void_p
+        arguments = command_line_to_argv(command, ctypes.byref(argument_count))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    if not arguments:
+        return None
+    try:
+        if argument_count.value <= 0:
+            return None
+        return [str(arguments[index]) for index in range(argument_count.value)]
+    except (OSError, TypeError, ValueError):
+        return None
+    finally:
+        with suppress(OSError, TypeError, ValueError):
+            _ = local_free(ctypes.cast(arguments, ctypes.c_void_p))
+
+
+def windows_process_liveness(pid: int) -> bool | None:
+    """Return live/dead for a Windows PID, or ``None`` when proof is unavailable."""
+
+    if os.name != "nt" or pid <= 0:
+        return False
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if win_dll is None:
+        return None
+    try:
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        wait_for_process = kernel32.WaitForSingleObject
+        wait_for_process.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        wait_for_process.restype = wintypes.DWORD
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        process_handle = open_process(_WINDOWS_SYNCHRONIZE, False, pid)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    if not process_handle:
+        if ctypes.get_last_error() == _WINDOWS_ERROR_INVALID_PARAMETER:
+            return False
+        return None
+    try:
+        wait_result = int(wait_for_process(process_handle, 0))
+    except (OSError, TypeError, ValueError):
+        return None
+    finally:
+        with suppress(OSError, TypeError, ValueError):
+            _ = close_handle(process_handle)
+    if wait_result == _WINDOWS_WAIT_TIMEOUT:
+        return True
+    if wait_result == _WINDOWS_WAIT_OBJECT_0:
+        return False
+    if wait_result == _WINDOWS_WAIT_FAILED:
+        return None
+    return None
+
+
+def windows_process_is_running(pid: int) -> bool:
+    """Fail closed when a Windows PID cannot be proven dead."""
+
+    return windows_process_liveness(pid) is not False
+
+
+def windows_process_creation_time(pid: int) -> int | None:
+    """Return the kernel process creation timestamp used to defeat PID reuse."""
+
+    if os.name != "nt" or pid <= 0:
+        return None
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if win_dll is None:
+        return None
+    try:
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        get_process_times = kernel32.GetProcessTimes
+        get_process_times.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        get_process_times.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        process_handle = open_process(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    if process_handle is None:
+        return None
+    creation = wintypes.FILETIME()
+    exit_time = wintypes.FILETIME()
+    kernel_time = wintypes.FILETIME()
+    user_time = wintypes.FILETIME()
+    try:
+        if not get_process_times(
+            process_handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            return None
+        return (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+    except (OSError, TypeError, ValueError):
+        return None
+    finally:
+        with suppress(OSError, TypeError, ValueError):
+            _ = close_handle(process_handle)
+
+
+def windows_terminate_process_if_creation_time(pid: int, expected_creation_time: int) -> bool:
+    """Terminate the exact PID generation through the handle used to validate it."""
+
+    if os.name != "nt" or pid <= 0 or expected_creation_time <= 0:
+        return False
+    win_dll = getattr(ctypes, "WinDLL", None)
+    if win_dll is None:
+        return False
+    try:
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        get_process_times = kernel32.GetProcessTimes
+        get_process_times.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        get_process_times.restype = wintypes.BOOL
+        terminate_process = kernel32.TerminateProcess
+        terminate_process.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        terminate_process.restype = wintypes.BOOL
+        wait_for_process = kernel32.WaitForSingleObject
+        wait_for_process.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        wait_for_process.restype = wintypes.DWORD
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        process_handle = open_process(
+            _WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION | _WINDOWS_PROCESS_TERMINATE | _WINDOWS_SYNCHRONIZE,
+            False,
+            pid,
+        )
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    if process_handle is None:
+        return False
+    creation = wintypes.FILETIME()
+    exit_time = wintypes.FILETIME()
+    kernel_time = wintypes.FILETIME()
+    user_time = wintypes.FILETIME()
+    try:
+        if not get_process_times(
+            process_handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            return False
+        creation_time = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+        if creation_time != expected_creation_time:
+            return False
+        wait_result = int(wait_for_process(process_handle, 0))
+        if wait_result == _WINDOWS_WAIT_OBJECT_0:
+            return True
+        if wait_result != _WINDOWS_WAIT_TIMEOUT or not terminate_process(process_handle, 1):
+            return False
+        return int(wait_for_process(process_handle, 1000)) == _WINDOWS_WAIT_OBJECT_0
+    except (OSError, TypeError, ValueError):
+        return False
+    finally:
+        with suppress(OSError, TypeError, ValueError):
+            _ = close_handle(process_handle)
+
+
+def trusted_windows_system_directories() -> tuple[Path, Path]:
+    """Return kernel-reported Windows and System32 directories."""
+
+    if os.name != "nt":
+        raise OSError("windows_system_directory_unavailable")
+    windows_directory = _kernel_directory("GetSystemWindowsDirectoryW")
+    system_directory = _kernel_directory("GetSystemDirectoryW")
+    if (
+        not ntpath.isabs(windows_directory)
+        or not ntpath.isabs(system_directory)
+        or ntpath.basename(system_directory).lower() != "system32"
+        or ntpath.normcase(ntpath.dirname(system_directory)) != ntpath.normcase(windows_directory)
+    ):
+        raise OSError("windows_system_directory_untrusted")
+    windows_path = _trusted_real_directory(Path(windows_directory))
+    system_path = _trusted_real_directory(Path(system_directory))
+    if ntpath.normcase(str(system_path.parent)) != ntpath.normcase(str(windows_path)):
+        raise OSError("windows_system_directory_untrusted")
+    return windows_path, system_path
+
+
+def trusted_windows_system_executable(*relative_parts: str) -> Path:
+    """Return one regular, non-reparse executable below native System32."""
+
+    if not relative_parts or any(not part or ntpath.isabs(part) for part in relative_parts):
+        raise OSError("windows_system_executable_untrusted")
+    _windows_directory, system_directory = trusted_windows_system_directories()
+    candidate = system_directory.joinpath(*relative_parts)
+    try:
+        metadata = candidate.lstat()
+    except OSError as error:
+        raise OSError("windows_system_executable_unavailable") from error
+    attributes = int(getattr(metadata, "st_file_attributes", 0))
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise OSError("windows_system_executable_untrusted")
+    resolved = candidate.resolve(strict=True)
+    try:
+        resolved.relative_to(system_directory)
+    except ValueError as error:
+        raise OSError("windows_system_executable_untrusted") from error
+    return resolved
+
+
+def trusted_windows_user_profile() -> Path:
+    """Return the current user's profile through the Known Folder API."""
+
+    return _trusted_windows_known_folder(
+        _FOLDERID_PROFILE,
+        failure_reason="windows_user_profile_unavailable",
+    )
+
+
+def trusted_windows_roaming_appdata() -> Path:
+    """Return the current user's potentially redirected Roaming AppData path."""
+
+    return _trusted_windows_known_folder(
+        _FOLDERID_ROAMING_APPDATA,
+        failure_reason="windows_roaming_appdata_unavailable",
+    )
+
+
+def trusted_windows_local_temp() -> Path:
+    """Return the default Temp directory in the current user's profile.
+
+    TEMP changes between processes, and so does the Local AppData known
+    folder, which Windows expands from USERPROFILE. The profile itself comes
+    from the registry, so a file one process writes here can be found by
+    another with a different environment.
+    """
+
+    return _trusted_real_directory(trusted_windows_user_profile() / "AppData" / "Local" / "Temp")
+
+
+def _trusted_windows_known_folder(folder_id_bytes: bytes, *, failure_reason: str) -> Path:
+    if os.name != "nt":
+        raise OSError(failure_reason)
+
+    folder_id = _Guid((ctypes.c_ubyte * 16).from_buffer_copy(folder_id_bytes))
+    folder_pointer = ctypes.c_wchar_p()
+    try:
+        shell32 = ctypes.windll.shell32
+        ole32 = ctypes.windll.ole32
+        get_known_folder = shell32.SHGetKnownFolderPath
+        get_known_folder.argtypes = [
+            ctypes.POINTER(_Guid),
+            ctypes.c_ulong,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_wchar_p),
+        ]
+        get_known_folder.restype = ctypes.c_long
+        free_memory = ole32.CoTaskMemFree
+        free_memory.argtypes = [ctypes.c_void_p]
+        free_memory.restype = None
+        result = int(get_known_folder(ctypes.byref(folder_id), 0, None, ctypes.byref(folder_pointer)))
+        if result != 0 or not folder_pointer.value:
+            raise OSError(failure_reason)
+        return _trusted_real_directory(Path(folder_pointer.value))
+    except (AttributeError, OSError, TypeError, ValueError) as error:
+        raise OSError(failure_reason) from error
+    finally:
+        if folder_pointer:
+            with suppress(AttributeError, OSError, TypeError, ValueError):
+                ctypes.windll.ole32.CoTaskMemFree(ctypes.cast(folder_pointer, ctypes.c_void_p))
+
+
+def _kernel_directory(function_name: str) -> str:
+    buffer = ctypes.create_unicode_buffer(_WINDOWS_PATH_BUFFER_SIZE)
+    try:
+        function = getattr(ctypes.windll.kernel32, function_name)
+        length = int(function(buffer, len(buffer)))
+    except (AttributeError, OSError, TypeError, ValueError) as error:
+        raise OSError("windows_system_directory_unavailable") from error
+    if length <= 0 or length >= len(buffer):
+        raise OSError("windows_system_directory_unavailable")
+    return ntpath.normpath(str(buffer.value))
+
+
+def _trusted_real_directory(path: Path) -> Path:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise OSError("windows_system_directory_unavailable") from error
+    attributes = int(getattr(metadata, "st_file_attributes", 0))
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise OSError("windows_system_directory_untrusted")
+    return path.resolve(strict=True)
+
+
+__all__ = [
+    "open_windows_locked_regular_descriptor",
+    "trusted_windows_local_temp",
+    "trusted_windows_roaming_appdata",
+    "trusted_windows_system_directories",
+    "trusted_windows_system_executable",
+    "trusted_windows_user_profile",
+    "windows_command_line_to_argv",
+    "windows_process_creation_time",
+    "windows_process_is_running",
+    "windows_process_liveness",
+    "windows_terminate_process_if_creation_time",
+]
