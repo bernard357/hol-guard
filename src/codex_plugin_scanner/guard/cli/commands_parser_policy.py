@@ -438,6 +438,11 @@ def _configure_guard_policy_parsers(
     )
     doctor_parser.add_argument("--perf", action="store_true", help="Include detector performance timings")
     doctor_parser.add_argument(
+        "--native",
+        action="store_true",
+        help="Report only the native runtime: availability, a resident already running, and this process's counters",
+    )
+    doctor_parser.add_argument(
         "--repair",
         "--fix",
         action="store_true",

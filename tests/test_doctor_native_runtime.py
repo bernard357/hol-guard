@@ -151,3 +151,102 @@ def test_the_default_doctor_explains_a_busy_owner_without_running_the_runtime(
     assert result["reason_code"] == "native_resident_owner_busy"
     assert result["available"] is None
     assert "Another Guard install" in result["message"]
+
+
+def test_resident_presence_sees_a_live_resident_for_this_runtime(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    state = {"runtime_sha256": "a" * 64, "process_id": os.getpid()}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+
+    assert native_resident_presence(tmp_path, "a" * 64) == {
+        "live": True,
+        "owner_lock_held": False,
+        "generations": 1,
+    }
+
+
+def test_resident_presence_ignores_another_runtime_build(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-bbbbbbbbbbbbbbbb"
+    resident.mkdir(parents=True)
+    state = {"runtime_sha256": "b" * 64, "process_id": os.getpid()}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["live"] is False
+    assert presence["generations"] == 0
+
+
+def test_resident_presence_reports_a_held_owner_lock(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    with _hold_owner_lock(tmp_path / "native-runtime"):
+        presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["owner_lock_held"] is True
+    assert presence["live"] is False
+
+
+def test_resident_presence_is_unknown_without_a_runtime_identity(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    assert native_resident_presence(tmp_path, None) == {
+        "live": None,
+        "owner_lock_held": None,
+        "generations": 0,
+    }
+
+
+def test_resident_presence_survives_a_damaged_state_file(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    (resident / "generation-1.json").write_text("{not json", encoding="utf-8")
+    (resident / "generation-2.json").write_text("[]", encoding="utf-8")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["live"] is False
+    assert presence["generations"] == 0
+
+
+def test_the_section_carries_availability_resident_and_this_process_counters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.cli import doctor_native_runtime
+
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: _status_for("a" * 64))
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+
+    section = doctor_native_runtime.native_runtime_section(tmp_path)
+
+    assert section["availability"]["reason_code"] == "native_ready"
+    assert section["resident"] == {"live": False, "owner_lock_held": False, "generations": 0}
+    assert isinstance(section["daemon_http"], dict)
+    assert "repair" not in section
+
+
+def test_the_section_does_not_serialize_the_binary_path_or_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.cli import doctor_native_runtime
+
+    identity = NativeRuntimeIdentity(path=Path("/private/user/native-secret"), size=1, mtime_ns=1, sha256="c" * 64)
+    status = NativeRuntimeStatus(
+        mode="auto", available=True, compatible=True, reason="native_ready", identity=identity
+    )
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status)
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "c" * 64)
+
+    encoded = json.dumps(doctor_native_runtime.native_runtime_section(tmp_path))
+
+    assert "native-secret" not in encoded
+    assert "c" * 64 not in encoded
+    assert "sha256" not in encoded
+    assert "mtime" not in encoded

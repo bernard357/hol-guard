@@ -132,3 +132,76 @@ def doctor_native_availability(guard_home: Path | None = None) -> NativeAvailabi
     if _owner_busy(guard_home, identity.sha256 if identity is not None else None):
         reason = "native_resident_owner_busy"
     return _with_reason(result, reason)
+
+
+class NativeResidentPresence(TypedDict):
+    """What the on-disk resident state says, without starting or stopping anything."""
+
+    live: bool | None
+    owner_lock_held: bool | None
+    generations: int
+
+
+def native_resident_presence(guard_home: Path | None, runtime_sha256: str | None) -> NativeResidentPresence:
+    """Report whether a resident for this runtime is already running on this account.
+
+    Unlike the admission and health counters, which only ever describe the
+    current process, this reads the files every Guard install on the account
+    shares, so a separate CLI invocation sees the same answer the hook does.
+    """
+
+    if guard_home is None or runtime_sha256 is None:
+        return {"live": None, "owner_lock_held": None, "generations": 0}
+    state_base = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY
+    owner_lock = probe_owner_lock(state_base)
+    live = False
+    generations = 0
+    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
+        try:
+            with state_path.open("rb") as handle:
+                state = json.loads(handle.read(_MAX_STATE_BYTES))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
+            continue
+        generations += 1
+        process_id = state.get("process_id")
+        if isinstance(process_id, int) and pid_is_alive(process_id):
+            live = True
+    return {
+        "live": live,
+        # ``probe_owner_lock`` returns None when it could not tell.
+        "owner_lock_held": None if owner_lock is None else owner_lock is False,
+        "generations": generations,
+    }
+
+
+def native_runtime_section(
+    guard_home: Path | None,
+    *,
+    repair: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build the ``native_runtime`` payload doctor reports and ``runtime status`` prints.
+
+    Every field here is read from a passive probe, the installed binary's
+    identity, or process-local counters. Nothing is evaluated and no verdict is
+    produced: the native resident remains the only authority.
+    """
+
+    from ..daemon.bounded_http import daemon_admission_snapshot
+    from .update_commands import bundled_native_runtime_report
+
+    availability = doctor_native_availability(guard_home)
+    section: dict[str, object] = {
+        "availability": availability,
+        # The HTTP gate counts this process only; a fresh CLI invocation
+        # reports its own zeros, not the daemon's totals.
+        "daemon_http": daemon_admission_snapshot(),
+        "resident": native_resident_presence(guard_home, _passive_runtime_sha256()),
+    }
+    bundled_runtime = bundled_native_runtime_report()
+    if bundled_runtime is not None:
+        section["bundled"] = bundled_runtime
+    if repair is not None:
+        section["repair"] = repair
+    return section
