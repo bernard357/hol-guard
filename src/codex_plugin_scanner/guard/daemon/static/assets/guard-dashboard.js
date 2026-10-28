@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CbgjldQU.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-BB4Cqcdy.js","assets/chunks/harness-version-label-D4a5Z4Um.js","assets/chunks/connect-guard-cloud-button-B8mPbbPw.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-CQIQ-ZgI.js","assets/chunks/confirm-dialog-mdgDXnzT.js","assets/chunks/extensions-workspace-BUZrkjLc.js","assets/chunks/app-detail-workspace-pqZPiiHy.js","assets/chunks/policy-workspace-page-Cwu5aQv_.js","assets/chunks/about-workspace-MAIZTTE3.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CbgjldQU.js","assets/chunks/home-protection-module-BWAkAvfY.js","assets/chunks/supply-chain-protection-stats-D5t87g7g.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-BB4Cqcdy.js","assets/chunks/harness-version-label-D4a5Z4Um.js","assets/chunks/connect-guard-cloud-button-B8mPbbPw.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-CQIQ-ZgI.js","assets/chunks/confirm-dialog-mdgDXnzT.js","assets/chunks/extensions-workspace-DpVpI1uW.js","assets/chunks/app-detail-workspace-pqZPiiHy.js","assets/chunks/policy-workspace-page-Cwu5aQv_.js","assets/chunks/about-workspace-MAIZTTE3.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
 (function polyfill() {
   const relList = document.createElement("link").relList;
   if (relList && relList.supports && relList.supports("modulepreload")) return;
@@ -16315,6 +16315,13 @@ function coverageStepLabel(segment) {
   const step = `Step ${segment.index + 1}`;
   return segment.executable === null ? step : `${step} · ${segment.executable}`;
 }
+function segmentDetail(segment) {
+  const titles = segment.rules.map((rule2) => rule2.title);
+  const labels = segment.permissions.filter((permission2) => permission2.configurable).map((item) => item.label);
+  const linked = new Set(segment.extensions.map((extension2) => extension2.name));
+  const parts = (titles.length > 0 ? titles : labels).filter((part) => !linked.has(part));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 function alreadyLinked(extension2, links) {
   return links.some(
     (link) => link.extension_id === extension2.extension_id && // A step that names no rule of its own lands on the extension page, so any
@@ -31191,12 +31198,6 @@ function BusinessReviewSummaryPanel({ requestId }) {
   ] });
   return state.summary ? /* @__PURE__ */ jsxRuntimeExports.jsx(BusinessReviewSummaryDetails, { summary: state.summary }) : null;
 }
-function segmentDetail(segment) {
-  const titles = segment.rules.map((rule2) => rule2.title);
-  const labels = segment.permissions.filter((permission2) => permission2.configurable).map((item) => item.label);
-  const parts = titles.length > 0 ? titles : labels;
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
 function ApprovalExtensionCoverageCard(props) {
   const { coverage, linkedPatterns } = props;
   const hasRecommendation = linkedPatterns.length > 0;
@@ -37242,7 +37243,7 @@ const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() =
 const SettingsWorkspace = lazyWorkspace("settings-workspace", () => __vitePreload(() => import("./chunks/settings-workspace-CQIQ-ZgI.js"), true ? __vite__mapDeps([10,9,5,11,8]) : void 0).then((m) => ({ default: m.SettingsWorkspace })));
 const ExtensionsWorkspace = lazyWorkspace(
   "extensions-workspace",
-  () => __vitePreload(() => import("./chunks/extensions-workspace-BUZrkjLc.js"), true ? __vite__mapDeps([12,11]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
+  () => __vitePreload(() => import("./chunks/extensions-workspace-DpVpI1uW.js"), true ? __vite__mapDeps([12,11]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
 );
 const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePreload(() => import("./chunks/app-detail-workspace-pqZPiiHy.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.AppDetailWorkspace })));
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));

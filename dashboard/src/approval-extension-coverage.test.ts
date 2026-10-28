@@ -4,6 +4,7 @@ import {
   coverageSegmentsBeyond,
   coverageStepLabel,
   normalizeApprovalExtensionCoverage,
+  segmentDetail,
 } from "./approval-extension-coverage";
 
 function assert(condition: boolean, message: string): void {
@@ -239,6 +240,32 @@ async function run(): Promise<void> {
     recommendationCardSource.includes("configurable.map(") && recommendationCardSource.includes("{reviewLinks}"),
     "the recommendation card links every extension it would configure, not just the first",
   );
+
+  // A step names its rules, or else its changeable permissions.
+  assert(segmentDetail(coverage!.segments[0]) === "Docker system prune", "a rule title names the step");
+  // A permission named after its extension would repeat the link beside it.
+  const sameName = normalizeApprovalExtensionCoverage(
+    rawCoverage({
+      segments: [
+        rawSegment({
+          executable: "npx",
+          extensions: [{ extension_id: "command.package.node", name: "Node package protection", focus_rule_id: null }],
+          rules: [],
+          permissions: [
+            {
+              permission_id: "command.package.node.permission.package-protection",
+              label: "Node package protection",
+              configurable: true,
+            },
+          ],
+        }),
+      ],
+    }),
+  );
+  assert(sameName !== null, "a permission-only step normalizes");
+  assert(segmentDetail(sameName!.segments[0]) === null, "a permission is not named twice beside its own extension");
+  const distinct = normalizeApprovalExtensionCoverage(rawCoverage({ segments: [rawSegment({ rules: [] })] }));
+  assert(segmentDetail(distinct!.segments[0]) === "Container system prune", "a differently named permission is kept");
 
   const decisionCardSource = readFileSync(new URL("./review-decision-card.tsx", import.meta.url), "utf8");
   assert(
