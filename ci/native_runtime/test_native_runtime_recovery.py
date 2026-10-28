@@ -12,13 +12,14 @@ import pytest
 import codex_plugin_scanner.guard.native_runtime as native_runtime
 from ci.native_runtime.native_hook_client_support import _push_snapshot
 from ci.native_runtime.native_process_test_support import process_is_alive
+from ci.native_runtime.post_tool_review import review_post_tool_native
 from ci.native_runtime.test_native_hook_client import (
     _request as _native_request,
 )
 from ci.native_runtime.test_native_hook_client import _state_files
 from codex_plugin_scanner.guard.native_policy_test_support import native_policy_snapshot
 from codex_plugin_scanner.guard.native_resident_client import close_native_residents
-from codex_plugin_scanner.guard.native_runtime import native_runtime_status, review_post_tool_native
+from codex_plugin_scanner.guard.native_runtime import native_runtime_status
 from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest
 from scripts.native_resident_stop_bound import RESIDENT_STOP_TIMEOUT_SECONDS
 

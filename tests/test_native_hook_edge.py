@@ -581,6 +581,7 @@ def test_post_tool_review_only_trusts_a_resident_that_checks_its_own_answer(
     features: tuple[str, ...],
     resident_called: bool,
 ) -> None:
+    from ci.native_runtime import post_tool_review
     from codex_plugin_scanner.guard import native_runtime
     from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest
 
@@ -618,7 +619,7 @@ def test_post_tool_review_only_trusts_a_resident_that_checks_its_own_answer(
         calls.append(kwargs)
         return None
 
-    monkeypatch.setattr(native_runtime, "native_resident_client_request", fake_client)
+    monkeypatch.setattr(post_tool_review, "native_resident_client_request", fake_client)
     request = HookReviewRequest(
         harness="claude",
         event_name="PostToolUse",
@@ -631,7 +632,7 @@ def test_post_tool_review_only_trusts_a_resident_that_checks_its_own_answer(
         source_scope="workspace",
     )
 
-    result = native_runtime.review_post_tool_native(request, observe_mode=False, policy_snapshot={"generation": 1})
+    result = post_tool_review.review_post_tool_native(request, observe_mode=False, policy_snapshot={"generation": 1})
 
     assert result is None
     assert bool(calls) is resident_called

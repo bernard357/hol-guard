@@ -25,6 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
+from ci.native_runtime.post_tool_review import review_post_tool_native  # noqa: E402
 from codex_plugin_scanner.guard.codex_hook_launch_runtime import run_isolated_hook_process  # noqa: E402
 from codex_plugin_scanner.guard.native_policy_test_support import native_policy_snapshot  # noqa: E402
 from codex_plugin_scanner.guard.native_resident_client import (  # noqa: E402
@@ -32,10 +33,7 @@ from codex_plugin_scanner.guard.native_resident_client import (  # noqa: E402
     native_resident_client_request,
 )
 from codex_plugin_scanner.guard.native_route_receipt import native_hook_route, reset_native_hook_route  # noqa: E402
-from codex_plugin_scanner.guard.native_runtime import (  # noqa: E402
-    native_runtime_status,
-    review_post_tool_native,
-)
+from codex_plugin_scanner.guard.native_runtime import native_runtime_status  # noqa: E402
 from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest  # noqa: E402
 from scripts.native_resident_stop_bound import RESIDENT_STOP_TIMEOUT_SECONDS  # noqa: E402
 

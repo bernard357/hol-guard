@@ -10,9 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from ci.native_runtime.post_tool_review import review_post_tool_native
 from codex_plugin_scanner.guard.native_policy_test_support import native_policy_snapshot
 from codex_plugin_scanner.guard.native_resident_client import close_native_residents
-from codex_plugin_scanner.guard.native_runtime import parity_signature, review_post_tool_native
+from codex_plugin_scanner.guard.native_runtime import parity_signature
 from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest, HookReviewResponse
 
 _NATIVE_BINARY = os.environ.get("HOL_GUARD_NATIVE_BINARY")
