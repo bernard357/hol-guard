@@ -48,6 +48,8 @@ pub fn omp_bash_execution_directory(
 mod omp_bash_cwd_tests;
 #[path = "open_quote.rs"]
 mod open_quote;
+#[path = "process_substitution.rs"]
+mod process_substitution;
 #[path = "generic_pure_eval.rs"]
 mod pure_eval;
 #[path = "generic_read_note.rs"]
@@ -651,6 +653,47 @@ fn evaluate_envelope(
                 return projected;
             }
             return env_prefix_projection::join_reviewed(projected, raw, &reviewed);
+        }
+    }
+
+    // `diff <(sort a.txt) b.txt` hands `diff` a pipe to read. Prove the inner
+    // commands and the command around them separately, and keep the projected
+    // answer only when every one of them settles on its own.
+    if let Some(substitution) = signals
+        .command
+        .as_deref()
+        .filter(|_| project_redirects && !search_scope_proven && !apply_patch_proven)
+        .and_then(process_substitution::project)
+    {
+        let raw_text = signals.command.as_deref().unwrap_or_default();
+        let inner_reads = substitution.inner.iter().all(|inner| {
+            let inner_payload = payload_with_command(payload, raw_text, inner);
+            process_substitution::reads_only(&evaluate_envelope(
+                harness,
+                event,
+                &inner_payload,
+                controls,
+                deadline,
+                context,
+                execution_environment,
+                project_redirects,
+            ))
+        });
+        if inner_reads {
+            let projected_payload = payload_with_command(payload, raw_text, &substitution.command);
+            let projected = evaluate_envelope(
+                harness,
+                event,
+                &projected_payload,
+                controls,
+                deadline,
+                context,
+                execution_environment,
+                project_redirects,
+            );
+            if process_substitution::reads_only(&projected) {
+                return projected;
+            }
         }
     }
 

@@ -460,6 +460,7 @@
       "src/pretool/private_temporary_workspace.rs",
       "src/pretool/process_probes.rs",
       "src/pretool/process_stops.rs",
+      "src/pretool/process_substitution.rs",
       "src/pretool/psql_reads.rs",
       "src/pretool/psql_statement.rs",
       "src/pretool/pure_expression.rs",
