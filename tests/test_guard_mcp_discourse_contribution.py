@@ -52,6 +52,7 @@ def test_discourse_selected_write_actions_require_review() -> None:
         "discourse_create_post",
         "discourse_create_topic",
         "discourse_update_topic",
+        "discourse_perform_reviewable_action",
         "discourse_create_private_message",
         "discourse_reply_private_message",
         "discourse_invite_to_private_message",
