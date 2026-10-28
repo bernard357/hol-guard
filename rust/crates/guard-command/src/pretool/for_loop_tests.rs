@@ -136,6 +136,13 @@ fn unsupported_loops_fall_back_to_review() {
         // proven: with a file named `x secret.pem .json` beside it,
         // `cat bak-$f` reads `secret.pem` while `cat bak-*.json` does not.
         "for f in *.json; do cat bak-$f; done",
+        // A backslash sticks the space to the reference, so `cat \ $f` is the
+        // one glued word ` *.json` and the loop's own matches go unproven.
+        "for f in *.json; do cat \\ $f; done",
+        // The quote before the reference closes a string and the one after
+        // opens the next, so taking them off would spell a name the loop
+        // never reads.
+        "for f in *.md; do cat \"x \"$f\" y\"; done",
         "for f in *.json; do cat \"bak-$f\"; done",
         "for f in *.md; do head -5 \"$f.bak\"; done",
         "for f in src/*.ts; do cat $f.bak; done",

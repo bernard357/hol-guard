@@ -445,8 +445,9 @@ pub(crate) fn references_stand_alone(item: &str) -> bool {
     let chars: Vec<char> = item.chars().collect();
     chars.iter().enumerate().all(|(index, &current)| {
         current != MARKER
-            || (word_boundary(index.checked_sub(1).map(|before| chars[before]))
-                && word_boundary(chars.get(index + 1).copied()))
+            || (index.checked_sub(1).is_none_or(|before| {
+                word_boundary(Some(chars[before])) && !escaped(&chars, before)
+            }) && word_boundary(chars.get(index + 1).copied()))
     })
 }
 
@@ -456,6 +457,21 @@ fn word_boundary(character: Option<char>) -> bool {
     character.is_none_or(|character| character.is_whitespace() || character == '|')
 }
 
+/// Whether a backslash makes the character at `at` a literal. The shell reads
+/// `\ ` as a space stuck to the word beside it, so `cat \ $f` is one glued
+/// word rather than two, and the reference does not stand on its own after
+/// all. An even run of backslashes spells backslashes and leaves the
+/// character the boundary it looks like.
+fn escaped(chars: &[char], at: usize) -> bool {
+    chars[..at]
+        .iter()
+        .rev()
+        .take_while(|character| **character == '\\')
+        .count()
+        % 2
+        == 1
+}
+
 /// Take the quotes off a reference the body quotes as a whole word of its own.
 ///
 /// Every word the loop header admits is one whitespace-free run of characters
@@ -463,12 +479,32 @@ fn word_boundary(character: Option<char>) -> bool {
 /// single word. Writing the bare word out is what lets the glob proof read the
 /// pattern the loop expands; left inside quotes it would stand for a name the
 /// shell never matches.
+///
+/// Which `"` opens a string and which closes one decides that, so the scan
+/// carries the quote state rather than reading the two characters beside the
+/// reference. In `cat "x "$f" y"` the quote before the reference closes
+/// `"x "` and the one after opens `" y"`: taking them off would spell the one
+/// literal name `x *.md y` for a loop that reads `x a.md y` and `x b.md y`.
 pub(crate) fn unquote_whole_references(item: &str) -> String {
     let chars: Vec<char> = item.chars().collect();
     let mut out = String::with_capacity(item.len());
     let mut index = 0usize;
+    let mut in_double = false;
     while let Some(&current) = chars.get(index) {
-        if current == '"'
+        if !in_double && current == '\'' {
+            out.push(current);
+            index += 1;
+            while let Some(&inner) = chars.get(index) {
+                out.push(inner);
+                index += 1;
+                if inner == '\'' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if !in_double
+            && current == '"'
             && chars.get(index + 1) == Some(&MARKER)
             && chars.get(index + 2) == Some(&'"')
             && word_boundary(index.checked_sub(1).map(|before| chars[before]))
@@ -477,6 +513,15 @@ pub(crate) fn unquote_whole_references(item: &str) -> String {
             out.push(MARKER);
             index += 3;
             continue;
+        }
+        if current == '\\' && index + 1 < chars.len() {
+            out.push(current);
+            out.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
+        if current == '"' {
+            in_double = !in_double;
         }
         out.push(current);
         index += 1;
