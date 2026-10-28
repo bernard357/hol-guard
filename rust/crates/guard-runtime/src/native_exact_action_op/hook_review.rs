@@ -85,6 +85,21 @@ pub(super) fn derive(query: &NativeExactActionQueryV1) -> Result<HookReview, &'s
     })
 }
 
+/// Whether the receipt's policy binding holds for a `HookReview` query,
+/// including one `derive` rejects.
+pub(super) fn policy_binding_valid(query: &NativeExactActionQueryV1) -> bool {
+    let NativeExactActionQueryV1::HookReview {
+        harness,
+        result,
+        receipt,
+        ..
+    } = query
+    else {
+        return false;
+    };
+    policy_binding(harness, result, receipt.as_ref()) != NativePolicyBindingV1::Invalid
+}
+
 /// A verdict that claims no extension policy, on either the verdict or its
 /// receipt, binds none. One that does binds only through a receipt that
 /// records this very `PreToolUse` result and carries a well-formed command

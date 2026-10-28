@@ -197,6 +197,23 @@ class TestZCodeHookResponses:
     def test_process_exit_allows_exit_zero(self) -> None:
         assert zcode_hook_process_exit(policy_action="allow", event_name="PreToolUse") == 0
 
+    def test_process_exit_treats_an_action_outside_the_lattice_as_review(self) -> None:
+        # ``policy_action`` arrives as a bare string decoded from the resident's
+        # response. A newer, truncated or corrupted value must take the review
+        # tier rather than the allow exit the blocking-set test used to give it.
+        for action in ("quarantine-required", "", "BLOCK", "deny", "0", None, 7):
+            assert zcode_hook_process_exit(policy_action=action, event_name="PreToolUse") == 0, action
+            assert zcode_hook_process_exit(policy_action=action, event_name="UserPromptSubmit") == 2, action
+            assert zcode_hook_process_exit(policy_action=action, event_name="PostToolUse") == 2, action
+
+    def test_process_exit_maps_the_legacy_ask_alias_onto_review(self) -> None:
+        # ``ask`` predates the lattice; it resolves to review rather than to a
+        # permissive rank.
+        for event in ("PreToolUse", "UserPromptSubmit", "PostToolUse"):
+            assert zcode_hook_process_exit(policy_action="ask", event_name=event) == zcode_hook_process_exit(
+                policy_action="review", event_name=event
+            ), event
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TEMPLATE_PATH = (

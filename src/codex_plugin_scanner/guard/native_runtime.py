@@ -49,8 +49,6 @@ from .native_runtime_values import (
     _python_package_version,
     _resolve_native_mode,
     decode_runtime_manifest,
-    native_output_sha256,  # noqa: F401
-    parity_signature,  # noqa: F401
     warn_legacy_hook_fast_path_once,
 )
 from .native_runtime_values import _NATIVE_RUNTIME_EXPORTS as __all__  # noqa: F401, N811

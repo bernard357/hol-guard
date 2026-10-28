@@ -140,7 +140,9 @@ fn verdict(
     if git_after_later_cd(model) {
         return Verdict::Review;
     }
-    let destination = super::segment_proof::verified_cwd_compound_context(model, context);
+    // `cd ../app && git status` runs the read in `../app`, so it is probed
+    // there. The `cd` itself writes nothing a later read could pick up.
+    let destination = super::segment_proof::git_read_cwd_compound_context(model, context);
     let read_context = super::PathContext {
         cwd: destination.as_deref().or(context.cwd),
         ..context
@@ -239,6 +241,7 @@ fn verdict(
     let settled = |prior: usize, later: &crate::CommandSegmentV1| {
         let segment = segments[prior];
         benign.contains(&prior)
+            || (prior == 0 && destination.is_some())
             || write_free(segment)
             || (link_settles
                 && super::symlink_writes::safe_symlink_arguments(segment, read_context))

@@ -3,7 +3,9 @@
 Reuses the runtime posture: the native probe describes each executable the
 configured MCP servers would launch, without running it, and the native
 assessment matches it against the runtime advisories carried in the cached
-supply-chain bundle. Nothing here reaches Cloud or feeds hooks or approvals.
+supply-chain bundle. Nothing here feeds hooks or approvals. Cloud receives each
+finding's identifiers and a keyed digest of its path, which matches the digest
+fleet posture reports for the same runtime; the path itself stays local.
 Where the native runtime enumerates running processes, a process that kept
 running after its runtime was replaced on disk keeps its finding, as
 ``restart_required``, until it exits: a new build on disk alone is never the

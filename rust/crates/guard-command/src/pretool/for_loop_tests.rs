@@ -41,6 +41,17 @@ fn read_only_loops_match_their_unrolled_form() {
             "echo src/*.ts; echo tests/*.ts",
         ),
         ("for d in src/*/; do echo $d; done", "echo src/*/"),
+        // A pattern with no directory in it names the directory the loop
+        // runs in, which is the directory the written-out command names, as
+        // long as the pattern's own text reads as a path.
+        ("for f in *.ts; do echo $f; done", "echo *.ts"),
+        ("for d in */; do echo $d; done", "echo */"),
+        // Double quotes round a whole reference stop the shell splitting the
+        // name into fields; they do not change which names the loop reads, so
+        // the written-out text spells the same pattern without them.
+        ("for f in *.md; do head -5 \"$f\"; done", "head -5 *.md"),
+        ("for f in *.md; do wc -l \"$f\"; done", "wc -l *.md"),
+        ("for d in */; do echo \"$d\"; done", "echo */"),
         // The body talks about the name without binding it, so the loop
         // variable still holds the header word.
         (
@@ -104,14 +115,38 @@ fn unsafe_loop_bodies_keep_their_unrolled_verdict() {
 fn unsupported_loops_fall_back_to_review() {
     for command in [
         "for f in $(ls); do echo $f; done",
-        "for f in *.ts; do echo $f; done",
+        // A bracket expression is a character set the text does not spell
+        // out, and the rest start at the root or reach above the directory
+        // the loop runs in.
         "for f in [ab]*.ts; do echo $f; done",
-        "for f in build*; do echo $f; done",
+        "for f in -*.ts; do echo $f; done",
+        // A directoryless pattern that names no file type is an identifier the
+        // shell leaves alone, so the body runs its program over the pattern
+        // itself rather than over the names of files.
+        "for id in PRRT_example*; do echo $id; done",
+        "for d in disk*; do echo $d; done",
+        "for f in *; do echo $f; done",
         "for f in ../*.ts; do echo $f; done",
         "for f in /etc/*.conf; do echo $f; done",
         "for f in src/../../*.ts; do echo $f; done",
         "for f in \"src/*.ts\"; do echo $f; done",
         "for f in 'src/*.ts'; do echo $f; done",
+        // A glob glued into a larger word writes out a pattern the loop never
+        // expanded, so the names the loop's own pattern matches are never
+        // proven: with a file named `x secret.pem .json` beside it,
+        // `cat bak-$f` reads `secret.pem` while `cat bak-*.json` does not.
+        "for f in *.json; do cat bak-$f; done",
+        // A backslash sticks the space to the reference, so `cat \ $f` is the
+        // one glued word ` *.json` and the loop's own matches go unproven.
+        "for f in *.json; do cat \\ $f; done",
+        // The quote before the reference closes a string and the one after
+        // opens the next, so taking them off would spell a name the loop
+        // never reads.
+        "for f in *.md; do cat \"x \"$f\" y\"; done",
+        "for f in *.json; do cat \"bak-$f\"; done",
+        "for f in *.md; do head -5 \"$f.bak\"; done",
+        "for f in src/*.ts; do cat $f.bak; done",
+        "for f in *.ts; do echo ${f}x; done",
         "for f in a b; do $f; done",
         "for f in a b; do echo hi > $f; done",
         "for f in a b; do f=x; echo $f; done",

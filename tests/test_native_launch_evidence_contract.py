@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from codex_plugin_scanner.guard.daemon import hook_native_exact_action as bridge
+from tests import native_review_evidence_support as bridge
 from tests.native_launch_evidence_helpers import validate_launch_evidence
 
 

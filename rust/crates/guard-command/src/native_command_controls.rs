@@ -425,9 +425,10 @@ impl CompiledNativeCommandControls {
         {
             return false;
         }
-        let mut covered: BTreeSet<_> = crate::pretool::benign_command_segments(command, context)
+        let benign: BTreeSet<_> = crate::pretool::benign_command_segments(command, context)
             .into_iter()
             .collect();
+        let mut covered = benign.clone();
         for observation in observations {
             if observation.effective_segment_indexes.is_empty() {
                 continue;
@@ -453,6 +454,10 @@ impl CompiledNativeCommandControls {
         // GitHub permission-only owners run last so they never hide an
         // ungranted rule.
         covered.extend(self.github_granted_segments(permission_observations));
+        // A Git ref read after covered steps keeps the proof it has alone.
+        covered.extend(crate::pretool::git_reads_after_allowed_steps(
+            command, context, &benign, &covered,
+        ));
         // Delegated package-firewall ownership is not execution consent. Only
         // verified rule observations or the native benign proof can cover a
         // segment; an extra unclassified command retains its own review.

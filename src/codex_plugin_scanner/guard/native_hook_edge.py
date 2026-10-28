@@ -29,6 +29,7 @@ _RESPONSE_FEATURE = "hook-harness-response-v1"
 _SELF_CHECK_FEATURE = "edge-self-check-v1"
 # The resident records the CLI an answered PreToolUse launches, off the answer path.
 _LOCAL_CLI_OBSERVATION_FEATURE = "edge-local-cli-observation-v1"
+_RECEIPT_RECORD_FEATURE = "edge-receipt-record-v1"
 # The edge answers the Oh My Pi / Pi structured-output mediation itself when
 # the envelope carries the daemon's managed-policy view.
 STRUCTURED_OUTPUT_FEATURE = "edge-structured-output-v1"
@@ -39,6 +40,11 @@ _LOCAL_CLI_RULE_FEATURE = "edge-local-cli-rule-v1"
 # launch can take seconds. It once had its own request with this timeout;
 # the edge keeps that allowance rather than spending the review's budget.
 _LOCAL_CLI_RULE_SECONDS = 5.0
+# The edge proves a review's policy binding, retry binding and exact-action
+# token beside the custom extension rule when the rules carry the daemon's
+# extension-control digest.
+_REVIEW_EVIDENCE_FEATURE = "edge-review-evidence-v1"
+_REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "once_only_reason"})
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -63,7 +69,14 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         "result",
         "receipt",
     }
-    allowed = required | {"request_id", "harness_response", "containment_route", "local_cli_rule"}
+    allowed = required | {
+        "request_id",
+        "harness_response",
+        "containment_route",
+        "local_cli_rule",
+        "review_evidence",
+        "receipt_recorded",
+    }
     if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
         return None
     event_name = payload.get("event_name")
@@ -80,6 +93,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or len(payload["harness"]) > 64
         or not isinstance(payload.get("result"), dict)
         or not isinstance(payload.get("harness_response"), dict)
+        or not isinstance(payload.get("receipt_recorded", False), bool)
     ):
         return None
     route = payload.get("containment_route", "none")
@@ -94,6 +108,17 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or set(rule) != {"blocked", "harness_response"}
         or not isinstance(rule["blocked"], bool)
         or not isinstance(rule["harness_response"], dict)
+    ):
+        return None
+    evidence = payload.get("review_evidence")
+    if evidence is not None and (
+        not isinstance(evidence, dict)
+        or set(evidence) != _REVIEW_EVIDENCE_KEYS
+        or not isinstance(evidence["policy_binding_valid"], bool)
+        or any(
+            evidence[key] is not None and not isinstance(evidence[key], str)
+            for key in _REVIEW_EVIDENCE_KEYS - {"policy_binding_valid"}
+        )
     ):
         return None
     return payload
@@ -115,6 +140,7 @@ def _encode_hook_envelope(
     recording_only: bool = False,
     local_cli_rules: Mapping[str, object] | None = None,
     observe_local_cli: bool = False,
+    record_receipt: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
@@ -151,6 +177,8 @@ def _encode_hook_envelope(
         envelope["local_cli_rules"] = dict(local_cli_rules)
     if observe_local_cli:
         envelope["observe_local_cli"] = True
+    if record_receipt:
+        envelope["record_receipt"] = True
     if structured_output_config is not None:
         envelope["structured_output_config"] = dict(structured_output_config)
     if execution_context_supported:
@@ -190,6 +218,7 @@ def review_raw_hook_native(
     request_id: str | None = None,
     local_cli_rules: Mapping[str, object] | None = None,
     observe_local_cli: bool = False,
+    record_receipt: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
 ) -> dict[str, Any] | None:
     """Return a typed Rust edge result, or fail closed without reinterpretation."""
@@ -221,6 +250,8 @@ def review_raw_hook_native(
             required_features.add("git-execution-context-v1")
             if local_cli_rules is not None:
                 required_features.add(_LOCAL_CLI_RULE_FEATURE)
+                if local_cli_rules.get("exact_action_control_digest") is not None:
+                    required_features.add(_REVIEW_EVIDENCE_FEATURE)
     if _LOCAL_CLI_RULE_FEATURE not in required_features:
         # Only a tool call has a custom extension rule to settle.
         local_cli_rules = None
@@ -254,6 +285,7 @@ def review_raw_hook_native(
         recording_only=observe_mode,
         local_cli_rules=local_cli_rules,
         observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
+        record_receipt=record_receipt and _RECEIPT_RECORD_FEATURE in status.capabilities.features,
         structured_output_config=structured_output_config,
     )
     if encoded is None:

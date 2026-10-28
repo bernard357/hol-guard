@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_plugin_scanner.guard.local_cli_hook import native_local_cli_hook
 from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.local_cli_identity import identify_unlisted_cli
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.runtime_wrapper_support import native_local_cli_hook
 
 from .local_cli_native_fixture import native_local_cli_grant_resident, review_rule_verdict  # noqa: F401
 

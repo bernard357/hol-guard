@@ -49,12 +49,8 @@ fn execution_environment_binds_identity_without_rejecting_unrelated_hooks() {
     assert_ne!(original_request, request_identity(&request).unwrap().1);
     assert_ne!(original_intent, execution_intent_digest(&request).unwrap());
     let intent = execution_intent_digest(&request).unwrap();
-    request
-        .source
-        .execution_environment
-        .as_mut()
-        .unwrap()
-        .environment_digest = "b".repeat(64);
+    let environment = request.source.execution_environment.as_mut().unwrap();
+    environment.environment_digest = "b".repeat(64);
     assert_ne!(intent, execution_intent_digest(&request).unwrap());
     request.source.execution_environment.as_mut().unwrap().path = "x".repeat(MAX_PATH_BYTES + 1);
     assert!(validate_envelope_shape(&request).is_ok());
@@ -133,11 +129,12 @@ pub(crate) fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
         recording_only: false,
         local_cli_rules: None,
         observe_local_cli: false,
+        record_receipt: false,
         structured_output_config: None,
     }
 }
 
-fn evaluate_isolated(envelope: GuardHookEnvelopeV2) -> Result<Vec<u8>, String> {
+pub(crate) fn evaluate_isolated(envelope: GuardHookEnvelopeV2) -> Result<Vec<u8>, String> {
     let guard_home = std::path::PathBuf::from(&envelope.source.guard_home);
     let result = validate_envelope_shape(&envelope)
         .and_then(|_| evaluate_validated_envelope(envelope, None, None));
