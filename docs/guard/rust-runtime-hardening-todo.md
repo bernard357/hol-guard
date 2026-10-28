@@ -115,7 +115,7 @@ Status: canonical follow-up backlog for `release/3.0`.
 
 ## PR 7: Supply chain, fuzz, chaos, soak, and opt-in gate
 
-- [ ] NRH-T120 add Cargo advisory, source, license, duplication, and banned-crate gates;
+- [x] NRH-T120 add Cargo advisory, source, license, duplication, and banned-crate gates;
 - [ ] NRH-T121 generate Rust SBOM/provenance bound to every native wheel and verify staged/published wheel bytes;
 - [ ] NRH-T122 add persistent frame/envelope/output/scanner/prompt/command/path/response fuzz targets and deterministic PR seeds;
 - [ ] NRH-T123 add 10,000 malformed frames, auth floods, 16 slow clients, 64 mixed clients, fallback saturation, daemon kills, disk/read-only/stale/low-FD chaos;
