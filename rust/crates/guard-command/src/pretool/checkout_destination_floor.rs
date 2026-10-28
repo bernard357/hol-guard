@@ -202,15 +202,25 @@ fn step_words(
         }
         position += 1;
     }
+    // After `--` every word is an operand, even one that starts with `-`.
+    let mut operands = Vec::new();
+    let mut terminated = false;
     for argument in arguments.iter().skip(index + 1) {
-        if let Some(rest) = argument.strip_prefix('-') {
-            if let Some((_, value)) = rest.split_once('=') {
-                words.push(value.to_owned());
-            }
+        if !terminated && argument == "--" {
+            terminated = true;
             continue;
         }
-        words.push(argument.clone());
+        if !terminated {
+            if let Some(rest) = argument.strip_prefix('-') {
+                if let Some((_, value)) = rest.split_once('=') {
+                    words.push(value.to_owned());
+                }
+                continue;
+            }
+        }
+        operands.push(argument.clone());
     }
+    words.extend(operands.iter().cloned());
     if matches!(arguments[index].as_str(), "clone" | "submodule") {
         // The repository is the first remote-shaped word; no other word is
         // exempt from screening. With no directory after it, Git names the
@@ -220,10 +230,7 @@ fn step_words(
         if let Some(position) = words.iter().position(|word| remote_word(word)) {
             words.remove(position);
         }
-        for operand in arguments[index + 1..]
-            .iter()
-            .filter(|word| !word.starts_with('-'))
-        {
+        for operand in &operands {
             words.extend(guessed_directories(operand)?);
         }
     }

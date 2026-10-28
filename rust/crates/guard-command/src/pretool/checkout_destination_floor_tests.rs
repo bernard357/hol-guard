@@ -39,6 +39,9 @@ fn layout(name: &str) -> Layout {
         .unwrap();
     // A link whose name is shaped like an SCP remote.
     std::os::unix::fs::symlink(home.join("Library/LaunchAgents"), workspace.join("ab:c")).unwrap();
+    // A link whose name is shaped like an option.
+    std::os::unix::fs::symlink(home.join("Library/LaunchAgents"), workspace.join("-agents"))
+        .unwrap();
     let canonical = |path: PathBuf| path.canonicalize().unwrap().to_str().unwrap().to_owned();
     Layout {
         home: canonical(home),
@@ -129,6 +132,9 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         // CDPATH can send a bare relative `cd` anywhere.
         "cd projects && git clone https://github.com/example-org/x.git",
         "git worktree add ~other/wt origin/main",
+        // After `--`, a word that starts with `-` is still a destination.
+        "git clone -- https://github.com/example-org/x.git -agents/x",
+        "git worktree add -- -agents/wt origin/main",
         // An unknown global option hides where the subcommand starts.
         "git --unknown-option clone https://github.com/example-org/x.git HOME/projects/x",
     ] {
@@ -158,6 +164,7 @@ fn ordinary_checkouts_are_not_a_floor() {
         "git clone --branch main --depth 1 https://github.com/example-org/x.git ../x",
         "git init ../fresh",
         "git submodule add https://github.com/example-org/x.git vendor/x",
+        "git clone -- https://github.com/example-org/x.git ../x",
         // Not a checkout: the floor never looks.
         "git worktree list",
         "git worktree remove ../hgp-a",
