@@ -1,6 +1,6 @@
 import { a8 as isUnsupportedPlatformCheck, h as harnessDisplayName, j as jsxRuntimeExports, a9 as RECHECK_UNAVAILABLE_SIGNATURE, aa as protectionReasonText, r as reactExports, A as ActionButton, ab as HiMiniExclamationCircle, ac as hasRepairableProtectionGap, ad as remainingProtectionRepairParts, ae as protectionGapSignature, af as repairOutcomeIsStalled, ag as ProtectionRepairFlowError, ah as nextProtectionRepairOutcome, ai as waitForAuthorizeUrl, aj as startOrRecoverCloudConnect, ak as safeCloudConnectUrl, al as openPackageFirewallAuthorizeFallback, am as waitForCloudConnection, an as activeFailedHarnesses, ao as resetRepairOutcomeTracker, ap as HiMiniWrenchScrewdriver, s as HiMiniCheckCircle, c as HiMiniChevronDown, aq as fetchSettings, ar as harnessPostureRows, as as selectHarnessPosture, at as harnessPosturePatch, I as updateSettings, au as harnessRowTone, av as PROTECTION_POSTURE_COPY, aw as harnessPostureOptions, ax as globalPosture, S as SectionLabel, ay as harnessRowStatus, N as EmptyState, H as HiMiniChevronRight, az as HiMiniEye, aA as HiMiniXCircle, u as isConnectableAppHarness, L as protectionHealthFor, K as useProtectionPresentationState, aB as GuardHero, aC as ProofStrip, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard } from "../guard-dashboard.js";
-import { H as HarnessVersionLabel, u as useHarnessDetection, d as detectedHarnesses, v as visibleHarnessesFor, r as resolveDetectedAppStatus, a as versionCompatibilityFor } from "./harness-version-label-D4a5Z4Um.js";
-import { C as ConnectGuardCloudButton } from "./connect-guard-cloud-button-B8mPbbPw.js";
+import { H as HarnessVersionLabel, u as useHarnessDetection, d as detectedHarnesses, v as visibleHarnessesFor, r as resolveDetectedAppStatus, s as setupStatusFor, a as versionCompatibilityFor } from "./harness-version-label-Db5IZIv9.js";
+import { C as ConnectGuardCloudButton } from "./connect-guard-cloud-button-olSoWn4O.js";
 import { a as SUPPORTED_APPS_BRIEF, d as defaultConnectHarness, A as APP_STATUS_LABELS } from "./app-catalog-By01oDVd.js";
 import { G as GuardRepairControl, S as SettingsSaveProofModal, H as HarnessPostureChoiceLabel } from "./settings-save-proof-modal-CZZvxWFO.js";
 const SUPPORTED_APPS_COPY = SUPPORTED_APPS_BRIEF;
@@ -993,7 +993,7 @@ function FleetWorkspace(props) {
     const install = managedInstalls.find((i) => i.harness === harness);
     const presentInventory = inventory.filter((i) => i.harness === harness && i.present);
     const appProtection = protectionHealthFor(props.runtime, harness);
-    const status = resolveDetectedAppStatus(install, appProtection, presentInventory.length > 0, receiptHarnesses.has(harness), detected.includes(harness));
+    const status = resolveDetectedAppStatus(install, appProtection, presentInventory.length > 0, receiptHarnesses.has(harness), detected.includes(harness), setupStatusFor(harnessDetection, harness));
     return {
       harness,
       status,

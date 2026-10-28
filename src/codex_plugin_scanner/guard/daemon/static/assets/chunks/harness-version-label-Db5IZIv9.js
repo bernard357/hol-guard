@@ -1,4 +1,4 @@
-import { da as fetchGuardApi, r as reactExports, u as isConnectableAppHarness, bi as isGuardDemoMode, j as jsxRuntimeExports, du as HiMiniCheckBadge, a4 as HiMiniExclamationTriangle, a7 as HiMiniMinusCircle, a1 as HiMiniQuestionMarkCircle } from "../guard-dashboard.js";
+import { db as fetchGuardApi, r as reactExports, u as isConnectableAppHarness, bi as isGuardDemoMode, j as jsxRuntimeExports, dv as HiMiniCheckBadge, a4 as HiMiniExclamationTriangle, a7 as HiMiniMinusCircle, a1 as HiMiniQuestionMarkCircle } from "../guard-dashboard.js";
 const STATES = /* @__PURE__ */ new Set(["tested", "untested", "version_unknown", "coverage_unavailable"]);
 const SCHEMA = "hol-guard-harness-version-compatibility.v1";
 function record(value) {
@@ -211,14 +211,19 @@ function isHarnessDetected(state, harness) {
 function isHarnessDetectedItems(items, harness) {
   return items.some((item) => item.harness === harness && item.status !== "not_found");
 }
-function resolveDetectedAppStatus(install, protectionHealth, hasInventory, hasReceipts, detected) {
+function resolveDetectedAppStatus(install, protectionHealth, hasInventory, hasReceipts, detected, setupStatus) {
+  if (setupStatus === "needs_repair") return "needs_repair";
   if (install !== void 0) {
     const hookCheck = protectionHealth.checks.find((check) => check.check_id === "harness_hooks");
     if (!install.active || hookCheck?.status !== "pass") return "needs_repair";
     if (protectionHealth.state === "protected") return "protected";
     return "partial";
   }
+  if (setupStatus === "protected") return "protected";
   return hasInventory || hasReceipts || detected ? "found_unprotected" : "not_found";
+}
+function setupStatusFor(state, harness) {
+  return state.kind === "ready" ? state.items.find((item) => item.harness === harness)?.status : void 0;
 }
 function versionCompatibilityFor(state, harness) {
   if (state.kind !== "ready") return null;
@@ -261,6 +266,7 @@ export {
   clearVersionAcknowledgement as g,
   isHarnessDetected as i,
   resolveDetectedAppStatus as r,
+  setupStatusFor as s,
   useHarnessDetection as u,
   visibleHarnessesFor as v
 };
