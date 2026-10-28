@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zeroize::Zeroizing;
 
 #[path = "resident_startup_lock.rs"]
 mod resident_startup_lock;
@@ -16,6 +17,8 @@ mod resident_startup_lock;
 mod resident_state_discovery;
 #[path = "resident_state_files.rs"]
 mod resident_state_files;
+#[path = "resident_state_redaction.rs"]
+mod resident_state_redaction;
 #[path = "resident_state_supersession.rs"]
 mod resident_state_supersession;
 
@@ -62,7 +65,7 @@ pub(crate) use resident_state_discovery::discover_home_states;
 pub(crate) use resident_state_discovery::discover_home_states_prefer;
 pub(crate) use resident_state_discovery::discover_same_executable_states;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ResidentState {
     pub(crate) schema: String,
@@ -226,8 +229,11 @@ pub(crate) fn state_mac(state: &ResidentState, token: &[u8]) -> String {
     ))
 }
 
-pub(crate) fn token_from_state(state: &ResidentState) -> Result<Vec<u8>, String> {
-    let token = decode_hex(&state.token_hex)?;
+/// Decodes the published token for one exchange with the resident.  Every
+/// caller holds a plaintext copy of the key, so the decoded bytes are cleared
+/// when that caller drops them instead of outliving the request they served.
+pub(crate) fn token_from_state(state: &ResidentState) -> Result<Zeroizing<Vec<u8>>, String> {
+    let token = Zeroizing::new(decode_hex(&state.token_hex)?);
     if token.len() != crate::AUTH_TOKEN_BYTES {
         return Err("native_resident_state_token_invalid".to_owned());
     }

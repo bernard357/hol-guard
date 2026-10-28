@@ -1,12 +1,14 @@
 """Route an outside-roots review the local CLI grant covers into the workspace sandbox.
 
 Rust reviews a command the workspace sandbox cannot run because its program
-lives outside the sandbox's executable roots. When this device allowed that
-CLI, the grant does not lift the review to ``allow``: the command runs in the
-sandbox widened by the grant (``workspace-contained-grant-v1``). The sink asks
-the store for the grant again itself, so nothing here is trusted beyond the
-routing. A blocked or undecided CLI, or a call the sink cannot take, keeps the
-review.
+lives outside the sandbox's executable roots. That review asks only whether
+this device trusts the program, so an allowed CLI lifts it to ``allow``: the
+resident answers ``allow`` here, nothing is routed, and the edge's custom rule
+allows the call as an Always allow on its card would. This module routes a
+call into the sandbox widened by the grant (``workspace-contained-grant-v1``)
+only when the resident answers with a contained grant. The sink asks the store
+for the grant again itself, so nothing here is trusted beyond the routing. A
+blocked or undecided CLI, or a call the sink cannot take, keeps the review.
 
 The sandbox requirement itself is the resident's: it answers the grant step
 with the review fields the command is routed to, and this module copies them.

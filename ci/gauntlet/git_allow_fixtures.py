@@ -34,6 +34,8 @@ GIT_ALLOW_NAMED_CHECKOUT_CASE = "git-allow-guard-named-checkout"
 GIT_ALLOW_WORKTREE_CASE = "git-allow-worktree-sibling-then-status"
 # ...but never settles a checkout into a folder Git runs code from.
 GIT_ALLOW_HOOKS_WORKTREE_CASE = "git-allow-worktree-into-hooks-folder"
+# An allowed step never carries a blocked step in the same compound with it.
+GIT_ALLOW_MIXED_WORKTREE_CASE = "git-allow-worktree-then-secret-read"
 GIT_ALLOW_CASES = frozenset(
     {
         GIT_ALLOW_MERGE_CASE,
@@ -42,6 +44,7 @@ GIT_ALLOW_CASES = frozenset(
         GIT_ALLOW_NAMED_CHECKOUT_CASE,
         GIT_ALLOW_WORKTREE_CASE,
         GIT_ALLOW_HOOKS_WORKTREE_CASE,
+        GIT_ALLOW_MIXED_WORKTREE_CASE,
     }
 )
 GIT_EXTENSION_ID = "command.git"
@@ -54,6 +57,7 @@ NAMED_COMMITTED = "<Wix />\n"
 NAMED_WORKTREE = "pr/hol-guard-pr-12"
 SIBLING_WORKTREE = "review-wt"
 HOOKS_WORKTREE = ".git/hooks/review-wt"
+MIXED_WORKTREE = "mixed-wt"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "Gauntlet Fixture",
     "GIT_AUTHOR_EMAIL": "gauntlet@example.invalid",
@@ -140,6 +144,9 @@ def git_allow_checks(workspace: Path, scenario_id: str) -> dict[str, bool]:
         return {"git-allow-sibling-worktree-at-origin": heads is not None and heads[0] == heads[1]}
     if scenario_id == GIT_ALLOW_HOOKS_WORKTREE_CASE:
         return {"git-allow-hooks-worktree-absent": not (workspace / HOOKS_WORKTREE).exists()}
+    if scenario_id == GIT_ALLOW_MIXED_WORKTREE_CASE:
+        # The whole compound is denied, so the allowed checkout never ran either.
+        return {"git-allow-mixed-worktree-absent": not (workspace.parent / MIXED_WORKTREE).exists()}
     heads = _heads(workspace)
     checks = {"git-allow-head-advanced": heads is not None and heads[0] == heads[1]}
     if scenario_id == GIT_ALLOW_STASH_CASE:

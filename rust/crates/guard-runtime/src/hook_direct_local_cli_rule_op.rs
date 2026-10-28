@@ -18,8 +18,6 @@ use serde_json::Value;
 use super::block::{ReviewVerdict, Verdict};
 use super::{LaunchEnv, RuleCheck};
 
-/// The one review a custom allow lifts: Rust did not recognise the program.
-const GRANT_LIFTABLE_REASON: &str = "native_command_review_required";
 const REVIEW_ACTIONS: [&str; 2] = ["review", "require-reapproval"];
 
 /// The daemon's answer for one rule check.
@@ -131,8 +129,9 @@ pub(crate) fn review_verdict(request: &HookLocalCliRuleRequestV1) -> RuleVerdict
     match super::review_grant(&check(request)) {
         Some(ReviewVerdict::Blocked(name)) => RuleVerdict::Blocked(name),
         Some(ReviewVerdict::Allowed)
-            if result.get("reason_code").and_then(Value::as_str) == Some(GRANT_LIFTABLE_REASON)
-                && crate::hook_direct::saved_decision::overridable(result) =>
+            if crate::connector_setup::is_non_recognition(
+                result.get("reason_code").and_then(Value::as_str),
+            ) && crate::hook_direct::saved_decision::overridable(result) =>
         {
             RuleVerdict::Allowed
         }

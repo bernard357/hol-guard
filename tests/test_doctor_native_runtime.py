@@ -8,23 +8,32 @@ import pytest
 
 from codex_plugin_scanner.guard import native_runtime
 from codex_plugin_scanner.guard.adapters.diagnostic_probes import without_command_probes
+from codex_plugin_scanner.guard.cli import doctor_native_runtime
 from codex_plugin_scanner.guard.cli.doctor_native_runtime import NativeAvailabilityResult, doctor_native_availability
 from codex_plugin_scanner.guard.native_runtime import NativeRuntimeIdentity, NativeRuntimeStatus
 
 
-def test_passive_scope_does_not_probe_or_repair_native_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("runtime_sha256", "available"), [("b" * 64, True), (None, False)])
+def test_passive_scope_answers_availability_without_probing_or_repairing(
+    monkeypatch: pytest.MonkeyPatch, runtime_sha256: str | None, available: bool
+) -> None:
     def unexpected_probe() -> NativeRuntimeStatus:
         pytest.fail("Passive diagnostics must not probe or change the native binary")
 
     monkeypatch.setattr(native_runtime, "native_runtime_status", unexpected_probe)
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: runtime_sha256)
+    monkeypatch.setattr(native_runtime, "native_mode", lambda: "auto")
+
     with without_command_probes():
-        assert doctor_native_availability() == {
-            "mode": "unknown",
-            "available": None,
-            "compatible": None,
-            "reason_code": "native_status_probe_skipped",
-            "evaluation_verified": False,
-        }
+        result = doctor_native_availability()
+
+    assert result["mode"] == "auto"
+    assert result["available"] is available
+    assert result["compatible"] is None
+    assert result["reason_code"] == "native_status_probe_skipped"
+    assert result["evaluation_verified"] is False
+    # The shared-install panel is for a busy owner only; nothing to say here.
+    assert "message" not in result
 
 
 @pytest.mark.parametrize(
@@ -149,5 +158,184 @@ def test_the_default_doctor_explains_a_busy_owner_without_running_the_runtime(
         result = doctor_native_availability(tmp_path)
 
     assert result["reason_code"] == "native_resident_owner_busy"
-    assert result["available"] is None
+    # The binary validated without being run, so availability is a real answer.
+    assert result["available"] is True
     assert "Another Guard install" in result["message"]
+
+
+def test_resident_presence_sees_a_live_resident_for_this_runtime(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    state = {"runtime_sha256": "a" * 64, "process_id": os.getpid()}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+
+    assert native_resident_presence(tmp_path, "a" * 64) == {
+        "live": True,
+        "owner_lock_held": False,
+        "generations": 1,
+    }
+
+
+def test_resident_presence_ignores_another_runtime_build(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-bbbbbbbbbbbbbbbb"
+    resident.mkdir(parents=True)
+    state = {"runtime_sha256": "b" * 64, "process_id": os.getpid()}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["live"] is False
+    assert presence["generations"] == 0
+
+
+def test_resident_presence_reports_a_held_owner_lock(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    with _hold_owner_lock(tmp_path / "native-runtime"):
+        presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["owner_lock_held"] is True
+    assert presence["live"] is False
+
+
+def test_resident_presence_is_unknown_without_a_runtime_identity(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    assert native_resident_presence(tmp_path, None) == {
+        "live": None,
+        "owner_lock_held": None,
+        "generations": 0,
+    }
+
+
+def test_resident_presence_survives_a_damaged_state_file(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    (resident / "generation-1.json").write_text("{not json", encoding="utf-8")
+    (resident / "generation-2.json").write_text("[]", encoding="utf-8")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["live"] is False
+    assert presence["generations"] == 0
+
+
+def test_the_section_carries_availability_resident_and_this_process_counters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.cli import doctor_native_runtime
+
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: _status_for("a" * 64))
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+
+    section = doctor_native_runtime.native_runtime_section(tmp_path)
+
+    assert section["availability"]["reason_code"] == "native_ready"
+    assert section["resident"] == {"live": False, "owner_lock_held": False, "generations": 0}
+    assert isinstance(section["daemon_http"], dict)
+    assert "repair" not in section
+
+
+def test_the_section_does_not_serialize_the_binary_path_or_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard.cli import doctor_native_runtime
+
+    identity = NativeRuntimeIdentity(path=Path("/private/user/native-secret"), size=1, mtime_ns=1, sha256="c" * 64)
+    status = NativeRuntimeStatus(mode="auto", available=True, compatible=True, reason="native_ready", identity=identity)
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: status)
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "c" * 64)
+
+    encoded = json.dumps(doctor_native_runtime.native_runtime_section(tmp_path))
+
+    assert "native-secret" not in encoded
+    assert "c" * 64 not in encoded
+    assert "sha256" not in encoded
+    assert "mtime" not in encoded
+
+
+@pytest.mark.parametrize("process_id", [0, -1, True, "4", None])
+def test_resident_presence_treats_a_state_file_without_a_real_pid_as_dead(tmp_path: Path, process_id: object) -> None:
+    """A zero, negative, boolean or non-numeric pid names no process."""
+
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    state = {"runtime_sha256": "a" * 64, "process_id": process_id}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    # The generation is still counted; only its liveness claim is rejected.
+    assert presence == {"live": False, "owner_lock_held": False, "generations": 1}
+
+
+def test_resident_presence_rejects_a_reused_pid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A live pid counts only while it is still the process the state named."""
+
+    from codex_plugin_scanner.guard import native_resident_watchdog
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    state = {
+        "runtime_sha256": "a" * 64,
+        "process_id": os.getpid(),
+        "process_start_marker": "linux:111",
+    }
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(native_resident_watchdog, "process_start_token", lambda pid: "linux:222")
+
+    presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert presence["live"] is False
+    assert presence["generations"] == 1
+
+
+def test_resident_presence_keeps_a_pid_that_still_matches_its_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_plugin_scanner.guard import native_resident_watchdog
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    marker = "linux:111"
+    state = {"runtime_sha256": "a" * 64, "process_id": os.getpid(), "process_start_marker": marker}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(native_resident_watchdog, "process_start_token", lambda pid: marker)
+
+    assert native_resident_presence(tmp_path, "a" * 64)["live"] is True
+
+
+def test_a_busy_owner_is_not_claimed_when_a_reused_pid_is_the_only_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both resident scans apply one rule, so they cannot disagree about liveness."""
+
+    from codex_plugin_scanner.guard import native_resident_watchdog
+    from codex_plugin_scanner.guard.cli.doctor_native_runtime import native_resident_presence
+
+    state_base = tmp_path / "native-runtime"
+    monkeypatch.setattr(native_resident_watchdog, "process_start_token", lambda pid: "linux:222")
+    with _hold_owner_lock(state_base):
+        resident = state_base / "resident-v3-aaaaaaaaaaaaaaaa"
+        resident.mkdir()
+        state = {
+            "runtime_sha256": "a" * 64,
+            "process_id": os.getpid(),
+            "process_start_marker": "linux:111",
+        }
+        (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+        result = _availability_while_held(tmp_path, "a" * 64, monkeypatch)
+        presence = native_resident_presence(tmp_path, "a" * 64)
+
+    assert result["reason_code"] == "native_resident_owner_busy"
+    assert presence["live"] is False

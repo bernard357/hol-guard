@@ -23,7 +23,14 @@ from .case_helpers import add_credential_redactions, fixture_system_context
 from .catalog import WATCH_COMMAND, WATCH_PROMPT, Scenario
 from .cleanup import cleanup_case_resources
 from .codex_contained import request_proofs as codex_request_proofs
-from .connector_fixtures import CONNECTOR_PROFILE, connector_checks, stage_connector_case, state_digest
+from .connector_fixtures import (
+    CONNECTOR_PROFILE,
+    GRANTED_SCRIPT_CASES,
+    allow_custom_script,
+    connector_checks,
+    stage_connector_case,
+    state_digest,
+)
 from .evidence import sha256_bytes
 from .extension_adapters import configure_extension_permission_denial, extension_adapter
 from .fixtures import (
@@ -241,6 +248,10 @@ def run_harness_case(
                 publisher = daemon._server.hook_worker.policy_snapshot_publisher
                 case["business_policy"] = bind_business_snapshot(
                     case["business_policy"], publisher.current_snapshot(), policy_snapshot
+                )
+            if connector is not None and scenario.id in GRANTED_SCRIPT_CASES:
+                case["custom_extension"] = allow_custom_script(
+                    daemon._server.store, connector.approve_script, fixture.home
                 )
             worker = daemon._server.hook_worker
             if scenario.oracle == "watch-command":

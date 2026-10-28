@@ -466,12 +466,12 @@ class LocalCliApiService:
 
     def _start_cli_reload(self, item: dict[str, object], payload: dict[str, object]) -> dict[str, object]:
         home_dir = Path.home()
-        identity = verified_cli_for_reload(item, home_dir=home_dir)
+        target = verified_cli_for_reload(item, home_dir=home_dir, path=payload.get("path"))
 
         def reload(cancel: threading.Event) -> None:
             load_cli_commands(
                 self._store,
-                identity,
+                target,
                 discover=_discover_from_command,
                 home_dir=home_dir,
                 guard_home=self._store.guard_home,
@@ -479,7 +479,7 @@ class LocalCliApiService:
             )
 
         return self._discovery_jobs.start(
-            identity.cli_id,
+            target.identity.cli_id,
             reload,
             requested_job_id=_client_discovery_job_id(payload),
         )

@@ -9,7 +9,8 @@ from typing import Literal, TypedDict
 
 from ..adapters.diagnostic_probes import skipped_command_probe
 from ..native_policy_snapshot_constants import NATIVE_RUNTIME_STATE_DIRECTORY
-from ..resident_state_prune import pid_is_alive, probe_owner_lock
+from ..native_resident_watchdog import published_process_alive, published_resident_process
+from ..resident_state_prune import probe_owner_lock
 
 
 class _NativeAvailabilityFields(TypedDict):
@@ -37,6 +38,33 @@ _REASON_MESSAGES = {
 }
 
 
+def _published_generations(state_base: Path, runtime_sha256: str) -> tuple[int, bool]:
+    """Count the generations published for this runtime and say whether one is live.
+
+    Liveness follows the same rule the resident watchdog applies: a published
+    pid counts only while it is still the process the state file named, so a
+    reused pid in state nobody cleaned up is not a running resident.
+
+    Reads only the resident state files; it starts and stops nothing.
+    """
+
+    generations = 0
+    live = False
+    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
+        try:
+            with state_path.open("rb") as handle:
+                state = json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
+            continue
+        generations += 1
+        published = published_resident_process(state)
+        if published is not None and published_process_alive(*published):
+            live = True
+    return generations, live
+
+
 def _resident_owned_elsewhere(state_base: Path, runtime_sha256: str) -> bool:
     """True when a process holds the home-wide owner lock and no live resident runs this runtime.
 
@@ -46,18 +74,7 @@ def _resident_owned_elsewhere(state_base: Path, runtime_sha256: str) -> bool:
 
     if probe_owner_lock(state_base) is not False:
         return False
-    for state_path in state_base.glob("resident-v3-*/generation-*.json"):
-        try:
-            with state_path.open("rb") as handle:
-                state = json.loads(handle.read(_MAX_STATE_BYTES))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
-            continue
-        process_id = state.get("process_id")
-        if isinstance(process_id, int) and pid_is_alive(process_id):
-            return False
-    return True
+    return not _published_generations(state_base, runtime_sha256)[1]
 
 
 def _passive_runtime_sha256() -> str | None:
@@ -89,21 +106,38 @@ def _with_reason(result: NativeAvailabilityResult, reason: str) -> NativeAvailab
     return result
 
 
+def _passive_availability(guard_home: Path | None) -> NativeAvailabilityResult:
+    """Answer as far as reading the installed files allows, without running them.
+
+    Installation is decidable passively: a runtime binary either validates
+    against its recorded identity or it does not, so ``available`` is a real
+    answer rather than a null one. Compatibility is not decidable this way,
+    because the capabilities a build reports can only be read from the build
+    itself, so it stays null and the message names that limit.
+    """
+
+    from ..native_runtime import native_mode
+
+    runtime_sha256 = _passive_runtime_sha256()
+    result: NativeAvailabilityResult = {
+        # ``native_mode`` reads the environment only; it starts nothing.
+        "mode": native_mode(),
+        "available": runtime_sha256 is not None,
+        "compatible": None,
+        "reason_code": "native_status_probe_skipped",
+        "evaluation_verified": False,
+    }
+    # The owner lock and the binary hash are read without running anything.
+    if _owner_busy(guard_home, runtime_sha256):
+        return _with_reason(result, "native_resident_owner_busy")
+    return _with_reason(result, "native_status_probe_skipped")
+
+
 def doctor_native_availability(guard_home: Path | None = None) -> NativeAvailabilityResult:
-    """Use null availability for an unperformed probe, never a false failure."""
+    """Report native availability, never a failure the caller did not let us check."""
     # This only queries the passive scope; its command metadata is not emitted.
     if skipped_command_probe(["hol-guard-runtime", "capabilities", "--json"]) is not None:
-        skipped: NativeAvailabilityResult = {
-            "mode": "unknown",
-            "available": None,
-            "compatible": None,
-            "reason_code": "native_status_probe_skipped",
-            "evaluation_verified": False,
-        }
-        # The owner lock and the binary hash are read without running anything.
-        if guard_home is not None and _owner_busy(guard_home, _passive_runtime_sha256()):
-            return _with_reason(skipped, "native_resident_owner_busy")
-        return skipped
+        return _passive_availability(guard_home)
 
     from ..native_runtime import native_runtime_status
 
@@ -132,3 +166,63 @@ def doctor_native_availability(guard_home: Path | None = None) -> NativeAvailabi
     if _owner_busy(guard_home, identity.sha256 if identity is not None else None):
         reason = "native_resident_owner_busy"
     return _with_reason(result, reason)
+
+
+class NativeResidentPresence(TypedDict):
+    """What the on-disk resident state says, without starting or stopping anything."""
+
+    live: bool | None
+    owner_lock_held: bool | None
+    generations: int
+
+
+def native_resident_presence(guard_home: Path | None, runtime_sha256: str | None) -> NativeResidentPresence:
+    """Report whether a resident for this runtime is already running on this account.
+
+    Unlike the admission and health counters, which only ever describe the
+    current process, this reads the files every Guard install on the account
+    shares, so a separate CLI invocation sees the same answer the hook does.
+    """
+
+    if guard_home is None or runtime_sha256 is None:
+        return {"live": None, "owner_lock_held": None, "generations": 0}
+    state_base = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY
+    owner_lock = probe_owner_lock(state_base)
+    generations, live = _published_generations(state_base, runtime_sha256)
+    return {
+        "live": live,
+        # ``probe_owner_lock`` returns None when it could not tell.
+        "owner_lock_held": None if owner_lock is None else owner_lock is False,
+        "generations": generations,
+    }
+
+
+def native_runtime_section(
+    guard_home: Path | None,
+    *,
+    repair: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build the ``native_runtime`` payload doctor reports and ``runtime status`` prints.
+
+    Every field here is read from a passive probe, the installed binary's
+    identity, or process-local counters. Nothing is evaluated and no verdict is
+    produced: the native resident remains the only authority.
+    """
+
+    from ..daemon.bounded_http import daemon_admission_snapshot
+    from .update_commands import bundled_native_runtime_report
+
+    availability = doctor_native_availability(guard_home)
+    section: dict[str, object] = {
+        "availability": availability,
+        # The HTTP gate counts this process only; a fresh CLI invocation
+        # reports its own zeros, not the daemon's totals.
+        "daemon_http": daemon_admission_snapshot(),
+        "resident": native_resident_presence(guard_home, _passive_runtime_sha256()),
+    }
+    bundled_runtime = bundled_native_runtime_report()
+    if bundled_runtime is not None:
+        section["bundled"] = bundled_runtime
+    if repair is not None:
+        section["repair"] = repair
+    return section

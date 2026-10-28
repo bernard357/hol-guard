@@ -351,9 +351,10 @@ fn only_plain_workspace_runs_take_the_native_sink() {
     let mut other = denial.clone();
     other["reason_code"] = json!("native_test_containment_required");
     assert!(!native_shape(&other, &input("pytest"), workspace));
-    // An outside-roots review a local CLI grant may route is never a sink
-    // shape of its own: the grant step asks the store first, as the daemon
-    // does, and the sink re-asks it.
+    // An outside-roots review is not a sandbox requirement: the sink never
+    // takes it, and an allowed local CLI lifts it on the saved-decision path.
+    // The grant route the edge answers does not change that: it asks the store
+    // first, as the daemon does, so the review is never a sink shape of its own.
     let outside = json!({
         "decision": "deny",
         "policy_action": "review",
