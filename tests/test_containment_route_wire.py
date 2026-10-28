@@ -372,5 +372,14 @@ def test_the_resident_sink_matches_the_retired_python_gate(
         receipt = options.pop("receipt")
         assert _sink(home, monkeypatch, "macos", receipt, **options) == (None, kept_because), change
     assert _sink(home, monkeypatch, "macos", _PYTEST, harness="codex", bridge=True).profile == "pytest-readonly-v2"
+    # Cursor's silent preToolUse probe names its shell tool Shell.
+    probe = {**_SHELL_CALL, "tool_name": "Shell"}
+    assert _sink(home, monkeypatch, "macos", _PYTEST, harness="cursor", bridge=True, payload=probe).profile == (
+        "pytest-readonly-v2"
+    )
+    assert _sink(home, monkeypatch, "windows", _PYTEST, harness="cursor", bridge=True, payload=probe) == (
+        None,
+        "platform_has_no_sink",
+    )
     camel = {"hookEventName": "pre_tool_use", "toolName": "run_command", "toolInput": {"command": "pytest"}}
     assert _sink(home, monkeypatch, "macos", _PYTEST, harness="zcode", payload=camel).profile == "pytest-readonly-v2"

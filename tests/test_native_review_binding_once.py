@@ -26,21 +26,14 @@ def test_native_review_asks_the_resident_for_the_review_binding_once(
     result, receipt = _verdict()
     worker, _store = _hook_worker(tmp_path, monkeypatch, result, receipt)
     bindings: list[str | None] = []
-    real_evidence = hook_native_review_approval.native_review_evidence
-    real_binding = hook_native_review_approval.native_review_binding
+    real_evidence = hook_native_review_approval.review_evidence_parts
 
-    def counting_evidence(**kwargs: Any) -> tuple[str | None, str | None, str | None]:
-        evidence = real_evidence(**kwargs)
-        bindings.append(evidence[0])
+    def counting_evidence(review_evidence: Any) -> tuple[bool, str | None, str | None, str | None] | None:
+        evidence = real_evidence(review_evidence)
+        bindings.append(None if evidence is None else evidence[1])
         return evidence
 
-    def counting_binding(*args: Any, **kwargs: Any) -> str | None:
-        binding = real_binding(*args, **kwargs)
-        bindings.append(binding)
-        return binding
-
-    monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
-    monkeypatch.setattr(hook_native_review_approval, "native_review_binding", counting_binding)
+    monkeypatch.setattr(hook_native_review_approval, "review_evidence_parts", counting_evidence)
     response = worker.review_http_payload(
         payload={
             "hook_event_name": "PreToolUse",

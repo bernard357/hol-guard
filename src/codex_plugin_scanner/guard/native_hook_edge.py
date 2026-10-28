@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from .native_approval_errors import resident_refusal_code
-from .native_decision_receipt import receipt_matches_edge, valid_prompt_risk_classes
 from .native_resident_client import (
     native_resident_client_request,
     record_native_resident_client_failure_code,
@@ -25,83 +24,27 @@ from .native_runtime_resilience import (
 _EDGE_FEATURE = "hook-envelope-v2"
 _CLIENT_FEATURE = "native-resident-client-v1"
 _RESPONSE_FEATURE = "hook-harness-response-v1"
+# Python no longer re-checks the edge result or receipt; only a resident that
+# checks its own answer may be trusted with it.
+_SELF_CHECK_FEATURE = "edge-self-check-v1"
+# The resident records the CLI an answered PreToolUse launches, off the answer path.
+_LOCAL_CLI_OBSERVATION_FEATURE = "edge-local-cli-observation-v1"
+_RECEIPT_RECORD_FEATURE = "edge-receipt-record-v1"
+# The edge answers the Oh My Pi / Pi structured-output mediation itself when
+# the envelope carries the daemon's managed-policy view.
+STRUCTURED_OUTPUT_FEATURE = "edge-structured-output-v1"
 _UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
-_GENERIC_PRE_TOOL_SCHEMA = "guard-pre-tool-result.v1"
-_GENERIC_PRE_TOOL_ACTION_SCHEMA = "guard-pre-tool-action.v1"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
-_MAX_RESULT_TEXT = 2_048
-_PRE_TOOL_ACTION_TYPES = {
-    "command",
-    "file_read",
-    "file_write",
-    "package",
-    "mcp_tool",
-    "network",
-    "process_service",
-    "browser",
-    "config",
-    "prompt",
-    "harness",
-    "unknown",
-}
-_PRE_TOOL_OPERATIONS = {
-    "execute",
-    "read",
-    "write",
-    "install",
-    "call",
-    "request",
-    "start",
-    "stop",
-    "navigate",
-    "set",
-    "submit",
-    "unknown",
-}
-_PRE_TOOL_ACTION_OPERATIONS = {
-    "command": {"execute"},
-    "file_read": {"read"},
-    "file_write": {"write"},
-    "package": {"install"},
-    "mcp_tool": {"call"},
-    "network": {"request"},
-    "process_service": {"start", "stop"},
-    "browser": {"navigate"},
-    "config": {"set"},
-    "prompt": {"submit"},
-    "harness": {"start", "stop", "set", "read"},
-    "unknown": {"unknown"},
-}
-_PRE_TOOL_RESULT_KEYS = {
-    "schema",
-    "version",
-    "authority",
-    "action",
-    "decision",
-    "policy_action",
-    "minimum_action",
-    "reason_code",
-    "reason",
-    "explicitly_benign",
-}
-_PRE_TOOL_POLICY_ACTIONS = {
-    "allow",
-    "warn",
-    "review",
-    "require-reapproval",
-    "sandbox-required",
-    "block",
-}
-_PRE_TOOL_ACTION_KEYS = {
-    "schema",
-    "version",
-    "harness",
-    "event",
-    "action_type",
-    "operation",
-    "bounded",
-    "sensitive_target",
-}
+_LOCAL_CLI_RULE_FEATURE = "edge-local-cli-rule-v1"
+# The custom extension rule is read after the review, and identifying a
+# launch can take seconds. It once had its own request with this timeout;
+# the edge keeps that allowance rather than spending the review's budget.
+_LOCAL_CLI_RULE_SECONDS = 5.0
+# The edge proves a review's policy binding, retry binding and exact-action
+# token beside the custom extension rule when the rules carry the daemon's
+# extension-control digest.
+_REVIEW_EVIDENCE_FEATURE = "edge-review-evidence-v1"
+_REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "once_only_reason"})
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -109,92 +52,6 @@ def _capture_deadline(deadline: float | None) -> tuple[float, int]:
     effective_deadline = deadline if deadline is not None else now + 0.75
     budget_ms = max(1, min(9_000, int((effective_deadline - now) * 1_000)))
     return effective_deadline, budget_ms
-
-
-def _valid_pre_tool_result_fields(result: dict[str, Any]) -> bool:
-    decision = result.get("decision")
-    policy_action = result.get("policy_action")
-    reason_code = result.get("reason_code")
-    reason = result.get("reason")
-    minimum_action = result.get("minimum_action")
-    return not (
-        result.get("schema") != _GENERIC_PRE_TOOL_SCHEMA
-        or result.get("version") != 1
-        or result.get("authority") != "rust"
-        or not isinstance(decision, str)
-        or decision not in {"allow", "deny"}
-        or not isinstance(policy_action, str)
-        or policy_action not in _PRE_TOOL_POLICY_ACTIONS
-        or minimum_action != policy_action
-        or not isinstance(reason_code, str)
-        or not reason_code
-        or len(reason_code) > _MAX_RESULT_TEXT
-        or not isinstance(reason, str)
-        or not reason
-        or len(reason) > _MAX_RESULT_TEXT
-        or not isinstance(result.get("explicitly_benign"), bool)
-    )
-
-
-def _valid_pre_tool_action(action: dict[str, Any], *, harness: str, event: str) -> bool:
-    action_type = action.get("action_type")
-    operation = action.get("operation")
-    action_harness = action.get("harness")
-    if (
-        action.get("schema") != _GENERIC_PRE_TOOL_ACTION_SCHEMA
-        or action.get("version") != 1
-        or action_harness != harness
-        or action.get("event") != event
-        or (event == "UserPromptSubmit" and action_type != "prompt")
-        or not isinstance(action_type, str)
-        or action_type not in _PRE_TOOL_ACTION_TYPES
-        or not isinstance(operation, str)
-        or operation not in _PRE_TOOL_OPERATIONS
-        or not isinstance(action_harness, str)
-        or not action_harness
-        or len(action_harness) > 64
-        or not isinstance(action.get("bounded"), bool)
-        or not isinstance(action.get("sensitive_target"), bool)
-    ):
-        return False
-    return operation in _PRE_TOOL_ACTION_OPERATIONS[action_type]
-
-
-def _decode_pre_tool_result(result: object, *, harness: str, event: str = "PreToolUse") -> bool:
-    if (
-        not isinstance(result, dict)
-        or not set(result).issuperset(_PRE_TOOL_RESULT_KEYS)
-        or set(result) - _PRE_TOOL_RESULT_KEYS - {"command_extensions", "prompt_risk_classes"}
-    ):
-        return False
-    if "prompt_risk_classes" in result and (
-        event != "UserPromptSubmit" or not valid_prompt_risk_classes(result["prompt_risk_classes"])
-    ):
-        return False
-    if "command_extensions" in result:
-        from .native_command_observations import validate_native_command_observations
-
-        extensions = validate_native_command_observations(result["command_extensions"])
-        if extensions is None:
-            return False
-        # The floor for an uncertain match is Rust's to choose; a structurally
-        # valid receipt is trusted rather than second-guessed here.
-        if extensions["evaluation_error"] is not None and result.get("minimum_action") != "block":
-            return False
-    if not _valid_pre_tool_result_fields(result):
-        return False
-    action = result.get("action")
-    if not isinstance(action, dict) or set(action) != _PRE_TOOL_ACTION_KEYS:
-        return False
-    if not _valid_pre_tool_action(action, harness=harness, event=event):
-        return False
-    decision = result["decision"]
-    minimum_action = result["minimum_action"]
-    if result["explicitly_benign"] != (decision == "allow" and minimum_action == "allow"):
-        return False
-    # `warn` is an allow-with-warning floor. All stronger actions remain
-    # denying floors; this keeps the Python edge purely mechanical.
-    return decision == ("allow" if minimum_action in {"allow", "warn"} else "deny")
 
 
 def _native_error_code(payload: object) -> str | None:
@@ -212,7 +69,14 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         "result",
         "receipt",
     }
-    allowed = required | {"request_id", "harness_response", "containment_route"}
+    allowed = required | {
+        "request_id",
+        "harness_response",
+        "containment_route",
+        "local_cli_rule",
+        "review_evidence",
+        "receipt_recorded",
+    }
     if not isinstance(payload, dict) or not required <= set(payload) or set(payload) - allowed:
         return None
     event_name = payload.get("event_name")
@@ -229,24 +93,33 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         or len(payload["harness"]) > 64
         or not isinstance(payload.get("result"), dict)
         or not isinstance(payload.get("harness_response"), dict)
+        or not isinstance(payload.get("receipt_recorded", False), bool)
     ):
         return None
-    if event_name in {"PreToolUse", "UserPromptSubmit"} and not _decode_pre_tool_result(
-        payload["result"], harness=payload["harness"], event=event_name
-    ):
-        return None
-    if event_name == "UserPromptSubmit" and payload_kind != "inline":
-        return None
-    if event_name == "PreToolUse" and payload_kind == "encrypted_payload_ref":
-        return None
-    if "containment_route" in payload and (
-        not isinstance(payload["containment_route"], str)
-        or payload["containment_route"] not in {"none", "sink", "grant"}
-        or (event_name != "PreToolUse" and payload["containment_route"] != "none")
-    ):
+    route = payload.get("containment_route", "none")
+    if not isinstance(route, str) or route not in {"none", "sink", "grant"}:
         return None
     receipt = payload.get("receipt")
-    if not receipt_matches_edge(payload, receipt):
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("request_id"), str):
+        return None
+    rule = payload.get("local_cli_rule")
+    if rule is not None and (
+        not isinstance(rule, dict)
+        or set(rule) != {"blocked", "harness_response"}
+        or not isinstance(rule["blocked"], bool)
+        or not isinstance(rule["harness_response"], dict)
+    ):
+        return None
+    evidence = payload.get("review_evidence")
+    if evidence is not None and (
+        not isinstance(evidence, dict)
+        or set(evidence) != _REVIEW_EVIDENCE_KEYS
+        or not isinstance(evidence["policy_binding_valid"], bool)
+        or any(
+            evidence[key] is not None and not isinstance(evidence[key], str)
+            for key in _REVIEW_EVIDENCE_KEYS - {"policy_binding_valid"}
+        )
+    ):
         return None
     return payload
 
@@ -265,6 +138,10 @@ def _encode_hook_envelope(
     execution_context_supported: bool = False,
     request_id: str | None = None,
     recording_only: bool = False,
+    local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
+    record_receipt: bool = False,
+    structured_output_config: Mapping[str, object] | None = None,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 
@@ -296,6 +173,14 @@ def _encode_hook_envelope(
     }
     if recording_only:
         envelope["recording_only"] = True
+    if local_cli_rules is not None:
+        envelope["local_cli_rules"] = dict(local_cli_rules)
+    if observe_local_cli:
+        envelope["observe_local_cli"] = True
+    if record_receipt:
+        envelope["record_receipt"] = True
+    if structured_output_config is not None:
+        envelope["structured_output_config"] = dict(structured_output_config)
     if execution_context_supported:
         # Direct CLI calls capture locally; daemon workers explicitly pass
         # None when caller context is unavailable instead of using daemon env.
@@ -331,6 +216,10 @@ def review_raw_hook_native(
     policy_snapshot: Mapping[str, object] | None = None,
     runtime_status: NativeRuntimeStatus | None = None,
     request_id: str | None = None,
+    local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
+    record_receipt: bool = False,
+    structured_output_config: Mapping[str, object] | None = None,
 ) -> dict[str, Any] | None:
     """Return a typed Rust edge result, or fail closed without reinterpretation."""
     record_native_resident_client_failure_code(None)
@@ -340,7 +229,11 @@ def review_raw_hook_native(
         return record_native_hook_result("native_fail_safe", None)
     status = runtime_status if runtime_status is not None else native_runtime_status()
     event_key = event.strip().lower().replace("_", "").replace("-", "")
-    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE}
+    required_features = {_EDGE_FEATURE, _CLIENT_FEATURE, _RESPONSE_FEATURE, _SELF_CHECK_FEATURE}
+    if structured_output_config is not None:
+        # A resident that cannot mediate would ignore the view and answer an
+        # allow the policy never covered, so it is refused rather than trusted.
+        required_features.add(STRUCTURED_OUTPUT_FEATURE)
     if event_key in {
         "pretool",
         "pretooluse",
@@ -355,6 +248,13 @@ def review_raw_hook_native(
         required_features.add("pre-tool-generic-authority-v1")
         if event_key not in {"userpromptsubmit", "userpromptsubmitted", "prompt"}:
             required_features.add("git-execution-context-v1")
+            if local_cli_rules is not None:
+                required_features.add(_LOCAL_CLI_RULE_FEATURE)
+                if local_cli_rules.get("exact_action_control_digest") is not None:
+                    required_features.add(_REVIEW_EVIDENCE_FEATURE)
+    if _LOCAL_CLI_RULE_FEATURE not in required_features:
+        # Only a tool call has a custom extension rule to settle.
+        local_cli_rules = None
     if (
         not status.available
         or not status.compatible
@@ -383,6 +283,10 @@ def review_raw_hook_native(
         execution_context_supported="git-execution-context-v1" in status.capabilities.features,
         request_id=request_id,
         recording_only=observe_mode,
+        local_cli_rules=local_cli_rules,
+        observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
+        record_receipt=record_receipt and _RECEIPT_RECORD_FEATURE in status.capabilities.features,
+        structured_output_config=structured_output_config,
     )
     if encoded is None:
         return record_native_hook_result("native_fail_safe", None)
@@ -391,7 +295,7 @@ def review_raw_hook_native(
         guard_home=guard_home,
         environment=_isolated_environment(),
         payload=encoded,
-        deadline_monotonic=deadline_monotonic,
+        deadline_monotonic=deadline_monotonic + (_LOCAL_CLI_RULE_SECONDS if local_cli_rules is not None else 0.0),
         raw_hook_envelope=True,
     )
     if output is None:

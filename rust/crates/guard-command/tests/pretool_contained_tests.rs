@@ -225,7 +225,6 @@ fn unrelated_execution_and_shell_effects_do_not_inherit_test_delegation() {
         "pytest -q > result.txt",
         "pytest $(cat .env)",
         "pytest `cat .env`",
-        "pytest &",
         "PATH=/tmp pytest -q",
         "PYTHONPATH=/tmp python3 -m pytest",
         // A `timeout` named by path is whatever that file holds.
@@ -244,6 +243,46 @@ fn unrelated_execution_and_shell_effects_do_not_inherit_test_delegation() {
         classify("cursor", "pytest -q").reason_code,
         "native_pytest_readonly_containment_required"
     );
+    // Cursor's own `preToolUse` for `Shell` can rewrite the call into the
+    // sink; its `beforeShellExecution`, which names its source hook, cannot.
+    let cursor = |payload: serde_json::Value| {
+        evaluate_pre_tool_envelope_with_context(
+            "cursor",
+            "PreToolUse",
+            &payload,
+            None,
+            None,
+            Some("/home/tester"),
+            Some("/home/tester/project"),
+        )
+    };
+    let probe = cursor(json!({
+        "tool_name":"Shell",
+        "tool_input":{"command":"pytest -q"},
+        "cursor_route_probe":true,
+    }));
+    // A Shell call that Guard's hook did not name as its probe keeps its review.
+    let unnamed = cursor(json!({"tool_name":"Shell","tool_input":{"command":"pytest -q"}}));
+    assert_ne!(
+        unnamed.reason_code,
+        "native_pytest_readonly_containment_required"
+    );
+    let before_shell = cursor(json!({
+        "tool_name":"Shell",
+        "tool_input":{"command":"pytest -q"},
+        "cursor_source_hook_event":"beforeShellExecution",
+    }));
+    assert_ne!(
+        before_shell.reason_code,
+        "native_pytest_readonly_containment_required"
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            probe.reason_code,
+            "native_pytest_readonly_containment_required"
+        );
+        assert_eq!(probe.minimum_action, "sandbox-required");
+    }
     let without_cwd = evaluate_pre_tool_envelope_with_context(
         "omp",
         "PreToolUse",
@@ -285,7 +324,6 @@ fn direct_node_tests_require_containment_without_weakening_other_execution() {
         "node --test > .env",
         "node --test && rm -rf /",
         "node --test $(cat .env)",
-        "node --test &",
         "NODE_OPTIONS=--require=x node --test",
     ] {
         let result = classify("omp", command);
@@ -294,6 +332,29 @@ fn direct_node_tests_require_containment_without_weakening_other_execution() {
             "{command}"
         );
         assert_ne!(result.decision, "allow", "{command}");
+    }
+}
+
+#[test]
+fn backgrounded_test_runs_keep_the_bare_command_verdict() {
+    // A backgrounded list is read as the list itself. The contained sink runs
+    // the submitted text in its own process group (a job object on Windows)
+    // and ends the whole group when the shell exits, so the background job
+    // stays inside the same profile as the bare run and cannot outlive it.
+    for (backgrounded, bare) in [
+        ("pytest -q &", "pytest -q"),
+        ("node --test &", "node --test"),
+    ] {
+        let backgrounded_result = classify("omp", backgrounded);
+        let bare_result = classify("omp", bare);
+        assert_eq!(
+            backgrounded_result.reason_code, bare_result.reason_code,
+            "{backgrounded}"
+        );
+        assert_eq!(
+            backgrounded_result.decision, bare_result.decision,
+            "{backgrounded}"
+        );
     }
 }
 

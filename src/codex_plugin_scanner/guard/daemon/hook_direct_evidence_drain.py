@@ -3,11 +3,11 @@
 A direct answer skips the daemon's post-allow recording. The resident queues
 the inputs that recording needs, and this drain pulls them over the resident
 channel and records them exactly as the daemon path does. After a
-``PreToolUse`` allow that is the decision receipt, the binding capture, the
-command activity, and the command-line observation, plus the desktop setup
-notice for a connector-setup review the resident queued; after a reviewed
-``PostToolUse`` it is the receipt, the binding capture, and the post-tool
-command activity; after a ``UserPromptSubmit`` it is the receipt and the
+``PreToolUse`` allow that is the decision receipt, the binding capture, and
+the command activity, plus the desktop setup notice for a connector-setup
+review the resident queued; the resident records the command-line observation
+itself. After a reviewed ``PostToolUse`` it is the receipt, the binding
+capture, and the post-tool command activity; after a ``UserPromptSubmit`` it is the receipt and the
 binding capture alone. A tool call the native MCP relay decided is recorded
 by ``mcp_relay_evidence_drain`` as the proxy records it, and one its package
 lane answered by ``mcp_relay_package_evidence_drain``. The publisher advertises the drain in the
@@ -79,7 +79,6 @@ def record_direct_hook_evidence(host: _DrainHost, record: object) -> bool:
     from ..cli.commands_support_command_activity import hook_post_succeeded
     from ..native_decision_receipt import validate_native_decision_receipt
     from .hook_managed_install_state import _hook_harness_is_unmanaged
-    from .hook_native_cli_observer import observe_native_pre_tool_cli
     from .hook_worker_native import _record_native_pre_activity
     from .mcp_relay_evidence_drain import is_mcp_relay_evidence, record_mcp_relay_evidence
     from .mcp_relay_package_evidence_drain import (
@@ -118,7 +117,8 @@ def record_direct_hook_evidence(host: _DrainHost, record: object) -> bool:
         return True
     # A hook the resident held through a policy update's fence reports its wait.
     record_direct_fence_wait(host.store, record.get("fence_wait_ms"))
-    accepted = validate_native_decision_receipt(receipt) if receipt is not None else None
+    # Activity may cite only a receipt the store will accept.
+    accepted = validate_native_decision_receipt(receipt, guard_home=host.guard_home) if receipt is not None else None
     if accepted is not None:
         submit = getattr(host.activity_writer, "submit_native_decision_receipt", None)
         if callable(submit):
@@ -139,8 +139,6 @@ def record_direct_hook_evidence(host: _DrainHost, record: object) -> bool:
             succeeded=hook_post_succeeded(_POST_TOOL_USE, payload),
         )
         return True
-    with suppress(Exception):
-        observe_native_pre_tool_cli(host.store, payload=payload, workspace=Path(workspace), home_dir=Path(home_dir))
     _record_native_pre_activity(host, harness, payload, response, accepted)  # pyright: ignore[reportArgumentType]
     with suppress(Exception):
         _raise_connector_setup_notice(host.store, record.get(_CONNECTOR_NOTICE_FIELD))

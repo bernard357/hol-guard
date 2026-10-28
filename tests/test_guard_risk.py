@@ -15,7 +15,6 @@ from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard.approvals import queue_blocked_approvals
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.consumer import artifact_hash, evaluate_detection
-from codex_plugin_scanner.guard.incident import build_incident_context
 from codex_plugin_scanner.guard.mcp_tool_calls import (
     build_tool_call_artifact,
     build_tool_call_hash,
@@ -24,8 +23,6 @@ from codex_plugin_scanner.guard.mcp_tool_calls import (
 from codex_plugin_scanner.guard.models import GuardArtifact, HarnessDetection
 from codex_plugin_scanner.guard.native_shell_request_authority import shell_request_authority
 from codex_plugin_scanner.guard.risk import (
-    artifact_risk_signals,
-    artifact_risk_signals_typed,
     artifact_risk_signals_v2,
     artifact_risk_summary,
 )
@@ -46,6 +43,8 @@ from codex_plugin_scanner.guard.runtime.secret_sensitivity import (
     classify_secret_path,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.artifact_risk_support import artifact_risk_signals, artifact_risk_signals_typed
+from tests.incident_context_support import build_incident_context
 
 LOCAL_COMPOSE_SAFE_CASES = (
     "docker compose up -d postgres",
@@ -1364,7 +1363,7 @@ def test_tool_action_request_classifier_reviews_native_coauthored_commit_redirec
     assert request.canonical_command.confidence == "exact"
     assert request.guard_default_action is None
     native = real_native_command_evaluation(request.command_text, cwd=tmp_path)
-    assert native.native_minimum_action == "review"
+    assert native.payload["minimum_action"] == "review"
     assert native.evaluation.minimum_action == "review"
 
 

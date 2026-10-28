@@ -379,7 +379,7 @@ fn saved_verdict(
 
 /// The rendered verdict marked with its reuse status, or `None` when the
 /// daemon's render request could exceed its size limit.
-fn render(harness: &str, verdict: &Object, status: &str) -> Option<Value> {
+pub(crate) fn render(harness: &str, verdict: &Object, status: &str) -> Option<Value> {
     let encoded = serde_json::to_vec(verdict).ok()?.len() + harness.len();
     if encoded * ESCAPE_FACTOR + ENVELOPE_BYTES > HOOK_RENDER_MAX_BYTES {
         return None;
@@ -540,7 +540,7 @@ mod portable;
 
 // Read once the direct lane queues a reviewed `PreToolUse` itself.
 #[path = "hook_direct_review_request.rs"]
-mod review_request;
+pub(crate) mod review_request;
 
 #[path = "hook_direct_review_queue.rs"]
 pub(crate) mod review_queue;

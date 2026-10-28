@@ -8,6 +8,10 @@ pub(crate) mod chain_literals;
 mod command_rewrite;
 #[path = "contained_publish.rs"]
 pub(crate) mod contained_publish;
+#[path = "generic_cursor_compaction_writes.rs"]
+mod cursor_compaction_writes;
+#[path = "generic_cursor_project_reads.rs"]
+mod cursor_project_reads;
 #[path = "env_prefix_projection.rs"]
 mod env_prefix_projection;
 pub use env_prefix_projection::bindable_setting;
@@ -406,20 +410,29 @@ fn evaluate_envelope(
         Ok(value) => value,
         Err(error) => return generic_error_result(harness, event, error),
     };
+    signals.mirrored_input_unproven = harness == "grok"
+        && !payload
+            .as_object()
+            .is_some_and(super::search_scope::mirrored_input_matches);
     signals.github_read_only = harness == "omp"
         && event == "PreToolUse"
         && omp::strict_tool_input(payload)
             .is_some_and(|input| github::read_only_call(input, signals.tool_name.as_deref()));
-    // A search pattern is data, not a command: a proven Claude `Grep` scope
-    // skips the command authority but still passes the command controls below.
+    // A search pattern is data, not a command: a proven Claude or Grok `Grep`
+    // scope skips the command authority but still passes the command controls
+    // below.
     let search_scope_proven = event == "PreToolUse"
-        && harness == "claude-code"
         && signals.url_values.is_empty()
-        && match signals.tool_name.as_deref() {
-            Some("Grep") => {
+        && match (harness, signals.tool_name.as_deref()) {
+            ("claude-code", Some("Grep")) => {
                 super::search_scope::claude_grep_directory_scope_proven(payload, home_dir, cwd)
             }
-            Some("Glob") => super::search_scope::claude_glob_scope_proven(payload, home_dir, cwd),
+            ("claude-code", Some("Glob")) => {
+                super::search_scope::claude_glob_scope_proven(payload, home_dir, cwd)
+            }
+            ("grok", Some("Grep")) => {
+                super::search_scope::grok_grep_directory_scope_proven(payload, home_dir, cwd)
+            }
             _ => false,
         };
     // Codex sends an edit as `apply_patch` with the patch body in `command`.
@@ -632,8 +645,7 @@ fn evaluate_envelope(
                     &reviewed.command,
                     context,
                     execution_environment,
-                    harness,
-                    event,
+                    super::workspace_contained::host_eligible(harness, event, payload),
                 )
             {
                 return projected;
@@ -812,6 +824,14 @@ fn evaluate_envelope(
         omp_result
     } else if let Some(pure_result) = pure_eval::evaluate(harness, event, payload, &signals) {
         pure_result
+    } else if let Some(cursor_read) =
+        cursor_project_reads::evaluate(harness, event, payload, &signals, home_dir, cwd)
+    {
+        cursor_read
+    } else if let Some(cursor_note) =
+        cursor_compaction_writes::evaluate(harness, event, payload, &signals, home_dir, cwd)
+    {
+        cursor_note
     } else if task_metadata {
         generic_result(
             generic_action(harness, event, PreToolActionTypeV1::Harness,
@@ -974,10 +994,10 @@ fn evaluate_envelope(
         ) && matches!(harness, "claude-code" | "codex" | "omp" | "oh-my-pi" | "pi");
     if (cfg!(target_os = "macos") || (cfg!(windows) && windows_contained))
         && event == "PreToolUse"
-        && matches!(
+        && (matches!(
             harness,
             "omp" | "oh-my-pi" | "pi" | "zcode" | "claude-code" | "codex"
-        )
+        ) || super::workspace_contained::cursor_shell_route(harness, payload))
         && cwd.is_some()
         && (result.action.action_type == PreToolActionTypeV1::Command
             || (matches!(
@@ -1081,6 +1101,7 @@ fn evaluate_envelope(
         execution_environment,
         harness,
         event,
+        payload,
         signals.command.as_deref(),
     );
     super::git_local_writes::settle(

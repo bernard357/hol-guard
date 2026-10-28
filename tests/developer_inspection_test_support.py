@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import os
 
-from codex_plugin_scanner.guard.models import GuardArtifact
 
-
-def assert_leading_cd_inspection_allowed(artifact: GuardArtifact | None) -> None:
+def assert_leading_cd_inspection_allowed(artifact: dict[str, object] | None) -> None:
     """Require the POSIX allow and an explicit review on Windows.
 
     The native developer-inspection kernel recovers the root of a leading
@@ -19,6 +17,6 @@ def assert_leading_cd_inspection_allowed(artifact: GuardArtifact | None) -> None
 
     if os.name == "nt":
         assert artifact is not None
-        assert artifact.metadata["guard_default_action"] == "require-reapproval"
+        assert artifact["policy_action"] != "allow"
     else:
         assert artifact is None

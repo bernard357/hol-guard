@@ -28,7 +28,7 @@ The link appears when the local dashboard is running. Otherwise the line points 
 
 A custom extension is a this-device setting. It does not require Guard Cloud and does not sync to other machines.
 
-A CLI extension binds to the tool's verified file identity. If that file changes, the previous grant no longer matches and those commands go back to Guard's normal review path. An MCP extension binds to the server identity Guard uses at runtime: launch command, arguments, stdio transport, and configured environment. If that identity changes, tool grants stop matching.
+A CLI extension binds to the tool's verified file identity. If that file changes, the previous grant no longer matches and those commands go back to Guard's normal review path. The Inbox card and the extension page then say the file changed since you allowed it, rather than calling the tool new, and offer **Allow this version**. Allowing it keeps your command choices, binds the grant to the current file, and approves the calls held on it once. A block is not carried forward the same way: a blocked file that changes goes back to the normal review. An MCP extension binds to the server identity Guard uses at runtime: launch command, arguments, stdio transport, and configured environment. If that identity changes, tool grants stop matching.
 
 Compound commands, wrappers, redirects, and environment overrides are not covered. An allow grant does not override Guard's built-in blocks for destructive or wrapped commands.
 

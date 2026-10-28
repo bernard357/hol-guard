@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
-from codex_plugin_scanner.guard.native_decision_receipt import canonical_receipt_bytes
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
+from tests.native_review_evidence_support import with_review_evidence
 
 
 def _edge(harness: str, *, url: str = "https://example.test", action_type: str = "network") -> dict[str, object]:
@@ -101,7 +102,7 @@ def _worker(
         }
         receipt["decision_id"] = hashlib.sha256(canonical_receipt_bytes(receipt)).hexdigest()
         rendered["receipt"] = receipt
-        return rendered
+        return with_review_evidence(rendered, **kwargs)
 
     monkeypatch.setattr(
         "codex_plugin_scanner.guard.daemon.hook_worker.review_raw_hook_native",

@@ -643,8 +643,8 @@ pub struct GuardConfig {
     /// `harness_risk_actions` (config.py :419).
     pub harness_risk_actions:
         Option<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>>,
-    /// `harness_postures` (config.py :421), canonically keyed as
-    /// `coerce_loaded_harness_postures` leaves them.
+    /// `harness_postures` (config.py :421), canonically keyed with malformed
+    /// entries dropped.
     pub harness_postures: Option<std::collections::BTreeMap<String, String>>,
     /// `managed_policy_status` (config.py :426).
     pub managed_policy_status: String,
