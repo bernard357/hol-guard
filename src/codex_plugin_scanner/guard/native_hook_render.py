@@ -165,41 +165,6 @@ def native_cli_hook_emit(
     return rendered[1] if rendered is not None else None
 
 
-# The payload fields ``claude_approval_copy`` reads to name the tool.
-_CLAUDE_COPY_PAYLOAD_FIELDS = ("tool_name", "message", "title")
-
-
-def native_claude_approval_copy(
-    which: str,
-    *,
-    payload: Mapping[str, object] | None = None,
-    notice: Mapping[str, object] | None = None,
-    reason: str = "",
-    guard_home: Path | None = None,
-) -> object | None:
-    """Render one named piece of Claude approval copy; ``None`` when unavailable.
-
-    The daemon path already renders this text; this ships the same pending
-    notice and the payload fields that name the tool, so the CLI path reads
-    the copy from the same place. Only those fields travel: the rest of a hook
-    payload carries the tool's own input, which this copy never reads and
-    which would push the request toward the op's size limit.
-    """
-
-    fields = payload or {}
-    params: dict[str, object] = {
-        "which": which,
-        "payload": {key: fields[key] for key in _CLAUDE_COPY_PAYLOAD_FIELDS if key in fields},
-        "reason": reason,
-    }
-    if notice is not None:
-        params["notice"] = dict(notice)
-    rendered = native_render_cli("claude_approval_copy", "claude-code", params, guard_home=guard_home)
-    if rendered is None or rendered[1] is None:
-        return None
-    return rendered[1].get("value")
-
-
 def native_evaluation_has_terminal_policy_action(
     harness: str,
     evaluation: Mapping[str, object],
@@ -275,7 +240,6 @@ def native_render_recording_only_pre_tool(
 
 __all__ = [
     "HOOK_RENDER_FEATURE",
-    "native_claude_approval_copy",
     "native_cli_hook_emit",
     "native_evaluation_has_terminal_policy_action",
     "native_render_cli",

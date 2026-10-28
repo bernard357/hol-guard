@@ -704,7 +704,6 @@
       },
       {
         "path": [
-          "src/codex_plugin_scanner/guard/daemon/claude_permission_request.py",
           "src/codex_plugin_scanner/guard/daemon/client.py",
           "src/codex_plugin_scanner/guard/daemon/cursor_shell_route.py",
           "src/codex_plugin_scanner/guard/daemon/live_identity.py",
@@ -713,7 +712,7 @@
           "src/codex_plugin_scanner/guard/daemon/response_bounds.py",
           "src/codex_plugin_scanner/guard/daemon/runtime_peer.py"
         ],
-        "reason": "Reviewed: daemon client and peer modules: client/response_bounds are the hook-to-daemon transport; runtime_peer/live_identity authenticate the live daemon; recovery_lifecycle is invoked from daemon/manager on hook-failure recovery; policy_authority_client is called from local_supply_chain; claude_permission_request is called from hook_worker; cursor_shell_route is called from hook_worker for Cursor's silent shell probe and its sink admission."
+        "reason": "Reviewed: daemon client and peer modules: client/response_bounds are the hook-to-daemon transport; runtime_peer/live_identity authenticate the live daemon; recovery_lifecycle is invoked from daemon/manager on hook-failure recovery; policy_authority_client is called from local_supply_chain; cursor_shell_route is called from hook_worker for Cursor's silent shell probe and its sink admission."
       },
       {
         "path": [
@@ -914,12 +913,6 @@
           "src/codex_plugin_scanner/guard/runtime/jsonc.py"
         ],
         "reason": "Reviewed and retained in runtime scope: the retired Python literal-cd parser imported these at load, so they counted as eager. They are now reached lazily: direct_vitest presents the resident's direct local tool context to the support-artifact command, and package_evidence_common with its bounded JSONC decoder reads lockfile integrity for the contained Node tool lane. They run while Guard prepares a contained run, so they stay counted as runtime."
-      },
-      {
-        "path": [
-          "src/codex_plugin_scanner/guard/daemon/claude_turn_events.py"
-        ],
-        "reason": "Reviewed and retained in runtime scope: the resident hook worker reaches this lazily for Claude Code PostToolUse and Stop. It records the user's answer to the HOL Guard approval question and discards a session's unanswered prompts when the turn ends; the native edge still decides every verdict."
       }
     ],
     "tests": {

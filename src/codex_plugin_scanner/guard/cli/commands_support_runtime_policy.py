@@ -62,19 +62,6 @@ def _runtime_request_summary(artifact: GuardArtifact) -> str | None:
     return _runtime_resolution_module()._runtime_request_summary(artifact)
 
 
-def _claude_notification_tool_name(payload: dict[str, object]) -> str | None:
-    direct_name = _optional_string(payload.get("tool_name"))
-    if direct_name is not None:
-        return direct_name
-    for key in ("message", "title"):
-        value = _optional_string(payload.get(key))
-        if value is None:
-            continue
-        match = re.search(r"\buse\s+([A-Za-z][A-Za-z0-9_]*)\b", value)
-        if match is not None:
-            return match.group(1)
-    return None
-
 def _approval_delivery_payload(
     harness: str,
     *,
@@ -351,7 +338,7 @@ def _runtime_detector_perf_payload(config: GuardConfig) -> list[dict[str, object
 
 __all__ = [
     "_approval_center_routed_message", "_approval_delivery_payload",
-    "_claude_notification_tool_name", "_ensure_terminal_punctuation",
+    "_ensure_terminal_punctuation",
     "_guard_cli_settings_payload", "_guard_settings_doctor_payload", "_guard_settings_explain_payload",
     "_guard_settings_payload", "_is_cloud_inbox_url", "_localize_decision_v2_review_copy",
     "_localize_pending_approval_copy", "_native_approval_center_context",

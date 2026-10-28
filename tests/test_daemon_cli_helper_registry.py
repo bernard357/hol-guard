@@ -7,11 +7,12 @@ import sys
 
 _SCRIPT = """
 import sys
+from types import SimpleNamespace
 
-from codex_plugin_scanner.guard.daemon.claude_turn_events import claude_guard_question_answer
+from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
 
 assert "codex_plugin_scanner.guard.cli.commands_support" not in sys.modules
-print(claude_guard_question_answer(None, {}))
+print(HookWorker._claude_lifecycle_response(SimpleNamespace(store=None), "PostToolUse", {}))
 """
 
 
