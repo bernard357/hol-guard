@@ -29,7 +29,7 @@
     },
     "publisher": {
       "id": "community.kantorcodes",
-      "display_name": "Michael Kantor (HOL)",
+      "display_name": "Michael Kantor",
       "url": "https://github.com/kantorcodes"
     },
     "permissions": [
@@ -103,6 +103,10 @@
               "-o",
               "--client-timeout",
               "-t"
+            ],
+            "forbidden_flags_before_delimiter": [
+              "--help",
+              "-h"
             ]
           }
         }
