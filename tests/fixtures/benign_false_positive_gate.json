@@ -32536,6 +32536,74 @@
       "expect": "allow"
     },
     {
+      "id": "cd-parent-sibling-git-status",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ../service-api && git status --short"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "cd-parent-sibling-git-reads",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ../service-api && git log -3 --oneline && git diff --stat"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "cd-parent-sibling-semicolon-git-status",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ../service-api; git status --short"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "cd-parent-sibling-git-status-fallback",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ../service-api && git branch --show-current; git status --short"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
       "id": "cd-grandparent-list",
       "fix_area": "shell",
       "harnesses": [
