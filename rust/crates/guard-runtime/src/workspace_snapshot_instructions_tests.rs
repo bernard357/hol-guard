@@ -102,6 +102,8 @@ fn nested_agent_files_and_root_rule_files_are_read_and_others_are_not() {
         "packages/app/.github/copilot-instructions.md",
         ".github/instructions/api.md",
         ".windsurf/style.md",
+        ".windsurf/rules/sub/.md",
+        ".github/instructions/sub/.instructions.md",
         ".cursor/rules/style.txt",
         "node_modules/pkg/AGENTS.md",
     ] {

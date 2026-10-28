@@ -91,12 +91,18 @@ static APPROVAL_BYPASS_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"--sandbox[ =]danger-full-access\b",
         r"--dangerously-bypass-approvals-and-sandbox\b",
         r"--dangerously-skip-permissions\b",
+        r"--always-approve\b",
+        r#"(?i)\bmode["']?\s*[:=]\s*["']always-approve["']"#,
         r#"(?i)["']?defaultMode["']?\s*[:=]\s*["']bypassPermissions["']"#,
     ]
     .iter()
     .map(|pattern| Regex::new(pattern).expect("valid approval bypass pattern"))
     .collect()
 });
+
+/// Directional isolates reorder text as an override does. The skill rules
+/// predate them and keep their own list.
+const BIDI_ISOLATES: [char; 4] = ['\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}'];
 
 /// The rules the instruction file `text` matches, in a fixed order.
 pub fn detect_instruction_file_risk(text: &str) -> Vec<InstructionRule> {
@@ -116,7 +122,7 @@ pub fn detect_instruction_file_risk(text: &str) -> Vec<InstructionRule> {
     if tells_hidden_actions(text) {
         rules.push(HIDE_ACTIONS);
     }
-    if has_unicode_controls(text) {
+    if has_unicode_controls(text) || text.contains(BIDI_ISOLATES) {
         rules.push(UNICODE_CONTROLS);
     }
     rules

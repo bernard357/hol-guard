@@ -251,10 +251,13 @@ fn is_instruction_path(relative: &str) -> bool {
             return true;
         }
     }
+    // The suffix must follow a file name: `.windsurf/rules/sub/.md` is not a
+    // rule file.
     ROOT_RULE_FOLDERS.iter().any(|(folder, suffix)| {
-        lower
-            .strip_prefix(folder)
-            .is_some_and(|rule| rule.len() > suffix.len() && rule.ends_with(suffix))
+        lower.strip_prefix(folder).is_some_and(|rule| {
+            let name = rule.rsplit_once('/').map_or(rule, |(_, name)| name);
+            name.len() > suffix.len() && name.ends_with(suffix)
+        })
     })
 }
 

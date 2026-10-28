@@ -26,6 +26,7 @@ from .workspace_rule_findings import (
     MAX_RULE_FINDINGS,
     WORKSPACE_SOURCE_KIND,
     RuleScan,
+    is_relative_path,
     project_rule_findings,
     with_rule_coverage,
 )
@@ -80,8 +81,9 @@ def _instruction_fields(item: Mapping[str, object]) -> dict[str, object] | None:
     rule_id = item.get("rule_id")
     path = item.get("path")
     if (
-        rule_id not in _RULE_IDS
-        or not isinstance(path, str)
+        not isinstance(rule_id, str)
+        or rule_id not in _RULE_IDS
+        or not is_relative_path(path)
         or len(path.encode("utf-8", "surrogatepass")) > _MAX_PATH_BYTES
         or not _INSTRUCTION_PATH.fullmatch(path)
     ):
