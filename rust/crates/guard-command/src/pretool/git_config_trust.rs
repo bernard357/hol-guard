@@ -83,9 +83,13 @@ pub(in crate::pretool) fn clean_environment(
     })
 }
 
-/// Whether the Git a segment names resolves, from this home and working
-/// directory, to a binary in a trusted install location. A read that needs no
-/// configuration probe still runs whatever the search path finds first.
+/// Whether the Git a segment names runs, from this home and working
+/// directory, as a binary in a trusted install location under an environment
+/// that leaves its setup alone. A read that needs no configuration probe
+/// still runs whatever the search path finds first, and the probe is also
+/// where the environment was screened: `GIT_DIR` hands Git a repository
+/// where the route found none, and a loader variable reaches even a trusted
+/// binary, so both questions are asked here instead.
 pub(in crate::pretool) fn trusted_launch(
     executable: &str,
     context: crate::pretool::PathContext<'_>,
@@ -97,7 +101,10 @@ pub(in crate::pretool) fn trusted_launch(
     let (Ok(home), Ok(cwd)) = (fs::canonicalize(home), fs::canonicalize(cwd)) else {
         return false;
     };
-    trusted_command(executable, &home, &cwd, execution_environment).is_some()
+    home.is_dir()
+        && cwd.is_dir()
+        && clean_environment(execution_environment, &home, &cwd)
+        && trusted_command(executable, &home, &cwd, execution_environment).is_some()
 }
 
 pub(in crate::pretool) fn trusted_command(

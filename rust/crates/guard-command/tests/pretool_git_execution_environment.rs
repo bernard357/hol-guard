@@ -578,4 +578,31 @@ fn a_route_to_no_repository_still_needs_a_trusted_git() {
             "{command}"
         );
     }
+
+    // The probe screened the environment as well as the binary. A directory
+    // that holds no repository holds one once `GIT_DIR` names it, and that
+    // repository's own `core.fsmonitor` runs on the status read; a loader
+    // variable reaches even the trusted Git. Each keeps the review.
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_EXEC_PATH",
+        "LD_PRELOAD",
+        "DYLD_INSERT_LIBRARIES",
+    ] {
+        let mut directed = environment(original_path.clone());
+        directed.environment_names.push(name.to_owned());
+        for command in &commands {
+            let result = evaluate(command, &directed);
+            assert_ne!(result.decision, "allow", "{name} {command}");
+            assert_eq!(
+                result.minimum_action, "require-reapproval",
+                "{name} {command}"
+            );
+            assert_eq!(
+                result.reason_code, "native_git_execution_context_review",
+                "{name} {command}"
+            );
+        }
+    }
 }
