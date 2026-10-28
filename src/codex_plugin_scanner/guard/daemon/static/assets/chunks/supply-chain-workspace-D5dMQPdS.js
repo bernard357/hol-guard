@@ -1,10 +1,10 @@
 import { j as jsxRuntimeExports, r as reactExports, A as ActionButton, s as HiMiniCheckCircle, c as HiMiniChevronDown, ab as HiMiniExclamationCircle } from "../guard-dashboard.js";
-import { r as resolveSupplyChainIssues } from "./supply-chain-issues-yxVKJKqq.js";
+import { r as resolveSupplyChainIssues } from "./supply-chain-issues-BEPxKqiG.js";
 import { r as resolveHomeProtectionStatus } from "./home-protection-module-BWAkAvfY.js";
 import { b as buildSupplyChainStats } from "./supply-chain-protection-stats-D5t87g7g.js";
 import { B as BrandHero, b as BrandHeroBadge, a as BrandHeroFacts } from "./brand-hero-COty1p6U.js";
-import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace-CKNAxTGr.js";
-import "./feed-health-workspace-DOb9yUgX.js";
+import { s as supplyChainFixAllIsPending, a as supplyChainFixAllNeedsCloudConnect, b as supplyChainFixAllButtonLabel } from "./supply-chain-hub-workspace--micBEv8.js";
+import "./feed-health-workspace-By-qwNqW.js";
 const PROTECTION_BADGE = {
   protected: "Protected",
   partial: "Partly protected",
@@ -165,7 +165,7 @@ function recoverySummary(issueCount, needsLocalRepair) {
   if (!needsLocalRepair) {
     return `${issueCount} step${issueCount === 1 ? "" : "s"} left. Package protection is already on for this device.`;
   }
-  return `${issueCount} issue${issueCount === 1 ? "" : "s"} to resolve. Check Cloud access, approve device changes once, then restore package protection.`;
+  return `${issueCount} issue${issueCount === 1 ? "" : "s"} to fix. Restore protection works through them in order and asks for your approval once.`;
 }
 function SupplyChainRecovery({
   issues,
