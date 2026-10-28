@@ -5,39 +5,17 @@
     "version": "1.0.0",
     "name": "env zero CLI command protection",
     "description": "External, local opt-in review rules for four documented high-impact env zero CLI environment and deployment operations. Independent HOL-authored proposal; env zero does not bundle, maintain, or endorse this contribution.",
-    "action_classes": [
-      "env zero environment destruction",
-      "env zero deployment cancellation",
-      "env zero deployment abort",
-      "env zero deployment approval"
-    ],
-    "risk_classes": [
-      "destructive_shell",
-      "network_egress"
-    ],
-    "safer_alternatives": [
-      "Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy.",
-      "Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling.",
-      "Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting.",
-      "Inspect the pending plan and current approval requirement before granting deployment approval."
-    ],
-    "reference_urls": [
-      "https://docs.envzero.com/guides/community-and-resources/support-and-help/env-zero-cli",
-      "https://docs.envzero.com/guides/community-and-resources/support-and-help/env-zero-cli/command-reference"
-    ],
+    "action_classes": ["env zero environment destruction","env zero deployment cancellation","env zero deployment abort","env zero deployment approval"],
+    "risk_classes": ["destructive_shell","network_egress"],
+    "safer_alternatives": ["Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy.","Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling.","Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting.","Inspect the pending plan and current approval requirement before granting deployment approval."],
+    "reference_urls": ["https://docs.envzero.com/guides/community-and-resources/support-and-help/env-zero-cli","https://docs.envzero.com/guides/community-and-resources/support-and-help/env-zero-cli/command-reference"],
     "required": false,
     "source": "built-in",
     "aliases": [],
     "dependencies": [],
     "conflicts": [],
-    "ecosystem_ids": [
-      "env0"
-    ],
-    "executables": [
-      "env0",
-      "env0.exe",
-      "env0.cmd"
-    ],
+    "ecosystem_ids": ["env0"],
+    "executables": ["env0","env0.exe","env0.cmd"],
     "project_markers": [],
     "permissions": [
       {
@@ -50,17 +28,13 @@
         "default_enabled": true,
         "configurable": true,
         "typed_capabilities": [],
-        "action_classes": [
-          "env zero environment destruction"
-        ],
+        "action_classes": ["env zero environment destruction"],
         "dependencies": [],
         "conflicts": [],
         "implied_permissions": [],
         "introduced_version": "1.0.0",
         "deprecated": false,
-        "safer_guidance": [
-          "Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy."
-        ],
+        "safer_guidance": ["Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy."],
         "example_command": "env0 environment destroy <environment-id> --yes"
       },
       {
@@ -73,17 +47,13 @@
         "default_enabled": true,
         "configurable": true,
         "typed_capabilities": [],
-        "action_classes": [
-          "env zero deployment cancellation"
-        ],
+        "action_classes": ["env zero deployment cancellation"],
         "dependencies": [],
         "conflicts": [],
         "implied_permissions": [],
         "introduced_version": "1.0.0",
         "deprecated": false,
-        "safer_guidance": [
-          "Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling."
-        ],
+        "safer_guidance": ["Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling."],
         "example_command": "env0 deployment cancel <deployment-id>"
       },
       {
@@ -96,17 +66,13 @@
         "default_enabled": true,
         "configurable": true,
         "typed_capabilities": [],
-        "action_classes": [
-          "env zero deployment abort"
-        ],
+        "action_classes": ["env zero deployment abort"],
         "dependencies": [],
         "conflicts": [],
         "implied_permissions": [],
         "introduced_version": "1.0.0",
         "deprecated": false,
-        "safer_guidance": [
-          "Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting."
-        ],
+        "safer_guidance": ["Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting."],
         "example_command": "env0 deployment abort <deployment-id>"
       },
       {
@@ -119,17 +85,13 @@
         "default_enabled": true,
         "configurable": true,
         "typed_capabilities": [],
-        "action_classes": [
-          "env zero deployment approval"
-        ],
+        "action_classes": ["env zero deployment approval"],
         "dependencies": [],
         "conflicts": [],
         "implied_permissions": [],
         "introduced_version": "1.0.0",
         "deprecated": false,
-        "safer_guidance": [
-          "Inspect the pending plan and current approval requirement before granting deployment approval."
-        ],
+        "safer_guidance": ["Inspect the pending plan and current approval requirement before granting deployment approval."],
         "example_command": "env0 deployment approve <deployment-id>"
       }
     ],
@@ -141,55 +103,26 @@
         "title": "Destroy managed environment",
         "description": "Destroys cloud infrastructure associated with an existing env zero environment.",
         "severity": "high",
-        "risk_classes": [
-          "destructive_shell"
-        ],
-        "action_classes": [
-          "env zero environment destruction"
-        ],
-        "safer_alternatives": [
-          "Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy."
-        ],
+        "risk_classes": ["destructive_shell"],
+        "action_classes": ["env zero environment destruction"],
+        "safer_alternatives": ["Inspect the exact environment ID and `env0 context <environment-id>` before approving an infrastructure destroy."],
         "default_mode": "review",
         "matcher": {
           "op": "executable.v1",
           "config": {
             "allow_leading_options": true,
-            "executables": [
-              "env0",
-              "env0.exe",
-              "env0.cmd"
-            ],
+            "executables": ["env0","env0.exe","env0.cmd"],
             "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [
-              "--yes"
-            ],
-            "interspersed_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "interspersed_flags": ["--yes"],
+            "interspersed_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "leading_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
             "required_option_values": [],
-            "subcommands": [
-              "environment",
-              "destroy"
-            ]
+            "subcommands": ["environment","destroy"]
           }
         },
         "safe_variants": [
@@ -200,33 +133,18 @@
               "op": "executable.v1",
               "config": {
                 "allow_leading_options": true,
-                "executables": [
-                  "env0",
-                  "env0.exe",
-                  "env0.cmd"
-                ],
+                "executables": ["env0","env0.exe","env0.cmd"],
                 "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [
-                  "--yes"
-                ],
-                "interspersed_options_with_values": [
-                  "--organization"
-                ],
+                "interspersed_flags": ["--yes"],
+                "interspersed_options_with_values": ["--organization"],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [
-                  "--organization"
-                ],
+                "leading_options_with_values": ["--organization"],
                 "options_with_values": [],
-                "required_flags": [
-                  "--help"
-                ],
+                "required_flags": ["--help"],
                 "required_flags_in_all_arguments": true,
                 "required_option_values": [],
-                "subcommands": [
-                  "environment",
-                  "destroy"
-                ]
+                "subcommands": ["environment","destroy"]
               }
             }
           }
@@ -239,55 +157,26 @@
         "title": "Cancel pending deployment",
         "description": "Cancels a pending deployment or approval-stage operation.",
         "severity": "high",
-        "risk_classes": [
-          "network_egress"
-        ],
-        "action_classes": [
-          "env zero deployment cancellation"
-        ],
-        "safer_alternatives": [
-          "Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling."
-        ],
+        "risk_classes": ["network_egress"],
+        "action_classes": ["env zero deployment cancellation"],
+        "safer_alternatives": ["Review `env0 deployment list --environment <environment-id>` and identify the pending deployment before canceling."],
         "default_mode": "review",
         "matcher": {
           "op": "executable.v1",
           "config": {
             "allow_leading_options": true,
-            "executables": [
-              "env0",
-              "env0.exe",
-              "env0.cmd"
-            ],
+            "executables": ["env0","env0.exe","env0.cmd"],
             "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [
-              "--yes"
-            ],
-            "interspersed_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "interspersed_flags": ["--yes"],
+            "interspersed_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "leading_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
             "required_option_values": [],
-            "subcommands": [
-              "deployment",
-              "cancel"
-            ]
+            "subcommands": ["deployment","cancel"]
           }
         },
         "safe_variants": [
@@ -298,33 +187,18 @@
               "op": "executable.v1",
               "config": {
                 "allow_leading_options": true,
-                "executables": [
-                  "env0",
-                  "env0.exe",
-                  "env0.cmd"
-                ],
+                "executables": ["env0","env0.exe","env0.cmd"],
                 "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [
-                  "--yes"
-                ],
-                "interspersed_options_with_values": [
-                  "--organization"
-                ],
+                "interspersed_flags": ["--yes"],
+                "interspersed_options_with_values": ["--organization"],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [
-                  "--organization"
-                ],
+                "leading_options_with_values": ["--organization"],
                 "options_with_values": [],
-                "required_flags": [
-                  "--help"
-                ],
+                "required_flags": ["--help"],
                 "required_flags_in_all_arguments": true,
                 "required_option_values": [],
-                "subcommands": [
-                  "deployment",
-                  "cancel"
-                ]
+                "subcommands": ["deployment","cancel"]
               }
             }
           }
@@ -337,55 +211,26 @@
         "title": "Abort running deployment",
         "description": "Aborts a currently running deployment and can interrupt infrastructure changes.",
         "severity": "high",
-        "risk_classes": [
-          "destructive_shell"
-        ],
-        "action_classes": [
-          "env zero deployment abort"
-        ],
-        "safer_alternatives": [
-          "Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting."
-        ],
+        "risk_classes": ["destructive_shell"],
+        "action_classes": ["env zero deployment abort"],
+        "safer_alternatives": ["Inspect `env0 deployment logs <deployment-id>` and confirm the active deployment before aborting."],
         "default_mode": "review",
         "matcher": {
           "op": "executable.v1",
           "config": {
             "allow_leading_options": true,
-            "executables": [
-              "env0",
-              "env0.exe",
-              "env0.cmd"
-            ],
+            "executables": ["env0","env0.exe","env0.cmd"],
             "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [
-              "--yes"
-            ],
-            "interspersed_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "interspersed_flags": ["--yes"],
+            "interspersed_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "leading_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
             "required_option_values": [],
-            "subcommands": [
-              "deployment",
-              "abort"
-            ]
+            "subcommands": ["deployment","abort"]
           }
         },
         "safe_variants": [
@@ -396,33 +241,18 @@
               "op": "executable.v1",
               "config": {
                 "allow_leading_options": true,
-                "executables": [
-                  "env0",
-                  "env0.exe",
-                  "env0.cmd"
-                ],
+                "executables": ["env0","env0.exe","env0.cmd"],
                 "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [
-                  "--yes"
-                ],
-                "interspersed_options_with_values": [
-                  "--organization"
-                ],
+                "interspersed_flags": ["--yes"],
+                "interspersed_options_with_values": ["--organization"],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [
-                  "--organization"
-                ],
+                "leading_options_with_values": ["--organization"],
                 "options_with_values": [],
-                "required_flags": [
-                  "--help"
-                ],
+                "required_flags": ["--help"],
                 "required_flags_in_all_arguments": true,
                 "required_option_values": [],
-                "subcommands": [
-                  "deployment",
-                  "abort"
-                ]
+                "subcommands": ["deployment","abort"]
               }
             }
           }
@@ -435,55 +265,26 @@
         "title": "Approve held deployment",
         "description": "Approves a pending deployment and can authorize infrastructure changes.",
         "severity": "high",
-        "risk_classes": [
-          "network_egress"
-        ],
-        "action_classes": [
-          "env zero deployment approval"
-        ],
-        "safer_alternatives": [
-          "Inspect the pending plan and current approval requirement before granting deployment approval."
-        ],
+        "risk_classes": ["network_egress"],
+        "action_classes": ["env zero deployment approval"],
+        "safer_alternatives": ["Inspect the pending plan and current approval requirement before granting deployment approval."],
         "default_mode": "review",
         "matcher": {
           "op": "executable.v1",
           "config": {
             "allow_leading_options": true,
-            "executables": [
-              "env0",
-              "env0.exe",
-              "env0.cmd"
-            ],
+            "executables": ["env0","env0.exe","env0.cmd"],
             "fail_secure_unknown_options": true,
             "forbidden_flags": [],
-            "interspersed_flags": [
-              "--yes"
-            ],
-            "interspersed_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "interspersed_flags": ["--yes"],
+            "interspersed_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "inverse_flag_pairs": [],
-            "leading_options_with_values": [
-              "--api-key-id",
-              "--api-key-secret",
-              "--api-url",
-              "--organization",
-              "--output",
-              "-o"
-            ],
+            "leading_options_with_values": ["--api-key-id","--api-key-secret","--api-url","--organization","--output","-o"],
             "options_with_values": [],
             "required_flags": [],
             "required_flags_in_all_arguments": false,
             "required_option_values": [],
-            "subcommands": [
-              "deployment",
-              "approve"
-            ]
+            "subcommands": ["deployment","approve"]
           }
         },
         "safe_variants": [
@@ -494,33 +295,18 @@
               "op": "executable.v1",
               "config": {
                 "allow_leading_options": true,
-                "executables": [
-                  "env0",
-                  "env0.exe",
-                  "env0.cmd"
-                ],
+                "executables": ["env0","env0.exe","env0.cmd"],
                 "fail_secure_unknown_options": true,
                 "forbidden_flags": [],
-                "interspersed_flags": [
-                  "--yes"
-                ],
-                "interspersed_options_with_values": [
-                  "--organization"
-                ],
+                "interspersed_flags": ["--yes"],
+                "interspersed_options_with_values": ["--organization"],
                 "inverse_flag_pairs": [],
-                "leading_options_with_values": [
-                  "--organization"
-                ],
+                "leading_options_with_values": ["--organization"],
                 "options_with_values": [],
-                "required_flags": [
-                  "--help"
-                ],
+                "required_flags": ["--help"],
                 "required_flags_in_all_arguments": true,
                 "required_option_values": [],
-                "subcommands": [
-                  "deployment",
-                  "approve"
-                ]
+                "subcommands": ["deployment","approve"]
               }
             }
           }
