@@ -130,6 +130,41 @@ jobs:
             exit 1
           fi
 
+  require-supply-chain-audit:
+    name: Require supply-chain audit
+    # A stable release ships the audited crate graph, so the Cargo supply chain
+    # gate has to have reached a verdict on this exact commit, and that verdict
+    # has to be green, before anything is built. The gate runs in Security Gates,
+    # which no release job can depend on across workflows, so its check run is
+    # read back here instead. Other channels publish nothing to stable PyPI, so
+    # the step reports and exits; the job itself always runs, which keeps the
+    # dependency below a success requirement rather than a skip.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      checks: read
+    steps:
+      - name: Require a green Cargo supply chain run for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ github.event.inputs.release_channel }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" || "$RELEASE_CHANNEL" != "stable" ]]; then
+            echo "Not a stable release dispatch; the supply-chain audit gate does not apply."
+            exit 0
+          fi
+          conclusion=$(gh api \
+            "repos/${REPOSITORY}/commits/${SOURCE_SHA}/check-runs?check_name=Cargo+supply+chain&per_page=100" \
+            --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at)[-1].conclusion // empty')
+          if [[ "$conclusion" != "success" ]]; then
+            echo "Cargo supply chain for ${SOURCE_SHA} is ${conclusion:-absent}; refusing to publish a stable release" >&2
+            exit 1
+          fi
+          echo "Cargo supply chain for ${SOURCE_SHA}: success"
+
   resolve-alpha-version:
     name: Resolve main alpha version
     needs: authorize-release
@@ -495,11 +530,12 @@ jobs:
     if: >-
       always() && !cancelled() &&
       needs.authorize-release.result == 'success' &&
+      needs.require-supply-chain-audit.result == 'success' &&
       (github.event_name != 'workflow_dispatch' || github.run_attempt == 1) &&
       (github.event_name != 'push' || github.run_attempt == 1) &&
       (github.event_name != 'push' || !contains(github.event.head_commit.message || '', '[skip release publish]')) &&
       (github.event.action != 'labeled' || github.event.label.name == 'publish-testpypi-canary')
-    needs: [authorize-release, resolve-alpha-version, resolve-canary-version]
+    needs: [authorize-release, require-supply-chain-audit, resolve-alpha-version, resolve-canary-version]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -262,4 +262,9 @@ jobs:
             cargo-deny-advisory-db-
       - name: Check advisories, bans, licenses and sources
         working-directory: rust
-        run: cargo deny --workspace --locked --log-level info check advisories bans licenses sources
+        # A `bans.skip` entry that no longer matches anything is a warning by
+        # default, so a duplicate exception would outlive the duplicate it was
+        # written for and silently widen the list. Promote it to an error.
+        run: >-
+          cargo deny --workspace --locked --log-level info check
+          --deny unmatched-skip advisories bans licenses sources

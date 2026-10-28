@@ -9,6 +9,7 @@ that turn a finding into a failure.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "security-gates.yml"
+PUBLISH_PATH = ROOT / ".github" / "workflows" / "publish.yml"
 DENY_PATH = ROOT / "rust" / "deny.toml"
 REQUIRED_CHECKS = ("advisories", "bans", "licenses", "sources")
 
@@ -38,9 +40,23 @@ def _deny() -> dict[str, Any]:
     return tomllib.loads(DENY_PATH.read_text(encoding="utf-8"))
 
 
+def _check_command() -> str:
+    return next(command for command in (step.get("run", "") for step in _steps()) if "cargo deny" in command)
+
+
+def _shipped_wheel_targets() -> set[str]:
+    """Read the native wheel targets publish.yml approves, as it writes them."""
+
+    text = PUBLISH_PATH.read_text(encoding="utf-8")
+    start = text.index("          metadata = {")
+    end = text.index("          }", start)
+    targets = re.findall(r'"([a-z0-9_]+-[a-z0-9-]+)": \(', text[start:end])
+    assert targets, "publish.yml no longer spells its approved wheel targets this way"
+    return set(targets)
+
+
 def test_gate_runs_every_check_against_the_workspace() -> None:
-    commands = [step.get("run", "") for step in _steps()]
-    check = next(command for command in commands if "cargo deny" in command)
+    check = _check_command()
 
     assert "--workspace" in check
     assert "--locked" in check
@@ -66,7 +82,13 @@ def test_the_gate_fails_rather_than_warns() -> None:
     deny = _deny()
 
     assert deny["advisories"]["yanked"] == "deny"
+    # `unmaintained` is the scope an unmaintained advisory is applied over, not
+    # how loudly it is reported; "all" is the widest, so every matching crate
+    # fails rather than only a workspace dependency or only a transitive one.
     assert deny["advisories"]["unmaintained"] == "all"
+    # A skip entry that matches nothing is only a warning by default, so a stale
+    # duplicate exception would widen the list without failing anything.
+    assert "--deny unmatched-skip" in _check_command()
     assert deny["bans"]["multiple-versions"] == "deny"
     assert deny["bans"]["wildcards"] == "deny"
     assert deny["sources"]["unknown-registry"] == "deny"
@@ -92,3 +114,28 @@ def test_every_duplicate_exception_carries_a_reason() -> None:
         assert entry["reason"].strip(), entry
     for entry in bans["deny"]:
         assert entry["reason"].strip(), entry
+
+
+def test_audited_targets_cover_every_published_wheel() -> None:
+    targets = set(_deny()["graph"]["targets"])
+
+    # A platform that ships a wheel but is missing here is a platform whose
+    # advisory, licence and duplicate findings nobody ever sees.
+    assert _shipped_wheel_targets() <= targets
+
+
+def test_a_stable_release_cannot_build_without_a_green_audit() -> None:
+    publish = yaml.safe_load(PUBLISH_PATH.read_text(encoding="utf-8"))
+    jobs = publish["jobs"]
+    gate = jobs["require-supply-chain-audit"]
+
+    assert gate["permissions"] == {"checks": "read"}
+    # No `if` on the job: a skipped dependency would satisfy a success check
+    # below only by accident, so the channel test lives inside the step.
+    assert "if" not in gate
+    run = gate["steps"][0]["run"]
+    assert "check_name=Cargo+supply+chain" in run
+    assert '"$RELEASE_CHANNEL" != "stable"' in run
+    assert '"$conclusion" != "success"' in run
+    assert "require-supply-chain-audit" in jobs["build"]["needs"]
+    assert "needs.require-supply-chain-audit.result == 'success'" in jobs["build"]["if"]
