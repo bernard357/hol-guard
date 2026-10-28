@@ -25140,6 +25140,13 @@ function activationHeadline(protection) {
   if (protection.path_status === "restart_required") return "Finish activation in Guard";
   return "Fix PATH to finish activation";
 }
+function activationDetail(protection) {
+  if (protection.path_status === "restart_required") {
+    return protection.shell_profile_configured ? "Guard saved your shell setup. Finish activation, then open a new shell." : "Guard installed its shims. Activation is still waiting in this Guard session.";
+  }
+  if (protection.path_status === "in_path") return "Guard's shims now check installs from your package managers.";
+  return "Installs skip Guard until its shim folder is on PATH.";
+}
 function ActivationSummary({
   activationAssistError,
   lastAuditProofAt = null,
@@ -25162,6 +25169,13 @@ function ActivationSummary({
       ] }) : null
     ] });
   }
+  if (protection.path_status !== "restart_required" && activationAssistError === null) {
+    return lastAuditProofAt !== null ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs leading-5 text-slate-600", children: [
+      "Last audit proof ",
+      formatRelativeTime(lastAuditProofAt),
+      "."
+    ] }) : null;
+  }
   const Icon = protection.path_status === "in_path" ? HiMiniCheckCircle : protection.path_status === "restart_required" ? HiMiniArrowPath : HiMiniExclamationTriangle;
   const toneClass = protection.path_status === "in_path" ? "border-brand-green/20 bg-brand-green/[0.04]" : protection.path_status === "restart_required" ? "border-brand-blue/20 bg-brand-blue/[0.04]" : "border-brand-attention/20 bg-brand-attention/[0.04]";
   const iconClass = protection.path_status === "in_path" ? "text-brand-green" : protection.path_status === "restart_required" ? "text-brand-blue" : "text-brand-attention";
@@ -25170,7 +25184,7 @@ function ActivationSummary({
     /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { className: `mt-0.5 h-4 w-4 shrink-0 ${iconClass}`, "aria-hidden": "true" }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-brand-dark", children: activationHeadline(protection) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-xs text-slate-600", children: copy.pathDetail }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-0.5 text-sm text-slate-600", title: protection.shim_dir, children: activationDetail(protection) }),
       lastAuditProofAt !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1 text-xs text-slate-500", children: [
         "Last audit proof ",
         formatRelativeTime(lastAuditProofAt)
@@ -27121,7 +27135,7 @@ function WorkspacePageHeader(props) {
   } : null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "guard-page-header", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "guard-page-header__layout", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "guard-page-header__copy space-y-1", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-semibold uppercase tracking-[0.18em] text-slate-400", children: eyebrow }),
+      eyebrow ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-semibold uppercase tracking-[0.18em] text-slate-400", children: eyebrow }) : null,
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-semibold tracking-tight text-brand-dark", children: title }),
       description ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-slate-500", children: description }) : null
     ] }),
@@ -37249,7 +37263,7 @@ const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePre
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));
 const SupplyChainHubWorkspace = lazyWorkspace(
   "supply-chain-hub-workspace",
-  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-CKNAxTGr.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
+  () => __vitePreload(() => import("./chunks/supply-chain-hub-workspace-CF-2s4KS.js").then((n) => n.d), true ? [] : void 0).then((m) => ({ default: m.SupplyChainHubWorkspace }))
 );
 const PolicyWorkspacePage = lazyWorkspace(
   "policy-workspace-page",
@@ -38400,9 +38414,9 @@ export {
   GuardHarnessActionError as d7,
   HiMiniRocketLaunch as d8,
   HiMiniTrash as d9,
-  ActivationSummary as dA,
-  ActionResultPanel as dB,
-  HiMiniBugAnt as dC,
+  HiMiniBugAnt as dA,
+  ActivationSummary as dB,
+  ActionResultPanel as dC,
   fetchSupplyChainBundle as dD,
   closeOnEscape as dE,
   ConnectFlowCard as dF,
