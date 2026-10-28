@@ -27,6 +27,8 @@ _RESPONSE_FEATURE = "hook-harness-response-v1"
 # Python no longer re-checks the edge result or receipt; only a resident that
 # checks its own answer may be trusted with it.
 _SELF_CHECK_FEATURE = "edge-self-check-v1"
+# The resident records the CLI an answered PreToolUse launches, off the answer path.
+_LOCAL_CLI_OBSERVATION_FEATURE = "edge-local-cli-observation-v1"
 # The edge answers the Oh My Pi / Pi structured-output mediation itself when
 # the envelope carries the daemon's managed-policy view.
 STRUCTURED_OUTPUT_FEATURE = "edge-structured-output-v1"
@@ -112,6 +114,7 @@ def _encode_hook_envelope(
     request_id: str | None = None,
     recording_only: bool = False,
     local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
@@ -146,6 +149,8 @@ def _encode_hook_envelope(
         envelope["recording_only"] = True
     if local_cli_rules is not None:
         envelope["local_cli_rules"] = dict(local_cli_rules)
+    if observe_local_cli:
+        envelope["observe_local_cli"] = True
     if structured_output_config is not None:
         envelope["structured_output_config"] = dict(structured_output_config)
     if execution_context_supported:
@@ -184,6 +189,7 @@ def review_raw_hook_native(
     runtime_status: NativeRuntimeStatus | None = None,
     request_id: str | None = None,
     local_cli_rules: Mapping[str, object] | None = None,
+    observe_local_cli: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
 ) -> dict[str, Any] | None:
     """Return a typed Rust edge result, or fail closed without reinterpretation."""
@@ -247,6 +253,7 @@ def review_raw_hook_native(
         request_id=request_id,
         recording_only=observe_mode,
         local_cli_rules=local_cli_rules,
+        observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
         structured_output_config=structured_output_config,
     )
     if encoded is None:

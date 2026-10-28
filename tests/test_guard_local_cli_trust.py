@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_plugin_scanner.guard.local_cli_hook import observe_unlisted_cli
+from codex_plugin_scanner.guard.local_cli_hook import native_local_cli_hook
 from codex_plugin_scanner.guard.local_cli_trust import utc_now
 from codex_plugin_scanner.guard.runtime.local_cli_identity import identify_unlisted_cli
 from codex_plugin_scanner.guard.store import GuardStore
@@ -87,7 +87,9 @@ def test_grant_does_not_allow_compound_source_and_ssh(tmp_path: Path) -> None:
     helper.write_text("#!/bin/sh\necho access\n", encoding="utf-8")
     helper.chmod(0o755)
     command = f"source {helper} && ssh -o BatchMode=yes host 'echo ok'"
-    observe_unlisted_cli(store=store, command=command, cwd=tmp_path, home_dir=tmp_path)
+    native_local_cli_hook(
+        store, command=command, cwd=tmp_path, home_dir=tmp_path, current_action="allow", grant_allowed=False
+    )
     identity = identify_unlisted_cli(f"bash {helper}", cwd=tmp_path, home_dir=tmp_path)
     assert identity is not None
     store.upsert_local_cli_grant(

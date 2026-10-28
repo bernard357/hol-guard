@@ -66,7 +66,6 @@ fn execution_environment_binds_identity_without_rejecting_unrelated_hooks() {
         .has_valid_shape());
     // Core source paths still enforce the transport contract's strict bound.
     request.source.home_dir = "x".repeat(MAX_PATH_BYTES + 1);
-
     assert_eq!(
         validate_envelope_shape(&request).unwrap_err(),
         "native_hook_source_metadata_invalid"
@@ -133,6 +132,7 @@ pub(crate) fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
         },
         recording_only: false,
         local_cli_rules: None,
+        observe_local_cli: false,
         structured_output_config: None,
     }
 }

@@ -11205,10 +11205,11 @@ def test_guard_hook_claude_notice_storage_failures_fall_back_to_generic_prompt(t
     )
 
     # Hook authority state lives in the native resident, which reports a locked store as no reply.
-    monkeypatch.setattr(
+    for target in (
         "codex_plugin_scanner.guard.cli.commands_support_hook_state.hook_authority_state",
-        lambda *_args, **_kwargs: None,
-    )
+        "codex_plugin_scanner.guard.native_hook_authority_state.hook_authority_state",
+    ):
+        monkeypatch.setattr(target, lambda *_args, **_kwargs: None)
     pre_tool_event = {
         "session_id": "session-claude-4",
         "tool_name": "Read",
@@ -11253,11 +11254,11 @@ def test_guard_hook_claude_notice_storage_failures_fall_back_to_generic_prompt(t
     assert pre_tool_rc == 0
     assert pre_tool_output["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert notification_rc == 0
+    # Without a reply there is no notice to read, so the prompt carries the
+    # generic hold copy and none of the review's reason.
     assert notification_output["systemMessage"] == (
-        "HOL Guard intercepted Claude's attempt to use Read and is routing it to a HOL Guard approval question. "
-        "This approval flow came from HOL Guard, not from Claude alone. "
-        "HOL Guard will ask the user to choose Allow once, Allow during this session, or Keep blocked before Claude "
-        "retries the action."
+        "HOL Guard is holding this Claude request for review. The HOL Guard runtime could not render "
+        "the full notice, so nothing in this prompt should be read as HOL Guard allowing the action."
     )
 
 

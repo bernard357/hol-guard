@@ -176,7 +176,7 @@ fn canonical_harness(value: &str) -> Result<String, String> {
     Ok(canonical.to_owned())
 }
 
-fn canonical_event(value: &str) -> Result<String, String> {
+pub(crate) fn canonical_event(value: &str) -> Result<String, String> {
     bounded_nonempty(value, MAX_EVENT_BYTES, "native_hook_event_invalid")?;
     let compact = value.trim().to_ascii_lowercase().replace(['_', '-'], "");
     match compact.as_str() {

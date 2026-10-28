@@ -227,7 +227,7 @@ pub(super) fn review_grant(check: &RuleCheck<'_>) -> Option<ReviewVerdict> {
 
 /// The daemon's command rule: the first non-blank command field of the tool
 /// input, then the arguments, then the payload itself.
-fn pre_tool_command(payload: &Map<String, Value>) -> Result<Option<&str>, ()> {
+pub(crate) fn pre_tool_command(payload: &Map<String, Value>) -> Result<Option<&str>, ()> {
     let tool_input = TOOL_INPUT_FIELDS
         .iter()
         .find_map(|field| payload.get(*field).and_then(Value::as_object));
@@ -251,10 +251,23 @@ pub(super) fn launch_cwd(
     payload: &Map<String, Value>,
     workspace: &str,
 ) -> Result<Option<String>, ()> {
-    let raw = match payload.get("cwd").and_then(Value::as_str) {
+    resolve_launch_dir(launch_dir_candidate(payload, workspace)?)
+}
+
+/// The directory `launch_cwd` resolves: the payload's non-blank `cwd`, else
+/// the workspace.
+pub(crate) fn launch_dir_candidate<'a>(
+    payload: &'a Map<String, Value>,
+    workspace: &'a str,
+) -> Result<&'a str, ()> {
+    Ok(match payload.get("cwd").and_then(Value::as_str) {
         Some(raw) if python_strip(raw).map_err(|_| ())?.is_some() => raw,
         _ => workspace,
-    };
+    })
+}
+
+/// `raw` resolved, when absolute and an existing directory once resolved.
+pub(crate) fn resolve_launch_dir(raw: &str) -> Result<Option<String>, ()> {
     if !Path::new(raw).is_absolute() {
         return Ok(None);
     }

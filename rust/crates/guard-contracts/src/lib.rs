@@ -368,6 +368,11 @@ pub struct GuardHookEnvelopeV2 {
     /// edge reads no rule. They never change the request identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_cli_rules: Option<GuardHookLocalCliRulesV1>,
+    /// The daemon asks the resident to record the CLI an answered
+    /// `PreToolUse` launches, off the answer path. It never changes the
+    /// verdict, receipt, or request identity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub observe_local_cli: bool,
     /// The managed-policy view the daemon holds for a Pi or Oh My Pi
     /// `PostToolUse`: `managed_policy_status`, `managed_policy_hash`,
     /// `managed_locked_settings` and `managed_policy`, the shape the

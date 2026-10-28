@@ -2,8 +2,10 @@
 //!
 //! Records the CLI a command launches (and refreshes a package script
 //! catalog), then refines the hook action with this device's grant. Python's
-//! `observe_unlisted_cli` and `apply_local_cli_grant` made one resident call
-//! per identity, record and grant read; the same steps run here in-process.
+//! observation and `apply_local_cli_grant` made one resident call per
+//! identity, record and grant read; the same steps run here in-process.
+//! [`observe_only`] records without refining, for the resident's own
+//! off-path observer (`crate::local_cli_observer`).
 //! The caller supplies only the command, its directories and environment, and
 //! the action being refined; none of those can create a grant.
 //!
@@ -118,6 +120,13 @@ pub(crate) fn run_refined(request: &LocalCliHookRequestV1) -> Result<Refined, &'
     Ok(refined(request, &package))
 }
 
+/// The recording alone, refining nothing: what the resident's off-path
+/// observer records for an answered `PreToolUse`.
+pub(crate) fn observe_only(request: &LocalCliHookRequestV1) -> Result<(), &'static str> {
+    let package = checked_package(request)?;
+    observe(request, &package)
+}
+
 /// The grant refinement alone, recording nothing: what the workspace sink
 /// asks again right before it widens a sandbox by a grant.
 #[cfg(unix)]
@@ -150,7 +159,7 @@ fn refined(request: &LocalCliHookRequestV1, package: &Package) -> Refined {
     })
 }
 
-/// `observe_unlisted_cli`: the package script identity, else every CLI a
+/// The launch observation: the package script identity, else every CLI a
 /// single or compound invocation launches.
 fn observe(request: &LocalCliHookRequestV1, package: &Package) -> Result<(), &'static str> {
     let Ok(package) = package else {
