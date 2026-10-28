@@ -97,6 +97,17 @@ impl ResidentStream for ScriptedStream {
     }
 }
 
+/// Every read of an exchange is given a timeout of its own, and none of them
+/// is given more than the bound the exchange started with: a read that kept
+/// the full bound after the deadline had nearly passed would hold its worker
+/// for up to twice what the exchange was admitted under.
+fn within_bound(recorded: &[Option<Duration>], bound: Duration) -> bool {
+    !recorded.is_empty()
+        && recorded
+            .iter()
+            .all(|timeout| matches!(timeout, Some(value) if !value.is_zero() && *value <= bound))
+}
+
 fn frame_header(magic: &[u8; 4], body: &[u8], length: u32) -> Vec<u8> {
     let mut header = Vec::with_capacity(crate::FRAME_HEADER_BYTES);
     header.extend_from_slice(magic);
@@ -184,7 +195,9 @@ fn the_header_read_is_bounded_by_the_header_timeout() {
 
     // A client that sends its header one byte at a time gets the transport's
     // bound, not a worker for as long as it keeps the connection open.
-    assert_eq!(*timeouts.lock().unwrap(), vec![Some(crate::HEADER_TIMEOUT)]);
+    let timeouts = timeouts.lock().unwrap();
+    assert_eq!(timeouts[0], Some(crate::HEADER_TIMEOUT));
+    assert!(within_bound(&timeouts, crate::HEADER_TIMEOUT));
 }
 
 #[test]
@@ -247,10 +260,9 @@ fn a_payload_the_client_stops_sending_ends_on_the_payload_timeout() {
 
     handle_pending_request(request, None, None);
 
-    assert_eq!(
-        *timeouts.lock().unwrap(),
-        vec![Some(crate::PAYLOAD_TIMEOUT)]
-    );
+    let recorded = timeouts.lock().unwrap();
+    assert_eq!(recorded[0], Some(crate::PAYLOAD_TIMEOUT));
+    assert!(within_bound(&recorded, crate::PAYLOAD_TIMEOUT));
     assert!(contains(
         &written.lock().unwrap(),
         b"native_frame_read_failed"
@@ -417,4 +429,31 @@ fn a_client_proof_for_another_token_is_rejected() {
         "native_resident_auth_rejected"
     );
     handle.join().expect("client thread");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_waits_only_for_what_is_left_of_the_deadline() {
+    // A deadline checked between reads is not enough on a real socket: the
+    // read itself blocks for whatever timeout the socket carries, so a client
+    // that sends its last byte just before the deadline sends the transport
+    // into one more full-length wait. The baseline here is twenty times the
+    // deadline, which is the gap that read would have held its worker for.
+    let (mut server, _peer) = UnixStream::pair().expect("socket pair");
+    let left = Duration::from_millis(100);
+    server
+        .set_read_timeout(Some(left * 20))
+        .expect("a baseline far past the deadline");
+    let mut buffer = [0u8; 8];
+
+    let started = Instant::now();
+    let error = crate::hardening::read_exact_by(&mut server, &mut buffer, Instant::now() + left)
+        .expect_err("a silent peer must not be waited for");
+
+    // The peer is still open, so this ended on the deadline, not on EOF.
+    assert!(started.elapsed() < left * 5);
+    assert!(matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    ));
 }

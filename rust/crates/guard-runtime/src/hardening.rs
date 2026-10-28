@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::io::{self, Read, Write};
+use std::io;
 use std::time::{Duration, Instant};
 
 pub const TOTAL_REQUEST_BUDGET: Duration = Duration::from_secs(4);
@@ -26,20 +26,24 @@ fn deadline_expired() -> io::Error {
 }
 
 /// A socket read timeout bounds one read, not an exchange: a client that sends
-/// one byte before each timeout renews it for as long as it likes and keeps the
-/// worker that is reading. Every resident read is bounded by a deadline for the
-/// whole exchange, so a drip-fed header or payload loses its worker on time.
-pub fn read_exact_by<R: Read + ?Sized>(
-    reader: &mut R,
+/// one byte before each timeout renews it for as long as it likes and keeps
+/// the worker that is reading. Every resident read is bounded by a deadline
+/// for the whole exchange, and each read of it is given only the time left
+/// before that deadline, so neither a drip feed nor a silence after the last
+/// byte can hold a worker past the bound its exchange was admitted under.
+pub(crate) fn read_exact_by(
+    stream: &mut dyn crate::resident_transport::ResidentStream,
     buffer: &mut [u8],
     deadline: Instant,
 ) -> io::Result<()> {
     let mut filled = 0;
     while filled < buffer.len() {
-        if Instant::now() >= deadline {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
             return Err(deadline_expired());
         }
-        match reader.read(&mut buffer[filled..]) {
+        stream.set_resident_read_timeout(Some(left))?;
+        match stream.read(&mut buffer[filled..]) {
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
             Ok(read) => filled += read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -50,19 +54,22 @@ pub fn read_exact_by<R: Read + ?Sized>(
 }
 
 /// The same bound for the answer. A caller that stops reading fills the socket
-/// buffer and blocks the write; without a deadline for the whole response it
-/// holds its worker one write timeout at a time.
-pub fn write_all_by<W: Write + ?Sized>(
-    writer: &mut W,
+/// buffer and blocks the write; without a deadline for the whole response, and
+/// without cutting each write to what is left of it, it holds its worker one
+/// write timeout at a time.
+pub(crate) fn write_all_by(
+    stream: &mut dyn crate::resident_transport::ResidentStream,
     buffer: &[u8],
     deadline: Instant,
 ) -> io::Result<()> {
     let mut written = 0;
     while written < buffer.len() {
-        if Instant::now() >= deadline {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
             return Err(deadline_expired());
         }
-        match writer.write(&buffer[written..]) {
+        stream.set_resident_write_timeout(Some(left))?;
+        match stream.write(&buffer[written..]) {
             Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
             Ok(wrote) => written += wrote,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
