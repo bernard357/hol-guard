@@ -347,6 +347,24 @@ regexes = [
   '''^[\t\r\n ]*"(?:replayKey|replay_key)": "[0-9a-f]{64}",?[\t\r\n ]*$''',
 ]
 
+[[rules.allowlists]]
+description = "Synthetic source-file SHA-256 in the contained-runner parity vectors, not a credential"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)rust/crates/guard\-command/tests/fixtures/contained_runner_vectors\.v1\.json$''']
+regexes = [
+  '''^73cb3858a687a8494ca3323053016282f3dad39d42cf62ca4e79dda2aac7d9ac$''',
+]
+
+[[rules.allowlists]]
+description = "Synthetic identity-binding auth-token ID digest in local lifecycle vectors, not a credential"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)rust/crates/guard\-runtime/tests/fixtures/daemon_lifecycle_vectors\.json$''']
+regexes = [
+  '''(?i)^755b2046dd8bb3da36b9fcd5a7ac5e1f363cd6aa530710454154d09d1441ea6e$''',
+]
+
 [[rules]]
 id = "github-pat"
 
@@ -389,6 +407,15 @@ regexes = [
 
 [[rules]]
 id = "private-key"
+
+[[rules.allowlists]]
+description = "Synthetic PEM armor around a non-key test value in the redaction vector"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)rust/crates/guard\-runtime/src/hook_render_op_redaction_tests\.rs$''']
+regexes = [
+  '''^[\t\r\n ]*\("a -----BEGIN RSA PRIVATE KEY-----\\u\{a\}MII\\u\{a\}x\\u\{a\}-----END RSA PRIVATE KEY----- b -----END RSA PRIVATE KEY-----", r#""a \*\*\*\*\* b -----END RSA PRIVATE KEY-----""#\),[\t\r\n ]*$''',
+]
 
 [[rules.allowlists]]
 description = "Exact Rust rejection fixture: YWJjZA== is abcd, not a private key"
