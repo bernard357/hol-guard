@@ -403,6 +403,13 @@ pub struct GuardHookEnvelopeV2 {
 pub struct GuardHookContainmentSinkV1 {
     /// The argv prefix that starts Guard's CLI; the sink command follows it.
     pub sink_command: Vec<String>,
+    /// Whether the edge also answers a `grant` route: the local CLI grant
+    /// step, the granted receipt and its rewrite, read from the envelope's
+    /// `local_cli_rules`. Sent only to a resident that advertises
+    /// `EDGE_CONTAINMENT_GRANT_FEATURE`; one that predates it refuses the
+    /// field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grant: bool,
 }
 
 /// Where the daemon's custom extension rules live and what a command's
@@ -466,6 +473,13 @@ pub struct GuardHookEdgeResultV2 {
     /// `containment_sink`: `routed` when `harness_response` is the allow that
     /// runs the call in the sink, `kept` when the receipt stands. Absent when
     /// the edge did not rewrite; a hook then asks `containment_rewrite`.
+    /// For a `grant` route the envelope asked the edge to answer
+    /// (`GuardHookContainmentSinkV1::grant`): `routed` as for a sink,
+    /// `kept` when `harness_response` is the granted receipt a receipt-only
+    /// call asked for, and `declined` when no grant routes the call and the
+    /// review stands with `harness_response` unchanged. `result` and
+    /// `receipt` never change. Absent when the grant step failed; a hook
+    /// then asks for the grant itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub containment_rewrite: Option<String>,
     /// The daemon's custom extension rule for a reviewed `PreToolUse`, when

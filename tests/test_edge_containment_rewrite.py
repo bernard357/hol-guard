@@ -2,8 +2,10 @@
 
 The rewrite itself is pinned by the Rust tests beside ``edge_containment``.
 These cover the wire: the envelope asks for it only from a resident that
-advertises it, the decoder accepts the mark only on a sink route, and the
-daemon skips its second resident call only when the edge says it rewrote.
+advertises it, the decoder accepts the mark only on a route the edge answers,
+and the daemon skips its second resident call only when the edge says it
+rewrote. A grant route is answered the same way (``edge_containment_grant``)
+when the envelope also carries the daemon's local CLI rules.
 """
 
 from __future__ import annotations
@@ -14,10 +16,13 @@ from pathlib import Path
 
 import pytest
 
+from codex_plugin_scanner.guard import native_hook_containment_route
 from codex_plugin_scanner.guard.adapters import zcode_contained_tests
+from codex_plugin_scanner.guard.daemon import hook_contained_grant, hook_worker_native
 from codex_plugin_scanner.guard.daemon.hook_worker_native import HookWorkerNativeMixin
 from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError
 from codex_plugin_scanner.guard.native_hook_edge import (
+    CONTAINMENT_GRANT_FEATURE,
     CONTAINMENT_REWRITE_FEATURE,
     _decode_edge,
     review_raw_hook_native,
@@ -86,15 +91,23 @@ def test_the_decoder_accepts_the_rewrite_mark_on_a_sink_route(rewrite: str) -> N
         {"containment_rewrite": "allow"},
         {"containment_rewrite": True},
         {"containment_rewrite": ["routed"]},
-        {"containment_rewrite": "routed", "containment_route": "grant"},
+        {"containment_rewrite": "declined"},
         {"containment_rewrite": "kept", "containment_route": "none"},
+        {"containment_rewrite": "declined", "containment_route": "none"},
+        {"containment_rewrite": "allow", "containment_route": "grant"},
     ),
 )
 def test_the_decoder_refuses_a_rewrite_mark_off_a_sink_route(fields: dict[str, object]) -> None:
     assert _decode_edge(_edge(**fields)) is None
 
 
-def _status(tmp_path: Path, *, advertised: bool) -> NativeRuntimeStatus:
+@pytest.mark.parametrize("answer", ("routed", "kept", "declined"))
+def test_the_decoder_accepts_a_grant_answer_on_a_grant_route(answer: str) -> None:
+    edge = _edge(containment_route="grant", containment_rewrite=answer)
+    assert _decode_edge(edge) == edge
+
+
+def _status(tmp_path: Path, *, advertised: bool, extra: tuple[str, ...] = ()) -> NativeRuntimeStatus:
     runtime = tmp_path / "hol-guard-runtime"
     runtime.write_bytes(b"runtime")
     identity = NativeRuntimeIdentity(
@@ -117,6 +130,7 @@ def _status(tmp_path: Path, *, advertised: bool) -> NativeRuntimeStatus:
             "pre-tool-generic-authority-v1",
             "git-execution-context-v1",
             *([CONTAINMENT_REWRITE_FEATURE] if advertised else []),
+            *extra,
         ),
     )
     return NativeRuntimeStatus(
@@ -299,3 +313,131 @@ def test_an_edge_routed_allow_off_the_routed_shape_is_the_outage(
     assert native is False
     assert answer.get("reason_code") == "native_containment_rewrite_invalid"
     assert answer.get("policy_action") != "allow"
+
+
+@pytest.mark.parametrize(
+    ("advertised", "rules", "asked"),
+    ((True, True, True), (False, True, False), (True, False, False)),
+)
+def test_the_sink_argv_asks_for_the_grant_only_from_a_resident_that_answers_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, advertised: bool, rules: bool, asked: bool
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_client(**kwargs: object) -> bytes:
+        captured.update(kwargs)
+        return json.dumps(_edge(), separators=(",", ":")).encode()
+
+    monkeypatch.setattr("codex_plugin_scanner.guard.native_hook_edge.native_resident_client_request", fake_client)
+    features = ("edge-local-cli-rule-v1", *([CONTAINMENT_GRANT_FEATURE] if advertised else []))
+    review_raw_hook_native(
+        payload=dict(_PAYLOAD),
+        harness="claude",
+        event="PreToolUse",
+        guard_home=tmp_path,
+        home_dir=tmp_path,
+        cwd=tmp_path,
+        source_ref_external_allowed=False,
+        observe_mode=False,
+        deadline=None,
+        policy_snapshot={"generation": 1},
+        runtime_status=_status(tmp_path, advertised=True, extra=features),
+        local_cli_rules={"store_path": str(tmp_path / "guard.db"), "user_home": str(tmp_path), "env": {}}
+        if rules
+        else None,
+        containment_sink=True,
+    )
+    encoded = captured["payload"]
+    assert isinstance(encoded, bytes)
+    sink = json.loads(encoded)["containment_sink"]
+    assert sink["sink_command"] == list(zcode_contained_tests.contained_sink_command_prefix())
+    # An older resident would refuse the field, and without the rules there
+    # is no grant to read.
+    assert sink.get("grant") is (True if asked else None)
+
+
+_OUTSIDE_ROOTS = {
+    "decision": "review",
+    "minimum_action": "review",
+    "policy_action": "review",
+    "reason_code": "native_workspace_containment_executable_outside_roots",
+}
+_REVIEW_RESPONSE = {
+    "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask"},
+}
+
+
+def _grant_edge(**fields: object) -> dict[str, object]:
+    return _edge(
+        **{
+            "result": dict(_OUTSIDE_ROOTS),
+            "harness_response": dict(_REVIEW_RESPONSE),
+            "containment_route": "grant",
+            **fields,
+        }
+    )
+
+
+@dataclass
+class _GrantRouteFixture(_SinkRouteFixture):
+    """A daemon whose edge answers a grant-routed PreToolUse."""
+
+    store: object = field(default_factory=object)
+
+
+def _no_second_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    def second_call(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("the edge already answered the grant route")
+
+    monkeypatch.setattr(hook_contained_grant, "granted_containment_response", second_call)
+    monkeypatch.setattr(native_hook_containment_route, "native_containment_route", second_call)
+
+
+@pytest.mark.parametrize(
+    ("answer", "response"),
+    (("routed", _ROUTED_RESPONSE), ("kept", _RECEIPT_RESPONSE)),
+)
+def test_the_daemon_answers_with_the_edge_grant_in_one_resident_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: str,
+    response: dict[str, object],
+) -> None:
+    _no_second_call(monkeypatch)
+    fixture = _GrantRouteFixture(edge=_grant_edge(harness_response=dict(response), containment_rewrite=answer))
+    reply, native = _review(fixture, tmp_path)
+    assert native is True
+    assert reply == response
+    assert len(fixture.captured) == 1
+
+
+def test_a_declined_grant_goes_straight_to_the_review_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_second_call(monkeypatch)
+    paused: list[object] = []
+
+    def pause(_store: object, **kwargs: object) -> dict[str, object]:
+        paused.append(kwargs["native_result"])
+        return {"paused": True}
+
+    monkeypatch.setattr(hook_worker_native, "pause_native_pre_tool_for_approval", pause)
+    fixture = _GrantRouteFixture(edge=_grant_edge(containment_rewrite="declined"))
+    reply, native = _review(fixture, tmp_path)
+    assert native is True
+    assert reply == {"paused": True}
+    assert paused == [_OUTSIDE_ROOTS]
+    assert len(fixture.captured) == 1
+
+
+def test_an_unmarked_grant_route_asks_for_the_grant_as_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[dict[str, object]] = []
+
+    def granted(_store: object, result: dict[str, object], **kwargs: object) -> dict[str, object]:
+        assert result == _OUTSIDE_ROOTS
+        asked.append(kwargs)
+        return dict(_ROUTED_RESPONSE)
+
+    monkeypatch.setattr(hook_contained_grant, "granted_containment_response", granted)
+    reply, native = _review(_GrantRouteFixture(edge=_grant_edge()), tmp_path)
+    assert native is True
+    assert reply == _ROUTED_RESPONSE
+    assert [call["workspace"] for call in asked] == [tmp_path]

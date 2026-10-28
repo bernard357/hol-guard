@@ -451,6 +451,23 @@ def _assert_containment_routed_by_resident() -> None:
         raise RuntimeError("the edge's containment rewrite is not the resident's rewrite")
     if 'edge.get("containment_rewrite")' not in daemon or "route_zcode_containment(" not in daemon:
         raise RuntimeError("daemon sink routing does not fall back to the resident when the edge did not rewrite")
+    # A grant route the edge answers runs the resident's own grant step and
+    # rewrite; the daemon takes only a marked answer and otherwise asks.
+    edge_grant = _read(Path("rust/crates/guard-runtime/src/edge_containment_grant.rs"))
+    if "decide_refined(" not in edge_grant or "containment_rewrite(&inputs)" not in edge_grant:
+        raise RuntimeError("the edge's grant answer is not the resident's grant step and rewrite")
+    grant_source = _read(_CONTAINMENT_GRANT)
+    from_grant_edge = _top_level_function(
+        ast.parse(grant_source, filename=str(_CONTAINMENT_GRANT)),
+        "edge_granted_containment_response",
+        _CONTAINMENT_GRANT,
+    )
+    if (
+        'edge.get("containment_rewrite")' not in grant_source
+        or "granted_containment_response" not in _ordered_call_names(from_grant_edge)
+        or "edge_granted_containment_response(" not in daemon
+    ):
+        raise RuntimeError("daemon grant routing does not fall back to the resident when the edge did not answer")
     transport = ast.parse(_read(_CONTAINMENT_TRANSPORT), filename=str(_CONTAINMENT_TRANSPORT))
     retired = {"native_containment_route", "edge_containment_route", "native_containment_sink"}
     defined = {node.name for node in transport.body if isinstance(node, ast.FunctionDef)}

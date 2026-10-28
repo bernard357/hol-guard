@@ -18,7 +18,7 @@ from ..native_resident_client import (
 from ..native_resident_revival import native_unavailable_reason
 from ..native_runtime import NativeRuntimeStatus
 from .hook_availability_policy import availability_harness_response
-from .hook_contained_grant import granted_containment_response
+from .hook_contained_grant import edge_granted_containment_response
 from .hook_evidence_dispatch import run_hook_evidence
 from .hook_fail_closed import render_pre_tool, render_recording_only_pre_tool
 from .hook_native_review_approval import (
@@ -421,7 +421,8 @@ class HookWorkerNativeMixin:
             try:
                 contained = None
                 if containment == "grant":
-                    contained = granted_containment_response(
+                    contained = edge_granted_containment_response(
+                        edge,
                         self.store,
                         native_result,
                         harness=native_harness,

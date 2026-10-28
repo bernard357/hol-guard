@@ -49,7 +49,14 @@ _REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "
 # envelope carries the argv that starts Guard's CLI: `routed` means the
 # response runs the call in the sink, `kept` that the receipt stands.
 CONTAINMENT_REWRITE_FEATURE = "edge-containment-rewrite-v1"
-_CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
+# The edge also answers a call it routes to a local CLI grant when the sink
+# argv carries `grant` and the envelope the daemon's rules: `kept` is then the
+# granted receipt, and `declined` means no grant routes the call.
+CONTAINMENT_GRANT_FEATURE = "edge-containment-grant-v1"
+_CONTAINMENT_REWRITES = {
+    "sink": frozenset({"routed", "kept"}),
+    "grant": frozenset({"routed", "kept", "declined"}),
+}
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -109,7 +116,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         return None
     rewrite = payload.get("containment_rewrite")
     if rewrite is not None and (
-        route != "sink" or not isinstance(rewrite, str) or rewrite not in _CONTAINMENT_REWRITES
+        not isinstance(rewrite, str) or rewrite not in _CONTAINMENT_REWRITES.get(route, frozenset())
     ):
         return None
     receipt = payload.get("receipt")
@@ -156,6 +163,7 @@ def _encode_hook_envelope(
     record_receipt: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
     containment_sink: Sequence[str] | None = None,
+    containment_grant: bool = False,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 
@@ -197,6 +205,8 @@ def _encode_hook_envelope(
         envelope["structured_output_config"] = dict(structured_output_config)
     if containment_sink is not None:
         envelope["containment_sink"] = {"sink_command": list(containment_sink)}
+        if containment_grant:
+            cast(dict[str, Any], envelope["containment_sink"])["grant"] = True
     if execution_context_supported:
         # Direct CLI calls capture locally; daemon workers explicitly pass
         # None when caller context is unavailable instead of using daemon env.
@@ -318,6 +328,11 @@ def review_raw_hook_native(
         record_receipt=record_receipt and _RECEIPT_RECORD_FEATURE in status.capabilities.features,
         structured_output_config=structured_output_config,
         containment_sink=sink_command,
+        # The grant step reads the daemon's rules, and an older resident
+        # refuses the field.
+        containment_grant=sink_command is not None
+        and local_cli_rules is not None
+        and CONTAINMENT_GRANT_FEATURE in status.capabilities.features,
     )
     if encoded is None:
         return record_native_hook_result("native_fail_safe", None)

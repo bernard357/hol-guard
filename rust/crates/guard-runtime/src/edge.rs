@@ -456,7 +456,7 @@ fn evaluate_validated_envelope(
     };
     edge_result_check::check(&edge)?;
     // After the check, so a refused edge leaves no sink snapshot behind.
-    edge_containment::attach(&envelope, &mut edge);
+    edge_containment::attach(&envelope, &mut edge, started);
     crate::edge_receipt::encode(&envelope, origin_store.is_some(), edge, started)
 }
 

@@ -12,6 +12,11 @@
 //! receipt (`kept`). A rewrite that fails is not answered, and the daemon
 //! asks the resident as before, so its outage stays the host outage
 //! response.
+//!
+//! A call routed to the grant is answered by `grant` when the envelope asks
+//! for it: the grant step, the granted receipt and the same rewrite.
+
+use std::time::Instant;
 
 use guard_contracts::{ContainmentRewriteInputsV1, GuardHookEdgeResultV2, GuardHookEnvelopeV2};
 use serde_json::{Map, Value};
@@ -24,13 +29,30 @@ pub(super) const ROUTED: &str = "routed";
 /// `containment_rewrite` when the receipt stands.
 pub(super) const KEPT: &str = "kept";
 const SINK_ROUTE: &str = "sink";
+const GRANT_ROUTE: &str = "grant";
 const RECEIPT_ONLY_FIELD: &str = "guard_containment_receipt_only";
 /// A review pauses for approval before any containment step.
 const REVIEW_ACTIONS: [&str; 2] = ["review", "require-reapproval"];
 
 /// Answers `edge.containment_rewrite`, replacing its `harness_response` with
-/// the routed allow when the sink takes the call.
-pub(super) fn attach(envelope: &GuardHookEnvelopeV2, edge: &mut GuardHookEdgeResultV2) {
+/// the routed allow when the sink takes the call. `started` is when the edge
+/// began the hook, which bounds the grant step.
+pub(super) fn attach(
+    envelope: &GuardHookEnvelopeV2,
+    edge: &mut GuardHookEdgeResultV2,
+    started: Instant,
+) {
+    if edge.containment_route.as_deref() == Some(GRANT_ROUTE) {
+        edge.containment_rewrite = grant::answer(
+            envelope,
+            &edge.harness,
+            &edge.result,
+            started,
+            &mut edge.harness_response,
+        )
+        .map(str::to_owned);
+        return;
+    }
     let custom_block = edge
         .local_cli_rule
         .as_ref()
@@ -127,6 +149,9 @@ fn inputs(
 fn first<'a>(payload: &'a Map<String, Value>, names: &[&str]) -> Option<&'a Value> {
     names.iter().find_map(|name| payload.get(*name))
 }
+
+#[path = "edge_containment_grant.rs"]
+mod grant;
 
 #[cfg(all(test, unix))]
 #[path = "edge_containment_tests.rs"]

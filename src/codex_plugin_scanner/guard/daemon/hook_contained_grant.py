@@ -15,6 +15,9 @@ A resident that cannot be reached sends no route, so the review stands.
 Whether a result is eligible at all is the resident's ``containment_route``
 answer (``grant``); callers ask it first. Whether the sink takes the rendered
 receipt is its ``containment_sink`` answer.
+
+A resident edge that answered the grant itself marks its answer
+(``containment_rewrite``); only an unmarked edge is asked here.
 """
 
 from __future__ import annotations
@@ -34,6 +37,10 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 OUTSIDE_ROOTS_REASON = "native_workspace_containment_executable_outside_roots"
+# The edge's grant answers: its response is the routed allow or the granted
+# receipt, and ``declined`` keeps the review.
+_EDGE_GRANT_ANSWERS = frozenset({"routed", "kept"})
+_EDGE_GRANT_DECLINED = "declined"
 
 
 def granted_containment_result(
@@ -116,4 +123,41 @@ def granted_containment_response(
     return rewrite.response
 
 
-__all__ = ["granted_containment_response", "granted_containment_result"]
+def edge_granted_containment_response(
+    edge: Mapping[str, object],
+    store: GuardStore,
+    result: Mapping[str, object],
+    *,
+    harness: str,
+    payload: Mapping[str, object],
+    guard_home: Path,
+    home_dir: Path,
+    workspace: Path | None,
+    deadline: float | None = None,
+) -> dict[str, object] | None:
+    """The edge's grant answer when it marked one, else ``granted_containment_response``.
+
+    The decoder accepts a grant mark only on a grant route, so a marked edge
+    already ran the grant step, the receipt render and the rewrite this would.
+    """
+    answer = edge.get("containment_rewrite")
+    if answer in _EDGE_GRANT_ANSWERS:
+        response = edge.get("harness_response")
+        if not isinstance(response, Mapping):
+            raise ValueError("native_hook_edge_invalid_response")
+        return {str(key): value for key, value in response.items()}
+    if answer == _EDGE_GRANT_DECLINED:
+        return None
+    return granted_containment_response(
+        store,
+        result,
+        harness=harness,
+        payload=payload,
+        guard_home=guard_home,
+        home_dir=home_dir,
+        workspace=workspace,
+        deadline=deadline,
+    )
+
+
+__all__ = ["edge_granted_containment_response", "granted_containment_response", "granted_containment_result"]

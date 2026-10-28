@@ -25,6 +25,11 @@ pub const HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE: &str = "hook-decision-conta
 /// for an envelope that carries `containment_sink`.
 pub const EDGE_CONTAINMENT_REWRITE_FEATURE: &str = "edge-containment-rewrite-v1";
 
+/// Advertised when the PreToolUse edge also answers a grant-routed call for
+/// an envelope whose `containment_sink` sets `grant`. A resident that only
+/// advertises `EDGE_CONTAINMENT_REWRITE_FEATURE` refuses that field.
+pub const EDGE_CONTAINMENT_GRANT_FEATURE: &str = "edge-containment-grant-v1";
+
 /// The native PreToolUse result a hook answers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
