@@ -160,11 +160,7 @@ fn runtime_launches(
             true,
         );
         for segment in &model.segments {
-            if let Some(executable) = launched(segment)
-                .filter(|(name, _)| is_runtime_name(name))
-                .filter(|(_, arguments)| !prints_version_only(arguments))
-                .map(|(name, _)| name)
-            {
+            if let Some(executable) = launched(segment).filter(|name| is_runtime_name(name)) {
                 let cwd = cwd.filter(|_| known.cwd);
                 let search_path = search_path.filter(|_| known.path && !segment.path_overridden);
                 if let Some(path) = resolve(executable, cwd, search_path) {
@@ -237,36 +233,24 @@ impl Known {
     }
 }
 
-/// The program a segment starts and the arguments it is given, looking
-/// through the shell's `exec`.
-fn launched(segment: &CommandSegment) -> Option<(&str, &[String])> {
+/// The program a segment starts, looking through the shell's `exec`.
+fn launched(segment: &CommandSegment) -> Option<&str> {
     let executable = segment.executable.as_deref()?;
     if executable != "exec" {
-        return Some((executable, segment.arguments.as_slice()));
+        return Some(executable);
     }
-    let mut index = 0;
-    while let Some(argument) = segment.arguments.get(index) {
-        index += 1;
+    let mut arguments = segment.arguments.iter();
+    while let Some(argument) = arguments.next() {
         match argument.as_str() {
-            "-a" => index += 1,
-            "--" => {
-                let program = segment.arguments.get(index)?;
-                return Some((program.as_str(), &segment.arguments[index + 1..]));
+            "-a" => {
+                arguments.next();
             }
+            "--" => return arguments.next().map(String::as_str),
             flag if flag.starts_with('-') => {}
-            program => return Some((program, &segment.arguments[index..])),
+            program => return Some(program),
         }
     }
     None
-}
-
-/// Whether this argv only asks the runtime to print its own version. Such a
-/// run reads no script, opens no input and loads no project module, so it
-/// cannot reach the code an advisory describes; reviewing it would stop an
-/// agent from checking which interpreter it is about to use. Anything else,
-/// including `-e`, `-p` and flags Guard does not model, stays a launch.
-fn prints_version_only(arguments: &[String]) -> bool {
-    matches!(arguments, [only] if only == "-v" || only == "--version")
 }
 
 fn is_runtime_name(executable: &str) -> bool {
