@@ -380,9 +380,12 @@ fn test_script(scripts: &Map<String, Value>, arguments: &[String]) -> bool {
         return false;
     }
     match tokens.as_slice() {
-        [runner, flag, ..] => {
-            (matches!(executable_basename(runner), "node" | "nodejs") && flag == "--test")
-                || (runner == "vitest" && flag == "run")
+        [runner, rest @ ..] => {
+            let flag = rest.first();
+            (matches!(executable_basename(runner), "node" | "nodejs")
+                && flag.is_some_and(|flag| flag == "--test"))
+                || (runner == "vitest" && flag.is_some_and(|flag| flag == "run"))
+                || (runner == "jest" && crate::contained_argv::jest_runs_once(rest))
         }
         _ => false,
     }

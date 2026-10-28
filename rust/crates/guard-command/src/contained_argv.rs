@@ -219,6 +219,10 @@ pub fn inline_eval(command: &[String]) -> Result<bool, RestrictedPytestError> {
 }
 
 pub fn bun_vitest_invocation(command: &[String]) -> Option<(Option<String>, Vec<String>)> {
+    bun_runner_invocation(command).map(|(directory, _, tail)| (directory, tail))
+}
+
+fn bun_runner_invocation(command: &[String]) -> Option<(Option<String>, &'static str, Vec<String>)> {
     let name = basename(command);
     if !matches!(name, "bun" | "bunx") {
         return None;
@@ -250,10 +254,58 @@ pub fn bun_vitest_invocation(command: &[String]) -> Option<(Option<String>, Vec<
     if args.first().is_some_and(|v| v == "--no-install") {
         args = &args[1..];
     }
-    if args.len() < 2 || args[0] != "vitest" || args[1] != "run" {
+    let (tool, tail) = runner_tail(args)?;
+    Some((directory, tool, tail))
+}
+
+/// True when `arguments` name a contained Node test runner and a call that
+/// runs once. Vitest needs the `run` verb that takes it out of watch mode;
+/// Jest has no verb and runs once unless the call asks it to watch.
+pub(crate) fn contained_runner_call(arguments: &[String]) -> bool {
+    matches!(arguments, [tool, rest @ ..]
+        if (tool == "vitest" && rest.first().is_some_and(|value| value == "run"))
+            || (tool == "jest" && jest_runs_once(rest)))
+}
+
+/// A watching Jest run never finishes inside the sink, so only a call that
+/// asks for no watch is contained.
+pub(crate) fn jest_runs_once(arguments: &[String]) -> bool {
+    !arguments.iter().any(|argument| {
+        matches!(argument.as_str(), "-w" | "--watch" | "--watchAll")
+            || argument.starts_with("--watch=")
+            || argument.starts_with("--watchAll=")
+    })
+}
+
+/// The runner a contained call names, with the arguments the sink hands it.
+fn runner_tail(arguments: &[String]) -> Option<(&'static str, Vec<String>)> {
+    let [tool, rest @ ..] = arguments else {
         return None;
+    };
+    contained_runner_call(arguments)
+        .then(|| (if tool == "jest" { "jest" } else { "vitest" }, rest.to_vec()))
+}
+
+/// The same, as the error the sink reports. A call that names a contained
+/// runner but asks it to keep running is a verb problem, not an unknown
+/// command, so it keeps the narrower message.
+fn runner_tail_or_error(
+    arguments: &[String],
+) -> Result<(&'static str, Vec<String>), RestrictedPytestError> {
+    match runner_tail(arguments) {
+        Some(found) => Ok(found),
+        None => match arguments.first().map(String::as_str) {
+            Some("vitest") => Err(RestrictedPytestError::new(
+                VITEST_INVALID,
+                "Protected Vitest requires direct run argv.",
+            )),
+            Some("jest") => Err(RestrictedPytestError::new(
+                VITEST_INVALID,
+                "Protected Jest requires a run that does not watch.",
+            )),
+            _ => invalid_vitest(),
+        },
     }
-    Some((directory, args[1..].to_vec()))
 }
 
 /// The arguments from the tool on, when `command` is a manager's bare `exec`
@@ -275,54 +327,74 @@ fn manager_exec_tool(command: &[String]) -> Option<&[String]> {
     Some(rest)
 }
 
-/// `npm exec vitest ...` and the other manager `exec` spellings, as the
-/// arguments after `vitest`.
-fn manager_exec_vitest(command: &[String]) -> Option<&[String]> {
-    manager_exec_tool(command)
-        .filter(|rest| rest[0] == "vitest")
-        .map(|rest| &rest[1..])
+/// `npm exec vitest run ...`, `npm exec jest ...` and the other manager
+/// `exec` spellings, as the runner and the arguments the sink hands it.
+fn manager_exec_runner(command: &[String]) -> Option<(&'static str, Vec<String>)> {
+    manager_exec_tool(command).and_then(runner_tail)
 }
 
 pub fn vitest_arguments(command: &[String]) -> Result<Vec<String>, RestrictedPytestError> {
+    contained_runner_invocation(command).map(|(_, arguments)| arguments)
+}
+
+/// The contained Node test runner a call names, with the arguments the sink
+/// hands it. Vitest keeps its `run` verb; Jest's tail starts at its first
+/// argument.
+pub fn contained_runner_invocation(
+    command: &[String],
+) -> Result<(&'static str, Vec<String>), RestrictedPytestError> {
     let argv = normalized_command(command)?;
     let name = basename(&argv);
     let runtime = node_runtime_args(&argv)?;
-    let invocation = bun_vitest_invocation(&argv);
-    let args = if let Some((_, args)) = invocation.filter(|_| matches!(name, "bun" | "bunx")) {
-        args
-    } else if matches!(name, "bunx" | "npx") {
-        let mut args = &argv[1..];
-        if args.first().is_some_and(|v| v == "--no-install") {
-            args = &args[1..];
-        }
-        if args.first().is_none_or(|v| v != "vitest") {
+    let invocation = bun_runner_invocation(&argv);
+    let call: Vec<String> =
+        if let Some((_, tool, tail)) = invocation.filter(|_| matches!(name, "bun" | "bunx")) {
+            std::iter::once(tool.to_owned()).chain(tail).collect()
+        } else if matches!(name, "bunx" | "npx") {
+            let mut args = &argv[1..];
+            if args.first().is_some_and(|v| v == "--no-install") {
+                args = &args[1..];
+            }
+            args.to_vec()
+        } else if let Some(args) = manager_exec_tool(&argv) {
+            args.to_vec()
+        } else if matches!(name, "vitest" | "jest") {
+            let mut call = vec![name.to_owned()];
+            call.extend_from_slice(&argv[1..]);
+            call
+        } else if matches!(name, "node" | "nodejs") {
+            let args = &argv[1 + runtime.len()..];
+            let entry = args
+                .first()
+                .map(|value| value.replace('\\', "/"))
+                .unwrap_or_default();
+            let tool = if entry.ends_with("/node_modules/vitest/vitest.mjs") {
+                "vitest"
+            } else if entry.ends_with("/node_modules/jest/bin/jest.js") {
+                "jest"
+            } else {
+                return invalid_vitest();
+            };
+            if args.len() < 2 {
+                return invalid_vitest();
+            }
+            let mut call = vec![tool.to_owned()];
+            call.extend_from_slice(&args[1..]);
+            call
+        } else {
             return invalid_vitest();
-        }
-        args[1..].to_vec()
-    } else if let Some(args) = manager_exec_vitest(&argv) {
-        args.to_vec()
-    } else if name == "vitest" {
-        argv[1..].to_vec()
-    } else if matches!(name, "node" | "nodejs") {
-        let args = &argv[1 + runtime.len()..];
-        if args.len() < 2 || !args[0].ends_with("/node_modules/vitest/vitest.mjs") {
-            return invalid_vitest();
-        }
-        args[1..].to_vec()
-    } else {
-        return invalid_vitest();
-    };
-    if args.first().is_none_or(|v| v != "run")
-        || args
-            .iter()
-            .any(|v| matches!(v.as_str(), ";" | "&&" | "||" | "|" | "|&" | "&"))
+        };
+    let (tool, args) = runner_tail_or_error(&call)?;
+    if args
+        .iter()
+        .any(|v| matches!(v.as_str(), ";" | "&&" | "||" | "|" | "|&" | "&"))
     {
         return Err(RestrictedPytestError::new(
             VITEST_INVALID,
             "Protected Vitest requires direct run argv.",
         ));
     }
-    Ok(args)
+    Ok((tool, args))
 }
 
 fn invalid_vitest<T>() -> Result<T, RestrictedPytestError> {
@@ -416,16 +488,17 @@ fn contained_kind(command: &[String]) -> Result<Value, RestrictedPytestError> {
     let bun = bun_vitest_invocation(command);
     let entries = command.iter().skip(1).take(2);
     let vitest = !command.is_empty()
-        && (matches!(name, "bunx" | "npx" | "vitest")
-            || manager_exec_vitest(command).is_some()
+        && (matches!(name, "bunx" | "npx" | "vitest" | "jest")
+            || manager_exec_runner(command).is_some()
             || bun.is_some()
             || tsx_test_invocation(command)?.is_some()
             || (matches!(name, "node" | "nodejs")
-                && entries
-                    .clone()
-                    .any(|v| v.ends_with("/node_modules/vitest/vitest.mjs"))));
+                && entries.clone().any(|v| {
+                    v.ends_with("/node_modules/vitest/vitest.mjs")
+                        || v.replace('\\', "/").ends_with("/node_modules/jest/bin/jest.js")
+                })));
     let node_tool = bun.is_none()
-        && manager_exec_vitest(command).is_none()
+        && manager_exec_runner(command).is_none()
         && !command.is_empty()
         && (matches!(
             name,

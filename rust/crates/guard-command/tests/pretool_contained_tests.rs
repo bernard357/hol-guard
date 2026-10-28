@@ -414,6 +414,57 @@ fn vitest_wrapper_and_resolved_script_require_the_same_protected_profile() {
 }
 
 #[test]
+fn jest_runs_share_the_read_only_node_test_profile() {
+    for harness in ["omp", "zcode", "claude-code"] {
+        for command in [
+            "npx jest --runInBand __tests__/registry.test.ts",
+            "npx --no-install jest",
+            "bunx jest tests/example.test.ts",
+            "bun x jest tests/example.test.ts",
+            "bun --cwd /project x jest tests/example.test.ts",
+            "bun --cwd=/project x --no-install jest tests/example.test.ts",
+            "pnpm exec jest __tests__/one.test.ts",
+            "jest -t \"keeps the index\"",
+            "node /home/tester/project/node_modules/jest/bin/jest.js --ci",
+        ] {
+            let result = classify(harness, command);
+            assert_eq!(result.decision, "deny", "{harness} {command}");
+            let expected = if cfg!(target_os = "macos") {
+                "native_vitest_readonly_containment_required"
+            } else if command.starts_with("bun ") || command.starts_with("pnpm ") {
+                "native_package_review"
+            } else {
+                "native_command_review_required"
+            };
+            assert_eq!(result.reason_code, expected, "{harness} {command}");
+        }
+        // Watch mode never finishes inside the sink, and the wrappers that
+        // fetch a package or add shell effects are still someone else's call.
+        for command in [
+            "jest --watch",
+            "jest --watchAll",
+            "npx jest -w",
+            "npx jest --watch=true",
+            "bunx jest@evil",
+            "bunx other",
+            "bunx jest && rm -rf /",
+            "bunx jest $(cat .env)",
+            "bunx jest > .env",
+            "pnpm exec -c jest",
+            "pnpm exec --filter app jest",
+            "pnpm -r exec jest",
+        ] {
+            let result = classify(harness, command);
+            assert_ne!(
+                result.reason_code, "native_vitest_readonly_containment_required",
+                "{harness} {command}"
+            );
+            assert_ne!(result.decision, "allow", "{harness} {command}");
+        }
+    }
+}
+
+#[test]
 fn git_inspections_require_protected_execution_not_helper_consent() {
     for command in [
         "git diff --stat",

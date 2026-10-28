@@ -124,6 +124,15 @@
       "reason": "native_package_test_readonly_containment_required"
     },
     {
+      "name": "jest-run",
+      "scripts": {
+        "test": "jest --ci"
+      },
+      "command": "pnpm run test",
+      "entries": [],
+      "reason": "native_package_test_readonly_containment_required"
+    },
+    {
       "name": "ready-pnpm-lint-bare",
       "scripts": {
         "build": "vite build",
@@ -419,6 +428,15 @@
       "name": "watch",
       "scripts": {
         "test": "vitest"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": null
+    },
+    {
+      "name": "jest-watch",
+      "scripts": {
+        "test": "jest --watch"
       },
       "command": "pnpm test",
       "entries": [],

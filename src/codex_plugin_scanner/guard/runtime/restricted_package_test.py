@@ -15,6 +15,16 @@ PACKAGE_TEST_REASON = "native_package_test_readonly_containment_required"
 PACKAGE_TEST_PROFILE = "package-test-readonly-v1"
 
 
+def _watches(arguments: Sequence[str]) -> bool:
+    """A watching Jest run never finishes inside the sink."""
+    return any(
+        argument in {"-w", "--watch", "--watchAll"}
+        or argument.startswith("--watch=")
+        or argument.startswith("--watchAll=")
+        for argument in arguments
+    )
+
+
 def is_package_test(command: Sequence[str]) -> bool:
     return (
         bool(command)
@@ -61,6 +71,7 @@ def resolve_package_test(command: Sequence[str], *, workspace: Path, cwd: Path |
         raise RestrictedPytestError("package_test_invalid_command", "Test shell effects need separate evaluation.")
     node = Path(tokens[0]).name in {"node", "nodejs"} and len(tokens) > 1 and tokens[1] == "--test"
     vitest = tokens[0] == "vitest" and len(tokens) > 1 and tokens[1] == "run"
-    if not node and not vitest:
+    jest = tokens[0] == "jest" and not _watches(tokens[1:])
+    if not node and not vitest and not jest:
         raise RestrictedPytestError("package_test_invalid_command", "The test script is not a supported local runner.")
     return (*tokens, *trailing[1:])

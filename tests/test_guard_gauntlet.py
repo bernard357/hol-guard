@@ -14,6 +14,7 @@ from ci.gauntlet.fixtures import create_fixture, filesystem_checks
 from ci.gauntlet.input_evidence import input_digest
 from ci.gauntlet.proofs import task_tools_match
 from ci.gauntlet.provider import InferenceRelay, canary_present, validate_endpoint
+from ci.gauntlet.workspace_runner_fixtures import WORKSPACE_JEST_CASE
 
 
 def test_scenario_tool_inventory_matches_actual_task():
@@ -242,6 +243,19 @@ def test_sibling_copy_requires_bash_then_native_read_and_exact_bytes(tmp_path):
     assert task_tools_match(scenario, calls)
     assert filesystem_checks(fixture, scenario.oracle, scenario.id)["sibling-copy-exact"] is True
     assert not task_tools_match(scenario, list(reversed(calls)))
+
+
+def test_workspace_jest_install_is_scoped_to_its_own_case(tmp_path):
+    """The npx case gets the project's own Jest; every other case keeps the shared fixture."""
+    fixture = create_fixture(tmp_path / "jest", realistic=True, scenario_id=WORKSPACE_JEST_CASE)
+    entry = fixture.workspace / "node_modules/jest/bin/jest.js"
+    assert entry.is_file() and entry.resolve() == (fixture.workspace / "node_modules/.bin/jest").resolve()
+    assert (
+        json.loads((fixture.workspace / "package.json").read_text())["devDependencies"]["jest"]
+        == json.loads((fixture.workspace / "node_modules/jest/package.json").read_text())["version"]
+    )
+    other = create_fixture(tmp_path / "plain", realistic=True, scenario_id="ordinary")
+    assert not (other.workspace / "node_modules/jest").exists()
 
 
 def test_fixture_uses_only_synthetic_data_and_detects_deletion(tmp_path):
