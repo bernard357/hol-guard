@@ -23,7 +23,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.append(str(_REPO_ROOT))
 
 import codex_plugin_scanner
-from ci.native_runtime.post_tool_review import review_post_tool_native
 from codex_plugin_scanner.guard.daemon.server import GuardDaemonServer
 from codex_plugin_scanner.guard.native_policy_test_support import native_policy_snapshot
 from codex_plugin_scanner.guard.native_resident_client import (
@@ -48,6 +47,18 @@ from scripts.native_probe_receipts import (
 from scripts.native_resident_stop_bound import RESIDENT_STOP_TIMEOUT_SECONDS
 from scripts.native_slo_adapter import is_allowed
 from scripts.native_slo_contract import MAX_READINESS_P95_MS, proof_environment_violations
+
+# Loaded by path like the hook client: when a script under `scripts/` loads
+# this probe, `scripts/ci` shadows the top-level `ci` package.
+_POST_TOOL_REVIEW_SPEC = importlib.util.spec_from_file_location(
+    "hol_guard_post_tool_review",
+    Path(__file__).with_name("post_tool_review.py"),
+)
+if _POST_TOOL_REVIEW_SPEC is None or _POST_TOOL_REVIEW_SPEC.loader is None:
+    raise RuntimeError("native_default_auto_probe_failed: PostToolUse review client could not be loaded")
+_POST_TOOL_REVIEW_MODULE = importlib.util.module_from_spec(_POST_TOOL_REVIEW_SPEC)
+_POST_TOOL_REVIEW_SPEC.loader.exec_module(_POST_TOOL_REVIEW_MODULE)
+review_post_tool_native = _POST_TOOL_REVIEW_MODULE.review_post_tool_native
 
 _HOOK_CLIENT_SPEC = importlib.util.spec_from_file_location(
     "hol_guard_installed_hook_client",
