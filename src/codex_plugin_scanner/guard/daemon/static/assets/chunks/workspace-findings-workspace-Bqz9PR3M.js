@@ -929,6 +929,8 @@ function ExportPreviewPanel(props) {
   const [error, setError] = reactExports.useState(null);
   const [preview, setPreview] = reactExports.useState(null);
   const mounted = reactExports.useRef(true);
+  const latestInput = reactExports.useRef(input);
+  latestInput.current = input;
   reactExports.useEffect(() => {
     mounted.current = true;
     return () => {
@@ -952,6 +954,7 @@ function ExportPreviewPanel(props) {
     } catch (caught) {
       if (!mounted.current) return;
       setPreview(null);
+      if (latestInput.current !== submitted) return;
       setError(caught instanceof ExportPreviewError ? caught.message : new ExportPreviewError("workspace_export_preview_failed").message);
     } finally {
       if (mounted.current) setBusy(false);

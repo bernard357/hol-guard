@@ -202,6 +202,9 @@ export function ExportPreviewPanel(props: { worktree: WorktreeKeys; findings: Wo
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ input: string; result: ExportPreview } | null>(null);
   const mounted = useRef(true);
+  // The list on screen now, so a failure for an older submission is not shown against it.
+  const latestInput = useRef(input);
+  latestInput.current = input;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -228,6 +231,7 @@ export function ExportPreviewPanel(props: { worktree: WorktreeKeys; findings: Wo
       if (!mounted.current) return;
       // A failed retry must not leave the previous result on screen as if it still held.
       setPreview(null);
+      if (latestInput.current !== submitted) return;
       setError(caught instanceof ExportPreviewError ? caught.message : new ExportPreviewError("workspace_export_preview_failed").message);
     } finally {
       if (mounted.current) setBusy(false);
