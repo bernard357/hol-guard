@@ -8570,6 +8570,21 @@
    ],
    "base_commit": "6bf9f88edec5328884d18b3e9afbe1ef8342aada",
    "remaining_role": "Evaluates the request artifact the resident's package_review_plan op builds and applies the verdict: a block always, an allow only when the resident proved the npm that runs. The command lookup (Copilot toolArgs included), shape check, intent parse and artifact build run in the resident."
+  },
+  {
+   "path": "src/codex_plugin_scanner/guard/daemon/hook_native_package_review.py",
+   "source_sha256": "9b6c33d181442a4681ea6522448ff8d0c154ac6690d1284313a6c911f9032040",
+   "forbidden_symbols": [
+    "_script_free_watch",
+    "_first_message",
+    "LIFECYCLE_SCRIPTS_ENABLED_CODE"
+   ],
+   "native_replacements": [
+    "rust/crates/guard-command/src/supply_chain_package_eval/review_settlement.rs",
+    "rust/crates/guard-runtime/src/supply_chain_eval_op.rs"
+   ],
+   "base_commit": "647fb01f6455b97b6fb15ebc296ecc1fd363cb3c",
+   "remaining_role": "Applies the resident's review settlement to the native verdict and renders it; which evaluator verdict lets a planned install continue, stops it with guidance, or blocks it is decided in Rust."
   }
  ],
  "retired_bodies": [

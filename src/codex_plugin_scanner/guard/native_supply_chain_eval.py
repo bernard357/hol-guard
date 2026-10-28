@@ -389,6 +389,7 @@ def unavailable_block_evaluation(artifact: GuardArtifact) -> Any:
             dashboard_url=None,
             harness_message=_UNAVAILABLE_MESSAGE,
         ),
+        review_settlement=("block", _UNAVAILABLE_MESSAGE),
     )
 
 
@@ -454,6 +455,7 @@ def evaluate_package_request_native(
         _cleanup(downloads)
         raise
     try:
+        evaluation = replace(evaluation, review_settlement=_review_settlement(payload.get("review_settlement")))
         if downloads:
             evaluation = replace(evaluation, external_archive_downloads=tuple(downloads))
         if record_evidence:
@@ -469,6 +471,17 @@ def evaluate_package_request_native(
         _cleanup(downloads)
         raise
     return evaluation
+
+
+def _review_settlement(value: object) -> tuple[str, str | None]:
+    """The resident's settlement; anything else leaves the review standing."""
+
+    if not isinstance(value, dict):
+        return ("review", None)
+    action, reason = value.get("action"), value.get("reason")
+    if action in {"block", "guide"} and isinstance(reason, str) and reason:
+        return (action, reason)
+    return ("allow", None) if action == "allow" else ("review", None)
 
 
 def _cleanup(downloads: list[RestrictedArchiveDownload]) -> None:
