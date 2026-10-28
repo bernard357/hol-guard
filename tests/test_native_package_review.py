@@ -283,3 +283,43 @@ class TestEvaluatorRule:
         assert evaluation.decision != "allow"
         assert not any(package.get("scriptFreeRegistryInstall") for package in evaluation.packages)
         assert evaluation.review_settlement[0] != "allow"
+
+
+@pytest.mark.parametrize(
+    "settlement",
+    [
+        None,
+        "allow",
+        {},
+        {"action": "allow"},
+        {"action": "allow", "reason": []},
+        {"action": "allow", "reason": "unexpected"},
+        {"action": ["allow"], "reason": None},
+        {"action": {"allow": True}, "reason": None},
+        {"action": "block", "reason": ""},
+        {"action": "guide", "reason": None},
+        {"action": "settle", "reason": None},
+    ],
+)
+def test_an_unreadable_settlement_leaves_the_review_standing(settlement: object) -> None:
+    assert native_supply_chain_eval._review_settlement(settlement, "monitor") == ("review", None)
+
+
+@pytest.mark.parametrize("settlement", [None, {"action": "allow"}, {"action": ["block"], "reason": "x"}])
+def test_an_unreadable_settlement_never_weakens_a_block(settlement: object) -> None:
+    action, reason = native_supply_chain_eval._review_settlement(settlement, "block")
+    assert action == "block"
+    assert reason
+
+
+@pytest.mark.parametrize(
+    ("settlement", "expected"),
+    [
+        ({"action": "allow", "reason": None}, ("allow", None)),
+        ({"action": "review", "reason": None}, ("review", None)),
+        ({"action": "block", "reason": "stop"}, ("block", "stop")),
+        ({"action": "guide", "reason": "rerun"}, ("guide", "rerun")),
+    ],
+)
+def test_a_well_formed_settlement_is_read_as_sent(settlement: object, expected: tuple[str, str | None]) -> None:
+    assert native_supply_chain_eval._review_settlement(settlement, "monitor") == expected
