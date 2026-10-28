@@ -283,3 +283,117 @@ def test_a_cancel_stops_further_help_runs(tool, monkeypatch):
     home = Path(os.environ["HOME"])
     local_cli_api._discover_from_command(tool.name, tool, home, home, home / "guard", cancel=cancel)
     assert len(started) == 1
+
+
+@pytest.fixture
+def script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[UnlistedCliIdentity, Path]:
+    # A personal script outside PATH, run by its full path as an agent would.
+    home = tmp_path / "operator"
+    tools = home / "tools"
+    tools.mkdir(parents=True)
+    program = tools / "approve-merge.sh"
+    program.write_text("#!/usr/bin/env bash\necho 'Usage: approve-merge.sh <command>'\n", encoding="utf-8")
+    program.chmod(program.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("HOME", str(home))
+    identity, code, _ = recognize_operator_cli(str(program), cwd=home, home_dir=home)
+    assert identity is not None, code
+    return identity, program
+
+
+def test_a_script_loads_its_commands_from_the_full_path_the_operator_gives(tmp_path, script, probes):
+    identity, program = script
+    store, service = _service(tmp_path, identity)
+    try:
+        with pytest.raises(LocalCliApiError) as raised:
+            service.refresh_job({"cli_id": identity.cli_id, "confirm_process_start": True})
+        assert (raised.value.status, raised.value.code) == (400, "cli_reload_needs_path")
+        assert "Enter its full path" in str(raised.value)
+        job = service.refresh_job({"cli_id": identity.cli_id, "confirm_process_start": True, "path": str(program)})
+        assert _finished(service, job)["state"] == "complete"
+    finally:
+        assert service.close_discovery()
+    assert probes.calls == [str(program)]
+    assert "deploy" in {command.command_id for command in store.read_local_cli_command_catalog(identity.cli_id)}
+    # The path is used for this load only; Guard still records no location.
+    assert _item(store, identity.cli_id)["source_path"] == "user-tool"
+
+
+def test_a_home_relative_script_path_is_expanded_before_it_is_quoted(tmp_path, script, probes):
+    identity, program = script
+    _, service = _service(tmp_path, identity)
+    try:
+        job = service.refresh_job(
+            {"cli_id": identity.cli_id, "confirm_process_start": True, "path": "~/tools/approve-merge.sh"}
+        )
+        assert _finished(service, job)["state"] == "complete"
+    finally:
+        assert service.close_discovery()
+    assert probes.calls == [str(program)]
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "code"),
+    [
+        ("tools/approve-merge.sh", 400, "cli_path_invalid"),
+        ("", 400, "cli_path_invalid"),
+        ("/tmp/x\n/bin/sh", 400, "cli_path_invalid"),
+        (7, 400, "cli_path_invalid"),
+        ("/nonexistent/approve-merge.sh", 400, "cli_path_not_found"),
+    ],
+)
+def test_a_path_that_names_no_runnable_file_runs_nothing(tmp_path, script, probes, path, status, code):
+    identity, _ = script
+    _, service = _service(tmp_path, identity)
+    try:
+        with pytest.raises(LocalCliApiError) as raised:
+            service.refresh_job({"cli_id": identity.cli_id, "confirm_process_start": True, "path": path})
+    finally:
+        assert service.close_discovery()
+    assert (raised.value.status, raised.value.code) == (status, code)
+    assert probes.calls == []
+
+
+def test_a_path_to_another_file_or_an_edited_one_is_not_run(tmp_path, script, probes):
+    identity, program = script
+    _, service = _service(tmp_path, identity)
+    other = program.with_name("other.sh")
+    other.write_text("#!/usr/bin/env bash\necho other\n", encoding="utf-8")
+    other.chmod(other.stat().st_mode | stat.S_IXUSR)
+    try:
+        for path in (other, program):
+            if path == program:
+                program.write_text("#!/usr/bin/env bash\necho edited\n", encoding="utf-8")
+            with pytest.raises(LocalCliApiError) as raised:
+                service.refresh_job({"cli_id": identity.cli_id, "confirm_process_start": True, "path": str(path)})
+            assert (raised.value.status, raised.value.code) == (409, "cli_identity_changed")
+    finally:
+        assert service.close_discovery()
+    assert probes.calls == []
+
+
+def test_a_script_probe_by_path_only_ever_asks_for_help(tmp_path, monkeypatch):
+    home = tmp_path / "operator"
+    tools = home / "tools"
+    tools.mkdir(parents=True)
+    acted = tmp_path / "acted"
+    program = tools / "approve-merge.sh"
+    program.write_text(
+        "#!/usr/bin/env bash\n"
+        'for arg in "$@"; do [ "$arg" = --help ] && helped=1; done\n'
+        f'[ -n "$helped" ] || {{ touch "{acted}"; exit 0; }}\n'
+        "printf 'Usage: approve-merge.sh <command>\\n\\nCommands:\\n  merge  Merge it\\n  check  Check it\\n'\n",
+        encoding="utf-8",
+    )
+    program.chmod(program.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("HOME", str(home))
+    identity, code, _ = recognize_operator_cli(str(program), cwd=home, home_dir=home)
+    assert identity is not None, code
+    store, service = _service(tmp_path, identity)
+    try:
+        job = service.refresh_job({"cli_id": identity.cli_id, "confirm_process_start": True, "path": str(program)})
+        assert _finished(service, job)["state"] == "complete"
+    finally:
+        assert service.close_discovery()
+    assert not acted.exists()
+    catalog = {command.command_id for command in store.read_local_cli_command_catalog(identity.cli_id)}
+    assert {"merge", "check"} <= catalog

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { DiscoveryFailure } from "../discovery-failure";
-import { LocalCliApiError, refreshMcpInventory, type LocalCliItem } from "../local-cli-api";
+import { LocalCliApiError, loadLocalCliCommands, type LocalCliItem } from "../local-cli-api";
 
 /** Job failures whose shared wording names connectors; a command-line tool gets its own. */
 const CLI_FAILURE_COPY: Record<string, string> = {
@@ -15,11 +15,27 @@ export function loadCommandsFailureMessage(caught: unknown): string {
   return "Guard could not load this tool's commands. Try again.";
 }
 
+const BARE_PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+const SCRIPT_SUFFIXES = new Set([
+  ".bash", ".bat", ".cmd", ".fish", ".js", ".mjs", ".cjs", ".ts", ".pl", ".ps1", ".py", ".rb", ".sh", ".zsh",
+]);
+
 /**
- * Reads a seen-in-use tool's --help on request, so its commands can be set
- * to Allow or Block one by one. The daemon only runs a program it finds on
- * PATH by name that is still the one it recorded; scripts are left to the
- * Add custom extension flow, which takes their full path.
+ * Whether the daemon needs the tool's full path to read its help. It looks
+ * up only a program named on PATH by itself; a script, or a file named like
+ * one, is never looked up, since Guard records no location for it.
+ */
+export function loadCommandsNeedsPath(item: Pick<LocalCliItem, "kind" | "name">): boolean {
+  const dot = item.name.lastIndexOf(".");
+  const suffix = dot > 0 ? item.name.slice(dot).toLowerCase() : "";
+  return item.kind !== "executable" || !BARE_PROGRAM_NAME.test(item.name) || SCRIPT_SUFFIXES.has(suffix);
+}
+
+/**
+ * Reads a recorded tool's --help on request, so its commands can be set to
+ * Allow or Block one by one. A program on PATH is found by name. A script is
+ * found by the full path the operator enters here; either way the daemon runs
+ * only the file it recorded.
  */
 export function LocalCliLoadCommands(props: {
   item: LocalCliItem;
@@ -27,9 +43,12 @@ export function LocalCliLoadCommands(props: {
   onLoaded: () => Promise<void>;
 }) {
   const { item, onLoaded } = props;
+  const pathId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [askPath, setAskPath] = useState(() => loadCommandsNeedsPath(item));
+  const [path, setPath] = useState("");
   const controllerRef = useRef<AbortController | null>(null);
   // The panel remounts this control for another tool or a changed program,
   // so unmounting aborts a load that belongs to the previous one.
@@ -42,41 +61,69 @@ export function LocalCliLoadCommands(props: {
     setError(null);
     setLoaded(false);
     try {
-      await refreshMcpInventory(item.cli_id, controller.signal);
+      await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? path.trim() : undefined);
       if (controller.signal.aborted) return;
       await onLoaded();
       setLoaded(true);
     } catch (caught) {
-      if (!controller.signal.aborted) setError(loadCommandsFailureMessage(caught));
+      if (controller.signal.aborted) return;
+      // Guard's PATH can differ from the agent's; the full path still works.
+      if (caught instanceof LocalCliApiError && caught.code === "cli_not_on_guard_path") setAskPath(true);
+      setError(loadCommandsFailureMessage(caught));
     } finally {
       setBusy(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [item.cli_id, onLoaded]);
+  }, [askPath, item.cli_id, onLoaded, path]);
 
-  if (item.kind !== "executable") {
-    return (
-      <p className="mt-3 max-w-2xl text-sm leading-6 text-brand-dark/75">
-        Guard does not run scripts on its own. To list this script&apos;s commands, find it again in Add custom
-        extension using its full path.
-      </p>
-    );
-  }
   // Root and other are Guard's own entries for every tool, not listed commands.
   const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
   return (
     <div className="mt-3 max-w-2xl" aria-busy={busy}>
       <p className="text-sm leading-6 text-brand-dark/75">
-        Guard runs <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">{item.name} --help</code> from an empty temporary
-        folder, then the same for each command it lists. A program that ignores --help may do its normal work
-        instead, so load commands only for tools you trust. Loading adds commands and never changes a choice you
-        already made.
+        {askPath ? (
+          <>
+            Guard does not record where {item.name} is saved. Enter its full path, and Guard runs it with{" "}
+            <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">--help</code>{" "}
+            from an empty temporary folder, then the same for each command it lists. It runs the file only if it is
+            the one Guard recorded. A script that ignores --help may do its normal work instead, so load commands
+            only for scripts you trust.
+          </>
+        ) : (
+          <>
+            Guard runs <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">{item.name} --help</code> from an empty temporary
+            folder, then the same for each command it lists. A program that ignores --help may do its normal work
+            instead, so load commands only for tools you trust.
+          </>
+        )}{" "}
+        Loading adds commands and never changes a choice you already made.
       </p>
+      {askPath ? (
+        <>
+          <label htmlFor={pathId} className="mt-3 block text-sm font-semibold text-brand-dark">
+            Full path to {item.name}
+          </label>
+          <input
+            id={pathId}
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && path.trim() !== "" && !busy && !props.disabled) void load();
+            }}
+            disabled={busy}
+            spellCheck={false}
+            autoComplete="off"
+            maxLength={4096}
+            placeholder={`/path/to/${item.name}`}
+            className="mt-2 min-h-11 w-full max-w-xl rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-brand-dark placeholder:text-brand-dark/70 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+          />
+        </>
+      ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={() => void load()}
-          disabled={props.disabled || busy}
+          disabled={props.disabled || busy || (askPath && path.trim() === "")}
           className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark disabled:cursor-wait disabled:opacity-50"
         >
           {busy ? "Loading commands…" : hasCommands ? "Check for new commands" : "Load commands"}

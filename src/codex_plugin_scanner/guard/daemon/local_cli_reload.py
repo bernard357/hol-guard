@@ -5,12 +5,13 @@ identity, but their ``--help`` is never read, so they list no commands to
 allow or block. This module reads that help on the operator's request, with
 the same probe the Add custom extension flow uses, under tighter conditions:
 
-* only a program found on ``PATH`` by its bare name, never a script launched
-  through an interpreter, a package runner, or a file named like a personal
-  script (``deploy.sh``), since a script is the likeliest thing to ignore
-  ``--help`` and do its real work;
-* only when the program ``PATH`` resolves to today is the same one Guard
-  recorded: the same id and identity hash. A replaced binary is not probed;
+* a program is found on ``PATH`` by its bare name. A script, or a file named
+  like one (``deploy.sh``), is never looked up on its own: Guard records no
+  path for it, and a script is the likeliest thing to ignore ``--help`` and do
+  its real work. The operator gives its full path instead, as Add custom
+  extension asks;
+* either way, only when the file found today is the same one Guard recorded:
+  the same id and identity hash. A replaced or edited file is not probed;
 * new commands are merged onto the stored ones, so a probe can never remove a
   command or the choice the operator already made for it, and a failed probe
   changes nothing;
@@ -22,10 +23,11 @@ the same probe the Add custom extension flow uses, under tighter conditions:
 from __future__ import annotations
 
 import re
+import shlex
 import threading
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from ..local_cli_errors import LocalCliCatalogLimitError
 from ..local_cli_trust import utc_now
@@ -73,25 +75,41 @@ _SCRIPT_SUFFIXES = frozenset(
 )
 
 
-def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> UnlistedCliIdentity:
-    """Return the stored tool's identity, re-derived from ``PATH``, or refuse.
+class ReloadTarget(NamedTuple):
+    """A recorded tool and the command Guard reads its --help through."""
+
+    identity: UnlistedCliIdentity
+    command: str
+
+
+_MAX_PATH_LENGTH = 4096
+
+
+def verified_cli_for_reload(
+    item: Mapping[str, object],
+    *,
+    home_dir: Path,
+    path: object = None,
+) -> ReloadTarget:
+    """Return the stored tool's identity, re-derived from ``PATH`` or ``path``, or refuse.
 
     No process starts here. Refusals carry a message the dashboard shows as is.
     """
 
     name = item.get("name")
+    label = name if isinstance(name, str) and name else "this tool"
+    if path is not None:
+        return _verified_at_path(item, label, path, home_dir=home_dir)
     if (
         item.get("kind") != "executable"
         or not isinstance(name, str)
         or _BARE_PROGRAM_NAME.fullmatch(name) is None
         or Path(name).suffix.lower() in _SCRIPT_SUFFIXES
     ):
-        label = name if isinstance(name, str) and name else "this tool"
         raise LocalCliApiError(
             400,
             "cli_reload_needs_path",
-            f"Guard does not run {label} on its own because it looks like a script. "
-            "If it prints help for --help, find it again in Add custom extension using its full path.",
+            f"Guard does not record where {label} is saved. Enter its full path to load its commands.",
         )
     identity, _, _ = recognize_operator_cli(name, cwd=home_dir, home_dir=home_dir)
     if identity is None:
@@ -101,10 +119,50 @@ def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> Un
             409,
             "cli_not_on_guard_path",
             f"Guard cannot find {name} on its own PATH, which can differ from your agent's. "
-            "Find it again in Add custom extension using its full path.",
+            "Enter its full path to load its commands.",
         )
+    _require_recorded(item, identity, label, found_on="Guard finds on its PATH")
+    return ReloadTarget(identity, name)
+
+
+def _verified_at_path(item: Mapping[str, object], label: str, path: object, *, home_dir: Path) -> ReloadTarget:
     if (
-        identity.kind != "executable"
+        not isinstance(path, str)
+        or not path.strip()
+        or len(path) > _MAX_PATH_LENGTH
+        or any(character in path for character in "\x00\r\n")
+    ):
+        raise LocalCliApiError(400, "cli_path_invalid", f"Enter the full path to {label}.")
+    location = path.strip()
+    if not (location.startswith("/") or location.startswith("~/") or Path(location).is_absolute()):
+        raise LocalCliApiError(
+            400,
+            "cli_path_invalid",
+            f"Enter the full path to {label}, starting with / or ~/.",
+        )
+    # Quoting keeps a path with spaces whole, but would also stop ``~`` from
+    # expanding, so the home directory is filled in first.
+    resolved = str(home_dir / location[2:]) if location.startswith("~/") else location
+    command = shlex.quote(resolved)
+    interpreter = item.get("interpreter_name")
+    if item.get("kind") == "script" and isinstance(interpreter, str) and interpreter:
+        # A script recorded through its interpreter keeps that launch, or it
+        # would be found again as a different tool.
+        command = f"{shlex.quote(interpreter)} {command}"
+    identity, _, _ = recognize_operator_cli(command, cwd=home_dir, home_dir=home_dir)
+    if identity is None:
+        raise LocalCliApiError(
+            400,
+            "cli_path_not_found",
+            f"Guard cannot find a program it can run at {location}. Check the path and try again.",
+        )
+    _require_recorded(item, identity, label, found_on="at this path")
+    return ReloadTarget(identity, command)
+
+
+def _require_recorded(item: Mapping[str, object], identity: UnlistedCliIdentity, label: str, *, found_on: str) -> None:
+    if (
+        identity.kind != item.get("kind")
         or identity.runner is not None
         or identity.cli_id != item.get("cli_id")
         or identity.identity_hash != item.get("identity_hash")
@@ -112,28 +170,28 @@ def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> Un
         raise LocalCliApiError(
             409,
             "cli_identity_changed",
-            f"The {name} Guard finds on its PATH is not the one it recorded: it is another copy, "
-            "or the program changed. Find it again in Add custom extension using its full path.",
+            f"The {label} {found_on} is not the one Guard recorded. It is another file, or it has changed "
+            "since Guard last saw it.",
         )
-    return identity
 
 
 def load_cli_commands(
     store: GuardStore,
-    identity: UnlistedCliIdentity,
+    target: ReloadTarget,
     *,
     discover: DiscoverCommands,
     home_dir: Path,
     guard_home: Path,
     cancel: threading.Event,
 ) -> None:
-    """Read ``identity``'s --help and add any new commands to its catalog."""
+    """Read the target's --help and add any new commands to its catalog."""
 
-    # The probe re-resolves the name and only runs a program whose id, kind
+    identity = target.identity
+    # The probe re-resolves the command and only runs a program whose id, kind
     # and identity hash still match, so a binary swapped after the check
     # above is not run.
     # A cancel also stops the probe from starting any further --help runs.
-    commands, help_status, _ = discover(identity.name, identity, home_dir, home_dir, guard_home, cancel=cancel)
+    commands, help_status, _ = discover(target.command, identity, home_dir, home_dir, guard_home, cancel=cancel)
     if cancel.is_set():
         return
     if help_status == "failed":

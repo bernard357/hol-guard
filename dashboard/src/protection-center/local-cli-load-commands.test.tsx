@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { DiscoveryFailure } from "../discovery-failure";
 import { LocalCliApiError, normalizeLocalCliItem } from "../local-cli-api";
-import { LocalCliLoadCommands, loadCommandsFailureMessage } from "./local-cli-load-commands";
+import { LocalCliLoadCommands, loadCommandsFailureMessage, loadCommandsNeedsPath } from "./local-cli-load-commands";
 
 const raw = {
   cli_id: "local-cli.lanectl-abcdef12",
@@ -48,11 +48,23 @@ assert.match(synthetic, />Load commands</);
 // The action follows the panel's busy state.
 assert.match(render(raw, true), /<button[^>]*disabled=""/);
 
-// A script is never offered a load: Guard points to the full-path flow instead.
-const script = render({ ...raw, kind: "script" });
-assert.doesNotMatch(script, /<button/);
-assert.match(script, /Guard does not run scripts on its own/);
-assert.match(script, /Add custom extension using its full path/);
+// A script loads from the full path the operator enters, on the extension page itself.
+for (const scriptLike of [{ ...raw, kind: "script" }, { ...raw, name: "approve-merge.sh" }, { ...raw, name: "release.PY" }]) {
+  const script = render(scriptLike);
+  assert.match(script, /Guard does not record where/);
+  assert.match(script, />Full path to /);
+  assert.match(script, /<input[^>]*placeholder="\/path\/to\//);
+  assert.match(script, /only if it is the one Guard recorded/);
+  assert.match(script, /load commands only for scripts you trust/);
+  // With no path entered yet there is nothing to run.
+  assert.match(script, /<button[^>]*disabled=""[^>]*>Load commands</);
+  assert.doesNotMatch(script, /Add custom extension/);
+}
+assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "lanectl" }), false);
+assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "pr-approve-merge.sh" }), true);
+assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "-lanectl" }), true);
+assert.equal(loadCommandsNeedsPath({ kind: "script", name: "lanectl" }), true);
+assert.doesNotMatch(empty, /Full path to/);
 
 // Shared job failures that name connectors get tool wording; others pass through.
 assert.match(loadCommandsFailureMessage(new DiscoveryFailure("catalog_limit_reached", "connector text")), /lists more commands than Guard can keep/);
