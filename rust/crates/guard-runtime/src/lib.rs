@@ -271,6 +271,7 @@ mod directory_trust;
 mod discovery_placement_op;
 mod edge;
 mod edge_git_push;
+mod edge_structured;
 mod encrypted_secret_store;
 mod extension_allow_hint_op;
 mod extension_control_authority_op;

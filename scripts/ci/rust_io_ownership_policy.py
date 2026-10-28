@@ -246,13 +246,6 @@ _TRANSPORT_DECODE_PATHS: Final = frozenset(
         "src/codex_plugin_scanner/guard/native_context.py",
     }
 )
-_STRUCTURED_OUTPUT_MEDIATION_PATHS: Final = frozenset(
-    {
-        "src/codex_plugin_scanner/guard/runtime/secret_sensitivity.py",
-        "src/codex_plugin_scanner/guard/runtime/structured_data_sensitivity.py",
-        "src/codex_plugin_scanner/guard/runtime/structured_output_mediation.py",
-    }
-)
 _ASYNC_POLICY_PATHS: Final = frozenset(
     {
         "src/codex_plugin_scanner/guard/mdm/policy.py",

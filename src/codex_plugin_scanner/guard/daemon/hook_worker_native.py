@@ -18,13 +18,6 @@ from ..native_resident_client import (
 )
 from ..native_resident_revival import native_unavailable_reason
 from ..native_runtime import NativeRuntimeStatus
-from ..runtime.structured_output_mediation import (
-    StructuredContentMediation,
-    StructuredOutputResolution,
-    canonical_harness_name,
-    mediate_native_post_tool_content,
-    resolve_managed_structured_output_resolution,
-)
 from .hook_availability_policy import availability_harness_response
 from .hook_contained_grant import granted_containment_response
 from .hook_evidence_dispatch import run_hook_evidence
@@ -40,6 +33,13 @@ from .hook_worker_native_review import (
     NativePolicyBindingRefreshError,
     review_native_edge,
     superseded_post_tool_snapshot,
+)
+from .hook_worker_structured import (
+    read_structured_view,
+    structured_destination_required,
+    withhold_stale_forward,
+    withhold_structured_destination,
+    withholds_structured_destination,
 )
 
 
@@ -91,47 +91,6 @@ class _HookWorkerNativeHost(Protocol):
     _apply_structured_unavailable_overlay: Callable[..., dict[str, object]]
 
     def _load_config(self, guard_home: Path, workspace: Path | None) -> GuardConfig: ...
-
-    def _apply_structured_mediation(
-        self,
-        native_result: Mapping[str, object],
-        *,
-        payload: Mapping[str, object],
-        native_harness: str,
-        native_event: str,
-        accepted_receipt: Mapping[str, object] | None,
-        guard_home: Path,
-        workspace: Path | None,
-        deadline: float | None,
-        recording_only: bool,
-    ) -> dict[str, object]: ...
-
-    def _structured_output_resolution(
-        self,
-        *,
-        guard_home: Path,
-        workspace: Path | None,
-        harness: str,
-    ) -> StructuredOutputResolution: ...
-
-
-def withholds_structured_destination(*, harness: str, event_name: str) -> bool:
-    """Return whether this hook can carry a managed structured destination."""
-
-    return event_name == "PostToolUse" and canonical_harness_name(harness) in {"pi", "omp"}
-
-
-def withhold_structured_destination(response: dict[str, object]) -> dict[str, object]:
-    """Withhold the structured destination on an answer without native proof."""
-
-    return {
-        **response,
-        "structured_content_mediation": StructuredContentMediation(
-            action="withhold",
-            reason_code="structured_native_edge_unavailable",
-            native_decision_id=None,
-        ).to_harness_json(),
-    }
 
 
 def _record_native_pre_activity(
@@ -250,87 +209,6 @@ class HookWorkerNativeMixin:
 
     _last_native_decision_receipt: dict[str, object] | None = None
 
-    def _structured_output_resolution(
-        self: _HookWorkerNativeHost,
-        *,
-        guard_home: Path,
-        workspace: Path | None,
-        harness: str,
-    ) -> StructuredOutputResolution:
-        """Resolve managed output only for post-native presentation.
-
-        This helper must run after the Rust edge has returned. Structured output
-        is an adapter projection and cannot participate in the native decision
-        or its availability floor.
-        """
-
-        loader = getattr(self, "_load_config", None)
-        if not callable(loader):
-            return StructuredOutputResolution(None, True, "structured_managed_authority_unavailable")
-        try:
-            config = loader(guard_home, workspace)
-            if config is None:
-                return StructuredOutputResolution(None, True, "structured_managed_authority_unavailable")
-            return resolve_managed_structured_output_resolution(config, harness=harness)
-        except Exception:
-            # A config read failure cannot establish whether the managed route
-            # is enrolled.  Keep the model-visible destination fail-closed.
-            return StructuredOutputResolution(None, True, "structured_managed_authority_unavailable")
-
-    def _apply_structured_mediation(
-        self: _HookWorkerNativeHost,
-        native_result: Mapping[str, object],
-        *,
-        payload: Mapping[str, object],
-        native_harness: str,
-        native_event: str,
-        accepted_receipt: Mapping[str, object] | None,
-        guard_home: Path,
-        workspace: Path | None,
-        deadline: float | None,
-        recording_only: bool,
-    ) -> dict[str, object]:
-        """Project managed structured mediation after Rust has decided."""
-
-        if native_event != "PostToolUse" or canonical_harness_name(native_harness) not in {"pi", "omp"}:
-            return dict(native_result)
-        # Native denials have no model-visible content to project.
-        if native_result.get("decision") != "allow":
-            return dict(native_result)
-        resolution = self._structured_output_resolution(
-            guard_home=guard_home,
-            workspace=workspace,
-            harness=native_harness,
-        )
-        if not resolution.required:
-            return dict(native_result)
-        mediation = mediate_native_post_tool_content(
-            harness=native_harness,
-            event_name=native_event,
-            native_result=native_result,
-            validated_receipt=accepted_receipt,
-            structured_output_json=payload.get("structured_output_json"),
-            binding=resolution.binding,
-            required_reason_code=resolution.reason_code,
-            # This second read is a revocation/binding check after scanning;
-            # reusing the initial resolution would permit a stale forward.
-            recheck_binding=lambda: (
-                self._structured_output_resolution(
-                    guard_home=guard_home,
-                    workspace=workspace,
-                    harness=native_harness,
-                ).binding
-            ),
-            deadline_monotonic=deadline,
-            allow_observe_mode=recording_only,
-        )
-        if mediation is None:
-            return dict(native_result)
-        return {
-            **native_result,
-            "structured_content_mediation": mediation.to_harness_json(),
-        }
-
     def _apply_structured_unavailable_overlay(
         self: _HookWorkerNativeHost,
         response: dict[str, object],
@@ -339,7 +217,7 @@ class HookWorkerNativeMixin:
         event_name: str,
         guard_home: Path,
         workspace: Path | None,
-        resolution: StructuredOutputResolution | None = None,
+        view: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         """Withhold a managed structured destination when native proof is absent.
 
@@ -350,14 +228,10 @@ class HookWorkerNativeMixin:
 
         if not withholds_structured_destination(harness=harness, event_name=event_name):
             return response
-        # Unavailable-edge callers supply their one resolution. The successful
-        # edge uses a separate initial read and a post-scan revocation check.
-        resolved = resolution or self._structured_output_resolution(
-            guard_home=guard_home,
-            workspace=workspace,
-            harness=harness,
-        )
-        if not resolved.required:
+        # A caller that already read the managed policy for this hook passes
+        # that view; the edge never answered, so nothing resolved it.
+        resolved = view if view is not None else read_structured_view(lambda: self._load_config(guard_home, workspace))
+        if not structured_destination_required(resolved, harness=harness):
             return response
         return withhold_structured_destination(response)
 
@@ -417,6 +291,14 @@ class HookWorkerNativeMixin:
         # Worker threads are reused, so clear any failure code left by an
         # earlier request before this review can report its own.
         record_native_resident_client_failure_code(None)
+        # The edge mediates a managed structured destination itself, from the
+        # managed policy only this daemon reads. It is read once, ahead of the
+        # call, and does not depend on the native decision.
+        structured_view = (
+            read_structured_view(lambda: self._load_config(guard_home, workspace))
+            if withholds_structured_destination(harness=harness, event_name=event_name)
+            else None
+        )
         for retried in (False, True):
             edge = self._review_raw_hook_native(
                 payload=payload,
@@ -431,6 +313,7 @@ class HookWorkerNativeMixin:
                 policy_snapshot=policy_snapshot,
                 **({"request_id": probe[1]} if probe is not None else {}),
                 local_cli_rules=True,
+                **({"structured_output_config": structured_view} if structured_view is not None else {}),
             )
             refreshed = (
                 None
@@ -472,15 +355,6 @@ class HookWorkerNativeMixin:
                 "PostToolUse": "native_post_tool_unavailable",
                 "PreToolUse": "native_pre_tool_unavailable",
             }.get(event_name, "native_hook_event_unavailable")
-            structured_resolution = (
-                self._structured_output_resolution(
-                    guard_home=guard_home,
-                    workspace=workspace,
-                    harness=harness,
-                )
-                if event_name == "PostToolUse" and canonical_harness_name(harness) in {"pi", "omp"}
-                else StructuredOutputResolution(None, False)
-            )
             return (
                 self._apply_structured_unavailable_overlay(
                     _record_unavailable_native(
@@ -495,7 +369,7 @@ class HookWorkerNativeMixin:
                     event_name=event_name,
                     guard_home=guard_home,
                     workspace=workspace,
-                    resolution=structured_resolution,
+                    view=structured_view,
                 ),
                 False,
             )
@@ -503,15 +377,6 @@ class HookWorkerNativeMixin:
         native_harness = str(edge["harness"])
         native_result = edge["result"]
         if not isinstance(native_result, Mapping):
-            structured_resolution = (
-                self._structured_output_resolution(
-                    guard_home=guard_home,
-                    workspace=workspace,
-                    harness=harness,
-                )
-                if event_name == "PostToolUse" and canonical_harness_name(harness) in {"pi", "omp"}
-                else StructuredOutputResolution(None, False)
-            )
             return (
                 self._apply_structured_unavailable_overlay(
                     _record_unavailable_native(
@@ -526,7 +391,7 @@ class HookWorkerNativeMixin:
                     event_name=event_name,
                     guard_home=guard_home,
                     workspace=workspace,
-                    resolution=structured_resolution,
+                    view=structured_view,
                 ),
                 False,
             )
@@ -650,26 +515,19 @@ class HookWorkerNativeMixin:
                 ),
                 True,
             )
-        mediated = self._apply_structured_mediation(
-            native_result,
-            payload=payload,
-            native_harness=native_harness,
-            native_event=native_event,
-            accepted_receipt=accepted_receipt,
-            guard_home=guard_home,
-            workspace=workspace,
-            deadline=deadline,
-            recording_only=recording_only,
-        )
         self._record_post_tool_activity(
             harness=native_harness,
             payload=payload,
             succeeded=hook_post_succeeded(native_event, payload),
         )
         response = _edge_harness_response(edge)
-        mediation = mediated.get("structured_content_mediation")
-        if mediation is not None and mediation != native_result.get("structured_content_mediation"):
-            response["structured_content_mediation"] = mediation
+        if structured_view is not None:
+            response = withhold_stale_forward(
+                response,
+                view=structured_view,
+                load_config=lambda: self._load_config(guard_home, workspace),
+                deadline=deadline,
+            )
         return (response, True)
 
     def _record_native_decision_receipt(self: _HookWorkerNativeHost, receipt: object) -> Mapping[str, object] | None:

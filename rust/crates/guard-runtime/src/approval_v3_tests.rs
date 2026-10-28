@@ -174,6 +174,7 @@ fn store_and_envelope_with_runtime(
         },
         recording_only: false,
         local_cli_rules: None,
+        structured_output_config: None,
     };
     (root, store, envelope)
 }

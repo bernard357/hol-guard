@@ -159,6 +159,7 @@ class HookWorker(HookWorkerNativeMixin):
         policy_snapshot: Mapping[str, object] | None = None,
         request_id: str | None = None,
         local_cli_rules: bool = False,
+        structured_output_config: Mapping[str, object] | None = None,
     ) -> dict[str, object] | None:
         runtime_status = self._native_runtime_status()
         store_path = getattr(self.store, "path", None)
@@ -182,6 +183,7 @@ class HookWorker(HookWorkerNativeMixin):
                 if local_cli_rules and isinstance(store_path, Path)
                 else None
             ),
+            structured_output_config=structured_output_config,
         )
 
     def _native_runtime_status(self) -> NativeRuntimeStatus:
