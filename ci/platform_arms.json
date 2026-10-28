@@ -899,14 +899,6 @@
    "body": "a03b7f1733a8"
   },
   {
-   "file": "rust/crates/guard-runtime/src/codex_tool_output_op.rs",
-   "item": "fn attachment_reader( &self, attachment_root: &str, relative: &[String], max_bytes: u64, ) -> Option<Box<dyn std::io::Read + '_>>",
-   "verdict": "windows-equivalent",
-   "note": "Without `openat` the walk cannot be descriptor-relative, so the path is resolved once and required to stay under the resolved attachment root, with the same `.`/`..`/empty rejections.",
-   "cfg": "not(unix)",
-   "body": "9fa0c0329ba5"
-  },
-  {
    "verdict": "posix-primitive",
    "note": "`//host/share` as a POSIX double-slash root is a Unix path concept; a Windows UNC path is handled by the component reader instead, so the arm is correctly false there.",
    "file": "rust/crates/guard-runtime/src/compound_git_paths.rs",
