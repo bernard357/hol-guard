@@ -53,6 +53,7 @@ fn deep_nesting_stops_at_the_script_budget() {
     assert!(!screen_script(&nested(MAX_SCRIPTS)).remote_code);
 }
 
+#[cfg(unix)]
 fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
