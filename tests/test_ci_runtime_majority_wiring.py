@@ -165,6 +165,16 @@ def test_a_loop_over_a_literal_table_resolves_by_tuple_position(tmp_path: Path) 
     assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == _BOTH_BRANCHES
 
 
+def test_a_comprehension_over_a_literal_table_resolves(tmp_path: Path) -> None:
+    root = (
+        "from importlib import import_module\n\n"
+        '_SPECS: tuple[str, ...] = (".plugin", ".fallback")\n\n\n'
+        "def build():\n"
+        "    return [import_module(module_name, __package__) for module_name in _SPECS]\n"
+    )
+    assert _in_scope(_resolved(tmp_path, root, "plugin", "fallback")) == _BOTH_BRANCHES
+
+
 def test_a_private_helper_resolves_from_its_literal_call_sites(tmp_path: Path) -> None:
     root = (
         "from importlib import import_module\n\n\n"
@@ -244,6 +254,21 @@ def test_an_argument_the_source_leaves_open_still_needs_a_declaration(tmp_path: 
         # A parameter shadows the module-level name it spells, and any caller
         # anywhere can pass it anything.
         'MODULE = ".plugin"\n\n\ndef load(MODULE):\n    return import_module(MODULE, __package__)\n',
+        # A comprehension target is the comprehension's own name, so the
+        # module-level literal spelled the same way is not what it holds.
+        'module_name = ".plugin"\n\n\n'
+        "def build(values):\n"
+        "    return [import_module(module_name, __package__) for module_name in values]\n",
+        # The same inside a generator expression, where the enclosing function
+        # rather than the module supplies the literal of that spelling.
+        "def build(values):\n"
+        '    module_name = ".plugin"\n'
+        "    return tuple(import_module(module_name, __package__) for module_name in values)\n",
+        # A later generator walks a name an earlier one bound, so the module
+        # table of that spelling is not the table it iterates.
+        '_SPECS = ((".plugin",),)\n\n\n'
+        "def build(rows):\n"
+        "    return [import_module(name, __package__) for _SPECS in rows for name in _SPECS]\n",
     ],
 )
 def test_a_name_the_source_can_point_elsewhere_still_needs_a_declaration(tmp_path: Path, source: str) -> None:

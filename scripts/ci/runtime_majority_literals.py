@@ -113,15 +113,15 @@ def literal_tables(tree: ast.Module) -> dict[str, list[ast.expr]]:
     return tables
 
 
-def _target_names(node: ast.expr) -> Iterator[str]:
+def target_names(node: ast.expr) -> Iterator[str]:
     """Every name one assignment target binds, unpacking tuples and stars."""
     if isinstance(node, ast.Name):
         yield node.id
     elif isinstance(node, ast.Starred):
-        yield from _target_names(node.value)
+        yield from target_names(node.value)
     elif isinstance(node, (ast.Tuple, ast.List)):
         for item in node.elts:
-            yield from _target_names(item)
+            yield from target_names(item)
 
 
 def scope_bindings(body: list[ast.stmt], params: Iterable[str] = ()) -> tuple[dict[str, int], dict[str, int]]:
@@ -161,16 +161,16 @@ def scope_bindings(body: list[ast.stmt], params: Iterable[str] = ()) -> tuple[di
         if isinstance(node, ast.Assign):
             single = len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
             for target in node.targets:
-                for name in _target_names(target):
+                for name in target_names(target):
                     bump(name, is_plain=single)
         elif isinstance(node, ast.AnnAssign):
-            for name in _target_names(node.target):
+            for name in target_names(node.target):
                 bump(name, is_plain=node.value is not None)
         elif isinstance(node, (ast.AugAssign, ast.For, ast.AsyncFor, ast.NamedExpr)):
-            for name in _target_names(node.target):
+            for name in target_names(node.target):
                 bump(name)
         elif isinstance(node, ast.withitem) and node.optional_vars is not None:
-            for name in _target_names(node.optional_vars):
+            for name in target_names(node.optional_vars):
                 bump(name)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             bump(node.name)
@@ -182,7 +182,7 @@ def scope_bindings(body: list[ast.stmt], params: Iterable[str] = ()) -> tuple[di
                 bump(name)
         elif isinstance(node, ast.Delete):
             for target in node.targets:
-                for name in _target_names(target):
+                for name in target_names(target):
                     bump(name)
         elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
             bump(node.name)

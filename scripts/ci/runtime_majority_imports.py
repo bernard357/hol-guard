@@ -26,8 +26,11 @@ from scripts.ci.runtime_majority_literals import (
     literal_strings,
     literal_tables,
     scope_bindings,
+    target_names,
     wrapper_literals,
 )
+
+_Comprehension = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
 
 
 @dataclass
@@ -199,25 +202,28 @@ class ImportCollector(ast.NodeVisitor):
         if node.value is not None:
             self._bind(node.target, node.value)
 
-    def _loop_bindings(self, node: ast.For | ast.AsyncFor) -> dict[str, set[str] | None]:
-        """Loop variables drawn from a literal table, resolved by tuple position."""
-        if isinstance(node.iter, ast.Name):
+    def _iterated_values(self, iterated: ast.expr, target: ast.expr) -> dict[str, set[str] | None]:
+        """What iterating ``iterated`` leaves in ``target``, by tuple position.
+
+        A name the source does not fix to a literal table, or a target shape the
+        table's rows do not match, resolves nothing and is left out entirely.
+        """
+        if isinstance(iterated, ast.Name):
             # A function-scope name of the same spelling is what the loop
             # actually iterates, and its elements are not the module table's.
-            elements = None if self._shadowed(node.iter.id) else self._tables.get(node.iter.id)
-        elif isinstance(node.iter, (ast.Tuple, ast.List)):
-            elements = list(node.iter.elts)
+            elements = None if self._shadowed(iterated.id) else self._tables.get(iterated.id)
+        elif isinstance(iterated, (ast.Tuple, ast.List)):
+            elements = list(iterated.elts)
         else:
             elements = None
         if not elements:
             return {}
-        if isinstance(node.target, ast.Name):
-            values = column_values([literal_strings(element, {}) for element in elements])
-            return {node.target.id: self._loop_value(node.target.id, values)}
-        if not isinstance(node.target, ast.Tuple):
+        if isinstance(target, ast.Name):
+            return {target.id: column_values([literal_strings(element, {}) for element in elements])}
+        if not isinstance(target, ast.Tuple):
             return {}
-        targets = [item for item in node.target.elts if isinstance(item, ast.Name)]
-        if len(targets) != len(node.target.elts):
+        targets = [item for item in target.elts if isinstance(item, ast.Name)]
+        if len(targets) != len(target.elts):
             return {}
         width = len(targets)
         columns: list[list[set[str] | None]] = [[] for _ in range(width)]
@@ -226,10 +232,61 @@ class ImportCollector(ast.NodeVisitor):
                 return {}
             for index, item in enumerate(element.elts):
                 columns[index].append(literal_strings(item, {}))
-        return {
-            name.id: self._loop_value(name.id, column_values(column))
-            for name, column in zip(targets, columns, strict=True)
-        }
+        return {name.id: column_values(column) for name, column in zip(targets, columns, strict=True)}
+
+    def _loop_bindings(self, node: ast.For | ast.AsyncFor) -> dict[str, set[str] | None]:
+        """Loop variables drawn from a literal table, resolved by tuple position."""
+        resolved = self._iterated_values(node.iter, node.target)
+        return {name: self._loop_value(name, values) for name, values in resolved.items()}
+
+    def _comprehension_bindings(self, node: _Comprehension) -> dict[str, set[str] | None]:
+        """Every name a comprehension's generators bind, and what each holds.
+
+        Unlike a loop's, these names belong to the comprehension alone, so one
+        the source leaves open is bound here to nothing rather than left out:
+        leaving it out would let an enclosing binding of the same spelling
+        answer for it.
+        """
+        scope: dict[str, set[str] | None] = {}
+        for generator in node.generators:
+            iterated = generator.iter
+            if isinstance(iterated, ast.Name) and iterated.id in scope:
+                # An earlier generator binds the name this one iterates, so a
+                # module table of the same spelling is not what it walks.
+                resolved: dict[str, set[str] | None] = {}
+            else:
+                resolved = self._iterated_values(iterated, generator.target)
+            for name in target_names(generator.target):
+                scope[name] = resolved.get(name)
+        return scope
+
+    def _visit_comprehension(self, node: _Comprehension) -> None:
+        """Read a comprehension with its targets bound in a scope of its own.
+
+        A comprehension's targets are not the enclosing scope's names, so a
+        module-level or function-level literal spelled the same way says nothing
+        about what the element expression reads. Without this scope a dynamic
+        import inside the comprehension resolves to that outer literal, is
+        recorded as a fixed edge, and never counts as unresolved -- the silent
+        mis-resolution the scope contract exists to prevent. Only the first
+        generator's iterable is evaluated outside the comprehension.
+        """
+        self.visit(node.generators[0].iter)
+        self._push(self._comprehension_bindings(node), None)
+        for index, generator in enumerate(node.generators):
+            if index:
+                self.visit(generator.iter)
+            for test in generator.ifs:
+                self.visit(test)
+        for child in (getattr(node, "elt", None), getattr(node, "key", None), getattr(node, "value", None)):
+            if child is not None:
+                self.visit(child)
+        self._pop()
+
+    visit_ListComp = _visit_comprehension  # noqa: N815
+    visit_SetComp = _visit_comprehension  # noqa: N815
+    visit_DictComp = _visit_comprehension  # noqa: N815
+    visit_GeneratorExp = _visit_comprehension  # noqa: N815
 
     def _loop_value(self, name: str, values: set[str] | None) -> set[str] | None:
         """The loop's own values, unless the scope binds the target elsewhere."""
