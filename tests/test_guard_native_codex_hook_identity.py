@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import cast
@@ -169,6 +170,46 @@ def test_a_batch_too_large_for_one_reply_splits_in_order(monkeypatch: pytest.Mon
     assert [answer["argv"] for answer in answers] == [[entry["command"]] for entry in entries]
     assert len(sent) > 1
     assert sum(len(request["entries"]) for request in sent) == len(entries)
+
+
+def test_a_source_with_many_short_handlers_splits_before_its_reply_outgrows_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thousands of short commands keep the request small but not the reply."""
+
+    sent = _resident(
+        monkeypatch, lambda request: {"identities": [{"records": [], "issues": []} for _ in request["entries"]]}
+    )
+    handlers = [{"type": "command", "command": f"{index:04d}" + "x" * 96} for index in range(1500)]
+    groups = [{"matcher": "Bash", "hooks": [handler]} for handler in handlers]
+    entries = [_inventory_entry(hooks={event: groups}) for event in ("PreToolUse", "PostToolUse")]
+    bridge.native_codex_hook_identity(entries, required_feature=bridge.CODEX_HOOK_INVENTORY_FEATURE)
+    assert len(sent) == 2
+    assert all(len(json.dumps(request)) < bridge._SPLIT_REQUEST_BYTES for request in sent)
+
+
+def test_the_reply_estimate_covers_a_real_inventory_record() -> None:
+    """Shaped like ``record_json`` in the resident's inventory walk."""
+
+    command = "node ./hooks/guard.js --event pre-tool-use"
+    group = {"matcher": "Bash|Edit", "hooks": [{"type": "command", "command": command, "timeout": 30}]}
+    record = {
+        "event_name": "PreToolUse",
+        "group_index": 4095,
+        "handler_index": 0,
+        "matcher": "Bash|Edit",
+        "handler_type": "command",
+        "command": command,
+        "command_argv": command.split(),
+        "timeout": 30,
+        "environment_keys": [],
+        "active": True,
+        "executable": True,
+        "ownership": "authenticated",
+        "canonical_identity": "f" * 64,
+    }
+    wire = {"kind": "inventory", "events": [["PreToolUse", [group]]]}
+    assert bridge._reply_estimate([wire]) - 2 * len(json.dumps(wire)) >= len(json.dumps(record))
 
 
 def test_an_argv_answer_of_null_is_not_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:

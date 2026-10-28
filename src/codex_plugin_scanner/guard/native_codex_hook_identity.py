@@ -64,9 +64,17 @@ _MAX_DEFINITION_DEPTH = 29
 # ownership binding sits one level inside its list.
 _EVENT_GROUPS_DEPTH = 3
 _BINDING_DEPTH = 2
-# A batch bigger than this is split in two. A reply repeats each handler's
-# command, so this keeps the answer under the resident's 2 MiB reply limit.
+# A batch is split in two when its request passes this size or its estimated
+# reply passes the reply budget, which leaves headroom under the resident's
+# 2 MiB reply limit. An inventory record repeats its handler's command (as
+# ``command`` and again split into ``command_argv``) and its group's matcher,
+# and adds field names, flags and a 64-hex identity, so the estimate charges
+# each handler that much on top of the overhead below. One event is the
+# smallest unit a source splits into; an event too large for one reply fails
+# closed like any other unavailable answer.
 _SPLIT_REQUEST_BYTES = 1024 * 1024
+_REPLY_BUDGET_BYTES = 1536 * 1024
+_RECORD_OVERHEAD_BYTES = 512
 _BINDING_KEYS = ("authenticated_bindings", "legacy_bindings", "self_bindings")
 
 
@@ -132,7 +140,10 @@ def _identities_for_batch(
         "entries": [_entry_wire(entry, tokens) for entry in entries],
         "scalar_tokens": tokens.meanings,
     }
-    if len(entries) > 1 and len(json.dumps(wire)) > _SPLIT_REQUEST_BYTES:
+    if len(entries) > 1 and (
+        len(json.dumps(wire)) > _SPLIT_REQUEST_BYTES
+        or _reply_estimate(cast("list[dict[str, object]]", wire["entries"])) > _REPLY_BUDGET_BYTES
+    ):
         middle = len(entries) // 2
         return _identities_for_batch(entries[:middle], home, required_feature) + _identities_for_batch(
             entries[middle:], home, required_feature
@@ -159,6 +170,29 @@ def _identities_for_batch(
     if not all(isinstance(item, dict) for item in identities):
         raise CodexHookIdentityUnavailableError
     return cast("list[dict[str, object]]", identities)
+
+
+def _reply_estimate(entries: Sequence[Mapping[str, object]]) -> int:
+    """An upper estimate of the reply's size, in bytes, for these wire entries."""
+
+    total = 0
+    for wire in entries:
+        total += 2 * len(json.dumps(wire))
+        events = wire.get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            groups = event[1] if isinstance(event, list) and len(event) == 2 else None
+            if not isinstance(groups, list):
+                continue
+            for group in groups:
+                handlers = group.get("hooks") if isinstance(group, dict) else None
+                if not isinstance(handlers, list):
+                    continue
+                matcher = len(json.dumps(group.get("matcher")))
+                for handler in handlers:
+                    total += 2 * len(json.dumps(handler)) + matcher + _RECORD_OVERHEAD_BYTES
+    return total
 
 
 def _batch_timeout_seconds(entry_count: int) -> float:
