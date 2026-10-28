@@ -26,12 +26,17 @@ from .fast_forward_fixtures import add_fast_forward_origin
 
 GIT_ALLOW_MERGE_CASE = "git-allow-merge-fast-forward-then-reads"
 GIT_ALLOW_STASH_CASE = "git-allow-stash-around-fast-forward"
-GIT_ALLOW_CASES = frozenset({GIT_ALLOW_MERGE_CASE, GIT_ALLOW_STASH_CASE})
+# A checkout and a pathspec named after Guard are the user's work, not Guard.
+GIT_ALLOW_NAMED_CHECKOUT_CASE = "git-allow-guard-named-checkout"
+GIT_ALLOW_CASES = frozenset({GIT_ALLOW_MERGE_CASE, GIT_ALLOW_STASH_CASE, GIT_ALLOW_NAMED_CHECKOUT_CASE})
 GIT_EXTENSION_ID = "command.git"
 
 STASH_FILE = "src/settings.ts"
 STASH_COMMITTED = "export const retryLimit = 3;\n"
 STASH_WORKING = "export const retryLimit = 5;\n"
+NAMED_FILE = "scripts/hol-guard.wxs"
+NAMED_COMMITTED = "<Wix />\n"
+NAMED_WORKTREE = "pr/hol-guard-pr-12"
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "Gauntlet Fixture",
     "GIT_AUTHOR_EMAIL": "gauntlet@example.invalid",
@@ -62,6 +67,9 @@ def add_git_allow_shape(workspace: Path, environment: dict[str, str], scenario_i
     if scenario_id not in GIT_ALLOW_CASES:
         return
     environment = {**environment, **_IDENTITY}
+    if scenario_id == GIT_ALLOW_NAMED_CHECKOUT_CASE:
+        _add_named_checkout(workspace, environment)
+        return
     if scenario_id == GIT_ALLOW_STASH_CASE:
         target = workspace / STASH_FILE
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +80,21 @@ def add_git_allow_shape(workspace: Path, environment: dict[str, str], scenario_i
     if scenario_id == GIT_ALLOW_STASH_CASE:
         # Uncommitted work the chain stashes across the fast-forward and restores.
         (workspace / STASH_FILE).write_text(STASH_WORKING, encoding="utf-8", newline="\n")
+
+
+def _add_named_checkout(workspace: Path, environment: dict[str, str]) -> None:
+    """A linked worktree and a tracked file both named after the project, the file edited."""
+    target = workspace / NAMED_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(NAMED_COMMITTED, encoding="utf-8", newline="\n")
+    _git(workspace, environment, "add", "--", NAMED_FILE)
+    _git(workspace, environment, "commit", "--quiet", "-m", "Add installer source")
+    exclude = workspace / ".git/info/exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write("/pr/\n")
+    _git(workspace, environment, "worktree", "add", "--quiet", "-b", "pr", NAMED_WORKTREE)
+    target.write_text("<Wix><Broken /></Wix>\n", encoding="utf-8", newline="\n")
 
 
 def _heads(workspace: Path) -> tuple[str, str] | None:
@@ -90,6 +113,10 @@ def git_allow_checks(workspace: Path, scenario_id: str) -> dict[str, bool]:
     """The chain physically completed: the branch advanced, and stashed work came back."""
     if scenario_id not in GIT_ALLOW_CASES:
         return {}
+    if scenario_id == GIT_ALLOW_NAMED_CHECKOUT_CASE:
+        target = workspace / NAMED_FILE
+        restored = target.is_file() and target.read_text(encoding="utf-8") == NAMED_COMMITTED
+        return {"git-allow-named-file-restored": restored}
     heads = _heads(workspace)
     checks = {"git-allow-head-advanced": heads is not None and heads[0] == heads[1]}
     if scenario_id == GIT_ALLOW_STASH_CASE:
