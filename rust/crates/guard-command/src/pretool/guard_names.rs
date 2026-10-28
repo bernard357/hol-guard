@@ -70,22 +70,24 @@ pub(super) fn judged_by_location(segment: &crate::CommandSegmentV1) -> bool {
     LOCATION_PROGRAMS.contains(&crate::command_compatibility::basename(segment).as_str())
 }
 
-/// Where the steps before a segment left the shell's directory.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Moved {
-    /// No earlier step changed directory.
-    Stayed,
-    /// Every change named an absolute target, or a relative one below it.
-    To(String),
-    /// A change Guard cannot follow from the text: a relative first target,
-    /// `cd -`, `popd` or a variable.
-    Unknown,
+/// Where the steps before a segment may have left the shell's directory.
+///
+/// A `cd` can fail, or run in a pipeline stage or subshell, and leave the
+/// shell where it was, so every directory a change could have reached is
+/// kept, not only the last one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Moved {
+    /// Each absolute directory an earlier change could have entered.
+    pub(super) bases: Vec<String>,
+    /// Whether some change went where the text does not say: a relative
+    /// target from the starting directory, `cd -`, `popd` or a variable.
+    pub(super) unknown: bool,
 }
 
-/// The directory `segments` leave the shell in, from their `cd` and `pushd`
-/// arguments alone.
+/// The directories `segments` may leave the shell in, from their `cd` and
+/// `pushd` arguments alone. No change leaves the default: the shell stayed.
 pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
-    let mut moved = Moved::Stayed;
+    let mut moved = Moved::default();
     for segment in segments {
         let program = crate::command_compatibility::basename(segment);
         if !matches!(program.as_str(), "cd" | "pushd" | "popd") {
@@ -98,11 +100,21 @@ pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
             }
             _ => None,
         };
-        moved = match (target, moved) {
-            (Some(target), _) if !relative(&target) => Moved::To(target),
-            (Some(target), Moved::To(base)) => Moved::To(format!("{base}/{target}")),
-            _ => Moved::Unknown,
-        };
+        match target {
+            Some(target) if !relative(&target) => moved.bases.push(target),
+            Some(target) => {
+                // From the starting directory, which the text does not name,
+                // the target lands somewhere unknown.
+                let joined: Vec<String> = moved
+                    .bases
+                    .iter()
+                    .map(|base| format!("{base}/{target}"))
+                    .collect();
+                moved.bases.extend(joined);
+                moved.unknown = true;
+            }
+            None => moved.unknown = true,
+        }
     }
     moved
 }
@@ -112,8 +124,9 @@ pub(super) fn moved_by(segments: &[crate::CommandSegmentV1]) -> Moved {
 ///
 /// Text with whitespace, or a leading `!`, is shell text a Git alias or
 /// option could run, so it keeps the plain name screen. After an earlier
-/// `cd`, a relative path is judged where it resolves; when that directory is
-/// unknown, a relative path that names a Guard program counts as Guard.
+/// `cd`, a relative path is judged in every directory the shell may be in;
+/// when one of them is unknown, a relative path that names a Guard program
+/// counts as Guard.
 pub(super) fn names_guard_location(argument: &str, moved: &Moved) -> bool {
     let lowered = argument.to_ascii_lowercase().replace('\\', "/");
     if names_guard_state(&lowered) {
@@ -136,18 +149,15 @@ pub(super) fn names_guard_location(argument: &str, moved: &Moved) -> bool {
         return true;
     }
     if relative(&lowered) {
-        match moved {
-            Moved::Stayed => {}
-            Moved::To(base) => {
-                if names_guard_location(&format!("{base}/{lowered}"), &Moved::Stayed) {
-                    return true;
-                }
-            }
-            Moved::Unknown => {
-                if components.iter().any(|component| guard_program(component)) {
-                    return true;
-                }
-            }
+        if moved
+            .bases
+            .iter()
+            .any(|base| names_guard_location(&format!("{base}/{lowered}"), &Moved::default()))
+        {
+            return true;
+        }
+        if moved.unknown && components.iter().any(|component| guard_program(component)) {
+            return true;
         }
     }
     if lowered.starts_with('!') || lowered.chars().any(char::is_whitespace) {
@@ -272,7 +282,7 @@ mod tests {
             "--work-tree=../hol-guard",
         ] {
             assert!(
-                !names_guard_location(argument, &Moved::Stayed),
+                !names_guard_location(argument, &Moved::default()),
                 "{argument}"
             );
         }
@@ -303,31 +313,40 @@ mod tests {
             "--work-tree=bin/hol-guard",
             "--git-dir=/var/lib/hol-guard/.git",
         ] {
-            assert!(names_guard_location(argument, &Moved::Stayed), "{argument}");
+            assert!(
+                names_guard_location(argument, &Moved::default()),
+                "{argument}"
+            );
         }
     }
 
     #[test]
     fn a_relative_path_after_a_directory_change_is_judged_where_it_resolves() {
-        let venvs = Moved::To("/home/u/.local/pipx/venvs".to_owned());
-        let projects = Moved::To("/home/u/projects".to_owned());
+        let to = |bases: &[&str]| Moved {
+            bases: bases.iter().map(|base| (*base).to_owned()).collect(),
+            unknown: false,
+        };
+        let venvs = to(&["/home/u/.local/pipx/venvs"]);
+        let projects = to(&["/home/u/projects"]);
         assert!(names_guard_location("hol-guard", &venvs));
         assert!(names_guard_location("./hol-guard/bin", &venvs));
         assert!(!names_guard_location("hol-guard", &projects));
         assert!(!names_guard_location("hol-guard-pr-12", &venvs));
-        let sibling = Moved::To("/home/u/.local/pipx/venvs/other".to_owned());
+        let sibling = to(&["/home/u/.local/pipx/venvs/other"]);
         assert!(names_guard_location("../hol-guard", &sibling));
+        // `cd venvs; cd /missing; git -C hol-guard ...` runs in `venvs` when
+        // the second change fails.
+        let failed = to(&["/home/u/.local/pipx/venvs", "/missing"]);
+        assert!(names_guard_location("hol-guard", &failed));
+        let unknown = Moved {
+            bases: Vec::new(),
+            unknown: true,
+        };
         for argument in ["hol-guard", "./hol-guard/bin", "hol-guard-core"] {
-            assert!(
-                names_guard_location(argument, &Moved::Unknown),
-                "{argument}"
-            );
+            assert!(names_guard_location(argument, &unknown), "{argument}");
         }
         for argument in ["hol-guard-pr-12", "/home/u/projects/hol-guard"] {
-            assert!(
-                !names_guard_location(argument, &Moved::Unknown),
-                "{argument}"
-            );
+            assert!(!names_guard_location(argument, &unknown), "{argument}");
         }
     }
 

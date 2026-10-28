@@ -179,6 +179,7 @@ fn a_git_command_that_reaches_guard_itself_still_waits_for_review() {
             "git -C {root}/.local/pipx/venvs/hol-guard status --short",
             "cd {root}/.local/pipx/venvs/hol-guard && git status --short",
             "cd {root}/.local/pipx/venvs && git -C hol-guard status --short",
+            "cd {root}/.local/pipx/venvs; cd {root}/missing; git -C hol-guard status --short",
             "git --work-tree={root}/.local/pipx/venvs/hol-guard status --short",
             "git -C /etc/hol-guard checkout -- .",
             "git -C $HOL_GUARD_HOME log -1",

@@ -95,7 +95,7 @@ fn global_options_before_api_keep_the_repository_exemption() {
         "gh api repos/example-org/app/actions/runs/1 -fname=hol-guard",
         "gh api repos/example-org/app/actions/runs/1 -f=name=hol-guard",
     ] {
-        assert!(!names_guard_outside_message(&segment(command), &Moved::Stayed), "{command}");
+        assert!(!names_guard_outside_message(&segment(command), &Moved::default()), "{command}");
     }
     for command in [
         "gh --hostname github.com api repos/example-org/app/contents/.hol-guard/config",
@@ -103,6 +103,6 @@ fn global_options_before_api_keep_the_repository_exemption() {
         "gh api repos/example-org/app/actions/runs/1 -fname=.hol-guard/config",
         "gh --hostname api repos/example-org/hol-guard/actions/runs/1",
     ] {
-        assert!(names_guard_outside_message(&segment(command), &Moved::Stayed), "{command}");
+        assert!(names_guard_outside_message(&segment(command), &Moved::default()), "{command}");
     }
 }
