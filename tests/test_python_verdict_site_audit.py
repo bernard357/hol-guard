@@ -44,11 +44,12 @@ def test_only_the_recorded_findings_compose_a_verdict_in_python() -> None:
 
     `_run_guard_protect_command` was the second finding and is gone: PR #6320
     deleted the rewrite once a probe showed the resident reads the approval-gate
-    row for itself.
+    row for itself. `_script_free_watch` was the first; the resident now settles
+    the script-free watch and `native_package_review_response` renders its answer.
     """
 
     composed = sorted(str(site["func"]) for site in _baseline()["sites"] if site["reading"] == "composes-in-python")
-    assert composed == ["native_package_review_response"]
+    assert composed == []
 
 
 def test_every_recorded_template_still_resists_parsing() -> None:

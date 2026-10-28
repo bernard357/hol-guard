@@ -328,11 +328,21 @@
       "file": "src/codex_plugin_scanner/guard/daemon/hook_native_package_review.py",
       "func": "native_package_review_response",
       "root": "hook",
-      "reading": "composes-in-python",
+      "reading": "renders-native",
       "actions": [
         "allow"
       ],
-      "note": "MAJ-AC-01 finding. The allow on `evaluation.decision == \"allow\"` renders the resident's verdict, but `_script_free_watch` widens a resident `monitor` into an allow whenever every package carries `scriptFreeRegistryInstall`. Rust sets that per-package flag; the rule that turns it into an allow exists only here."
+      "note": "Renders the resident's review_settlement: an allow only where the resident settled the review as allow and the package review plan's may_allow still holds. Closed MAJ-AC-01 finding: the script-free watch widening now lives in the resident."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/daemon/hook_native_review_approval.py",
+      "func": "_policy_binding_failed",
+      "root": "hook",
+      "reading": "fails-closed",
+      "actions": [
+        "block"
+      ],
+      "note": "Renders a block when a review cannot be bound to its native policy."
     },
     {
       "file": "src/codex_plugin_scanner/guard/daemon/hook_native_review_approval.py",
@@ -436,6 +446,17 @@
         "block"
       ],
       "note": "The evaluation used when the resident cannot be reached."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/native_supply_chain_eval.py",
+      "func": "_review_settlement",
+      "root": "hook",
+      "reading": "renders-native",
+      "actions": [
+        "block",
+        "review"
+      ],
+      "note": "Reads the resident's review_settlement as sent; anything unreadable leaves a block standing as a block and every other verdict as a review, so it never produces an allow the resident did not send."
     },
     {
       "file": "src/codex_plugin_scanner/guard/native_supply_chain_eval.py",
