@@ -11,6 +11,8 @@ import pytest
 
 from codex_plugin_scanner.guard import workspace_assessment_reads as reads
 from codex_plugin_scanner.guard import workspace_assessment_store as assessments
+from codex_plugin_scanner.guard.runtime import fleet_posture_common as fleet_common
+from codex_plugin_scanner.guard.runtime import fleet_posture_runtimes as fleet_runtimes
 from codex_plugin_scanner.guard.runtime import runner as guard_runner_module
 from codex_plugin_scanner.guard.runtime import workspace_assessment_sync as sync
 from codex_plugin_scanner.guard.store import GuardStore
@@ -104,6 +106,29 @@ def test_summary_rekeys_identifiers_and_never_carries_paths_or_commits(tmp_path:
     assert item["fixVersion"] == "1.0.1"
     assert item["advisoryIds"] == ["GHSA-aaaa-bbbb-cccc"]
     assert "path" not in item
+
+
+def test_agent_inventory_findings_carry_the_location_digest_fleet_posture_reports(tmp_path: Path) -> None:
+    guard_store = GuardStore(tmp_path / "home")
+    runtime_path = "/opt/tools/node/bin/node"
+    runtime_finding = {**finding(1), "source_kind": "agent_inventory", "package_name": None, "path": runtime_path}
+    assessed(guard_store, findings=[runtime_finding, finding(2)])
+
+    built = sync.build_workspace_assessment_sync(guard_store, now=NOW)
+
+    assert built is not None
+    [entry] = built.payload["worktrees"]
+    by_kind = {item["sourceKind"]: item for item in entry["findings"]}
+    fleet_item = fleet_runtimes.project_runtime_posture(
+        {"status": "ok", "runtimes": [{"path": runtime_path}]},
+        hash_key=fleet_common.load_hash_key(guard_store, NOW),
+    )["items"][0]
+    assert by_kind["agent_inventory"]["locationHash"] == fleet_item["locationHash"]
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", by_kind["agent_inventory"]["locationHash"])
+    assert "locationHash" not in by_kind["supply_chain"]
+    for item in entry["findings"]:
+        assert "path" not in item
+    assert runtime_path not in json.dumps(built.payload)
 
 
 def test_snapshot_digest_is_rekeyed_and_the_stored_digest_never_leaves(tmp_path: Path) -> None:
