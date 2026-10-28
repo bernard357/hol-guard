@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 import time
@@ -46,7 +47,7 @@ from .native_context import (
 from .native_execution import _resident_request
 from .native_hook_adapter_wire import _Tagger, _TooLargeError, _UnrepresentableError
 from .native_resident_client import native_resident_client_failure_code, record_native_resident_client_failure_code
-from .native_resident_revival import RESTART_BLOCKED_CODE
+from .native_resident_revival import RESTART_BLOCKED_CODE, restart_hold_seconds_remaining
 
 HOOK_ADAPTER_FEATURE = "hook-adapter-v1"
 _REQUEST_SCHEMA = "guard-hook-adapter-request.v1"
@@ -58,7 +59,7 @@ _DEADLINE = "native_hook_adapter_deadline_expired"
 _REQUEST_TOO_LARGE = "native_hook_adapter_request_too_large"
 _TIMEOUT_SECONDS = 5.0
 _RETRY_MIN_SECONDS = 1.0
-_NO_RETRY_CODES = frozenset({"native_client_timed_out", RESTART_BLOCKED_CODE})
+_CLIENT_TIMED_OUT = "native_client_timed_out"
 _MAX_REQUEST_BYTES = 4 * 1024 * 1024
 # Transport framing around ``request`` (operation name, deadline budget).
 _ENVELOPE_OVERHEAD_BYTES = 256
@@ -217,10 +218,14 @@ def _call(
     if not ensure_resident_prerequisite(home):
         raise NativeHookAdapterError(_UNAVAILABLE)
     response, digest = _send(request, home, deadline)
-    if response is None and _worth_retrying(deadline):
+    if response is None:
         # Adapter calls have no side effects: a resident that dropped one round trip (a restart,
         # a busy socket) gets one more inside the caller's budget. A second miss fails closed.
-        response, digest = _send(request, home, deadline)
+        delay = _retry_delay(deadline)
+        if delay is not None:
+            if delay > 0.0:
+                time.sleep(delay)
+            response, digest = _send(request, home, deadline)
     if deadline is not None and time.monotonic() > deadline:
         # A late answer is as unusable as none: the caller's budget is spent.
         raise NativeHookAdapterError(_DEADLINE)
@@ -269,11 +274,24 @@ def _send(request: dict[str, object], home: Path, deadline: float | None) -> tup
     return response, digest
 
 
-def _worth_retrying(deadline: float | None) -> bool:
-    # A timeout already spent the budget, and a held restart will not clear in time.
-    if native_resident_client_failure_code() in _NO_RETRY_CODES:
-        return False
-    return deadline is None or deadline - time.monotonic() >= _RETRY_MIN_SECONDS
+def _retry_delay(deadline: float | None) -> float | None:
+    """How long to wait before one more attempt, or ``None`` to fail closed.
+
+    A timeout already spent the budget, so it gets nothing. A refused respawn is
+    different from a dropped round trip: retrying inside the hold reads the same
+    refusal back, but the hold is bounded, so a caller with budget for the rest
+    of it plus an attempt waits it out instead of reporting the runtime
+    unavailable while seconds of its own budget are still unspent. That is what
+    a digest handoff looks like from here, and failing it closed costs a hook
+    its answer for no reason.
+    """
+
+    code = native_resident_client_failure_code()
+    if code == _CLIENT_TIMED_OUT:
+        return None
+    remaining = math.inf if deadline is None else deadline - time.monotonic()
+    hold = restart_hold_seconds_remaining() if code == RESTART_BLOCKED_CODE else 0.0
+    return hold if remaining >= hold + _RETRY_MIN_SECONDS else None
 
 
 def _raise_rejection(code: object, payload: object, query: object) -> None:

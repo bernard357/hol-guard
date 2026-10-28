@@ -84,6 +84,24 @@ def restart_hold_active(key: HoldKey, *, now: float | None = None) -> bool:
         return True
 
 
+def restart_hold_seconds_remaining(*, now: float | None = None) -> float:
+    """How long the longest armed hold still has to run.
+
+    A caller that holds no key of its own still has to know whether waiting is
+    worth it: a hold is bounded at ``RESTART_HOLD_SECONDS``, so a caller with
+    more budget than that can wait for the pacing to lapse instead of failing
+    closed on a refusal that is about to expire. Taking the longest armed hold
+    keeps the answer safe for a caller whose runtime it cannot name.
+    """
+
+    if not _HOLDS:
+        return 0.0  # The usual case: no lock and no lookup on the request path.
+    current = time.monotonic() if now is None else now
+    with _HOLD_LOCK:
+        remaining = max((until - current for until in _HOLDS.values()), default=0.0)
+    return min(max(remaining, 0.0), RESTART_HOLD_SECONDS)
+
+
 def clear_restart_hold(key: HoldKey) -> None:
     if not _HOLDS:
         return

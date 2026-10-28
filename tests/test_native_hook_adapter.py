@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from codex_plugin_scanner.guard import native_hook_adapter as adapter
+from codex_plugin_scanner.guard import native_resident_revival as revival
 from codex_plugin_scanner.guard.runtime.actions import normalize_harness_payload
 from tests.cursor_hook_payload_support import native_prepare_payload
 
@@ -356,3 +357,89 @@ def test_hook_scope_binds_the_hook_guard_home_for_ambient_calls(
         assert native_context._BOUND_GUARD_HOME.get() is None
     finally:
         native_context._BOUND_GUARD_HOME.reset(baseline)
+
+
+def _envelope_payload() -> list[object]:
+    return ["d"] + [item for key in adapter._ENVELOPE_KEYS for item in (key, None)]
+
+
+def _refusing_once(monkeypatch: pytest.MonkeyPatch, code: str) -> list[dict[str, object]]:
+    """A resident that drops the first round trip with ``code``, then answers."""
+
+    answers = iter([None, _envelope_payload()])
+
+    def reply(request: dict[str, object]) -> dict[str, object] | None:
+        payload = next(answers)
+        if payload is None:
+            adapter.record_native_resident_client_failure_code(code)
+            return None
+        return _good(request, payload=payload)
+
+    return _recording_resident(monkeypatch, reply)
+
+
+def test_a_bounded_restart_hold_is_waited_out_inside_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A digest handoff arms the hold while the hook still holds most of its
+    # budget. Reporting the runtime unavailable there costs the hook its answer
+    # for a refusal that expires in well under a second.
+    revival._HOLDS.clear()
+    revival.arm_restart_hold(("runtime", "state"))
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE)
+
+    envelope = adapter.native_action_envelope(
+        "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 5
+    )
+
+    assert envelope is not None
+    assert len(seen) == 2
+    assert slept and slept[0] == pytest.approx(revival.RESTART_HOLD_SECONDS, abs=0.1)
+    assert slept[0] <= revival.RESTART_HOLD_SECONDS
+
+
+def test_a_restart_hold_longer_than_the_budget_still_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    revival._HOLDS.clear()
+    revival.arm_restart_hold(("runtime", "state"))
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, revival.RESTART_BLOCKED_CODE)
+
+    with pytest.raises(adapter.NativeHookAdapterError) as error:
+        adapter.native_action_envelope(
+            "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 0.5
+        )
+
+    assert error.value.code == "native_hook_adapter_unavailable"
+    assert len(seen) == 1
+    assert slept == []
+
+
+def test_a_client_timeout_spends_the_budget_and_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    revival._HOLDS.clear()
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, "native_client_timed_out")
+
+    with pytest.raises(adapter.NativeHookAdapterError):
+        adapter.native_action_envelope(
+            "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 5
+        )
+
+    assert len(seen) == 1
+    assert slept == []
+
+
+def test_a_dropped_round_trip_without_a_hold_retries_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    revival._HOLDS.clear()
+    slept: list[float] = []
+    monkeypatch.setattr(adapter.time, "sleep", slept.append)
+    seen = _refusing_once(monkeypatch, "native_client_connect_failed")
+
+    envelope = adapter.native_action_envelope(
+        "codex", "PreToolUse", {}, workspace=None, home_dir=None, deadline=adapter.time.monotonic() + 5
+    )
+
+    assert envelope is not None
+    assert len(seen) == 2
+    assert slept == []

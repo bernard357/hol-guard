@@ -127,6 +127,21 @@ def test_hold_helpers_arm_expire_and_clear(tmp_path: Path) -> None:
     assert not revival.restart_hold_active(key)
 
 
+def test_hold_remaining_reports_the_longest_armed_hold(tmp_path: Path) -> None:
+    short = (str(tmp_path / "a"), str(tmp_path / "state"))
+    long = (str(tmp_path / "b"), str(tmp_path / "state"))
+    assert revival.restart_hold_seconds_remaining() == 0.0
+    revival.arm_restart_hold(short, now=100.0)
+    revival.arm_restart_hold(long, now=100.5)
+    # A caller that cannot name its runtime waits out the longest hold, and the
+    # answer never exceeds the bound a hold is armed for.
+    assert revival.restart_hold_seconds_remaining(now=101.0) == pytest.approx(
+        revival.RESTART_HOLD_SECONDS - 0.5
+    )
+    assert revival.restart_hold_seconds_remaining(now=99.0) == revival.RESTART_HOLD_SECONDS
+    assert revival.restart_hold_seconds_remaining(now=100.5 + revival.RESTART_HOLD_SECONDS) == 0.0
+
+
 def test_restart_blocked_frame_matches_only_the_exact_refusal() -> None:
     assert revival.is_restart_blocked_frame(_BLOCKED)
     assert not revival.is_restart_blocked_frame(b'{"error":"native_resident_restart_circuit_open","retryable":true}')
