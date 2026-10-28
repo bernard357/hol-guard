@@ -157,7 +157,7 @@ fn reason(result: &Map<String, Value>) -> Result<String, Failure> {
 }
 
 /// `native_review_tool_name`: the first non-blank tool name, stripped.
-fn tool_name(payload: &Map<String, Value>) -> String {
+pub(crate) fn tool_name(payload: &Map<String, Value>) -> String {
     TOOL_NAME_FIELDS
         .iter()
         .filter_map(|key| payload.get(*key).and_then(Value::as_str))
@@ -168,14 +168,14 @@ fn tool_name(payload: &Map<String, Value>) -> String {
 }
 
 /// `pre_tool_input`.
-fn pre_tool_input(payload: &Map<String, Value>) -> Option<&Map<String, Value>> {
+pub(crate) fn pre_tool_input(payload: &Map<String, Value>) -> Option<&Map<String, Value>> {
     TOOL_INPUT_FIELDS
         .iter()
         .find_map(|key| payload.get(*key).and_then(Value::as_object))
 }
 
 /// `pre_tool_command`: the first non-blank command text, unstripped.
-fn pre_tool_command(payload: &Map<String, Value>) -> Option<String> {
+pub(crate) fn pre_tool_command(payload: &Map<String, Value>) -> Option<String> {
     let arguments = payload.get("arguments").and_then(Value::as_object);
     [pre_tool_input(payload), arguments, Some(payload)]
         .into_iter()

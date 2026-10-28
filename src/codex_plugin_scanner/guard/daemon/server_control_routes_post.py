@@ -8,11 +8,11 @@ from typing import Any, cast
 
 from ..approval_gate import ApprovalGateError
 from ..approval_gate import input_from_mapping as approval_gate_input_from_mapping
+from ..approval_scope_selection import resolve_request_scope_selection
 from ..approval_scope_support import (
     IneligibleApprovalScopeError,
     StaleApprovalScopeContractError,
     request_scope_contract_payload,
-    resolve_request_scope_selection,
 )
 from ..approvals import ApprovalRequestAlreadyResolvedError, ApprovalRequestNotFoundError, apply_approval_resolution
 from ..native_approval_scope import ApprovalScopeUnavailableError

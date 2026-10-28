@@ -28,9 +28,9 @@ def test_native_review_asks_the_resident_for_the_review_binding_once(
     bindings: list[str | None] = []
     real_evidence = hook_native_review_approval.native_review_evidence
 
-    def counting_evidence(**kwargs: Any) -> tuple[str | None, str | None, str | None]:
+    def counting_evidence(**kwargs: Any) -> tuple[bool, str | None, str | None, str | None]:
         evidence = real_evidence(**kwargs)
-        bindings.append(evidence[0])
+        bindings.append(evidence[1])
         return evidence
 
     monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
