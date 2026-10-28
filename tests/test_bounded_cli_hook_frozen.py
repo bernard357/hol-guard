@@ -392,6 +392,8 @@ def test_frozen_runtime_asks_the_recovered_daemon_once_more(monkeypatch: pytest.
     monkeypatch.setattr(bounded_cli_hook_bridge.sys, "executable", "/app/hol-guard")
     monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", daemon)
     monkeypatch.setattr(bounded_cli_hook_recovery, "run_isolated_hook_process", recovered)
+    identities = iter([("failed", "token"), ("recovered", "token")])
+    monkeypatch.setattr(bounded_cli_hook_recovery, "daemon_identity", lambda _home: next(identities))
     output = io.StringIO()
     with redirect_stdout(output):
         returncode = bounded_cli_hook_bridge.run_bounded_cli_hook(config, input_text="{}")

@@ -191,12 +191,26 @@ def _started(commands: list[tuple[str, ...]]) -> Callable[..., BoundedHookProces
     return start
 
 
+def _identities(monkeypatch: pytest.MonkeyPatch, *values: tuple[str, str] | None) -> list[tuple[str, str] | None]:
+    """Name the daemon each `daemon_identity` read finds; the last one repeats."""
+    reads: list[tuple[str, str] | None] = []
+
+    def identity(_guard_home: Path) -> tuple[str, str] | None:
+        value = values[min(len(reads), len(values) - 1)]
+        reads.append(value)
+        return value
+
+    monkeypatch.setattr(bounded_cli_hook_recovery, "daemon_identity", identity)
+    return reads
+
+
 def test_a_daemon_miss_starts_the_daemon_and_asks_it_once_more(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config(tmp_path)
     answers: list[tuple[str, str, int] | None] = [None, ('{"permissionDecision":"allow"}\n', "", 0)]
     started: list[tuple[str, ...]] = []
     monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", lambda **_kwargs: answers.pop(0))
     monkeypatch.setattr(bounded_cli_hook_recovery, "run_isolated_hook_process", _started(started))
+    _identities(monkeypatch, None, ("new", "token"))
     output = io.StringIO()
     with redirect_stdout(output):
         returncode = bridge.run_bounded_cli_hook(config, input_text="{}")
@@ -215,6 +229,7 @@ def test_a_daemon_that_stays_down_fails_the_hook_closed_without_evaluating(
     started: list[tuple[str, ...]] = []
     monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", lambda **kwargs: asked.append(kwargs))
     monkeypatch.setattr(bounded_cli_hook_recovery, "run_isolated_hook_process", _started(started))
+    _identities(monkeypatch, None, ("new", "token"))
     output = io.StringIO()
     with redirect_stdout(output):
         returncode = bridge.run_bounded_cli_hook(_config(tmp_path), input_text="{}")
@@ -223,4 +238,34 @@ def test_a_daemon_that_stays_down_fails_the_hook_closed_without_evaluating(
     assert len(asked) == 2
     assert len(started) == 1
     assert "daemon" in " ".join(started[0])
+    assert (json.loads(output.getvalue())["permissionDecision"], returncode) == ("deny", 0)
+
+
+def test_recovery_waits_for_the_started_daemon_to_come_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    answers: list[tuple[str, str, int] | None] = [None, ('{"permissionDecision":"allow"}\n', "", 0)]
+    monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", lambda **_kwargs: answers.pop(0))
+    monkeypatch.setattr(bounded_cli_hook_recovery, "run_isolated_hook_process", _started([]))
+    # No daemon state at the miss, none for two polls after the start, then the new daemon.
+    reads = _identities(monkeypatch, None, None, None, ("new", "token"))
+    output = io.StringIO()
+    with redirect_stdout(output):
+        returncode = bridge.run_bounded_cli_hook(_config(tmp_path), input_text="{}")
+
+    assert answers == []
+    assert len(reads) == 4
+    assert (json.loads(output.getvalue())["permissionDecision"], returncode) == ("allow", 0)
+
+
+def test_the_daemon_that_missed_the_hook_is_never_asked_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[object] = []
+    monkeypatch.setattr(bounded_cli_hook_daemon, "try_daemon_hook", lambda **kwargs: asked.append(kwargs))
+    monkeypatch.setattr(bounded_cli_hook_recovery, "run_isolated_hook_process", _started([]))
+    # The slow daemon that already saw the hook stays the only one the state names.
+    _identities(monkeypatch, ("slow", "token"))
+    config = {**_config(tmp_path), "timeout_seconds": 3}
+    output = io.StringIO()
+    with redirect_stdout(output):
+        returncode = bridge.run_bounded_cli_hook(config, input_text="{}")
+
+    assert len(asked) == 1
     assert (json.loads(output.getvalue())["permissionDecision"], returncode) == ("deny", 0)

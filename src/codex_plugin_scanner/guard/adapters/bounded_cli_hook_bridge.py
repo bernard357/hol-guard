@@ -367,8 +367,11 @@ def run_bounded_cli_hook(
         deadline_monotonic=deadline,
     )
     if daemon_result is None:
-        from .bounded_cli_hook_recovery import ask_after_daemon_recovery
+        from .bounded_cli_hook_recovery import ask_after_daemon_recovery, daemon_identity
 
+        # Read after the miss: a daemon that replaced the failed one in between
+        # is skipped too, which fails the hook closed rather than asking twice.
+        failed = daemon_identity(guard_home)
         start_command = (
             frozen_daemon_start_command(sys.executable, guard_home, cli_args)
             if runtime_frozen
@@ -380,6 +383,7 @@ def run_bounded_cli_hook(
             harness=harness,
             input_text=input_text,
             deadline=deadline,
+            failed=failed,
         )
     if daemon_result is None or time.monotonic() >= deadline:
         return fail()
