@@ -50,7 +50,10 @@ const STATE_MAC_LABEL: &[u8] = b"hol-guard-resident-state-v3\0";
 const MAX_STATE_BYTES: u64 = 16 * 1024;
 const MAX_STATE_FILES: usize = 64;
 const RETAINED_STATE_FILES: usize = 8;
-const MAX_RUNTIME_BYTES: u64 = 128 * 1024 * 1024;
+// Gauntlet development wheels build every crate at opt-level 0 and ship a
+// runtime several times the published size; the resident must still identify
+// itself from one. The digest streams, so the bound only limits hashing time.
+const MAX_RUNTIME_BYTES: u64 = 512 * 1024 * 1024;
 const LOCK_STALE_AFTER: Duration = Duration::from_secs(10);
 const MAX_STARTUP_LOCK_BYTES: u64 = 4 * 1024;
 

@@ -47,7 +47,9 @@ _MAX_NATIVE_REQUEST_BYTES = 6 * 1024 * 1024
 _REQUEST_TOO_LARGE_CODE = "native_request_too_large"
 _MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 64 * 1024
-_MAX_COMPILER_BYTES = 128 * 1024 * 1024
+# The packaged compiler is the runtime itself, so it takes the runtime's bound,
+# including the larger runtime a Gauntlet development wheel carries.
+_MAX_COMPILER_BYTES = 512 * 1024 * 1024
 _MAX_STDERR_BYTES = 64 * 1024
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 _SHA40 = 40
