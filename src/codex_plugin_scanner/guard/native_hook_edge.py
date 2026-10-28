@@ -30,6 +30,10 @@ _SELF_CHECK_FEATURE = "edge-self-check-v1"
 _UNSUPPORTED_EVENT_CODE = "native_hook_event_unsupported"
 _MAX_REQUEST_BYTES = 6 * 1024 * 1024
 _LOCAL_CLI_RULE_FEATURE = "edge-local-cli-rule-v1"
+# The custom extension rule is read after the review, and identifying a
+# launch can take seconds. It once had its own request with this timeout;
+# the edge keeps that allowance rather than spending the review's budget.
+_LOCAL_CLI_RULE_SECONDS = 5.0
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -240,7 +244,7 @@ def review_raw_hook_native(
         guard_home=guard_home,
         environment=_isolated_environment(),
         payload=encoded,
-        deadline_monotonic=deadline_monotonic,
+        deadline_monotonic=deadline_monotonic + (_LOCAL_CLI_RULE_SECONDS if local_cli_rules is not None else 0.0),
         raw_hook_envelope=True,
     )
     if output is None:
