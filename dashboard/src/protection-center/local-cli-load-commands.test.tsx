@@ -41,6 +41,10 @@ assert.doesNotMatch(empty, /role="alert"/);
 const listed = render({ ...raw, commands: [{ command_id: "deploy", name: "deploy", usage: "lanectl deploy", description: "", state: "allow" }] });
 assert.match(listed, />Check for new commands</);
 
+// Guard's own root and other entries are not listed commands.
+const synthetic = render({ ...raw, commands: ["root", "other"].map((id) => ({ command_id: id, name: id, usage: id, description: "", state: "inherit" })) });
+assert.match(synthetic, />Load commands</);
+
 // The action follows the panel's busy state.
 assert.match(render(raw, true), /<button[^>]*disabled=""/);
 

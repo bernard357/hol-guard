@@ -3433,7 +3433,7 @@ function LocalCliLoadCommands(props) {
   if (item.kind !== "executable") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-2xl text-sm leading-6 text-brand-dark/75", children: "Guard does not run scripts on its own. To list this script's commands, find it again in Add custom extension using its full path." });
   }
-  const hasCommands = item.commands.length > 0;
+  const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 max-w-2xl", "aria-busy": busy, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm leading-6 text-brand-dark/75", children: [
       "Guard runs ",

@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ..local_cli_errors import LocalCliCatalogLimitError
 from ..local_cli_trust import utc_now
@@ -38,10 +38,19 @@ from .mcp_discovery_jobs import DiscoveryStageError, begin_commit
 if TYPE_CHECKING:
     from ..store import GuardStore
 
-DiscoverCommands = Callable[
-    [str, UnlistedCliIdentity, Path, Path, Path],
-    tuple[tuple[LocalCliCommand, ...], str, str | None],
-]
+
+class DiscoverCommands(Protocol):
+    def __call__(
+        self,
+        command: str,
+        identity: UnlistedCliIdentity,
+        cwd: Path,
+        home_dir: Path,
+        guard_home: Path,
+        *,
+        cancel: threading.Event | None = None,
+    ) -> tuple[tuple[LocalCliCommand, ...], str, str | None]: ...
+
 
 _BARE_PROGRAM_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 _SCRIPT_SUFFIXES = frozenset(
@@ -123,7 +132,8 @@ def load_cli_commands(
     # The probe re-resolves the name and only runs a program whose id, kind
     # and identity hash still match, so a binary swapped after the check
     # above is not run.
-    commands, help_status, _ = discover(identity.name, identity, home_dir, home_dir, guard_home)
+    # A cancel also stops the probe from starting any further --help runs.
+    commands, help_status, _ = discover(identity.name, identity, home_dir, home_dir, guard_home, cancel=cancel)
     if cancel.is_set():
         return
     if help_status == "failed":

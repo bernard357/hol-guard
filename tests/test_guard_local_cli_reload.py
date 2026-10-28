@@ -51,7 +51,7 @@ class Probes:
 def probes(monkeypatch: pytest.MonkeyPatch) -> Probes:
     recorded = Probes()
 
-    def discover(command, identity, cwd, home_dir, guard_home):
+    def discover(command, identity, cwd, home_dir, guard_home, *, cancel=None):
         recorded.calls.append(command)
         if recorded.during is not None:
             recorded.during()
@@ -265,3 +265,20 @@ def test_a_tool_guard_cannot_find_is_not_called_replaced(tmp_path, tool, probes,
         assert service.close_discovery()
     assert (raised.value.status, raised.value.code) == (409, "cli_not_on_guard_path")
     assert probes.calls == []
+
+
+def test_a_cancel_stops_further_help_runs(tool, monkeypatch):
+    import threading
+
+    started: list[tuple[str, ...]] = []
+    cancel = threading.Event()
+
+    def help_once(argv):
+        started.append(tuple(argv))
+        cancel.set()
+        return "Usage: fixturetool <command>\n\nCommands:\n  deploy  Ship it\n  status  Show state\n"
+
+    monkeypatch.setattr(local_cli_api, "run_cli_help", help_once)
+    home = Path(os.environ["HOME"])
+    local_cli_api._discover_from_command(tool.name, tool, home, home, home / "guard", cancel=cancel)
+    assert len(started) == 1

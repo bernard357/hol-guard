@@ -313,6 +313,17 @@ def test_run_cli_help_stops_after_output_limit(tmp_path: Path) -> None:
     assert len(output) <= _HELP_OUTPUT_LIMIT
 
 
+def _assert_stopped(pid: int) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    pytest.fail("a process the help program started kept running")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX")
 def test_a_timed_out_probe_stops_what_the_program_started(tmp_path: Path) -> None:
     started = tmp_path / "started"
@@ -320,12 +331,17 @@ def test_a_timed_out_probe_stops_what_the_program_started(tmp_path: Path) -> Non
     tool.write_text(f'#!/bin/sh\nsleep 30 &\necho $! > "{started}"\nwait\n', encoding="utf-8")
     tool.chmod(0o755)
     run_cli_help((str(tool), "--help"))
-    child = int(started.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        try:
-            os.kill(child, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.05)
-    pytest.fail("the probe's child kept running after the timeout")
+    _assert_stopped(int(started.read_text(encoding="utf-8")))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX")
+def test_a_probe_that_exits_stops_what_it_left_behind(tmp_path: Path) -> None:
+    started = tmp_path / "started"
+    tool = tmp_path / "forks"
+    tool.write_text(
+        f'#!/bin/sh\nsleep 30 >/dev/null 2>&1 &\necho $! > "{started}"\necho "Usage: forks"\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    assert "Usage: forks" in run_cli_help((str(tool), "--help"))
+    _assert_stopped(int(started.read_text(encoding="utf-8")))

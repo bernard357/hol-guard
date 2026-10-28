@@ -62,7 +62,8 @@ export function LocalCliLoadCommands(props: {
       </p>
     );
   }
-  const hasCommands = item.commands.length > 0;
+  // Root and other are Guard's own entries for every tool, not listed commands.
+  const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
   return (
     <div className="mt-3 max-w-2xl" aria-busy={busy}>
       <p className="text-sm leading-6 text-brand-dark/75">

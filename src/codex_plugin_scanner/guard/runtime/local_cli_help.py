@@ -211,11 +211,16 @@ def _read_help_output(argv: list[str], tmp: str) -> str:
     reader = threading.Thread(target=_drain, daemon=True)
     reader.start()
     reader.join(_HELP_TIMEOUT_SECONDS)
-    if reader.is_alive() or process.poll() is None:
-        _stop_probe(process)
-        reader.join(1)
-        if process.poll() is None:
-            process.wait(timeout=1)
+    try:
+        if reader.is_alive() or process.poll() is None:
+            _stop_probe(process)
+            reader.join(1)
+            if process.poll() is None:
+                process.wait(timeout=1)
+    finally:
+        # A child that let go of the output can outlive a program that exited
+        # on its own; nothing a help run started keeps running after it.
+        _stop_group(process)
     return "".join(chunks)[:_HELP_OUTPUT_LIMIT]
 
 
@@ -227,10 +232,14 @@ def _stop_probe(process: subprocess.Popen[str]) -> None:
     leave them running.
     """
 
+    _stop_group(process)
+    process.kill()
+
+
+def _stop_group(process: subprocess.Popen[str]) -> None:
     if os.name != "nt":
         with contextlib.suppress(OSError):
             os.killpg(process.pid, signal.SIGKILL)
-    process.kill()
 
 
 def _with_nested_commands(
