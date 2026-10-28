@@ -14,6 +14,7 @@ from codex_plugin_scanner.guard.daemon.local_cli_api import LocalCliApiError, Lo
 from codex_plugin_scanner.guard.runtime.local_cli_commands import LocalCliCommand
 from codex_plugin_scanner.guard.runtime.local_cli_identity import UnlistedCliIdentity, recognize_operator_cli
 from codex_plugin_scanner.guard.store import GuardStore
+from tests.local_cli_store_support import upsert_local_cli_command_states
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the fixture tool is a POSIX shell script")
 
@@ -84,7 +85,7 @@ def _item(store: GuardStore, cli_id: str) -> dict[str, object]:
 def test_loading_commands_adds_new_ones_and_keeps_existing_choices(tmp_path, tool, probes):
     store, service = _service(tmp_path, tool)
     store.replace_local_cli_commands(tool.cli_id, (_command("legacy"),))
-    store.upsert_local_cli_command_states(tool.cli_id, {"legacy": "block"})
+    upsert_local_cli_command_states(store, tool.cli_id, {"legacy": "block"})
     try:
         job = service.refresh_job({"cli_id": tool.cli_id, "confirm_process_start": True})
         assert _finished(service, job)["state"] == "complete"

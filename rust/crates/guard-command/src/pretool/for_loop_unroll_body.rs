@@ -418,10 +418,116 @@ fn reference(chars: &[(usize, char)], i: &mut usize, name: &str, argument: bool)
             format!("${ident}")
         });
     }
-    (ident == name).then(|| MARKER.to_owned())
+    (ident == name).then(|| MARKER.to_string())
 }
 
-const MARKER: &str = "\u{1}";
+/// Where the loop variable stood in the body, kept out of the shell's own
+/// character set so no written word can collide with it.
+const MARKER: char = '\u{1}';
+
+/// Whether every reference to the loop variable is a whole unquoted word.
+///
+/// The shell splits an unquoted expansion into fields and expands what comes
+/// out as a pattern, so each name a glob matches reaches the body as its own
+/// argument. The proofs that expand a pattern own that rule, and they see it
+/// only while the reference is the whole word: `cat $f` is written out as
+/// `cat *.json`, so the glob proof reads exactly the names the loop reads,
+/// and it refuses a directory holding a name that would split.
+///
+/// Glued into a larger word the written-out text spells a different pattern.
+/// `cat bak-$f` becomes `cat bak-*.json`, whose matches are proven while the
+/// loop's own `*.json` matches never are, so a name holding whitespace splits
+/// in the body into words that pattern never matched. A reference inside a
+/// larger word keeps its review. A reference the body quotes on its own is
+/// read here as the whole word it is, because `unquote_whole_references` has
+/// already taken the quotes off.
+pub(crate) fn references_stand_alone(item: &str) -> bool {
+    let chars: Vec<char> = item.chars().collect();
+    chars.iter().enumerate().all(|(index, &current)| {
+        current != MARKER
+            || (index.checked_sub(1).is_none_or(|before| {
+                word_boundary(Some(chars[before])) && !escaped(&chars, before)
+            }) && word_boundary(chars.get(index + 1).copied()))
+    })
+}
+
+/// Whether the character beside a reference ends the word, counting the ends
+/// of the item itself.
+fn word_boundary(character: Option<char>) -> bool {
+    character.is_none_or(|character| character.is_whitespace() || character == '|')
+}
+
+/// Whether a backslash makes the character at `at` a literal. The shell reads
+/// `\ ` as a space stuck to the word beside it, so `cat \ $f` is one glued
+/// word rather than two, and the reference does not stand on its own after
+/// all. An even run of backslashes spells backslashes and leaves the
+/// character the boundary it looks like.
+fn escaped(chars: &[char], at: usize) -> bool {
+    chars[..at]
+        .iter()
+        .rev()
+        .take_while(|character| **character == '\\')
+        .count()
+        % 2
+        == 1
+}
+
+/// Take the quotes off a reference the body quotes as a whole word of its own.
+///
+/// Every word the loop header admits is one whitespace-free run of characters
+/// the shell does nothing with, so `"$f"` and `$f` hand the body the same
+/// single word. Writing the bare word out is what lets the glob proof read the
+/// pattern the loop expands; left inside quotes it would stand for a name the
+/// shell never matches.
+///
+/// Which `"` opens a string and which closes one decides that, so the scan
+/// carries the quote state rather than reading the two characters beside the
+/// reference. In `cat "x "$f" y"` the quote before the reference closes
+/// `"x "` and the one after opens `" y"`: taking them off would spell the one
+/// literal name `x *.md y` for a loop that reads `x a.md y` and `x b.md y`.
+pub(crate) fn unquote_whole_references(item: &str) -> String {
+    let chars: Vec<char> = item.chars().collect();
+    let mut out = String::with_capacity(item.len());
+    let mut index = 0usize;
+    let mut in_double = false;
+    while let Some(&current) = chars.get(index) {
+        if !in_double && current == '\'' {
+            out.push(current);
+            index += 1;
+            while let Some(&inner) = chars.get(index) {
+                out.push(inner);
+                index += 1;
+                if inner == '\'' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if !in_double
+            && current == '"'
+            && chars.get(index + 1) == Some(&MARKER)
+            && chars.get(index + 2) == Some(&'"')
+            && word_boundary(index.checked_sub(1).map(|before| chars[before]))
+            && word_boundary(chars.get(index + 3).copied())
+        {
+            out.push(MARKER);
+            index += 3;
+            continue;
+        }
+        if current == '\\' && index + 1 < chars.len() {
+            out.push(current);
+            out.push(chars[index + 1]);
+            index += 2;
+            continue;
+        }
+        if current == '"' {
+            in_double = !in_double;
+        }
+        out.push(current);
+        index += 1;
+    }
+    out
+}
 
 pub(crate) fn substitute(item: &str, word: &str) -> Option<String> {
     // Every pipeline stage must start with a plain word: no marker, no

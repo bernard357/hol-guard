@@ -47,7 +47,7 @@ def _utf8_len(value: str) -> int | None:
 
 
 def _environment() -> dict[str, str] | None:
-    # ``native_review_evidence`` sends every text entry of ``os.environ``.
+    # The edge's review evidence query sends every text entry of ``os.environ``.
     environment = {name: value for name, value in os.environ.items() if isinstance(value, str)}
     if len(environment) > _MAX_ENVIRONMENT_ENTRIES:
         return None

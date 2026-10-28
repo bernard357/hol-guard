@@ -13,10 +13,10 @@ from codex_plugin_scanner.guard.runtime.approval_context import (
     APPROVAL_CONTEXT_TOKEN_PREFIX,
     NativeContextDigestUnavailableError,
     approval_context_token_is_well_formed,
-    approval_context_tokens_validation_reason,
     build_approval_context_token,
     build_runtime_launch_identity,
 )
+from tests.resident_probe_support import approval_context_tokens_validation_reason
 
 
 def _context(**overrides: object) -> dict[str, object]:

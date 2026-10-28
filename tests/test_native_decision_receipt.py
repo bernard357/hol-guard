@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from ci.native_runtime.post_tool_review import response_from_payload
 from codex_plugin_scanner.guard.native_decision_receipt import (
     receipt_matches_edge,
     validate_native_decision_receipt,
 )
 from codex_plugin_scanner.guard.native_hook_adapter import native_review_request
-from codex_plugin_scanner.guard.native_response_decoder import response_from_payload
 from codex_plugin_scanner.guard.runtime.actions import (
     GuardActionEnvelope,
     normalize_harness_payload,

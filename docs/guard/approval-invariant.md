@@ -48,9 +48,23 @@ are not reviews, so there is nothing to approve.
 
 When Guard can prove what a command runs, the approval token is the strong
 exact-action token. It binds the resolved program and file contents as well as
-the command, and it also binds Guard's rule set and extensions. Editing the
-script or changing those rules makes it a new command, so Guard asks once more
-and both choices are offered again.
+the command, and it also binds the configured command extensions. Editing the
+script or changing those extensions makes it a new command, so Guard asks once
+more and both choices are offered again. A Guard upgrade that only changes the
+compiled rules keeps the token. If the new rules block the command or require a
+sandbox, the saved approval does not lower that.
+
+Package approvals and skill, plugin and MCP-server approvals follow the same
+rule. A new advisory or rule that matches an approved package or server shows
+as a finding and leaves the saved approval in place. A blocking verdict still
+blocks. Turning the detector registry off, or a detector that could not run,
+still asks again.
+
+The release that introduced this asks once more for proven-command Always
+approvals and for skill, plugin and MCP-server approvals saved before it,
+because their tokens changed shape. Package approvals saved with no advisory or
+rule matched are not affected. After that one prompt, rule and feed updates
+keep the approval.
 
 When Guard cannot prove it, for example an executable outside the workspace
 roots, a helper-selecting Git config or a mutable script launcher, the token
@@ -81,7 +95,7 @@ Changing any of these produces a new command, and Guard asks again.
 | Final-action settle of an artifact verdict (a browser outcome other than allow, block or sandbox-required settles nothing; the settle never touches an approval choice) | `rust/crates/guard-runtime/src/hook_decision_artifact_finalize.rs` (`artifact_finalize`, `artifact_browser_outcome`). No Python caller runs this settle any more: the CLI hook answers through the daemon review path |
 | Reuse of a saved approval on the artifact hook (claim, revalidate, settled). A saved allow is claimed before it is used, a claim that wins is always revalidated against the request it was issued for, a claim that loses never allows, reuse reads no scope, so Always allow is honored whichever scope saved it and under `require-reapproval` (only a trusted browser request's override reads the source, and it claims a gate-written allow), and a changed hash is refused and never claimed | `rust/crates/guard-runtime/src/hook_decision_artifact_reuse_step.rs` (`artifact_reuse_step`). No Python caller runs this plan any more: the CLI hook answers through the daemon review path, as the bridges do |
 | Gathering of local tool-grant evidence on a native tool request, and the receipt `approval_source` label (a label of who approved; it never narrows the choices offered) | `rust/crates/guard-runtime/src/hook_artifact_compose_policy_tail.rs` (`local_eligibility_required`, `approval_source`) |
-| PreToolUse floor on a native command (a review or require-reapproval floor stays that tier and keeps both choices; a sandbox-required floor keeps that tier instead of collapsing to a block, while the containment rewrite stays routed from the edge result; an allowed local CLI grant never settles below a require-reapproval floor; no pre-tool review, or no local CLI grant answer, is the host outage response, never a floor or action the transport picks) | `rust/crates/guard-runtime/src/hook_decision_pretool_floor.rs` (`pretool_floor`), answered through the resident `hook_decide` operation; the local CLI grant step is `rust/crates/guard-runtime/src/local_cli_grant_op.rs` (`decide_allowed_launch`), reached from `src/codex_plugin_scanner/guard/local_cli_hook.py` (`native_local_cli_hook`) through `rust/crates/guard-runtime/src/local_cli_hook_op.rs` (`evaluate_local_cli_hook_request`) |
+| PreToolUse floor on a native command (a review or require-reapproval floor stays that tier and keeps both choices; a sandbox-required floor keeps that tier instead of collapsing to a block, while the containment rewrite stays routed from the edge result; an allowed local CLI grant never settles below a require-reapproval floor; no pre-tool review, or no local CLI grant answer, is the host outage response, never a floor or action the transport picks) | `rust/crates/guard-runtime/src/hook_decision_pretool_floor.rs` (`pretool_floor`), answered through the resident `hook_decide` operation; the local CLI grant step is `rust/crates/guard-runtime/src/local_cli_grant_op.rs` (`decide_allowed_launch`), reached from `src/codex_plugin_scanner/guard/local_cli_hook.py` (`_native_local_cli_hook_reply`) through `rust/crates/guard-runtime/src/local_cli_hook_op.rs` (`evaluate_local_cli_hook_request`) |
 | Containment routing of a native PreToolUse answer (a review that is not routed keeps its card with both choices; only a sandbox-required answer goes to the contained sink, and only an outside-roots review the saved-approval path could also override asks the local CLI grant, which still ends at the sink; whether the sink takes a receipt is answered per harness and host, and a host with no sink for the profile, Windows included, keeps the receipt and says so instead of allowing; no resident answer is the host outage response, never a route the transport picks) | `rust/crates/guard-runtime/src/hook_decision_containment_route.rs` (`containment_route`, `containment_sink`; `edge_route` stamps the same route on the PreToolUse edge so no second round trip is needed) and `rust/crates/guard-runtime/src/hook_decision_containment_rewrite.rs` (`containment_rewrite`: the resident writes the private request snapshot and quotes the sink command, and a call it cannot snapshot keeps its receipt), asked by `src/codex_plugin_scanner/guard/daemon/hook_worker_native.py` and `src/codex_plugin_scanner/guard/daemon/hook_contained_grant.py` through `src/codex_plugin_scanner/guard/native_hook_containment_route.py` |
 | Review card choices | `dashboard/src/approval-retry-guidance.ts`, `dashboard/src/review-decision-card.tsx` |
 

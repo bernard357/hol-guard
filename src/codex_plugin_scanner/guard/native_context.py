@@ -34,7 +34,6 @@ from .native_resident_client import (
     native_resident_client_failure_code,
     native_resident_client_ready,
     native_resident_client_request,
-    native_resident_client_transport,
 )
 from .native_resident_prerequisite_reason import (
     clear_prerequisite_failure,
@@ -605,7 +604,7 @@ def native_context_digest(
         # "native_client_pool_exhausted", ...) is the actionable half of this.
         _digest_failed(
             f"{native_resident_client_failure_code() or 'native_context_digest_resident_unavailable'}"
-            f"[{native_resident_client_transport()},{attempts} attempt(s),"
+            f"[{attempts} attempt(s),"
             f"allowance={'granted' if cold_start else 'none'},budget={budget_seconds:.2f}s]"
         )
         native_record_resident_failure(

@@ -1,3 +1,4 @@
+use super::guard_names::Moved;
 use super::{github_api_path_after_repository, names_guard_outside_message};
 use crate::github_command_capabilities::api_endpoint_index;
 
@@ -88,14 +89,20 @@ fn global_options_before_api_keep_the_repository_exemption() {
         "gh --hostname github.com api --method POST repos/example-org/hol-guard/actions/runs/1/approve",
         "gh --hostname=github.com api repos/example-org/hol-guard/dispatches",
         "gh -R example-org/app api repos/example-org/hol-guard/actions/runs/1",
+        // A raw field is a string in the request body; a check or workflow
+        // name that mentions the project reaches nothing on this host.
+        "gh --hostname github.com api repos/example-org/app/actions/runs/1 -f name=hol-guard",
+        "gh api repos/example-org/app/actions/runs/1 -fname=hol-guard",
+        "gh api repos/example-org/app/actions/runs/1 -f=name=hol-guard",
     ] {
-        assert!(!names_guard_outside_message(&segment(command)), "{command}");
+        assert!(!names_guard_outside_message(&segment(command), &Moved::default()), "{command}");
     }
     for command in [
         "gh --hostname github.com api repos/example-org/app/contents/.hol-guard/config",
-        "gh --hostname github.com api repos/example-org/app/actions/runs/1 -f name=hol-guard",
+        "gh --hostname github.com api repos/example-org/app/actions/runs/1 -f name=.hol-guard/config",
+        "gh api repos/example-org/app/actions/runs/1 -fname=.hol-guard/config",
         "gh --hostname api repos/example-org/hol-guard/actions/runs/1",
     ] {
-        assert!(names_guard_outside_message(&segment(command)), "{command}");
+        assert!(names_guard_outside_message(&segment(command), &Moved::default()), "{command}");
     }
 }

@@ -118,6 +118,7 @@ pub(crate) mod git_listing_reads;
 mod git_local_writes;
 mod git_probe;
 mod git_push;
+mod git_read_after_allow;
 mod git_remote_config;
 mod git_remote_ops;
 mod git_routes;
@@ -126,6 +127,7 @@ mod git_worktree;
 pub(crate) mod github_conversation;
 mod glob_words;
 mod guard_diagnostics;
+mod guard_names;
 mod list_wrapper;
 mod listing_reads;
 mod listing_temporary;
@@ -211,6 +213,7 @@ pub use generic::{bounded_task_metadata_output, evaluate_pre_tool_envelope};
 pub use git_push::{
     install_git_push_verdict, push_environment_git, GitPushRequest, GitPushVerdict,
 };
+pub(crate) use git_read_after_allow::git_reads_after_allowed_steps;
 pub use safe_scalar::PsqlEnvironment;
 #[cfg_attr(not(unix), allow(unused_imports))]
 pub(crate) use script_content::launch_loopback_ports;
@@ -294,7 +297,9 @@ pub(crate) fn fixed_command_floor(model: &CanonicalCommandV1) -> bool {
             &crate::canonical_command::CanonicalCommand::from_v1(model),
         )
         || ps::sensitive_exfiltration(model, sensitive_command, exfiltration_command)
-        || model.segments.iter().any(names_guard_outside_message)
+        || model.segments.iter().enumerate().any(|(index, segment)| {
+            names_guard_outside_message(segment, &guard_names::moved_by(&model.segments[..index]))
+        })
         || model.segments.iter().any(selects_secret_outside_message)
 }
 
@@ -306,10 +311,21 @@ pub(crate) fn fixed_command_floor(model: &CanonicalCommandV1) -> bool {
 /// `owner/name` names a repository on the GitHub host, never a local file,
 /// program or process, so a repository called `hol-guard` keeps the Allow.
 /// The same holds for the owner and name in a `gh api repos/{owner}/{name}/...`
-/// endpoint; the rest of that path is still checked.
-fn names_guard_outside_message(segment: &crate::CommandSegmentV1) -> bool {
+/// endpoint; the rest of that path is still checked. A raw `-f` field of that
+/// call is a string in the request body, so only Guard's state counts there.
+///
+/// Git and directory changes take checkout paths, pathspecs and remote URLs.
+/// Those name Guard only when they reach its state, an installed Guard
+/// program or shell text an alias could run; see [`guard_names`].
+fn names_guard_outside_message(
+    segment: &crate::CommandSegmentV1,
+    moved: &guard_names::Moved,
+) -> bool {
     let selectors = github_repository_values(segment);
     let endpoint = github_api_endpoint(segment);
+    let raw_fields =
+        endpoint.map_or_else(Vec::new, |_| guard_names::github_api_raw_fields(segment));
+    let by_location = guard_names::judged_by_location(segment);
     arguments_outside_message(segment).any(|argument| {
         if selectors
             .iter()
@@ -319,6 +335,15 @@ fn names_guard_outside_message(segment: &crate::CommandSegmentV1) -> bool {
         }
         if endpoint.is_some_and(|endpoint| std::ptr::eq(endpoint, argument)) {
             return names_guard(github_api_path_after_repository(argument).unwrap_or(argument));
+        }
+        if raw_fields
+            .iter()
+            .any(|field| std::ptr::eq(*field, argument))
+        {
+            return guard_names::names_guard_state(argument);
+        }
+        if by_location {
+            return guard_names::names_guard_location(argument, moved);
         }
         names_guard(argument)
     })

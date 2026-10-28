@@ -9,6 +9,36 @@ mod options;
 
 type Capabilities = Option<Vec<&'static str>>;
 
+/// Options that take a GitHub user, where `gh` reads `@me` as the signed-in
+/// account. A user is never a file, so `--author @me` reads nothing local.
+const USER_OPTIONS: &[&str] = &[
+    "--add-assignee",
+    "--add-reviewer",
+    "--assignee",
+    "--author",
+    "--commenter",
+    "--involves",
+    "--mention",
+    "--mentions",
+    "--remove-assignee",
+    "--remove-reviewer",
+    "--review-requested",
+    "--reviewed-by",
+    "--reviewer",
+];
+
+/// `@me` as the separate value of a user option. The `--author=@me` spelling
+/// never starts with `@`, and the `-F key=@path` file form stays with `api`.
+/// After a bare `--` every token is positional, so no option precedes it.
+fn names_signed_in_user(original: &[String], index: usize) -> bool {
+    original[index] == "@me"
+        && index
+            .checked_sub(1)
+            .and_then(|option| original.get(option))
+            .is_some_and(|option| USER_OPTIONS.contains(&option.as_str()))
+        && !original[..index].iter().any(|value| value == "--")
+}
+
 /// `probe` is where native proofs run the segment (after a verified leading
 /// `cd`), with the deadline and the environment the command inherits.
 pub(super) fn observe(
@@ -113,7 +143,9 @@ fn classify(original: &[String], text: &str) -> Capabilities {
     if original.iter().enumerate().any(|(index, value)| {
         value.contains('\0')
             || (value.contains('`') && !literal_everywhere(text, '`'))
-            || (value.starts_with('@') && !bare_jq_format(original, index))
+            || (value.starts_with('@')
+                && !bare_jq_format(original, index)
+                && !names_signed_in_user(original, index))
             || (value.contains('$')
                 && !(graphql
                     && literal_everywhere(text, '$')

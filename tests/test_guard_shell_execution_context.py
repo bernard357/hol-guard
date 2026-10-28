@@ -27,6 +27,13 @@ from codex_plugin_scanner.guard.runtime.shell_execution_context import (
 from tests.live_hook_review_support import live_post_tool_flag
 from tests.resident_probe_support import validate_shell_execution_segment
 
+_FLOW_OPERATORS = frozenset({"&&", "||", ";", "\n", "|", "|&", "&"})
+
+
+def _last_flow_operator(controls: tuple[str, ...]) -> str | None:
+    return next((control for control in reversed(controls) if control in _FLOW_OPERATORS), None)
+
+
 pytestmark = pytest.mark.usefixtures("package_intent_native")
 
 
@@ -153,7 +160,7 @@ def test_fd_duplication_is_preserved_as_a_redirection_not_background_control(tmp
     context = model_shell_execution_context("cd project-b 2>&1 && pytest -q", cwd=tmp_path)
 
     assert context.complete
-    assert context.segments[0].control_operator == "&&"
+    assert _last_flow_operator(context.segments[0].control_after) == "&&"
     assert context.segments[1].effective_cwd == destination.resolve()
 
 
@@ -173,7 +180,7 @@ def test_pipeline_directory_change_does_not_leak_from_its_subprocess(tmp_path: P
     context = model_shell_execution_context("cd project-b | pytest -q", cwd=tmp_path)
 
     assert context.complete
-    assert context.segments[0].control_operator == "|"
+    assert _last_flow_operator(context.segments[0].control_after) == "|"
     assert context.segments[1].effective_cwd == tmp_path.resolve()
 
     right_hand_change = model_shell_execution_context("echo ready | cd project-b && pytest -q", cwd=tmp_path)

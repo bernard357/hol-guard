@@ -182,7 +182,7 @@ def test_saved_exact_action_block_wins_over_custom_extension_allow(
 ) -> None:
     saved_block = {"decision": "deny", "source": "saved"}
     monkeypatch.setattr(
-        hook_native_review_approval, "native_review_evidence", lambda **_kwargs: (True, None, "token", None)
+        hook_native_review_approval, "review_evidence_parts", lambda _evidence: (True, None, "token", None)
     )
     monkeypatch.setattr(hook_native_review_approval, "native_saved_decision_response", lambda *_a, **_k: saved_block)
 

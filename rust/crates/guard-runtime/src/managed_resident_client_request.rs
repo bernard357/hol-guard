@@ -4,7 +4,8 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{containment, handoff, lease, restart_budget, CLIENT_RETRY_DELAY};
+use super::handoff_record::Retirement;
+use super::{containment, handoff, handoff_record, lease, restart_budget, CLIENT_RETRY_DELAY};
 use crate::resident_diagnostics::{note, observe, Phase};
 use crate::resident_state::{
     acquire_startup_lock, clear_stale_startup_lock, discover_home_states_prefer, next_generation,
@@ -85,6 +86,12 @@ fn try_home_states(
             deadline,
         ) {
             note("client_state_foreign_retired", 1);
+            handoff_record::record(
+                state_base,
+                &runtime_digest,
+                &state.runtime_sha256,
+                Retirement::Orphaned,
+            );
             continue;
         }
         let same_runtime = runtime_digest == state.runtime_sha256;
@@ -138,6 +145,12 @@ fn try_home_states(
                 ) =>
             {
                 note("client_state_foreign_rejected", 1);
+                handoff_record::record(
+                    state_base,
+                    &runtime_digest,
+                    &state.runtime_sha256,
+                    Retirement::Rejected,
+                );
             }
             Ok(response) => return Ok(Some(response)),
             Err(error)

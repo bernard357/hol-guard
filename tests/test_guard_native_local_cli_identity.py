@@ -78,11 +78,10 @@ def test_no_resident_answer_for_the_local_cli_step_is_the_host_outage(
     # for review itself (``an_unreadable_grant_is_unverified`` in Rust); no
     # answer at all is an outage the hook answers with the host outage
     # response, as the direct hook path does, whatever the store holds.
-    from codex_plugin_scanner.guard import local_cli_hook
     from codex_plugin_scanner.guard.native_hook_decision import NativeHookDecisionError
     from tests import runtime_wrapper_support
 
-    monkeypatch.setattr(local_cli_hook, "native_local_cli_hook", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_wrapper_support, "native_local_cli_hook", lambda *_args, **_kwargs: None)
 
     class Store:
         guard_home = tmp_path
