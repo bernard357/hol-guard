@@ -3,7 +3,7 @@
   "id": "mcp.discourse",
   "version": "1.0.0",
   "name": "Discourse MCP",
-  "description": "Offers local opt-in review for Discourse MCP post, topic and private-message mutations. Unlisted tools keep existing Guard policy; this is not affiliated with or bundled into Discourse MCP.",
+  "description": "Offers local opt-in review for selected Discourse MCP post, topic, private-message and moderation mutations. Unlisted tools keep existing Guard policy; this is not affiliated with or bundled into Discourse MCP.",
   "trustClass": "external",
   "activation": "opt-in",
   "publisher": {
@@ -36,6 +36,10 @@
     },
     {
       "name": "discourse_update_topic",
+      "state": "review"
+    },
+    {
+      "name": "discourse_perform_reviewable_action",
       "state": "review"
     },
     {
