@@ -23,6 +23,8 @@ use edge_identity::{
     verdict_policy_identity, MAX_EVENT_BYTES, MAX_HARNESS_BYTES, MAX_PATH_BYTES,
 };
 pub(crate) use edge_identity::{policy_generation_matches, stable_policy_identity};
+#[path = "edge_local_cli.rs"]
+mod edge_local_cli;
 #[path = "edge_result_check.rs"]
 mod edge_result_check;
 pub(crate) use edge_result_check::standalone_receipt;
@@ -56,8 +58,7 @@ pub(crate) fn execution_intent_digest(envelope: &GuardHookEnvelopeV2) -> Result<
 /// Derive a stable opaque identity when the harness omitted a request ID.
 /// The digest covers semantic request inputs only. Transport deadlines,
 /// object field order, and event-alias spelling are deliberately excluded.
-/// Raw request material remains inside the resident and never appears in an
-/// approval result.
+/// Raw request material stays in the resident, never in an approval result.
 pub(crate) fn request_identity(envelope: &GuardHookEnvelopeV2) -> Result<(String, String), String> {
     let harness = canonical_harness(&envelope.harness)?;
     let event = authoritative_event(envelope)?;
@@ -175,7 +176,7 @@ fn canonical_harness(value: &str) -> Result<String, String> {
     Ok(canonical.to_owned())
 }
 
-fn canonical_event(value: &str) -> Result<String, String> {
+pub(crate) fn canonical_event(value: &str) -> Result<String, String> {
     bounded_nonempty(value, MAX_EVENT_BYTES, "native_hook_event_invalid")?;
     let compact = value.trim().to_ascii_lowercase().replace(['_', '-'], "");
     match compact.as_str() {
@@ -291,6 +292,7 @@ fn evaluate_validated_envelope(
     policy_snapshot: Option<&AdmittedPolicySnapshot>,
     origin_store: Option<&crate::policy_store::PolicySnapshotStore>,
 ) -> Result<Vec<u8>, String> {
+    let started = Instant::now();
     let harness = canonical_harness(&envelope.harness)?;
     let event_name = authoritative_event(&envelope)?;
     let kind = payload_kind(&envelope.raw_payload)?;
@@ -447,9 +449,11 @@ fn evaluate_validated_envelope(
         // Guard's Claude Code notice outside Watch; the typed result's reason is always text.
         let _ = crate::hook_direct::claude_prompt_text::brand(response, &result);
     }
+    let local_cli_rule = edge_local_cli::settle(&envelope, &harness, &event_name, &result)?;
     let edge = GuardHookEdgeResultV2 {
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),
+        local_cli_rule,
         schema: GUARD_HOOK_EDGE_RESULT_V2_SCHEMA.to_owned(),
         authority: "rust".to_owned(),
         request_id: Some(request_id),
@@ -461,7 +465,7 @@ fn evaluate_validated_envelope(
         receipt,
     };
     edge_result_check::check(&edge)?;
-    crate::encode_response(&edge)
+    crate::encode_response(&crate::edge_structured::attached(&envelope, edge, started))
 }
 
 /// Evaluate a resident hook envelope against the already-installed in-memory
@@ -493,4 +497,4 @@ pub(crate) fn evaluate_envelope_with_snapshot(
 
 #[cfg(test)]
 #[path = "edge_tests.rs"]
-mod tests;
+pub(crate) mod tests;

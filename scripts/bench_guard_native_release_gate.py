@@ -12,6 +12,7 @@ and resident readiness are held to absolute ceilings.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import statistics
@@ -20,6 +21,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -32,12 +34,23 @@ from codex_plugin_scanner.guard.native_resident_client import (  # noqa: E402
     native_resident_client_request,
 )
 from codex_plugin_scanner.guard.native_route_receipt import native_hook_route, reset_native_hook_route  # noqa: E402
-from codex_plugin_scanner.guard.native_runtime import (  # noqa: E402
-    native_runtime_status,
-    review_post_tool_native,
-)
+from codex_plugin_scanner.guard.native_runtime import native_runtime_status  # noqa: E402
 from codex_plugin_scanner.guard.runtime.hook_review_types import HookReviewRequest  # noqa: E402
 from scripts.native_resident_stop_bound import RESIDENT_STOP_TIMEOUT_SECONDS  # noqa: E402
+
+
+def _load_post_tool_review() -> ModuleType:
+    """Load the CI PostToolUse client by path: `scripts/ci` shadows the top-level `ci` here."""
+    source = _REPO_ROOT / "ci" / "native_runtime" / "post_tool_review.py"
+    spec = importlib.util.spec_from_file_location("_bench_post_tool_review", source)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {source}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+review_post_tool_native = _load_post_tool_review().review_post_tool_native
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _MAX_WARM_P95_MS = 20.0

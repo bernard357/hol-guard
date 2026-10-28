@@ -447,6 +447,7 @@ fn required(value: &Option<String>) -> Result<&str, &'static str> {
     value.as_deref().ok_or(ERROR_INVALID)
 }
 
+mod claude_lifecycle;
 pub(crate) mod direct_record;
 mod dispatch;
 mod flows;
@@ -464,3 +465,7 @@ mod session_ops;
 #[cfg(all(test, unix))]
 #[path = "hook_authority_state_question_settle_tests.rs"]
 mod question_settle_tests;
+
+#[cfg(all(test, unix))]
+#[path = "hook_authority_state_claude_lifecycle_tests.rs"]
+mod claude_lifecycle_tests;

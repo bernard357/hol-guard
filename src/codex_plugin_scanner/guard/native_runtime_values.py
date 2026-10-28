@@ -49,7 +49,6 @@ _NATIVE_RUNTIME_EXPORTS = [
     "native_runtime_health",
     "native_runtime_status",
     "parity_signature",
-    "review_post_tool_native",
 ]
 
 

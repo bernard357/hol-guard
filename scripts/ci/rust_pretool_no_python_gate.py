@@ -238,6 +238,9 @@ def _contract_failures(root: Path) -> list[str]:
                 "pre-tool-generic-authority-v1",
                 # The edge checks its own answer; Python trusts it only then.
                 "edge-self-check-v1",
+                # The edge resolves the managed-policy view Python sends and
+                # answers the structured mediation itself.
+                "edge-structured-output-v1",
                 # The resident PreToolUse frame carries the command model
                 # request, now wrapped in the envelope that adds the path
                 # context the lane runs in.
@@ -292,7 +295,7 @@ def _bridge_failures(root: Path) -> list[str]:
     failures.extend(
         required_tokens(
             root / "src/codex_plugin_scanner/guard/native_hook_edge.py",
-            ("pre-tool-generic-authority-v1", "edge-self-check-v1"),
+            ("pre-tool-generic-authority-v1", "edge-self-check-v1", "edge-structured-output-v1"),
         )
     )
     # The edge checks its own pre-tool result and receipt before it answers.

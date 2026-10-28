@@ -35,7 +35,6 @@ from codex_plugin_scanner.guard.approvals import apply_approval_resolution
 from codex_plugin_scanner.guard.cli import commands as guard_commands_module
 from codex_plugin_scanner.guard.cli import render as guard_render_module
 from codex_plugin_scanner.guard.cli.commands_support_runtime_artifact_policy import runtime_policy_artifact_facts
-from codex_plugin_scanner.guard.cli.commands_support_runtime_resolution import _runtime_policy_path
 from codex_plugin_scanner.guard.cli.oauth_client import generate_dpop_key_pair
 from codex_plugin_scanner.guard.cli.render import emit_guard_payload
 from codex_plugin_scanner.guard.codex_config import read_toml_payload
@@ -74,9 +73,6 @@ from codex_plugin_scanner.guard.store import (
 )
 from codex_plugin_scanner.guard.synced_policy import synced_policy_payload
 from tests.claude_notice_support import claude_guard_approval_question_text, record_claude_permission_notice
-from tests.codex_read_only_inspection import (
-    codex_command_is_read_only_source_inspection,
-)
 from tests.guard_signed_approval_fixtures import write_synthetic_daemon_auth_token
 from tests.live_hook_review_support import (
     LIVE_ALLOWS_RETIRED_REVIEW,
@@ -8302,57 +8298,6 @@ def test_guard_hook_copilot_permission_request_defers_tool_calls_payload(
     _assert_permission_request_deferred(output)
 
 
-def test_runtime_policy_path_prefers_pi_workspace_settings(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    _write_json(workspace_dir / ".pi" / "settings.json", {"extensions": []})
-
-    assert _runtime_policy_path("pi", home_dir, workspace_dir) == workspace_dir / ".pi" / "settings.json"
-
-
-def test_runtime_policy_path_defaults_to_pi_workspace_settings_without_payload_override(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    _write_json(workspace_dir / ".omp" / "settings.json", {"extensions": []})
-
-    assert _runtime_policy_path("pi", home_dir, workspace_dir) == workspace_dir / ".pi" / "settings.json"
-
-
-def test_runtime_policy_path_honors_payload_config_path_for_pi(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    config_path = workspace_dir / ".omp" / "settings.json"
-    _write_json(workspace_dir / ".pi" / "settings.json", {"extensions": []})
-    _write_json(config_path, {"extensions": []})
-
-    assert _runtime_policy_path("pi", home_dir, workspace_dir, payload={"config_path": str(config_path)}) == config_path
-
-
-def test_runtime_policy_path_ignores_forged_payload_config_path_for_pi(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    forged_path = workspace_dir / ".cursor" / "mcp.json"
-    _write_json(workspace_dir / ".pi" / "settings.json", {"extensions": []})
-    _write_json(forged_path, {"servers": {}})
-
-    assert _runtime_policy_path("pi", home_dir, workspace_dir, payload={"config_path": str(forged_path)}) == (
-        workspace_dir / ".pi" / "settings.json"
-    )
-
-
-def test_runtime_policy_path_ignores_payload_config_path_for_other_harnesses(tmp_path):
-    home_dir = tmp_path / "home"
-    workspace_dir = tmp_path / "workspace"
-    _write_json(workspace_dir / ".omp" / "settings.json", {"extensions": []})
-
-    assert _runtime_policy_path(
-        "codex",
-        home_dir,
-        workspace_dir,
-        payload={"config_path": str(workspace_dir / ".omp" / "settings.json")},
-    ) == (workspace_dir / ".codex" / "config.toml")
-
-
 def test_guard_hook_emits_copilot_native_deny_for_risky_mcp_pre_tool_use(
     tmp_path,
     capsys,
@@ -11208,10 +11153,11 @@ def test_guard_hook_claude_notice_storage_failures_fall_back_to_generic_prompt(t
     )
 
     # Hook authority state lives in the native resident, which reports a locked store as no reply.
-    monkeypatch.setattr(
+    for target in (
         "codex_plugin_scanner.guard.cli.commands_support_hook_state.hook_authority_state",
-        lambda *_args, **_kwargs: None,
-    )
+        "codex_plugin_scanner.guard.native_hook_authority_state.hook_authority_state",
+    ):
+        monkeypatch.setattr(target, lambda *_args, **_kwargs: None)
     pre_tool_event = {
         "session_id": "session-claude-4",
         "tool_name": "Read",
@@ -11256,11 +11202,11 @@ def test_guard_hook_claude_notice_storage_failures_fall_back_to_generic_prompt(t
     assert pre_tool_rc == 0
     assert pre_tool_output["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert notification_rc == 0
+    # Without a reply there is no notice to read, so the prompt carries the
+    # generic hold copy and none of the review's reason.
     assert notification_output["systemMessage"] == (
-        "HOL Guard intercepted Claude's attempt to use Read and is routing it to a HOL Guard approval question. "
-        "This approval flow came from HOL Guard, not from Claude alone. "
-        "HOL Guard will ask the user to choose Allow once, Allow during this session, or Keep blocked before Claude "
-        "retries the action."
+        "HOL Guard is holding this Claude request for review. The HOL Guard runtime could not render "
+        "the full notice, so nothing in this prompt should be read as HOL Guard allowing the action."
     )
 
 
@@ -20139,94 +20085,6 @@ def test_sync_runtime_session_treats_token_endpoint_503_as_retryable_error(tmp_p
     assert not isinstance(error.value, guard_runner_module.GuardSyncAuthorizationExpiredError)
 
 
-def test_codex_read_only_source_inspection_external_targets_require_plain_non_recursive_grep(
-    tmp_path: Path,
-) -> None:
-    home_dir = tmp_path / "home"
-    projects_dir = home_dir / "projects"
-    workspace_dir = projects_dir / "workspace"
-    source_root = projects_dir / "sibling-worktree"
-    source_file = source_root / "src" / "safe.ts"
-    workspace_dir.mkdir(parents=True)
-    source_file.parent.mkdir(parents=True)
-    source_file.write_text("export const browser = true;\n")
-    (source_root / ".git").write_text("gitdir: ../.git/worktrees/test-checkout\n")
-
-    assert codex_command_is_read_only_source_inspection(
-        f"grep 'browser' {source_file}",
-        cwd=workspace_dir,
-        home_dir=home_dir,
-    )
-
-    workspace_source = workspace_dir / "src" / "local.ts"
-    workspace_source.parent.mkdir()
-    workspace_source.write_text("export const browser = true;\n")
-    assert codex_command_is_read_only_source_inspection(
-        f"grep -r 'browser' {workspace_source.parent}",
-        cwd=workspace_dir,
-        home_dir=home_dir,
-    )
-
-    rejected_commands = (
-        f"grep -r 'browser' {source_file.parent}",
-        f"grep -R 'browser' {source_file.parent}",
-        f"grep -rn 'browser' {source_file.parent}",
-        f"grep -nR 'browser' {source_file.parent}",
-        f"grep --recursive 'browser' {source_file.parent}",
-        f"grep --dereference-recursive 'browser' {source_file.parent}",
-        f"grep -d recurse 'browser' {source_file.parent}",
-        f"grep -drecurse 'browser' {source_file.parent}",
-        f"grep --directories=recurse 'browser' {source_file.parent}",
-        f"grep --directories recurse 'browser' {source_file.parent}",
-        f"rg 'browser' {source_file}",
-        f"git grep 'browser' {source_file}",
-        f"bash -c \"grep 'browser' {source_file}\"",
-    )
-    for command in rejected_commands:
-        assert not codex_command_is_read_only_source_inspection(
-            command,
-            cwd=workspace_dir,
-            home_dir=home_dir,
-        )
-
-
-def test_codex_read_only_source_inspection_rejects_globbed_targets(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    (workspace_dir / "src").mkdir(parents=True)
-    _write_text(workspace_dir / "src" / "safe.ts", "export const safe = true;\n")
-
-    commands = [
-        "cat src/*.ts",
-        "cat src/[leak].ts",
-        "sed -n '1,40p' src/*.ts | head -40",
-        "rg safe src/*.ts",
-    ]
-
-    for command in commands:
-        assert not codex_command_is_read_only_source_inspection(
-            command,
-            cwd=workspace_dir,
-        )
-
-
-def test_codex_read_only_source_inspection_allows_quoted_bracket_targets(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    route_file = workspace_dir / "app" / "[slug]" / "page.tsx"
-    _write_text(route_file, "export default function Page() { return null; }\n")
-
-    commands = [
-        "cat 'app/[slug]/page.tsx'",
-        "sed -n '1,40p' 'app/[slug]/page.tsx' | head -40",
-        "rg Page 'app/[slug]/page.tsx'",
-    ]
-
-    for command in commands:
-        assert codex_command_is_read_only_source_inspection(
-            command,
-            cwd=workspace_dir,
-        )
-
-
 def test_codex_read_only_source_inspection_allows_safe_sed_chains(live_hook_root: Path) -> None:
     workspace_dir = live_hook_root / "workspace"
     route_file = workspace_dir / "src" / "api" / "routes" / "skill-registry.ts"
@@ -20239,10 +20097,6 @@ def test_codex_read_only_source_inspection_allows_safe_sed_chains(live_hook_root
         "sed -n '940,1005p' src/services/skill-registry/skill-registry-service.ts"
     )
 
-    assert codex_command_is_read_only_source_inspection(
-        command,
-        cwd=workspace_dir,
-    )
     artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
@@ -20254,52 +20108,6 @@ def test_codex_read_only_source_inspection_allows_safe_sed_chains(live_hook_root
         cwd=workspace_dir,
     )
     assert artifact is None
-
-
-def test_codex_read_only_source_inspection_rejects_unbounded_sed_ranges(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "sed -n '9999999p' src/safe.ts",
-        cwd=workspace_dir,
-    )
-    assert not codex_command_is_read_only_source_inspection(
-        f"sed -n '{'9' * 10000}p' src/safe.ts",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_sed_chain_with_secret_file(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    route_file = workspace_dir / "src" / "api" / "routes" / "skill-registry.ts"
-    _write_text(route_file, "export const safe = true;\n")
-
-    command = "sed -n '450,510p' src/api/routes/skill-registry.ts && cat .env"
-
-    assert not codex_command_is_read_only_source_inspection(
-        command,
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_preserves_pipelines_in_safe_chains(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    route_file = workspace_dir / "src" / "api" / "routes" / "skill-registry.ts"
-    service_file = workspace_dir / "src" / "services" / "skill-registry" / "skill-registry-service.ts"
-    _write_text(route_file, "export const safe = true;\n")
-    _write_text(service_file, "export const alsoSafe = true;\n")
-
-    command = (
-        "rg skill src/api/routes/skill-registry.ts | head -20 && "
-        "sed -n '940,1005p' src/services/skill-registry/skill-registry-service.ts"
-    )
-
-    assert codex_command_is_read_only_source_inspection(
-        command,
-        cwd=workspace_dir,
-    )
 
 
 def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_search(live_hook_root: Path) -> None:
@@ -20321,11 +20129,6 @@ def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_se
         f"rg -n {shlex.quote(pattern)} src app __tests__ docs -g '!**/*.map' | sed -n '1,260p'"
     )
 
-    assert codex_command_is_read_only_source_inspection(
-        command,
-        cwd=repo_root,
-        home_dir=live_hook_root,
-    )
     artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
@@ -20343,25 +20146,6 @@ def test_codex_read_only_source_inspection_allows_cd_then_bounded_secret_term_se
     assert artifact is None
 
 
-def test_codex_read_only_source_inspection_rejects_cd_parent_escape(tmp_path: Path) -> None:
-    repo_root = tmp_path / "CascadeProjects" / "hashgraph-online"
-    workspace_dir = repo_root / "cloud-portal" / ".worktrees" / "guard-auth-phase-r-removal"
-    outside_dir = tmp_path / "CascadeProjects" / "outside"
-    _write_text(workspace_dir / "src" / "inside.ts", "export const token_label = 'field name only';\n")
-    _write_text(outside_dir / "src" / "outside.ts", "export const token_label = 'field name only';\n")
-
-    command = (
-        f"cd {shlex.quote(str(workspace_dir / '..' / '..' / '..' / '..' / 'outside'))} && "
-        "rg -n token_label src | sed -n '1,40p'"
-    )
-
-    assert not codex_command_is_read_only_source_inspection(
-        command,
-        cwd=repo_root,
-        home_dir=tmp_path,
-    )
-
-
 def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(live_hook_root: Path) -> None:
     repo_root = live_hook_root / "CascadeProjects" / "hashgraph-online"
     workspace_dir = repo_root / "cloud-portal" / ".worktrees" / "guard-auth-phase-r-default-surfaces"
@@ -20377,11 +20161,6 @@ def test_codex_read_only_source_inspection_allows_tilde_worktree_targets(live_ho
         "~/CascadeProjects/hashgraph-online/cloud-portal/.worktrees/guard-auth-phase-r-default-surfaces/__tests__"
     )
 
-    assert codex_command_is_read_only_source_inspection(
-        command,
-        cwd=repo_root,
-        home_dir=live_hook_root,
-    )
     artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
@@ -20452,10 +20231,6 @@ def test_codex_read_only_source_inspection_allows_git_diff_with_bounded_sed(
         "tests/test_guard_approvals.py | sed -n '1,260p'"
     )
 
-    assert codex_command_is_read_only_source_inspection(
-        command,
-        cwd=workspace_dir,
-    )
     artifact = live_post_tool_flag(
         payload={
             "tool_name": "Bash",
@@ -20470,593 +20245,6 @@ def test_codex_read_only_source_inspection_allows_git_diff_with_bounded_sed(
         cwd=workspace_dir,
     )
     assert artifact is None
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_secret_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    _write_text(workspace_dir / ".env", "TOKEN_LABEL=value\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- .env | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_external_config(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[diff]
-    external = /tmp/guard-helper
-""".strip(),
-    )
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_textconv_config(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[diff "guard"]
-    textconv = /tmp/guard-textconv
-""".strip(),
-    )
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_driver_command_config(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[diff "guard"]
-    command = /tmp/guard-diff
-""".strip(),
-    )
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_external_diff_env(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    monkeypatch.setenv("GIT_EXTERNAL_DIFF", "/tmp/guard-helper")
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_config_parameters_env(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'diff.external=/tmp/guard-helper'")
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_global_textconv_config(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(
-        global_config,
-        """
-[diff "guard"]
-    textconv = /tmp/guard-textconv
-""".strip(),
-    )
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_included_config_with_comment(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff "guard"]
-    textconv = /tmp/guard-textconv
-""".strip(),
-    )
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f"[include]\n    path = {included_config} # required by local tools\n")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_included_config_with_section_comment(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f"[include] # local helper config\n    path = {included_config}\n")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_ignores_unmatched_git_include_if(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "gitdir:{tmp_path / "other-repo"}/"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-
-    assert codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_matched_git_include_if(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "gitdir:{workspace_dir}/"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_gitdir_matches_dot_git(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "gitdir:{workspace_dir / ".git"}"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_gitdir_matches_symlink(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    symlink_dir = tmp_path / "workspace-link"
-    try:
-        symlink_dir.symlink_to(workspace_dir, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"symlink unavailable: {exc}")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "gitdir:{symlink_dir / ".git"}"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=symlink_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_relative_gitdir(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "gitdir:./workspace/.git"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_hasconfig(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[remote "origin"]
-    url = https://github.com/hashgraph-online/hol-guard
-""".strip(),
-    )
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(
-        global_config,
-        f'[includeIf "hasconfig:remote.*.url:https://github.com/hashgraph-online/*"]\n    path = {included_config}\n',
-    )
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_hasconfig_nested_include(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    helper_config = tmp_path / "helper-gitconfig"
-    _write_text(
-        helper_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    remote_config = tmp_path / "remote-gitconfig"
-    _write_text(
-        remote_config,
-        """
-[remote "origin"]
-    url = https://github.com/hashgraph-online/hol-guard
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    _write_text(workspace_dir / ".git" / "config", f"[include]\n    path = {remote_config}\n")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(
-        global_config,
-        f'[includeIf "hasconfig:remote.*.url:https://github.com/hashgraph-online/*"]\n    path = {helper_config}\n',
-    )
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_config_continued_include_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/main\n")
-    _write_text(workspace_dir / "helper-gitconfig", "[diff]\n    external = /tmp/guard-diff\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[include]
-    path = ../helper-\\
-        gitconfig
-""".strip(),
-    )
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_include_if_onbranch_prefix(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    included_config = tmp_path / "included-gitconfig"
-    _write_text(
-        included_config,
-        """
-[diff]
-    external = /tmp/guard-diff
-""".strip(),
-    )
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(workspace_dir / ".git" / "HEAD", "ref: refs/heads/feature/read-only\n")
-    global_config = tmp_path / "global-gitconfig"
-    _write_text(global_config, f'[includeIf "onbranch:feature/"]\n    path = {included_config}\n')
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_allows_git_diff_with_external_helpers_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-    _write_text(
-        workspace_dir / ".git" / "config",
-        """
-[diff "guard"]
-    textconv = /tmp/guard-textconv
-""".strip(),
-    )
-
-    assert codex_command_is_read_only_source_inspection(
-        "git diff --no-ext-diff --no-textconv -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_config_injection(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git -c diff.external=/tmp/guard-helper diff -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_unknown_git_diff_option(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff --mystery -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_git_diff_paths_without_separator(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_disallowed_option_after_optional_git_diff_flag(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff --color --output=/tmp/leak -- src/safe.ts | sed -n '1,40p'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_unbounded_sed_filter(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _isolate_git_config(monkeypatch)
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    assert not codex_command_is_read_only_source_inspection(
-        "git diff -- src/safe.ts | sed 's/token/value/'",
-        cwd=workspace_dir,
-    )
-
-
-def test_codex_read_only_source_inspection_rejects_invalid_sed_without_crashing(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    for command in (
-        "sed -i 's/safe/unsafe/' src/safe.ts",
-        "sed --unknown -n '1,40p' src/safe.ts",
-    ):
-        assert not codex_command_is_read_only_source_inspection(
-            command,
-            cwd=workspace_dir,
-        )
-
-
-def test_codex_read_only_source_inspection_rejects_malformed_chains(tmp_path: Path) -> None:
-    workspace_dir = tmp_path / "workspace"
-    source_file = workspace_dir / "src" / "safe.ts"
-    _write_text(source_file, "export const safe = true;\n")
-
-    commands = [
-        "&& sed -n '1,10p' src/safe.ts",
-        "sed -n '1,10p' src/safe.ts &&",
-        "sed -n '1,10p' src/safe.ts && && cat src/safe.ts",
-        "sed -n '1,10p' src/safe.ts || cat src/safe.ts",
-        "sed -n '1,10p' src/safe.ts;; cat src/safe.ts",
-    ]
-
-    for command in commands:
-        assert not codex_command_is_read_only_source_inspection(
-            command,
-            cwd=workspace_dir,
-        )
 
 
 def test_sign_guard_dpop_proof_sets_nonce_claim() -> None:

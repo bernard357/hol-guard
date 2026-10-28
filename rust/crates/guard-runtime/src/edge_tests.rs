@@ -66,7 +66,6 @@ fn execution_environment_binds_identity_without_rejecting_unrelated_hooks() {
         .has_valid_shape());
     // Core source paths still enforce the transport contract's strict bound.
     request.source.home_dir = "x".repeat(MAX_PATH_BYTES + 1);
-
     assert_eq!(
         validate_envelope_shape(&request).unwrap_err(),
         "native_hook_source_metadata_invalid"
@@ -86,7 +85,7 @@ fn write_fixture_file(path: &std::path::Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
-fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
+pub(crate) fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
     let digest = "a".repeat(64);
     let guard_home = std::env::temp_dir().join(format!(
         "hol-guard-native-edge-generation-test-{}-{}",
@@ -132,6 +131,9 @@ fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
             execution_environment: None,
         },
         recording_only: false,
+        local_cli_rules: None,
+        observe_local_cli: false,
+        structured_output_config: None,
     }
 }
 

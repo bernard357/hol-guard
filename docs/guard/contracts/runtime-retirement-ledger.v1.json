@@ -122,7 +122,9 @@
   "src/codex_plugin_scanner/guard/runtime/executable_resolution.py",
   "src/codex_plugin_scanner/guard/runtime/secret_file_request_services/constants_patterns.py",
   "src/codex_plugin_scanner/guard/runtime/github_capability_contract.py",
-  "src/codex_plugin_scanner/guard/runtime/github_capability_interaction.py"
+  "src/codex_plugin_scanner/guard/runtime/github_capability_interaction.py",
+  "src/codex_plugin_scanner/guard/runtime/structured_data_sensitivity.py",
+  "src/codex_plugin_scanner/guard/runtime/structured_output_mediation.py"
  ],
  "retired_tests": [
   {
@@ -7662,6 +7664,81 @@
    ],
    "status": "obsolete_implementation_assertion",
    "rationale": "Exercises the retired frozen-entry copy of the hook context stamp. The native bridge stamps and bounds the hook input."
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_required_authority_failure_withholds_after_native_receipt",
+   "replacement_nodes": [
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_withholds_content_it_cannot_prove_clean",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::a_view_the_edge_cannot_resolve_withholds_as_an_unavailable_authority"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_binding_recheck_failure_withholds_without_logging_callback_details",
+   "replacement_nodes": [
+    "tests/test_structured_output_mediation_routes.py::test_a_forward_is_withheld_when_the_config_cannot_be_read_again",
+    "tests/test_structured_output_mediation.py::test_a_forward_is_withheld_when_the_view_changed_or_cannot_be_confirmed",
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_forwards_only_under_the_binding_the_scan_ran_under"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_match_unsupported_deadline_missing_receipt_and_native_deny_withhold",
+   "replacement_nodes": [
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_withholds_content_it_cannot_prove_clean",
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_withholds_once_its_deadline_has_passed",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::only_an_allowed_pi_post_tool_use_is_mediated"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_native_route_attaches_adapter_field_after_receipt_without_mutating_native_result",
+   "replacement_nodes": [
+    "tests/test_structured_output_mediation_routes.py::test_the_edge_is_sent_the_managed_policy_view_and_its_answer_passes_through",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::the_edge_answers_the_mediation_the_daemon_asked_for"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercised the Python adapter attaching the mediation after the native receipt. The native edge now answers the mediation itself and the daemon passes it through."
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_native_route_load_error_attaches_fail_closed_mediation",
+   "replacement_nodes": [
+    "tests/test_structured_output_mediation_routes.py::test_native_route_load_error_sends_an_unreadable_view_the_edge_withholds_under",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::a_view_the_edge_cannot_resolve_withholds_as_an_unavailable_authority"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_recording_only_cannot_bypass_real_managed_structured_policy",
+   "replacement_nodes": [
+    "tests/test_structured_output_mediation_routes.py::test_recording_only_hands_the_edge_the_real_managed_policy",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::a_covered_policy_withholds_content_it_cannot_prove_clean"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_mediation_early_exits_preserve_native_authority",
+   "replacement_nodes": [
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_leaves_what_it_does_not_cover_to_the_native_verdict",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::only_an_allowed_pi_post_tool_use_is_mediated",
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::a_policy_that_requires_no_mediation_adds_nothing"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation_routes.py::test_mediation_withholds_unproved_or_cancelled_content_without_native_rewrite",
+   "replacement_nodes": [
+    "rust/crates/guard-command/src/content_sensitivity_tests.rs::mediation_withholds_content_it_cannot_prove_clean"
+   ],
+   "status": "native_behavior_ported_requires_ci"
+  },
+  {
+   "old_node": "tests/test_structured_output_mediation.py::test_native_route_does_not_skip_configured_authority_failures",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/edge_structured_tests.rs::a_managed_policy_that_cannot_be_trusted_withholds_naming_why",
+    "tests/test_structured_output_mediation.py::test_the_view_sent_for_a_configured_policy_carries_its_failure"
+   ],
+   "status": "native_behavior_ported_requires_ci"
   }
  ],
  "preserved_tests": [
@@ -8591,20 +8668,6 @@
   {
    "path": "src/codex_plugin_scanner/guard/runtime/secret_sensitivity.py",
    "source_sha256": "2f692c209f962b918c70a38b30235a8284d2889daa4df07e885dc584754a114b",
-   "replacement_nodes": [
-    "rust/crates/guard-command/src/content_sensitivity_tests.rs::original_python_sensitivity_and_mediation_vectors_replay"
-   ]
-  },
-  {
-   "path": "src/codex_plugin_scanner/guard/runtime/structured_data_sensitivity.py",
-   "source_sha256": "923a670b3e9a8500fb980bd7583354d9fd8c8a4db19ef1228313319a874a9c02",
-   "replacement_nodes": [
-    "rust/crates/guard-command/src/content_sensitivity_tests.rs::original_python_sensitivity_and_mediation_vectors_replay"
-   ]
-  },
-  {
-   "path": "src/codex_plugin_scanner/guard/runtime/structured_output_mediation.py",
-   "source_sha256": "f75a612d86365e85f4e37c0ef395d92622414c29e9d552667b54b6a9c19fce20",
    "replacement_nodes": [
     "rust/crates/guard-command/src/content_sensitivity_tests.rs::original_python_sensitivity_and_mediation_vectors_replay"
    ]

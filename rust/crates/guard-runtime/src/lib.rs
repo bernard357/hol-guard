@@ -152,18 +152,12 @@ mod codex_hooks;
 #[cfg(test)]
 mod codex_hooks_parity_tests;
 mod codex_identity;
-#[cfg(all(test, unix))]
-mod codex_post_tool_output_vectors_tests;
 mod codex_proxy;
 mod codex_request_resume_busy;
 mod codex_request_resume_op;
 mod codex_request_resume_store;
 mod codex_sources;
 mod codex_thread_continue_op;
-mod codex_tool_output_git;
-mod codex_tool_output_op;
-#[cfg(all(test, unix))]
-mod codex_tool_output_vectors_tests;
 mod codex_value;
 #[cfg(all(test, unix))]
 mod codex_vectors_tests;
@@ -274,6 +268,7 @@ mod directory_trust;
 mod discovery_placement_op;
 mod edge;
 mod edge_git_push;
+mod edge_structured;
 mod encrypted_secret_store;
 mod extension_allow_hint_op;
 mod extension_control_authority_op;
@@ -555,6 +550,7 @@ mod local_cli_help;
 mod local_cli_hook_contained;
 mod local_cli_hook_op;
 mod local_cli_identify;
+mod local_cli_observer;
 mod local_mcp_grant_identity;
 mod local_mcp_grant_launcher;
 mod local_mcp_grant_op;
@@ -729,6 +725,7 @@ mod request_context_shell;
 mod resident_client;
 mod resident_diagnostics;
 mod resident_endpoint;
+mod resident_inspection_host;
 mod resident_inspection_services;
 mod resident_op_features;
 mod resident_ops;

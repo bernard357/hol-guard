@@ -32,6 +32,9 @@ fn launch_fence_holds_policy_push_until_dispatch_or_abort() {
             execution_environment: None,
         },
         recording_only: false,
+        local_cli_rules: None,
+        observe_local_cli: false,
+        structured_output_config: None,
     };
     let fence = store.fence_for_launch(&envelope).unwrap();
     assert_eq!(fence.snapshot().generation, 1);
