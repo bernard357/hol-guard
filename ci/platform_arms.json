@@ -1046,9 +1046,9 @@
    "verdict": "other-platform",
    "note": "Windows expands `USERPROFILE` in its own arm; elsewhere `None` leaves the home unknown, every home-relative rule stays unmatched, and a connector-setup review defers to the daemon.",
    "file": "rust/crates/guard-runtime/src/hook_direct_review_request.rs",
-   "item": "pub(super) fn expanded_home(_environment: &BTreeMap<String, String>) -> Option<String>",
+   "item": "pub(crate) fn expanded_home(_environment: &BTreeMap<String, String>) -> Option<String>",
    "cfg": "not(any(unix, windows))",
-   "body": "de55ba4b1d6f"
+   "body": "69f65fe1875b"
   },
   {
    "verdict": "other-platform",
