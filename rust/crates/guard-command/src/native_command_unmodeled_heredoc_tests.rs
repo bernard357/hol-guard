@@ -3,7 +3,7 @@
 //! the delimiter left the shape unparseable, and an unparseable shape has no
 //! floor to reach: it blocks outright, with no approval row, while the same
 //! text without the redirect reaches an ordinary review.
-use super::tests::{controls, decision};
+use super::super::tests::{controls, decision};
 use super::{first_heredoc, input_heredoc};
 
 const FAILED: &str = "native_command_extension_evaluation_failed";
@@ -23,6 +23,10 @@ fn a_delimiter_stops_at_the_word_that_names_it() {
     let heredoc = first_heredoc("cat <<-'EOF' > f\n\tb\n\tEOF").unwrap();
     assert_eq!(heredoc.delimiter, "EOF");
     assert_eq!(heredoc.trailing, " > f");
+    // Punctuation belongs to an unquoted delimiter as much as letters do.
+    let heredoc = first_heredoc("cat <<END-OF-FILE\nb\nEND-OF-FILE").unwrap();
+    assert_eq!(heredoc.delimiter, "END-OF-FILE");
+    assert_eq!(heredoc.trailing, "");
 }
 
 #[test]
@@ -34,6 +38,13 @@ fn a_line_that_names_no_delimiter_opens_no_heredoc() {
         "cat <<'EOF > out.txt\nEOF",
         // A second heredoc on the line feeds an input this reading leaves out.
         "cat <<'A' <<'B'\nA\nB",
+        // The shell ends these words at `EOFx`, `EOF` and `EOF`, none of
+        // which is the text a quote-stripping read of the line would take.
+        "cat <<'EOF'x\nEOF\nEOFx",
+        "cat <<'EO''F'\nEO\nEOF",
+        "cat <<E\\OF\nEOF",
+        // The line closes the quote it opened with the other quote.
+        "cat <<'EOF\"\nEOF",
     ] {
         assert!(first_heredoc(text).is_none(), "{text}");
     }
