@@ -522,11 +522,13 @@ class HookWorkerNativeMixin:
         )
         response = _edge_harness_response(edge)
         if structured_view is not None:
+            edge_result = edge.get("result")
             response = withhold_stale_forward(
                 response,
                 view=structured_view,
                 load_config=lambda: self._load_config(guard_home, workspace),
                 deadline=deadline,
+                allowed=isinstance(edge_result, dict) and edge_result.get("decision") == "allow",
             )
         return (response, True)
 

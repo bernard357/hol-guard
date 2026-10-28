@@ -128,6 +128,14 @@ def test_a_forward_is_withheld_when_the_config_changed_after_the_scan(tmp_path: 
     assert response["decision"] == "allow"
 
 
+def test_an_unmediated_allow_is_withheld_when_a_policy_is_activated_during_the_review(tmp_path: Path) -> None:
+    fixture = _NativeRouteFixture(_config(status="absent", locked=()), config_after_edge=_config())
+    response, _native_used = _review(fixture, tmp_path)
+    assert response["structured_content_mediation"] == _mediation("withhold", "structured_binding_changed")
+    assert response["decision"] == "allow"
+    assert fixture.reads == 2
+
+
 def test_a_forward_is_withheld_when_the_config_cannot_be_read_again(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,

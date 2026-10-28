@@ -4,8 +4,9 @@ The Rust edge resolves the managed policy and mediates the model-visible
 content of an Oh My Pi or Pi ``PostToolUse``, and answers with the disposition
 already in its harness response. The daemon only reads Guard config, which
 only it can, and sends the edge the managed-policy view with the hook. Once
-the edge forwards, it reads the config again: a forward is released only while
-the config still holds the view the edge scanned under.
+the edge forwards, or allows content it found nothing to mediate on, it reads
+the config again: the answer stands only while the config still holds the view
+the edge reviewed under.
 """
 
 from __future__ import annotations
@@ -84,9 +85,21 @@ def structured_destination_required(view: Mapping[str, object], *, harness: str)
     return not (isinstance(result, dict) and result.get("required") is False)
 
 
+def _expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
 def _stale_reason(view: Mapping[str, object], load_config: Callable[[], object], deadline: float | None) -> str | None:
-    if deadline is not None and time.monotonic() >= deadline:
+    if _expired(deadline):
         return "structured_review_deadline_exceeded"
+    reason = _changed_reason(view, load_config)
+    # The reread itself can run past the hook's budget.
+    if reason is None and _expired(deadline):
+        return "structured_review_deadline_exceeded"
+    return reason
+
+
+def _changed_reason(view: Mapping[str, object], load_config: Callable[[], object]) -> str | None:
     try:
         config = load_config()
         current = None if config is None else structured_output_view(config)
@@ -103,17 +116,27 @@ def withhold_stale_forward(
     view: Mapping[str, object],
     load_config: Callable[[], object],
     deadline: float | None,
+    allowed: bool = False,
 ) -> dict[str, object]:
-    """Release the edge's forward only while the config still holds ``view``.
+    """Release the edge's answer only while the config still holds ``view``.
 
     This second read is a revocation check after the scan; reusing the first
-    read would permit a stale forward. A withhold needs no check.
+    read would permit a stale forward. An ``allowed`` answer the edge attached
+    no disposition to is checked too: the view required none, and a policy
+    activated during the review must not let the content through unmediated.
+    A withhold needs no check.
     """
 
     disposition = response.get(MEDIATION_FIELD)
-    if not isinstance(disposition, dict) or disposition.get("action") != "forward":
+    if isinstance(disposition, dict) and disposition.get("action") == "forward":
+        reason = _stale_reason(view, load_config, deadline)
+        native_decision_id = disposition.get("native_decision_id")
+    elif disposition is None and allowed:
+        # Nothing was mediated, so only a changed view can withhold it.
+        reason = _changed_reason(view, load_config)
+        native_decision_id = None
+    else:
         return response
-    reason = _stale_reason(view, load_config, deadline)
     if reason is None:
         return response
-    return {**response, MEDIATION_FIELD: _withheld(reason, disposition.get("native_decision_id"))}
+    return {**response, MEDIATION_FIELD: _withheld(reason, native_decision_id)}

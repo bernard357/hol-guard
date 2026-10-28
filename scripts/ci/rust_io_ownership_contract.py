@@ -63,7 +63,10 @@ def capability_contract(compatibility_modes: Iterable[str]) -> list[dict[str, ob
                 "guard_command::content_sensitivity::evaluate",
             ],
             "python_semantic_fallback": False,
-            "python_decision_time_disk_io": False,
+            # The daemon reads the managed-policy view from Guard config,
+            # which only it can, before the edge call and again to confirm an
+            # allowed answer. Rust decides the disposition from that view.
+            "python_decision_time_disk_io": True,
             "failure": "fail_closed",
         },
     ]

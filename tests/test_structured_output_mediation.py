@@ -225,3 +225,39 @@ def test_a_forward_is_withheld_once_the_deadline_has_passed_without_reading() ->
     withheld = withhold_stale_forward(response, view=view, load_config=load, deadline=0.0)
     assert withheld[MEDIATION_FIELD] == _mediation("withhold", "structured_review_deadline_exceeded")
     assert reads == []
+
+
+def test_a_forward_is_withheld_when_its_reread_crosses_the_deadline() -> None:
+    config = _config()
+    view = structured_output_view(config)
+    assert view is not None
+    deadline = time.monotonic() + 0.2
+
+    def slow_load() -> object:
+        time.sleep(0.3)
+        return config
+
+    response = {"decision": "allow", MEDIATION_FIELD: FORWARD}
+    withheld = withhold_stale_forward(response, view=view, load_config=slow_load, deadline=deadline)
+    assert withheld[MEDIATION_FIELD] == _mediation("withhold", "structured_review_deadline_exceeded")
+
+
+def test_an_unmediated_allow_is_withheld_once_a_policy_is_activated() -> None:
+    view = structured_output_view(_config(status="absent", locked=()))
+    assert view is not None
+    load, reads = _loader(_config())
+    response = {"decision": "allow"}
+    withheld = withhold_stale_forward(response, view=view, load_config=load, deadline=None, allowed=True)
+    assert withheld == {"decision": "allow", MEDIATION_FIELD: _mediation("withhold", "structured_binding_changed")}
+    assert reads == [1]
+
+
+def test_an_unmediated_allow_under_an_unchanged_view_passes_through() -> None:
+    config = _config(status="absent", locked=())
+    view = structured_output_view(config)
+    assert view is not None
+    load, reads = _loader(config)
+    response = {"decision": "allow"}
+    # The deadline only bounds a forward the edge scanned.
+    assert withhold_stale_forward(response, view=view, load_config=load, deadline=0.0, allowed=True) is response
+    assert reads == [1]
