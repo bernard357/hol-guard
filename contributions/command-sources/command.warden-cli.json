@@ -118,7 +118,9 @@
             ],
             "allow_leading_options": false,
             "fail_secure_unknown_options": true,
-            "forbidden_flags": [],
+            "forbidden_flags": [
+              "--json"
+            ],
             "interspersed_flags": [
               "--wrap",
               "--json"
