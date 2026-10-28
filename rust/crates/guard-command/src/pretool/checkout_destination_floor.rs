@@ -250,11 +250,12 @@ fn remote_word(word: &str) -> bool {
 }
 
 /// The directory `git clone <repository>` creates when none is given, the
-/// way Git guesses it: trailing separators, whitespace and `/.git` dropped, a
-/// bare `host:port` reduced to the host, the last component without `.git`,
-/// and runs of whitespace and control characters collapsed to one space and
-/// trimmed. Git strips `.bundle` only from a bundle file, so a name ending in
-/// it is screened in both forms. `None` when nothing is left to name it.
+/// way Git guesses it: trailing separators, whitespace and `/.git` dropped,
+/// the scheme and any authentication skipped, a bare `host:port` reduced to
+/// the host, the last component without `.git`, and runs of whitespace and
+/// control characters collapsed to one space and trimmed. Git strips
+/// `.bundle` only from a bundle file, so a name ending in it is screened in
+/// both forms. `None` when nothing is left to name it.
 fn guessed_directories(repository: &str) -> Option<Vec<String>> {
     let separator = |c: char| c == '/' || c == '\\';
     let mut trimmed =
@@ -265,6 +266,26 @@ fn guessed_directories(repository: &str) -> Option<Vec<String>> {
         .filter(|parent| !parent.is_empty())
     {
         trimmed = parent.trim_end_matches(separator);
+    }
+    // Git reads the name past the scheme and past authentication, and only
+    // then asks whether what is left is a bare host and port. Reading those
+    // over the whole word names `https://hooks:443` after its port and
+    // `ssh://git@LaunchAgents` after its user, so the directory Git would
+    // create goes unscreened.
+    trimmed = &trimmed[trimmed.find("://").map_or(0, |at| at + 3)..];
+    // Authentication is stripped greedily, up to the last `@` before the
+    // first separator.
+    let mut authentication = None;
+    for (at, character) in trimmed.char_indices() {
+        if separator(character) {
+            break;
+        }
+        if character == '@' {
+            authentication = Some(at + character.len_utf8());
+        }
+    }
+    if let Some(at) = authentication {
+        trimmed = &trimmed[at..];
     }
     if !trimmed.contains('/') {
         if let Some((host, port)) = trimmed.rsplit_once(':') {

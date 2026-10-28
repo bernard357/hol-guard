@@ -113,6 +113,10 @@ fn checkouts_into_auto_loaded_locations_stay_a_floor() {
         "git clone git@github.com:example-org/.codex",
         "git clone --depth 1 https://github.com/example-org/.husky/",
         "git submodule add https://github.com/example-org/.github.git",
+        // Git reads that name past the scheme and past any user, so a
+        // host-only remote names the directory it creates.
+        "cd .git && git clone https://hooks:443",
+        "cd HOME/Library && git clone ssh://git@LaunchAgents",
         // Git trims whitespace around the name it guesses.
         "git clone 'https://github.com/example-org/ .claude.git'",
         "git clone 'https://github.com/example-org/.claude.git/ '",
