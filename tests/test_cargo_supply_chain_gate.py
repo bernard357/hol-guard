@@ -116,6 +116,28 @@ def test_every_duplicate_exception_carries_a_reason() -> None:
         assert entry["reason"].strip(), entry
 
 
+def test_every_advisory_exception_names_the_advisory_and_why_it_does_not_reach_us() -> None:
+    advisories = _deny()["advisories"]
+
+    for entry in advisories["ignore"]:
+        # A bare id would mute an advisory without recording what was checked,
+        # which is how an ignore outlives the reasoning behind it.
+        assert entry["id"].startswith("RUSTSEC-"), entry
+        assert entry["reason"].strip(), entry
+
+
+def test_the_workspace_crates_are_private_so_path_pins_stay_allowed() -> None:
+    members = re.findall(r'^\s*"(crates/[^"]+)",', (ROOT / "rust" / "Cargo.toml").read_text(encoding="utf-8"), re.M)
+    assert members, "the workspace no longer lists its members this way"
+
+    # `allow-wildcard-paths` only exempts private crates, because crates.io
+    # refuses a path dependency. A member that forgets `publish = false` turns
+    # every one of its sibling path pins into a wildcard failure.
+    for member in members:
+        manifest = tomllib.loads((ROOT / "rust" / member / "Cargo.toml").read_text(encoding="utf-8"))
+        assert manifest["package"]["publish"] is False, member
+
+
 def test_audited_targets_cover_every_published_wheel() -> None:
     targets = set(_deny()["graph"]["targets"])
 

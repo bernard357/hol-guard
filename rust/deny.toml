@@ -27,9 +27,11 @@ db-urls = ["https://github.com/RustSec/advisory-db"]
 # used. For a security runtime that is an error, not a note.
 yanked = "deny"
 unmaintained = "all"
-# Nothing is ignored today. An entry here needs the advisory id and the reason
-# the code path does not reach us.
-ignore = []
+# An entry here needs the advisory id and the reason the code path does not
+# reach us.
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "the Marvin attack recovers a key from the timing of RSA private-key operations; Guard only ever verifies signatures with rsa, so no private key and no decryption reaches the crate outside its own tests, and the advisory has no fixed release" },
+]
 
 [licenses]
 # Permissive licenses only, matching the workspace's own Apache-2.0 terms. Guard
@@ -81,8 +83,6 @@ skip = [
     { crate = "fancy-regex@0.16.2", reason = "transitive, pending a dependent upgrade" },
     { crate = "getrandom@0.2.17", reason = "transitive, dependents still on the 0.2 API" },
     { crate = "getrandom@0.3.4", reason = "transitive, dependents still on the 0.3 API" },
-    { crate = "hashbrown@0.16.1", reason = "transitive, pending a dependent upgrade" },
-    { crate = "r-efi@5.3.0", reason = "transitive through getrandom's older line" },
     { crate = "roxmltree@0.20.0", reason = "transitive, pending a dependent upgrade" },
     { crate = "serde_spanned@0.6.9", reason = "transitive through the toml 0.8 line" },
     { crate = "shlex@1.3.0", reason = "transitive, dependents still on the 1.x API" },
