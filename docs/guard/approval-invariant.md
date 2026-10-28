@@ -57,7 +57,14 @@ sandbox, the saved approval does not lower that.
 Package approvals and skill, plugin and MCP-server approvals follow the same
 rule. A new advisory or rule that matches an approved package or server shows
 as a finding and leaves the saved approval in place. A blocking verdict still
-blocks. A detector that could not run still asks again.
+blocks. Turning the detector registry off, or a detector that could not run,
+still asks again.
+
+The release that introduced this asks once more for proven-command Always
+approvals and for skill, plugin and MCP-server approvals saved before it,
+because their tokens changed shape. Package approvals saved with no advisory or
+rule matched are not affected. After that one prompt, rule and feed updates
+keep the approval.
 
 When Guard cannot prove it, for example an executable outside the workspace
 roots, a helper-selecting Git config or a mutable script launcher, the token

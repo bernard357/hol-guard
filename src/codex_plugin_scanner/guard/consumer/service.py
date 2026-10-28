@@ -238,28 +238,32 @@ def _consumer_policy_context(
     }
 
 
-def _runtime_detector_failures(
+def _runtime_detector_state(
     runtime_detector_context: Mapping[str, object] | None,
-) -> list[dict[str, object]]:
-    """The runtime detectors that did not finish, for the approval context.
+) -> dict[str, object]:
+    """Whether the runtime detectors ran, and which did not finish.
 
     What detectors and advisories find is not part of an approval: a new
     finding is reported, and a blocking one still blocks, but it does not void
-    an approval of unchanged content. A detector that could not run is part of
-    it, because the approval was given while that check ran.
+    an approval of unchanged content. Whether the checks ran is part of it,
+    because the approval was given while they ran: turning the detector
+    registry off, or a detector that could not finish, asks again.
     """
     telemetry = (runtime_detector_context or {}).get("telemetry")
     if not isinstance(telemetry, list):
-        return []
-    return [
-        {
-            "detector_id": item.get("detector_id"),
-            "error_type": item.get("error_type"),
-            "status": item.get("status"),
-        }
-        for item in telemetry
-        if isinstance(item, Mapping) and item.get("status") != "ok"
-    ]
+        return {"failures": [], "ran": False}
+    return {
+        "failures": [
+            {
+                "detector_id": item.get("detector_id"),
+                "error_type": item.get("error_type"),
+                "status": item.get("status"),
+            }
+            for item in telemetry
+            if isinstance(item, Mapping) and item.get("status") != "ok"
+        ],
+        "ran": True,
+    }
 
 
 def _consumer_approval_context_token(
@@ -331,7 +335,7 @@ def _consumer_approval_context_token(
             "artifact_capabilities": dict(capability_snapshot),
             "command_available": detection.command_available,
             "installed": detection.installed,
-            "runtime_detector_failures": _runtime_detector_failures(runtime_detector_context),
+            "runtime_detectors": _runtime_detector_state(runtime_detector_context),
             "scanner_policy_version": _CONSUMER_APPROVAL_POLICY_VERSION,
             "transport": artifact.transport,
         },
@@ -389,7 +393,7 @@ def _removed_consumer_approval_context_token(
         content={"artifact_hash": previous_hash, "removed": True, "snapshot": dict(previous)},
         capabilities={
             "removed": True,
-            "runtime_detector_failures": _runtime_detector_failures(runtime_detector_context),
+            "runtime_detectors": _runtime_detector_state(runtime_detector_context),
             "snapshot": dict(previous),
         },
         policy=_consumer_policy_context(

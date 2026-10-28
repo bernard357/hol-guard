@@ -343,8 +343,18 @@ fn a_new_advisory_or_rule_match_keeps_the_saved_approval() {
         .push(json!({"id": "GHSA-0002", "package_url": "pkg:npm/left-pad@1.3.0"}));
     let mut new_rule = saved.clone();
     new_rule["request"]["evaluation"]["matched_rule_id"] = json!("rule-2");
+    let mut package_advisory = saved.clone();
+    package_advisory["request"]["evaluation"]["packages"][0]["relatedAdvisoryIds"] =
+        json!(["GHSA-0001", "GHSA-0002"]);
+    let mut package_rule = saved.clone();
+    package_rule["request"]["evaluation"]["packages"][0]["ruleId"] = json!("rule-2");
 
-    for (name, changed) in [("advisory", new_advisory), ("rule", new_rule)] {
+    for (name, changed) in [
+        ("advisory", new_advisory),
+        ("rule", new_rule),
+        ("package-advisory", package_advisory),
+        ("package-rule", package_rule),
+    ] {
         let current = context_token(&changed, name);
         assert_eq!(
             crate::context_digest::validate_context_tokens(&saved_token, &current),

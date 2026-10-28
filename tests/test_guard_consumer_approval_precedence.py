@@ -2379,6 +2379,23 @@ def test_runtime_detector_unchanged_status_ignores_elapsed_ms_and_launches_after
     assert len(launches) == 1
 
 
+def test_turning_the_detector_registry_off_changes_the_approval_context(
+    tmp_path: Path,
+) -> None:
+    artifact = _artifact(tmp_path)
+    detection = _detection(artifact)
+    config = _config(tmp_path)
+    store = GuardStore(tmp_path / "guard-home")
+    detectors_ran = {"telemetry": [{"detector_id": "persistence", "status": "ok"}]}
+
+    ran = evaluate_detection(detection, store, config, persist=False, runtime_detector_context=detectors_ran)
+    registry_off = evaluate_detection(detection, store, config, persist=False, runtime_detector_context=None)
+
+    # A clean run and a run without the detector registry both have no
+    # failures; the approval still tells them apart.
+    assert ran["artifacts"][0]["approval_context_hash"] != registry_off["artifacts"][0]["approval_context_hash"]
+
+
 def test_runtime_detector_finding_change_keeps_exact_saved_approval(
     tmp_path: Path,
 ) -> None:

@@ -193,9 +193,10 @@ const EVIDENCE_SOURCE_REASON_CODES: [&str; 5] = [
 ];
 
 /// Per-package fields that name the package or carry its verdict. Scores, fix
-/// suggestions and reason text are left out: a feed refresh rewrites them
-/// without changing what is installed or what Guard decided about it.
-const PACKAGE_POLICY_KEYS: [&str; 15] = [
+/// suggestions, reason text and the advisory and rule ids that matched are left
+/// out: a feed refresh rewrites them without changing what is installed or what
+/// Guard decided about it.
+const PACKAGE_POLICY_KEYS: [&str; 13] = [
     "alias",
     "decision",
     "dependencyPath",
@@ -204,10 +205,8 @@ const PACKAGE_POLICY_KEYS: [&str; 15] = [
     "name",
     "namespace",
     "packageManager",
-    "relatedAdvisoryIds",
     "requestedVersion",
     "resolvedVersion",
-    "ruleId",
     "sourceIdentity",
     "sourceRepository",
     "sourceRevisionKind",
