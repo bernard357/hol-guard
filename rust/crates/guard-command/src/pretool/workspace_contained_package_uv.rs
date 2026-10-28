@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 // uv drives a project environment the workspace holds. Only the verbs that
 // read it are local: `add`, `tool`, `sync` and the rest reach a registry, and
-// `pip` is local for the queries [`crate::pretool::python`] admits.
+// `pip` is local for the queries [`super::super::python`] admits.
 const UV_LOCAL_VERBS: &[&str] = &["run", "tree", "export", "version", "pip"];
 // uv options a local verb may carry: each changes what the verb reads, never
 // what it has to fetch. The list is an allowlist because uv's installing
@@ -169,7 +169,7 @@ pub(super) fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Pa
         return false;
     }
     if verb == "pip" {
-        return crate::pretool::python::local_uv_pip_work(&arguments[uv.verb + 1..], &uv.project);
+        return super::super::python::local_uv_pip_work(&arguments[uv.verb + 1..], &uv.project);
     }
     if let Some(operand) = uv.operand.map(|operand| arguments[operand]) {
         // `uv version 2.0.0` writes the version into the project and locks it
@@ -177,7 +177,7 @@ pub(super) fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Pa
         // script carrying a dependency block has those installed first.
         if verb == "version"
             || operand.contains("://")
-            || crate::pretool::python::declares_dependencies(&uv.directory.join(operand))
+            || super::super::python::declares_dependencies(&uv.directory.join(operand))
         {
             return false;
         }
@@ -185,7 +185,7 @@ pub(super) fn local_uv_work(arguments: &[&str], directory: &Path, workspace: &Pa
     if !uv.discovered {
         return uv.project.join(".venv").is_dir();
     }
-    crate::pretool::cd::first_from(&uv.project, workspace, |probe| {
+    super::super::cd::first_from(&uv.project, workspace, |probe| {
         probe.join("pyproject.toml").is_file()
     })
     .is_some_and(|project| project.join(".venv").is_dir())
