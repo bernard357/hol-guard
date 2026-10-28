@@ -11,6 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 
 SIBLING_HEAP_CASE = "omp-native-sibling-node-heap-jest"
+# Cases that link the installed tree into the sibling's linked worktree rather
+# than install a second copy there.
+SIBLING_LINK_CASES = (
+    "omp-native-ln-sibling-modules-then-check",
+    "omp-native-ln-sibling-modules-into-source-dir",
+)
 _FILES = {
     "node_modules/jest/package.json": '{"name": "jest", "version": "30.0.5"}\n',
     "node_modules/jest/bin/jest.js": (
@@ -25,7 +31,7 @@ _FILES = {
 
 def add_sibling_test_runner(home: Path, scenario_id: str | None) -> None:
     """Install the runner, untracked as ``npm install`` leaves it, for its case only."""
-    if scenario_id != SIBLING_HEAP_CASE:
+    if scenario_id != SIBLING_HEAP_CASE and scenario_id not in SIBLING_LINK_CASES:
         return
     for relative, text in _FILES.items():
         target = home / "other-project" / relative

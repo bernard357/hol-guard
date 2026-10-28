@@ -57,7 +57,10 @@ def _referenced(tool_name: str, tool_input: dict[str, object]) -> list[str]:
     for match in _TOKEN_PATH.finditer(blob):
         reference = match.group()
         bare = reference.rstrip("/")
-        if bare in created:
+        # A path below one the command creates, such as a package read
+        # through the link an earlier step makes, exists only once that step
+        # has run. The fixture leaves it absent, as `materialise` does.
+        if bare in created or any(bare.startswith(target + "/") for target in created):
             continue
         # A path whose own name holds a ``$`` — a dynamic route file such as
         # ``posts.$postId.tsx`` — ends the token match early, so the created

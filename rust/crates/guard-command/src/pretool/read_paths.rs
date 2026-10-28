@@ -24,6 +24,7 @@ pub(super) use hidden_listing::{
 use hidden_listing::{resolved_home_hidden_content_read, resolved_home_hidden_listing};
 #[path = "private_temporary_workspace.rs"]
 mod private_temporary;
+pub(super) use private_temporary::inside_private_temporary_directory;
 #[path = "workspace_scratch_reads.rs"]
 mod scratch;
 use allowances::{
