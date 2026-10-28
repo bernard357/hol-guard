@@ -300,3 +300,7 @@ pub(super) fn clear(scope: &Path) -> Result<(), String> {
 #[cfg(test)]
 #[path = "resident_restart_budget_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "resident_restart_budget_flood_tests.rs"]
+mod flood_tests;

@@ -71,7 +71,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T046 bind in-flight responses to their serving generation — `resident_state_supersession.rs`, `managed_resident_lease_retirement.rs`;
 - [x] NRH-T047 add global one-shot semaphore/rate-limit/cooldown and bounded Python fallback queue — `native_runtime_resilience.rs` (`OneshotLease`, `native_oneshot_lease_acquire`);
 - [x] NRH-T048 distinguish overload/unavailable/incompatible/auth/timeout/invalid/crash categories — the `native_record_*` family separates overload, resident failure, one-shot failure and integrity failure, each with its own reason label;
-- [ ] NRH-T049 prove 64 failures cannot create 64 processes;
+- [x] NRH-T049 prove 64 failures cannot create 64 processes — `resident_restart_budget_flood_tests.rs` charges the budget the way a spawn does and proves the three shapes a crash loop takes: 64 failures in a tight retry loop start three residents and retrying faster buys nothing back, a loop patient enough to wait out every backoff pays over ten minutes for the residents it gets, and 64 clients that miss the resident at once are charged one at a time under the budget lock;
 - [x] NRH-T050 implement deterministic fail-safe behavior for every hook when daemon is unavailable — `hook_bridge_fallback.rs` settles the hook and records the hand-off with harness and fixed reason only;
 - [ ] NRH-T051 allow only authenticated current emergency-safe profile during daemon failure;
 - [ ] NRH-T052 add bounded daemon restart reservation and preserve approval/receipt/activity ordering;
