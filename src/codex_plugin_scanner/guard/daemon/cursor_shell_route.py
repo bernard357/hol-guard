@@ -48,7 +48,7 @@ _SINK_ROUTE = "sink"
 # A resident that advertises this answers the probe in its edge when the
 # daemon sends the sink argv; an older one leaves it to the render.
 _EDGE_PROBE_FEATURE = "edge-cursor-probe-v1"
-_EDGE_PROBE_ANSWERS = frozenset({"routed", "kept"})
+_ROUTED = "native_contained_execution_routed"
 # The edge fields the resident reads to route a probe.
 _EDGE_FIELDS = ("harness", "event_name", "containment_route", "result")
 
@@ -150,9 +150,16 @@ def _probe_response(
     # answers any other with the plain allow, so that one skips the call.
     if edge.get("containment_route") != _SINK_ROUTE:
         return dict(_ALLOW)
-    # An edge that answered the probe itself carries the render's response.
+    # A resident replaced after the feature was read may answer with the
+    # generic rewrite, which keeps the receipt, so only probe answers count.
     response = edge.get("harness_response")
-    if edge_answers and edge.get("containment_rewrite") in _EDGE_PROBE_ANSWERS and isinstance(response, dict):
+    mark = edge.get("containment_rewrite")
+    if (
+        edge_answers
+        and isinstance(response, dict)
+        and ((mark == "kept" and response == _ALLOW) or (mark == "routed" and response.get("reason_code") == _ROUTED))
+        and response.get("policy_action") == "allow"
+    ):
         return dict(response)
     return _resident_route(
         payload, edge, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
