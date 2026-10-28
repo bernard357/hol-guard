@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from codex_plugin_scanner.guard import codex_hook_file_integrity as integrity
 from codex_plugin_scanner.guard import native_codex_hook_manifest_verify as verify
-from codex_plugin_scanner.guard.codex_hook_file_integrity import CodexHookIntegrityError, hook_validation_deadline
+from codex_plugin_scanner.guard.codex_hook_file_integrity import CodexHookIntegrityError
 
 _UNAVAILABLE = verify._unavailable_state()
 
@@ -163,6 +164,7 @@ def test_the_resident_gets_only_the_remaining_budget(monkeypatch: pytest.MonkeyP
         raise OSError("down")
 
     monkeypatch.setattr(verify, "_resident_request", request)
-    with hook_validation_deadline(time.monotonic() + 0.5):
-        assert verify._ask({}, tmp_path) is None
-    assert 0 < seen[0] <= 0.5
+    monkeypatch.setattr(verify, "active_hook_validation_deadline", lambda: 100.5)
+    monkeypatch.setattr(verify, "time", SimpleNamespace(monotonic=lambda: 100.0))
+    assert verify._ask({}, tmp_path) is None
+    assert seen == [0.5]
