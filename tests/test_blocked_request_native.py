@@ -94,7 +94,7 @@ def test_unbound_native_review_does_not_tell_the_agent_to_wait(
     from codex_plugin_scanner.guard.daemon import hook_native_review_approval
 
     exact = ("exact-token", None) if exact_allowable else (None, "no exact action")
-    monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", lambda **_kwargs: (True, None, *exact))
+    monkeypatch.setattr(hook_native_review_approval, "review_evidence_parts", lambda _evidence: (True, None, *exact))
     worker, store = _worker(tmp_path, monkeypatch, _edge("omp"), ask=False)
     response = worker.review_http_payload(
         payload={

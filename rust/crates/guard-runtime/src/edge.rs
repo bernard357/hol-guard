@@ -19,8 +19,8 @@ use crate::native_hook_receipt::{
 #[path = "edge_identity.rs"]
 mod edge_identity;
 use edge_identity::{
-    canonical_identity_digest, request_id_is_safe, request_payload_identity,
-    verdict_policy_identity, MAX_EVENT_BYTES, MAX_HARNESS_BYTES, MAX_PATH_BYTES,
+    canonical_identity_digest, request_id_is_safe, request_payload_identity, review_anchor_digest,
+    MAX_EVENT_BYTES, MAX_HARNESS_BYTES, MAX_PATH_BYTES,
 };
 pub(crate) use edge_identity::{policy_generation_matches, stable_policy_identity};
 #[path = "edge_local_cli.rs"]
@@ -98,31 +98,6 @@ fn request_source(envelope: &GuardHookEnvelopeV2, error: &str) -> Result<Value, 
             serde_json::to_value(context).map_err(|_| error.to_owned())?;
     }
     Ok(source)
-}
-
-/// Fence a one-time review approval to the action, its full source and the
-/// part of policy that can decide a verdict. The snapshot `generation` and
-/// `policy_digest` are deliberately absent: both move whenever the publisher
-/// republishes, including for observed state that cannot weaken a verdict, and
-/// a moved anchor strands the approval the identical retry was meant to find.
-pub(crate) fn review_anchor_digest(
-    envelope: &GuardHookEnvelopeV2,
-    snapshot: Option<&guard_policy_snapshot::PolicySnapshotV3>,
-) -> Result<String, String> {
-    const FAILED: &str = "native_hook_review_anchor_digest_failed";
-    let harness = canonical_harness(&envelope.harness)?;
-    let event = authoritative_event(envelope)?;
-    let payload = request_payload_identity(&envelope.raw_payload, &harness, &event)?;
-    let value = serde_json::json!({
-        "schema": "guard-native-review-anchor.v1",
-        "version": 1,
-        "event": event,
-        "harness": harness,
-        "payload": payload,
-        "policy": verdict_policy_identity(snapshot, &envelope.policy_snapshot)?,
-        "source": request_source(envelope, FAILED)?,
-    });
-    canonical_identity_digest(&value, FAILED)
 }
 
 fn bounded_nonempty(value: &str, maximum: usize, code: &str) -> Result<(), String> {
@@ -449,11 +424,21 @@ fn evaluate_validated_envelope(
         // Guard's Claude Code notice outside Watch; the typed result's reason is always text.
         let _ = crate::hook_direct::claude_prompt_text::brand(response, &result);
     }
-    let local_cli_rule = edge_local_cli::settle(&envelope, &harness, &event_name, &result)?;
+    let guard_home = origin_store.map(crate::policy_store::PolicySnapshotStore::guard_home);
+    let (local_cli_rule, review_evidence) = crate::edge_review_evidence::beside(
+        &envelope,
+        &harness,
+        &event_name,
+        &result,
+        &receipt,
+        guard_home,
+        || edge_local_cli::settle(&envelope, &harness, &event_name, &result),
+    );
     let edge = GuardHookEdgeResultV2 {
+        review_evidence,
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),
-        local_cli_rule,
+        local_cli_rule: local_cli_rule?,
         schema: GUARD_HOOK_EDGE_RESULT_V2_SCHEMA.to_owned(),
         authority: "rust".to_owned(),
         request_id: Some(request_id),

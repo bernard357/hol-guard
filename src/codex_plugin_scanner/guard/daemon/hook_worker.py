@@ -45,6 +45,7 @@ from ..native_policy_snapshot_acked import acked_snapshot_binding_for_store as a
 from ..native_policy_snapshot_constants import _PUBLISH_TIMEOUT_SECONDS, TRANSIENT_PUBLICATION_ERRORS
 from ..native_runtime import NativeRuntimeStatus, native_runtime_status
 from ..native_runtime_status_share import share_verified_runtime_status
+from ..runtime.extension_control_runtime import current_extension_control_binding_digest
 from .hook_direct_counters import HookCounterLog
 from .hook_evidence_dispatch import HookEvidenceDispatch, run_hook_evidence
 from .hook_request_parsing import (
@@ -188,10 +189,16 @@ class HookWorker(HookWorkerNativeMixin):
             runtime_status=runtime_status,
             observe_local_cli=observe_local_cli,
             **({"request_id": request_id} if request_id is not None else {}),
-            # The edge settles the daemon's custom extension rules; a launch
-            # resolves against the daemon's home and environment.
+            # The edge settles the daemon's custom extension rules and proves a
+            # review's evidence; a launch resolves against the daemon's home and
+            # environment.
             local_cli_rules=(
-                {"store_path": str(store_path), "user_home": str(Path.home()), "env": dict(os.environ)}
+                {
+                    "store_path": str(store_path),
+                    "user_home": str(Path.home()),
+                    "env": dict(os.environ),
+                    "exact_action_control_digest": current_extension_control_binding_digest(),
+                }
                 if local_cli_rules and isinstance(store_path, Path)
                 else None
             ),

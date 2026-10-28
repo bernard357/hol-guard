@@ -7,6 +7,7 @@ from typing import Any
 
 from codex_plugin_scanner.guard.daemon import hook_native_exact_action
 from codex_plugin_scanner.guard.native_daemon_route import _decide
+from tests import native_review_evidence_support as review_support
 
 
 def native_launch_evidence(
@@ -28,7 +29,7 @@ def native_launch_evidence(
     """
     del tool_name  # The resident reads the tool name from the payload.
     try:
-        review = hook_native_exact_action._hook_review_query(
+        review = review_support._hook_review_query(
             harness=harness,
             payload=payload,
             native_result=native_result,
@@ -41,17 +42,17 @@ def native_launch_evidence(
             guard_home,
             {"evidence": (dict, type(None)), "unavailable_reason": (str, type(None))},
             validate_launch_evidence,
-            operation=hook_native_exact_action._OPERATION,
-            max_request_bytes=hook_native_exact_action._MAX_REQUEST_BYTES,
+            operation=review_support._OPERATION,
+            max_request_bytes=review_support._MAX_REQUEST_BYTES,
         )
         return reply["evidence"], reply["unavailable_reason"]
-    except (hook_native_exact_action.NativeExactActionError, OSError, RuntimeError, TypeError, ValueError):
+    except (review_support.NativeExactActionError, OSError, RuntimeError, TypeError, ValueError):
         return None, hook_native_exact_action.UNPROVEN_LAUNCH
 
 
 def validate_launch_evidence(payload: dict[str, Any]) -> None:
     """An observation never carries approval authority or an ambiguous identity."""
-    invalid = hook_native_exact_action.NativeExactActionError(hook_native_exact_action._OPERATION.invalid)
+    invalid = review_support.NativeExactActionError(review_support._OPERATION.invalid)
     evidence, reason = payload["evidence"], payload["unavailable_reason"]
     if evidence is None:
         if reason not in hook_native_exact_action._ONCE_ONLY_REASONS:
@@ -90,7 +91,7 @@ def native_exact_action(
 ) -> tuple[str | None, str | None]:
     """The exact-action token of one review, or why it stays once-only."""
     del tool_name  # The resident reads the tool name from the payload.
-    _valid, _binding, token, reason = hook_native_exact_action.native_review_evidence(
+    _valid, _binding, token, reason = review_support.native_review_evidence(
         harness=harness,
         payload=payload,
         native_result=native_result,
