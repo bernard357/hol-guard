@@ -387,6 +387,22 @@ pub struct GuardHookEnvelopeV2 {
     /// request identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output_config: Option<Value>,
+    /// The argv that starts Guard's CLI, so a `PreToolUse` the edge routes
+    /// into the contained sink comes back already rewritten
+    /// (`GuardHookEdgeResultV2::containment_rewrite`). Only the daemon sends
+    /// it; without it the edge rewrites nothing. It never changes the
+    /// verdict, receipt, or request identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub containment_sink: Option<GuardHookContainmentSinkV1>,
+}
+
+/// What the edge's containment rewrite needs beyond the envelope: the
+/// workspace, home and Guard home are the envelope's `source`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GuardHookContainmentSinkV1 {
+    /// The argv prefix that starts Guard's CLI; the sink command follows it.
+    pub sink_command: Vec<String>,
 }
 
 /// Where the daemon's custom extension rules live and what a command's
@@ -446,6 +462,12 @@ pub struct GuardHookEdgeResultV2 {
     /// second round trip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub containment_route: Option<String>,
+    /// The edge's rewrite of a `sink` route, when the envelope carried
+    /// `containment_sink`: `routed` when `harness_response` is the allow that
+    /// runs the call in the sink, `kept` when the receipt stands. Absent when
+    /// the edge did not rewrite; a hook then asks `containment_rewrite`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub containment_rewrite: Option<String>,
     /// The daemon's custom extension rule for a reviewed `PreToolUse`, when
     /// one applies. An allowed `PreToolUse` a rule blocks carries the block as
     /// its `harness_response` instead.

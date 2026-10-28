@@ -23,7 +23,7 @@
 
 use super::{reviewed_edge, HookDirectDefer, CURSOR, PRE_TOOL_USE};
 use crate::hook_decision_containment_rewrite::containment_rewrite;
-use crate::hook_decision_containment_route::edge_route;
+use crate::hook_decision_containment_route::{edge_route, host_platform};
 use guard_command::hook_responses::pre_tool;
 use guard_contracts::ContainmentRewriteInputsV1;
 use serde_json::{json, Map, Value};
@@ -230,19 +230,6 @@ fn routed(edge: &[u8], payload: &Map<String, Value>, scope: &Scope) -> Option<Va
     let text = |name: &str| response.get(name).and_then(Value::as_str);
     (text("policy_action") == Some("allow") && text("reason_code") == Some(ROUTED_REASON))
         .then_some(response)
-}
-
-/// The host as the resident's containment decisions name it.
-fn host_platform() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else if cfg!(windows) {
-        "windows"
-    } else {
-        "other"
-    }
 }
 
 /// Whether `value` names the workspace itself, after `~` expansion against

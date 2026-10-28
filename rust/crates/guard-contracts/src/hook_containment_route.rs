@@ -21,6 +21,10 @@ pub const HOOK_DECISION_CONTAINMENT_ROUTE_FEATURE: &str = "hook-decision-contain
 /// that predates it rejects the query.
 pub const HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE: &str = "hook-decision-containment-rewrite-v1";
 
+/// Advertised when the PreToolUse edge rewrites a sink-routed call itself
+/// for an envelope that carries `containment_sink`.
+pub const EDGE_CONTAINMENT_REWRITE_FEATURE: &str = "edge-containment-rewrite-v1";
+
 /// The native PreToolUse result a hook answers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

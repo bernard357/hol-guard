@@ -434,8 +434,21 @@ def _assert_containment_routed_by_resident() -> None:
         raise RuntimeError("a granted containment review is not rewritten by the resident")
     if "edge_containment_route(" not in _read(_CONTAINMENT_DAEMON):
         raise RuntimeError("daemon containment does not ask the resident for the route")
-    if "edge_route(" not in _read(Path("rust/crates/guard-runtime/src/edge.rs")):
+    edge = _read(Path("rust/crates/guard-runtime/src/edge.rs"))
+    if "edge_route(" not in edge:
         raise RuntimeError("the resident's PreToolUse edge does not carry its containment route")
+    # The edge folds the sink rewrite into its answer only after its own
+    # self-check, and through the resident's rewrite; an edge that did not
+    # rewrite leaves the daemon to ask, failing closed to the outage.
+    checked = edge.find("edge_result_check::check(&edge)")
+    attached = edge.find("edge_containment::attach(")
+    if checked < 0 or attached < checked:
+        raise RuntimeError("the edge's containment rewrite is not answered after its self-check")
+    if "containment_rewrite(&inputs)" not in _read(Path("rust/crates/guard-runtime/src/edge_containment.rs")):
+        raise RuntimeError("the edge's containment rewrite is not the resident's rewrite")
+    daemon = _read(_CONTAINMENT_DAEMON)
+    if 'edge.get("containment_rewrite")' not in daemon or "route_zcode_containment(" not in daemon:
+        raise RuntimeError("daemon sink routing does not fall back to the resident when the edge did not rewrite")
     transport = ast.parse(_read(_CONTAINMENT_TRANSPORT), filename=str(_CONTAINMENT_TRANSPORT))
     # The route stamped on the edge is the resident's; without one the
     # transport asks, and it never reads the result's action itself.

@@ -24,6 +24,8 @@ use edge_identity::{
 pub(crate) use edge_identity::{
     policy_generation_matches, review_anchor_digest, stable_policy_identity,
 };
+#[path = "edge_containment.rs"]
+mod edge_containment;
 #[path = "edge_local_cli.rs"]
 mod edge_local_cli;
 #[path = "edge_result_check.rs"]
@@ -435,10 +437,11 @@ fn evaluate_validated_envelope(
         guard_home,
         || edge_local_cli::settle(&envelope, &harness, &event_name, &result),
     );
-    let edge = GuardHookEdgeResultV2 {
+    let mut edge = GuardHookEdgeResultV2 {
         review_evidence,
         // Every edge carries its route so no hook asks again; only PreToolUse is routed.
         containment_route: Some(edge_route(&event_name, &result, envelope.recording_only)),
+        containment_rewrite: None,
         local_cli_rule: local_cli_rule?,
         receipt_recorded: false,
         schema: GUARD_HOOK_EDGE_RESULT_V2_SCHEMA.to_owned(),
@@ -452,6 +455,8 @@ fn evaluate_validated_envelope(
         receipt,
     };
     edge_result_check::check(&edge)?;
+    // After the check, so a refused edge leaves no sink snapshot behind.
+    edge_containment::attach(&envelope, &mut edge);
     crate::edge_receipt::encode(&envelope, origin_store.is_some(), edge, started)
 }
 

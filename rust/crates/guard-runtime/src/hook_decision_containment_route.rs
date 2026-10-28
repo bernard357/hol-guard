@@ -117,6 +117,19 @@ pub(crate) fn edge_route(event_name: &str, result: &Value, recording_only: bool)
     route(&inputs).to_owned()
 }
 
+/// The host as the resident's containment decisions name it.
+pub(crate) fn host_platform() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "other"
+    }
+}
+
 fn route(inputs: &ContainmentRouteInputsV1) -> &'static str {
     if inputs.recording_only || inputs.event_name.as_deref() != Some(PRE_TOOL_USE) {
         return "none";

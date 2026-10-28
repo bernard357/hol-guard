@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,6 +45,11 @@ _LOCAL_CLI_RULE_SECONDS = 5.0
 # extension-control digest.
 _REVIEW_EVIDENCE_FEATURE = "edge-review-evidence-v1"
 _REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "once_only_reason"})
+# The edge rewrites a call it routes to the contained sink itself when the
+# envelope carries the argv that starts Guard's CLI: `routed` means the
+# response runs the call in the sink, `kept` that the receipt stands.
+CONTAINMENT_REWRITE_FEATURE = "edge-containment-rewrite-v1"
+_CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -73,6 +78,7 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         "request_id",
         "harness_response",
         "containment_route",
+        "containment_rewrite",
         "local_cli_rule",
         "review_evidence",
         "receipt_recorded",
@@ -98,6 +104,11 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
         return None
     route = payload.get("containment_route", "none")
     if not isinstance(route, str) or route not in {"none", "sink", "grant"}:
+        return None
+    rewrite = payload.get("containment_rewrite")
+    if rewrite is not None and (
+        route != "sink" or not isinstance(rewrite, str) or rewrite not in _CONTAINMENT_REWRITES
+    ):
         return None
     receipt = payload.get("receipt")
     if not isinstance(receipt, dict) or not isinstance(receipt.get("request_id"), str):
@@ -142,6 +153,7 @@ def _encode_hook_envelope(
     observe_local_cli: bool = False,
     record_receipt: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
+    containment_sink: Sequence[str] | None = None,
 ) -> bytes | None:
     from .hook_execution_environment import HOOK_EXECUTION_ENVIRONMENT_KEY, collect_hook_execution_environment
 
@@ -181,6 +193,8 @@ def _encode_hook_envelope(
         envelope["record_receipt"] = True
     if structured_output_config is not None:
         envelope["structured_output_config"] = dict(structured_output_config)
+    if containment_sink is not None:
+        envelope["containment_sink"] = {"sink_command": list(containment_sink)}
     if execution_context_supported:
         # Direct CLI calls capture locally; daemon workers explicitly pass
         # None when caller context is unavailable instead of using daemon env.
@@ -220,6 +234,7 @@ def review_raw_hook_native(
     observe_local_cli: bool = False,
     record_receipt: bool = False,
     structured_output_config: Mapping[str, object] | None = None,
+    containment_sink: bool = False,
 ) -> dict[str, Any] | None:
     """Return a typed Rust edge result, or fail closed without reinterpretation."""
     record_native_resident_client_failure_code(None)
@@ -252,6 +267,7 @@ def review_raw_hook_native(
                 required_features.add(_LOCAL_CLI_RULE_FEATURE)
                 if local_cli_rules.get("exact_action_control_digest") is not None:
                     required_features.add(_REVIEW_EVIDENCE_FEATURE)
+    tool_call = "git-execution-context-v1" in required_features
     if _LOCAL_CLI_RULE_FEATURE not in required_features:
         # Only a tool call has a custom extension rule to settle.
         local_cli_rules = None
@@ -270,6 +286,18 @@ def review_raw_hook_native(
     generation = snapshot.get("generation")
     if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
         return record_native_hook_result("native_fail_safe", None)
+    sink_command: tuple[str, ...] | None = None
+    if (
+        containment_sink
+        and tool_call
+        and cwd is not None
+        and CONTAINMENT_REWRITE_FEATURE in status.capabilities.features
+    ):
+        # Without a workspace there is no snapshot to write, and the receipt
+        # stands; an older resident leaves the rewrite to the hook.
+        from .adapters.zcode_contained_tests import contained_sink_command_prefix
+
+        sink_command = contained_sink_command_prefix()
     encoded = _encode_hook_envelope(
         payload=payload,
         harness=harness,
@@ -287,6 +315,7 @@ def review_raw_hook_native(
         observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
         record_receipt=record_receipt and _RECEIPT_RECORD_FEATURE in status.capabilities.features,
         structured_output_config=structured_output_config,
+        containment_sink=sink_command,
     )
     if encoded is None:
         return record_native_hook_result("native_fail_safe", None)

@@ -51,6 +51,8 @@ def _edge_harness_response(edge: Mapping[str, object]) -> dict[str, object]:
 
 
 _NATIVE_PRE_TOOL_APPROVAL_ACTIONS = frozenset({"review", "require-reapproval"})
+# `containment_rewrite` answers the edge gives once it rewrote a sink route.
+_EDGE_CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
 
 
 class _HookWorkerMetrics(Protocol):
@@ -312,6 +314,9 @@ class HookWorkerNativeMixin:
                 local_cli_rules=True,
                 observe_local_cli=True,
                 record_receipt=callable(getattr(self.activity_writer, "submit_native_decision_receipt", None)),
+                # The edge rewrites a call it routes to the contained sink in
+                # the same answer.
+                containment_sink=True,
                 **({"structured_output_config": structured_view} if structured_view is not None else {}),
             )
             refreshed = (
@@ -476,7 +481,9 @@ class HookWorkerNativeMixin:
                 if native_result and not isinstance(edge.get("harness_response"), dict)
                 else _edge_harness_response(edge)
             )
-            if containment == "sink":
+            # The edge rewrote the sink route itself when it says so; an edge
+            # that did not is asked, and no answer is the outage response.
+            if containment == "sink" and edge.get("containment_rewrite") not in _EDGE_CONTAINMENT_REWRITES:
                 try:
                     rendered = route_zcode_containment(
                         rendered,

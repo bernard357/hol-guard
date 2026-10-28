@@ -383,6 +383,7 @@ fn bash_package_binding_omp_preview_uses_the_hosts_tool_directory() {
         observe_local_cli: false,
         record_receipt: false,
         structured_output_config: None,
+        containment_sink: None,
         deadline_budget_ms: Some(1000),
         policy_generation: 0,
         policy_snapshot: json!({}),

@@ -199,4 +199,5 @@ pub(crate) const RESIDENT_OP_FEATURES: &[&str] = &[
     guard_contracts::POLICY_INTEGRITY_RECONCILE_FEATURE,
     guard_contracts::ADAPTER_STATE_INTEGRITY_FEATURE,
     guard_contracts::PROTECTION_HEALTH_REPORT_FEATURE,
+    guard_contracts::EDGE_CONTAINMENT_REWRITE_FEATURE,
 ];

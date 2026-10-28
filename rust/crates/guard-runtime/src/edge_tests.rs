@@ -131,6 +131,7 @@ pub(crate) fn envelope(event: &str, payload: Value) -> GuardHookEnvelopeV2 {
         observe_local_cli: false,
         record_receipt: false,
         structured_output_config: None,
+        containment_sink: None,
     }
 }
 
