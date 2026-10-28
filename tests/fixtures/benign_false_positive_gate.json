@@ -18623,7 +18623,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "ln -s ${HOME}/other-project/node_modules ${HOME}/other-project-wt/node_modules && test -e ${HOME}/other-project-wt/node_modules/jest/bin/jest.js && ls ${HOME}/other-project-wt/node_modules 2>/dev/null && echo linked"
+        "command": "ln -s ${HOME}/other-project/node_modules ${HOME}/other-project-wt/node_modules && [ -e ${HOME}/other-project-wt/node_modules/jest/bin/jest.js ] && ls ${HOME}/other-project-wt/node_modules 2>/dev/null && echo linked"
       },
       "cwd": "parent",
       "expect": "allow"

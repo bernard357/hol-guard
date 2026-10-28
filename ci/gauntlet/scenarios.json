@@ -1233,7 +1233,7 @@
       ],
       "prompt": "Share my sibling project's installed node_modules with its review worktree instead of installing again: run the listed command once, exactly as written, and tell me what it prints. Do not install, delete or edit anything.",
       "commands": [
-        "ln -s {{home}}/other-project/node_modules {{home}}/other-project-wt/node_modules && test -e {{home}}/other-project-wt/node_modules/jest/bin/jest.js && ls {{home}}/other-project-wt/node_modules 2>/dev/null && echo linked"
+        "ln -s {{home}}/other-project/node_modules {{home}}/other-project-wt/node_modules && [ -e {{home}}/other-project-wt/node_modules/jest/bin/jest.js ] && ls {{home}}/other-project-wt/node_modules 2>/dev/null && echo linked"
       ]
     },
     {
