@@ -28,6 +28,7 @@ import { allowedEarlierVersion, connectorGroupOutcome, connectorSetupMatch, conn
 import { ConnectorSetupBanner } from "./connector-setup-banner";
 import { CustomExtensionReviewModal } from "./local-cli-review-modal";
 import { LocalCliCapabilities } from "./local-cli-capabilities";
+import { LocalCliLoadCommands } from "./local-cli-load-commands";
 import { canForgetLocalCli, ForgetLocalCliButton, lastSeenCopy } from "./local-cli-forget";
 
 export { customExtensionStateLabel } from "./local-cli-panel-copy";
@@ -418,6 +419,9 @@ export function LocalCliDetail(props: {
           </p>
           {commandsDirty && hasSuggestedRules(props.item) && !added ? (
             <p role="note" className="mt-2 max-w-2xl text-sm leading-6 text-brand-dark/75">{SUGGESTED_RULES_NOTICE}</p>
+          ) : null}
+          {props.item.surface === "cli" ? (
+            <LocalCliLoadCommands item={props.item} disabled={busy} onLoaded={props.onRefresh} />
           ) : null}
           <CustomExtensionCommandBrowser
             key={props.item.cli_id}

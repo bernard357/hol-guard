@@ -103,6 +103,7 @@ from .local_cli_profiles_api import (
     seeded_profile_items,
 )
 from .local_cli_registry_setup import registry_setup as reviewed_registry_setup
+from .local_cli_reload import load_cli_commands, verified_cli_for_reload
 from .mcp_discovery_jobs import DiscoveryJobError, DiscoveryStageError, McpDiscoveryJobs
 from .mcp_registry_undo import RegistrySetupUndo
 
@@ -436,6 +437,8 @@ class LocalCliApiService:
                     "Confirm starting this configured server to list tools.",
                 )
             item = next((item for item in self._store.list_local_cli_items() if item.get("cli_id") == cli_id), None)
+            if item is not None and item.get("surface") == "cli":
+                return self._start_cli_reload(item, payload)
             if item is None or item.get("surface") != "mcp":
                 raise LocalCliApiError(404, "mcp_refresh_unavailable")
 
@@ -459,6 +462,26 @@ class LocalCliApiService:
                 "discovery_unavailable": "Guard is stopping. Reopen Guard to try discovery again.",
             }
             raise LocalCliApiError(status, code, messages.get(code, "Could not start discovery.")) from error
+
+    def _start_cli_reload(self, item: dict[str, object], payload: dict[str, object]) -> dict[str, object]:
+        home_dir = Path.home()
+        identity = verified_cli_for_reload(item, home_dir=home_dir)
+
+        def reload(cancel: threading.Event) -> None:
+            load_cli_commands(
+                self._store,
+                identity,
+                discover=_discover_from_command,
+                home_dir=home_dir,
+                guard_home=self._store.guard_home,
+                cancel=cancel,
+            )
+
+        return self._discovery_jobs.start(
+            identity.cli_id,
+            reload,
+            requested_job_id=_client_discovery_job_id(payload),
+        )
 
     def close_discovery(self) -> bool:
         return self._discovery_jobs.close()

@@ -43,6 +43,8 @@ _PUBLIC_FAILURE_CODES = frozenset(
         "codex_host_limit",
         "codex_host_timeout",
         "codex_host_unavailable",
+        # A command-line tool's --help could not be read or parsed.
+        "cli_help_unreadable",
     }
 )
 
