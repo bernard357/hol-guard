@@ -40,10 +40,15 @@ def test_every_audited_site_carries_a_reading() -> None:
 
 
 def test_only_the_recorded_findings_compose_a_verdict_in_python() -> None:
-    """The audit's open findings. Fixing one should remove its row."""
+    """The audit's open findings. Fixing one removes its row.
+
+    `_run_guard_protect_command` was the second finding and is gone: PR #6320
+    deleted the rewrite once a probe showed the resident reads the approval-gate
+    row for itself.
+    """
 
     composed = sorted(str(site["func"]) for site in _baseline()["sites"] if site["reading"] == "composes-in-python")
-    assert composed == ["_run_guard_protect_command", "native_package_review_response"]
+    assert composed == ["native_package_review_response"]
 
 
 def test_every_recorded_template_still_resists_parsing() -> None:

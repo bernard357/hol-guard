@@ -193,16 +193,6 @@
       "note": "The protect command's reply when the resident request fails."
     },
     {
-      "file": "src/codex_plugin_scanner/guard/cli/commands_dispatch_local.py",
-      "func": "_run_guard_protect_command",
-      "root": "guard-run",
-      "reading": "composes-in-python",
-      "actions": [
-        "allow"
-      ],
-      "note": "After an approval wait resolves, this overwrites the resident's fresh verdict with allow when _package_shim_approval_matches_fresh_request finds the request unchanged - even though the resident just re-evaluated that same request as review or require-reapproval. Python, not the resident, concludes the approval covers it. Removed by PR #6320: the resident reads the approval-gate row the resolution writes and answers allow itself, so the rewrite was residue, not a rule anyone needed."
-    },
-    {
       "file": "src/codex_plugin_scanner/guard/cli/commands_hook_native_authority.py",
       "func": "emit_hook_review",
       "root": "hook",

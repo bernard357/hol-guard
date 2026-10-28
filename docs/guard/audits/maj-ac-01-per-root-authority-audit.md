@@ -110,7 +110,11 @@ tightens the composers below.
 
 ## The findings
 
-Two sites settle a verdict in Python that the resident did not give.
+Two sites settled a verdict in Python that the resident did not give. The
+second is closed - PR #6320 deleted it, and its row is gone from the baseline,
+so a scan of current main reports 60 sites rather than the 61 this audit read.
+It is written up below because the reason it could be deleted rather than ported
+is the useful part.
 
 ### `_script_free_watch`
 
@@ -167,8 +171,8 @@ The resident evaluated the fresh request and asked for review. Python concludes
 that the approval the user already gave covers it, because the request bytes
 match. That is an authority rule, and it lives only here.
 
-Neither is an open door: the first admits an install the resident already proved
-runs no package code and `may_allow` still gates it; the second needs a resolved
+Neither was an open door: the first admits an install the resident already proved
+runs no package code and `may_allow` still gates it; the second needed a resolved
 approval for a byte-identical request. Both are nonetheless the shape MAJ-AC-01
 was written to catch.
 
@@ -190,9 +194,9 @@ with the resolved request's `resolution_scope == "artifact"`, claims the one
 shot, and the resident answers `allow` on the re-evaluation by itself. The
 Python rewrite therefore only ever fired where the resident had already decided
 to keep the install paused — it was residue that happened to be shaped like an
-authority rule. PR #6320 removes the `elif` and
-`_package_shim_approval_matches_fresh_request` outright and pins the resident's
-own allow with an integration test.
+authority rule. PR #6320 removed the `elif` and
+`_package_shim_approval_matches_fresh_request` outright and pinned the resident's
+own allow with an integration test, so this root composes nothing today.
 
 ## Keeping it true
 
