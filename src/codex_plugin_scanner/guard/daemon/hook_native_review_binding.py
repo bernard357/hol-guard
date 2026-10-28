@@ -7,8 +7,10 @@ import sqlite3
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypeGuard
 
 from ..native_decision_receipt import edge_receipt
+from ..store_base import _workspace_policy_key
 
 # v2 drops ``policy_digest``: it is ``H(config_digest, rule_digest)`` over the
 # whole compiled snapshot, so it moves whenever the publisher republishes, even
@@ -154,10 +156,21 @@ def native_review_claimed_allow(
         )
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return False
-    if not isinstance(decision, Mapping) or decision.get("action") != "allow":
-        return False
-    if claimed_approval_request_id is not None and decision.get("request_id") != claimed_approval_request_id:
-        return False
+    if not _allows_request(decision, claimed_approval_request_id):
+        # A Cloud Review allow is stored apart from local approvals and only
+        # answers to the request it was issued for. The live completion that
+        # asks with claim_saved_approval=False consumes it afterwards; a
+        # retry that would claim it here is left to the ordinary path.
+        if claim_saved_approval or claimed_approval_request_id is None:
+            return False
+        return _exact_cloud_allow(
+            store,
+            request_id=claimed_approval_request_id,
+            harness=harness,
+            artifact_id=artifact_id,
+            workspace=workspace,
+            identity=identity,
+        )
     if not claim_saved_approval:
         return True
     approval_id = decision.get("approval_id")
@@ -175,3 +188,37 @@ def native_review_claimed_allow(
         )
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return False
+
+
+def _allows_request(decision: object, request_id: str | None) -> TypeGuard[Mapping[str, object]]:
+    if not isinstance(decision, Mapping) or decision.get("action") != "allow":
+        return False
+    return request_id is None or decision.get("request_id") == request_id
+
+
+def _exact_cloud_allow(
+    store: object,
+    *,
+    request_id: str,
+    harness: str,
+    artifact_id: str,
+    workspace: Path | None,
+    identity: str,
+) -> bool:
+    peek = getattr(store, "peek_exact_cloud_local_once_approval", None)
+    if not callable(peek):
+        return False
+    try:
+        decision = peek(request_id=request_id, now=datetime.now(tz=timezone.utc).isoformat())
+    except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        return False
+    if not _allows_request(decision, request_id):
+        return False
+    stored_hash = decision.get("artifact_hash")
+    return (
+        decision.get("harness") == harness
+        and decision.get("artifact_id") == artifact_id
+        and isinstance(stored_hash, str)
+        and hmac.compare_digest(stored_hash, identity)
+        and decision.get("workspace") == _workspace_policy_key(str(workspace) if workspace is not None else None)
+    )
