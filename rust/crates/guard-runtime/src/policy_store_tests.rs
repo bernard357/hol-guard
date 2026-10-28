@@ -138,7 +138,6 @@ pub(super) fn install_test_key(root: &Path, value: u8) -> [u8; VERIFIER_KEY_BYTE
     key
 }
 
-#[cfg(windows)]
 fn workspace_source(root: &Path) -> GuardHookSourceMetadataV2 {
     GuardHookSourceMetadataV2 {
         cwd: Some("/workspace".into()),
@@ -149,6 +148,7 @@ fn workspace_source(root: &Path) -> GuardHookSourceMetadataV2 {
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn windows_scope_aliases_share_one_digest_identity() {
     let normal = normalize_scope_text(r"C:\Users\Guard\State");
