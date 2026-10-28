@@ -1,5 +1,5 @@
-import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as hasSuggestedRules, bV as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bW as bulkCommandState, H as HiMiniChevronRight, bX as fetchLocalCliApi, bY as ExtensionBrandMark, c as HiMiniChevronDown, bZ as fetchMcpProviderActions, b_ as connectorSetupReady, b$ as shortIdentity, c0 as customExtensionDisplayName, c1 as previewLocalCliMutation, c2 as applyLocalCliMutation, c3 as LOCAL_CLI_CAPABILITIES, c4 as refreshMcpInventory, c5 as DiscoveryFailure, c6 as readJson, c7 as enrollablePackageScriptCommands, c8 as seenSuggestionMeta, c9 as HiMiniPlus, ca as looksLikeProjectRelocatePaste, cb as packageScriptFilterNeedle, e as HiMiniCheck, cc as initialAddCommand, cd as suggestedPackageScriptExtensions, ce as filterExtensionSuggestions, cf as suggestedHarnessExtensions, cg as suggestedSeenExtensions, ch as keepsPackageScriptCatalog, ci as prefillSuggestedStates, cj as recognizeLocalCli, ck as preferredPackageScriptExtension, cl as looksLikePackageScriptPaste, cm as enrollmentCommandStates, cn as isBulkApproveGateReady, co as HiMiniArrowLeft, cp as fetchLocalCliList, cq as normalizeLocalCliList, cr as unreviewedToolChangeCount, cs as connectorSetupMatch, ct as connectorGroupOutcome, cu as allowedEarlierVersion, cv as startGuardCloudConnect, cw as extensionEffectiveState, cx as permissionEffectiveState, cy as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cz as fetchExtensionControlApi, cA as permissionForRule, cB as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cC as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, cD as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cE as startCancelableDiscoveryJob, cF as waitForMcpDiscoveryJob, cG as isLocalCliId, bc as guardAwareHref, cH as localCliHref, bi as isGuardDemoMode, cI as fetchPluginUpdatesApi, cJ as filterCodexHostApps, cK as connectorWorkspaceItems, cL as customExtensionNeedsReview, cM as profileSetupCommand, cN as customExtensionBadge, aM as HiMiniAdjustmentsHorizontal, cO as extensionDisplayName, cP as catalogRowSecondLine, cQ as extensionStateLabel, cR as HiMiniGlobeAlt, cS as HiMiniFunnel, cT as discoveryFailureMessage, ba as WorkspacePageHeader, cU as refreshCodexHostInventory, cV as CODEX_HOST_FALLBACK, cW as CONFIGURED_CONNECTIONS_FALLBACK, cX as loadCurrentDashboardBuild, cY as canonicalExtensionId, cZ as extensionDetailHref, c_ as DEFAULT_EXTENSION_DETAIL_URL_STATE, c$ as addCustomExtensionPrefillHref, d0 as acknowledgeDegradedExtensionControlAuthority, d1 as recoverExtensionControlAuthority, d2 as connectorSetupLinkFromSearch, d3 as readExtensionDetailUrlState, d4 as parseProtectionRoute, d5 as addCustomExtensionHref } from "../guard-dashboard.js";
-import { u as useConfirmDialog } from "./confirm-dialog-QOlb635L.js";
+import { r as reactExports, bt as fetchExtensionCatalog, bu as ExtensionControlApiError, bv as normalizeExtensionCatalogSummary, bw as normalizeExtensionPermission, bx as ExtensionControlProtocolError, by as normalizeExtensionCatalogItem, bz as guardApiCacheScope, bA as fetchExtensionCatalogV2Api, bB as localPermissionDraftState, bC as setLocalPermissionDraftState, bD as extensionPolicyAuthorityUnchanged, bE as newExtensionPolicyDraftIdentity, bF as extensionPolicyDraftIsDirty, bG as setLocalPermissionDraftStates, bH as buildExtensionPolicyDraftMutation, bI as fetchEffectiveExtensionControls, bJ as previewExtensionMutation, bK as isCurrentExtensionPolicyDraft, bL as applyExtensionMutation, bM as fetchExtensionControlHistory, j as jsxRuntimeExports, bN as managedPermissionState, Z as HiMiniSparkles, s as HiMiniCheckCircle, g as HiMiniNoSymbol, v as HiMiniLockClosed, a4 as HiMiniExclamationTriangle, bO as controlProvenance, bP as treatmentLabel, aR as isApprovalProofSubmitDisabled, _ as HiMiniXMark, aQ as ApprovalProofFieldInputs, bQ as useResolvedApprovalGate, bR as groupPermissionsByFamily, d as HiMiniArrowPath, R as HiMiniShieldCheck, bS as HiMiniInformationCircle, aS as buildApprovalProofCredentials, bT as LocalCliApiError, bU as hasSuggestedRules, bV as approvalProofRecentlySatisfied, p as HiMiniMagnifyingGlass, bW as bulkCommandState, H as HiMiniChevronRight, bX as fetchLocalCliApi, bY as ExtensionBrandMark, c as HiMiniChevronDown, bZ as fetchMcpProviderActions, b_ as connectorSetupReady, b$ as shortIdentity, c0 as customExtensionDisplayName, c1 as previewLocalCliMutation, c2 as applyLocalCliMutation, c3 as LOCAL_CLI_CAPABILITIES, c4 as loadLocalCliCommands, c5 as DiscoveryFailure, c6 as readJson, c7 as enrollablePackageScriptCommands, c8 as seenSuggestionMeta, c9 as HiMiniPlus, ca as looksLikeProjectRelocatePaste, cb as packageScriptFilterNeedle, e as HiMiniCheck, cc as initialAddCommand, cd as suggestedPackageScriptExtensions, ce as filterExtensionSuggestions, cf as suggestedHarnessExtensions, cg as suggestedSeenExtensions, ch as keepsPackageScriptCatalog, ci as prefillSuggestedStates, cj as recognizeLocalCli, ck as preferredPackageScriptExtension, cl as looksLikePackageScriptPaste, cm as enrollmentCommandStates, cn as isBulkApproveGateReady, co as HiMiniArrowLeft, cp as fetchLocalCliList, cq as normalizeLocalCliList, cr as unreviewedToolChangeCount, cs as connectorSetupMatch, ct as refreshMcpInventory, cu as connectorGroupOutcome, cv as allowedEarlierVersion, cw as startGuardCloudConnect, cx as extensionEffectiveState, cy as permissionEffectiveState, cz as HiMiniArrowTopRightOnSquare, a0 as HiMiniCloud, cA as fetchExtensionControlApi, cB as permissionForRule, cC as refreshEffectiveExtensionControls, aD as HiMiniClipboardDocumentCheck, aE as HiMiniClipboard, aG as ApprovalProofModal, cD as fetchExtensionDiscoveryApi, t as HiMiniArrowRight, cE as HiMiniClock, B as createCommandActivityClient, C as fetchCommandActivityApi, cF as startCancelableDiscoveryJob, cG as waitForMcpDiscoveryJob, cH as isLocalCliId, bc as guardAwareHref, cI as localCliHref, bi as isGuardDemoMode, cJ as fetchPluginUpdatesApi, cK as filterCodexHostApps, cL as connectorWorkspaceItems, cM as customExtensionNeedsReview, cN as profileSetupCommand, cO as customExtensionBadge, aM as HiMiniAdjustmentsHorizontal, cP as extensionDisplayName, cQ as catalogRowSecondLine, cR as extensionStateLabel, cS as HiMiniGlobeAlt, cT as HiMiniFunnel, cU as discoveryFailureMessage, ba as WorkspacePageHeader, cV as refreshCodexHostInventory, cW as CODEX_HOST_FALLBACK, cX as CONFIGURED_CONNECTIONS_FALLBACK, cY as loadCurrentDashboardBuild, cZ as canonicalExtensionId, c_ as extensionDetailHref, c$ as DEFAULT_EXTENSION_DETAIL_URL_STATE, d0 as addCustomExtensionPrefillHref, d1 as acknowledgeDegradedExtensionControlAuthority, d2 as recoverExtensionControlAuthority, d3 as connectorSetupLinkFromSearch, d4 as readExtensionDetailUrlState, d5 as parseProtectionRoute, d6 as addCustomExtensionHref } from "../guard-dashboard.js";
+import { u as useConfirmDialog } from "./confirm-dialog-DbPRaiDR.js";
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -3405,11 +3405,36 @@ function loadCommandsFailureMessage(caught) {
   if (caught instanceof LocalCliApiError) return caught.message;
   return "Guard could not load this tool's commands. Try again.";
 }
+const BARE_PROGRAM_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+const SCRIPT_SUFFIXES = /* @__PURE__ */ new Set([
+  ".bash",
+  ".bat",
+  ".cmd",
+  ".fish",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".pl",
+  ".ps1",
+  ".py",
+  ".rb",
+  ".sh",
+  ".zsh"
+]);
+function loadCommandsNeedsPath(item) {
+  const dot = item.name.lastIndexOf(".");
+  const suffix = dot > 0 ? item.name.slice(dot).toLowerCase() : "";
+  return item.kind !== "executable" || !BARE_PROGRAM_NAME.test(item.name) || SCRIPT_SUFFIXES.has(suffix);
+}
 function LocalCliLoadCommands(props) {
   const { item, onLoaded } = props;
+  const pathId = reactExports.useId();
   const [busy, setBusy] = reactExports.useState(false);
   const [error, setError] = reactExports.useState(null);
   const [loaded, setLoaded] = reactExports.useState(false);
+  const [askPath, setAskPath] = reactExports.useState(() => loadCommandsNeedsPath(item));
+  const [path, setPath] = reactExports.useState("");
   const controllerRef = reactExports.useRef(null);
   reactExports.useEffect(() => () => controllerRef.current?.abort(), []);
   const load = reactExports.useCallback(async () => {
@@ -3419,37 +3444,71 @@ function LocalCliLoadCommands(props) {
     setError(null);
     setLoaded(false);
     try {
-      await refreshMcpInventory(item.cli_id, controller.signal);
+      await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? path.trim() : void 0);
       if (controller.signal.aborted) return;
       await onLoaded();
       setLoaded(true);
     } catch (caught) {
-      if (!controller.signal.aborted) setError(loadCommandsFailureMessage(caught));
+      if (controller.signal.aborted) return;
+      if (caught instanceof LocalCliApiError && caught.code === "cli_not_on_guard_path") setAskPath(true);
+      setError(loadCommandsFailureMessage(caught));
     } finally {
       setBusy(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [item.cli_id, onLoaded]);
-  if (item.kind !== "executable") {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-3 max-w-2xl text-sm leading-6 text-brand-dark/75", children: "Guard does not run scripts on its own. To list this script's commands, find it again in Add custom extension using its full path." });
-  }
+  }, [askPath, item.cli_id, onLoaded, path]);
   const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 max-w-2xl", "aria-busy": busy, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm leading-6 text-brand-dark/75", children: [
-      "Guard runs ",
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("code", { className: "rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark", children: [
+      askPath ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        "Guard does not record where ",
         item.name,
-        " --help"
+        " is saved. Enter its full path, and Guard runs it with",
+        " ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark", children: "--help" }),
+        " ",
+        "from an empty temporary folder, then the same for each command it lists. It runs the file only if it is the one Guard recorded. A script that ignores --help may do its normal work instead, so load commands only for scripts you trust."
+      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        "Guard runs ",
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("code", { className: "rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark", children: [
+          item.name,
+          " --help"
+        ] }),
+        " from an empty temporary folder, then the same for each command it lists. A program that ignores --help may do its normal work instead, so load commands only for tools you trust."
       ] }),
-      " from an empty temporary folder, then the same for each command it lists. A program that ignores --help may do its normal work instead, so load commands only for tools you trust. Loading adds commands and never changes a choice you already made."
+      " ",
+      "Loading adds commands and never changes a choice you already made."
     ] }),
+    askPath ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { htmlFor: pathId, className: "mt-3 block text-sm font-semibold text-brand-dark", children: [
+        "Full path to ",
+        item.name
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "input",
+        {
+          id: pathId,
+          value: path,
+          onChange: (event) => setPath(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter" && path.trim() !== "" && !busy && !props.disabled) void load();
+          },
+          disabled: busy,
+          spellCheck: false,
+          autoComplete: "off",
+          maxLength: 4096,
+          placeholder: `/path/to/${item.name}`,
+          className: "mt-2 min-h-11 w-full max-w-xl rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-brand-dark placeholder:text-brand-dark/70 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+        }
+      )
+    ] }) : null,
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 flex flex-wrap items-center gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
           onClick: () => void load(),
-          disabled: props.disabled || busy,
+          disabled: props.disabled || busy || askPath && path.trim() === "",
           className: "inline-flex min-h-11 items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark disabled:cursor-wait disabled:opacity-50",
           children: busy ? "Loading commands…" : hasCommands ? "Check for new commands" : "Load commands"
         }
