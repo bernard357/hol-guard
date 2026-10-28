@@ -1399,7 +1399,14 @@ def _discover_from_command(
         if invocation is None:
             continue
         matched, argv = invocation
-        if matched.cli_id != identity.cli_id:
+        if (
+            matched.cli_id != identity.cli_id
+            or matched.identity_hash != identity.identity_hash
+            or matched.kind != identity.kind
+            or matched.runner != identity.runner
+        ):
+            # Only the program the caller verified is run; one replaced since
+            # then shares its id but not its identity hash.
             continue
         tool_path = next(iter(argv), None)
         if tool_path is None:

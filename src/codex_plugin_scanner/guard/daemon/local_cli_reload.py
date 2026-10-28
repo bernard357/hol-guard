@@ -13,7 +13,10 @@ the same probe the Add custom extension flow uses, under tighter conditions:
   recorded: the same id and identity hash. A replaced binary is not probed;
 * new commands are merged onto the stored ones, so a probe can never remove a
   command or the choice the operator already made for it, and a failed probe
-  changes nothing.
+  changes nothing;
+* nothing is written when the stored tool changed while its help was read, or
+  when the operator cancelled first. Once writing starts, a cancel no longer
+  applies, so a job that stored commands never reports itself cancelled.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import re
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..local_cli_errors import LocalCliCatalogLimitError
 from ..local_cli_trust import utc_now
@@ -29,7 +33,10 @@ from ..runtime.local_cli_commands import MAX_LOCAL_CLI_COMMANDS, LocalCliCommand
 from ..runtime.local_cli_identity import UnlistedCliIdentity, recognize_operator_cli
 from .local_cli_api_contract import LocalCliApiError
 from .local_cli_profiles_api import merge_profile_commands
-from .mcp_discovery_jobs import DiscoveryStageError
+from .mcp_discovery_jobs import DiscoveryStageError, begin_commit
+
+if TYPE_CHECKING:
+    from ..store import GuardStore
 
 DiscoverCommands = Callable[
     [str, UnlistedCliIdentity, Path, Path, Path],
@@ -95,7 +102,7 @@ def verified_cli_for_reload(item: Mapping[str, object], *, home_dir: Path) -> Un
 
 
 def load_cli_commands(
-    store: object,
+    store: GuardStore,
     identity: UnlistedCliIdentity,
     *,
     discover: DiscoverCommands,
@@ -105,22 +112,30 @@ def load_cli_commands(
 ) -> None:
     """Read ``identity``'s --help and add any new commands to its catalog."""
 
-    # The probe re-resolves the name and only runs a program whose id still
-    # matches, so a binary swapped after the check above is not run.
+    # The probe re-resolves the name and only runs a program whose id, kind
+    # and identity hash still match, so a binary swapped after the check
+    # above is not run.
     commands, help_status, _ = discover(identity.name, identity, home_dir, home_dir, guard_home)
     if cancel.is_set():
         return
     if help_status == "failed":
         raise DiscoveryStageError("cli_help_unreadable")
+    stored = next((item for item in store.list_local_cli_items() if item.get("cli_id") == identity.cli_id), None)
+    if stored is None or stored.get("identity_hash") != identity.identity_hash:
+        # The tool was found again as a different program while its help was
+        # read. These commands describe the old one.
+        raise DiscoveryStageError("cli_identity_changed")
+    if not begin_commit(cancel):
+        return
     try:
-        store.merge_local_cli_commands(  # type: ignore[attr-defined]
+        store.merge_local_cli_commands(
             identity.cli_id,
             merge_profile_commands(identity.name, commands),
             limit=MAX_LOCAL_CLI_COMMANDS,
         )
     except LocalCliCatalogLimitError:
         raise DiscoveryStageError("catalog_limit_reached") from None
-    store.record_local_cli_observation(  # type: ignore[attr-defined]
+    store.record_local_cli_observation(
         identity,
         seen_at=utc_now(),
         # The stored location class stays; a resolved path is not recorded.

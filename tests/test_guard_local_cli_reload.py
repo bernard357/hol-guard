@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import stat
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ class Probes:
     calls: list[str] = field(default_factory=list)
     commands: tuple[LocalCliCommand, ...] = (LocalCliCommand("deploy", "deploy", "deploy", ""),)
     status: str = "ok"
+    during: Callable[[], None] | None = None
 
 
 @pytest.fixture
@@ -51,6 +53,8 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> Probes:
 
     def discover(command, identity, cwd, home_dir, guard_home):
         recorded.calls.append(command)
+        if recorded.during is not None:
+            recorded.during()
         return recorded.commands, recorded.status, "/resolved/path/never/stored"
 
     monkeypatch.setattr(local_cli_api, "_discover_from_command", discover)
@@ -192,3 +196,60 @@ def test_a_real_probe_only_ever_asks_for_help(tmp_path, monkeypatch):
     assert not acted.exists()
     catalog = {command.command_id for command in store.read_local_cli_command_catalog(identity.cli_id)}
     assert {"deploy", "status"} <= catalog
+
+
+def test_a_tool_found_again_during_loading_keeps_its_new_catalog(tmp_path, tool, probes):
+    store, service = _service(tmp_path, tool)
+    replacement = replace(tool, identity_hash="f" * 64)
+    probes.during = lambda: store.record_local_cli_observation(replacement, seen_at=SEEN_AT, surface="cli")
+    try:
+        job = service.refresh_job({"cli_id": tool.cli_id, "confirm_process_start": True})
+        result = _finished(service, job)
+    finally:
+        assert service.close_discovery()
+    assert (result["state"], result["error"]) == ("failed", "cli_identity_changed")
+    assert store.read_local_cli_command_catalog(tool.cli_id) == []
+
+
+def test_a_cancel_before_writing_stores_nothing(tmp_path, tool, probes):
+    store, service = _service(tmp_path, tool)
+    jobs: list[str] = []
+    probes.during = lambda: service._discovery_jobs.read(jobs[0], cancel=True)
+    job_id = "a" * 32
+    jobs.append(job_id)
+    try:
+        job = service.refresh_job({"cli_id": tool.cli_id, "confirm_process_start": True, "client_job_id": job_id})
+        assert _finished(service, job)["state"] == "cancelled"
+    finally:
+        assert service.close_discovery()
+    assert store.read_local_cli_command_catalog(tool.cli_id) == []
+
+
+def test_a_cancel_after_writing_began_reports_the_stored_result(tmp_path, tool, probes, monkeypatch):
+    store, service = _service(tmp_path, tool)
+    job_id = "b" * 32
+    merge = store.merge_local_cli_commands
+    cancelled: list[dict[str, object]] = []
+
+    def merge_then_cancel(*args, **kwargs):
+        cancelled.append(service._discovery_jobs.read(job_id, cancel=True))
+        return merge(*args, **kwargs)
+
+    monkeypatch.setattr(store, "merge_local_cli_commands", merge_then_cancel)
+    try:
+        job = service.refresh_job({"cli_id": tool.cli_id, "confirm_process_start": True, "client_job_id": job_id})
+        assert _finished(service, job)["state"] == "complete"
+    finally:
+        assert service.close_discovery()
+    assert cancelled[0]["state"] == "running"
+    assert "deploy" in {command.command_id for command in store.read_local_cli_command_catalog(tool.cli_id)}
+
+
+def test_discovery_never_runs_a_program_whose_identity_changed(tool, monkeypatch):
+    ran: list[object] = []
+    monkeypatch.setattr(local_cli_api, "discover_local_cli_commands", lambda *args, **kwargs: ran.append(args))
+    stale = replace(tool, identity_hash="c" * 64)
+    home = Path(os.environ["HOME"])
+    _, status, _ = local_cli_api._discover_from_command(tool.name, stale, home, home, home / "guard")
+    assert status == "failed"
+    assert ran == []

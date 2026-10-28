@@ -34650,6 +34650,8 @@ function stageFailure(code) {
       return new DiscoveryFailure("observed_provider_scan_failed", "Guard could not merge observed provider tools. Known tools and choices were kept; choose Check for connectors again.");
     case "cli_help_unreadable":
       return new DiscoveryFailure("cli_help_unreadable", "Guard could not read this tool's --help output. Known commands and choices were kept.");
+    case "cli_identity_changed":
+      return new DiscoveryFailure("cli_identity_changed", "This tool was found again as a different program while Guard read its --help, so nothing was saved. Load commands again to read the new one.");
     case "catalog_limit_reached":
       return new DiscoveryFailure("catalog_limit_reached", "This connector has more tools than Guard can catalog safely. Existing choices were kept; remove tools you do not use in the host app, then check again.");
     case "discovery_failed":
