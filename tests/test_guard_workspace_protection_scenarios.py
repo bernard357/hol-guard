@@ -327,6 +327,11 @@ def test_missing_lockfile_is_partial_and_never_clean(tmp_path: Path, native_bina
     assert run["coverage"]["detectors"]["supply_chain"] != "complete"
 
 
+def _encoded(path: Path) -> str:
+    """The path as it appears inside serialized JSON (backslashes escaped on Windows)."""
+    return json.dumps(str(path))[1:-1]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs extra rights on Windows")
 def test_a_symlink_out_of_the_root_is_not_followed(tmp_path: Path, native_binary: None, offline: None) -> None:
     clock = Clock()
@@ -344,7 +349,7 @@ def test_a_symlink_out_of_the_root_is_not_followed(tmp_path: Path, native_binary
 
     run = _latest(store, keys)
     assert all(item["package_version"] != AFFECTED for item in _minimist(run))
-    assert str(outside) not in json.dumps(run)
+    assert _encoded(outside) not in json.dumps(run)
 
 
 def test_a_relative_dependency_outside_the_root_is_never_read(
@@ -375,7 +380,7 @@ def test_a_relative_dependency_outside_the_root_is_never_read(
 
     run = _latest(store, keys)
     assert all(item["package_version"] != AFFECTED for item in _minimist(run))
-    assert str(outside) not in json.dumps(assessments.latest_assessed_runs(store))
+    assert _encoded(outside) not in json.dumps(assessments.latest_assessed_runs(store))
 
 
 def test_restoring_protection_leaves_the_known_risk_open(
