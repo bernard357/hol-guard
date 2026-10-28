@@ -44,6 +44,7 @@ _RECEIPT_ONLY_FIELD = "guard_containment_receipt_only"
 _SINK_VERB = "execute-contained-test"
 _ALLOW: dict[str, object] = {"policy_action": "allow"}
 # The edge fields the resident reads to route a probe.
+_SINK_ROUTE = "sink"
 _EDGE_FIELDS = ("harness", "event_name", "containment_route", "result")
 
 
@@ -137,6 +138,10 @@ def _probe_response(
     )
     if edge is None:
         return None
+    # The resident rewrites only a probe the edge routes to the sink and
+    # answers any other with the plain allow, so that one skips the call.
+    if edge.get("containment_route") != _SINK_ROUTE:
+        return dict(_ALLOW)
     return _resident_route(
         payload, edge, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
     )

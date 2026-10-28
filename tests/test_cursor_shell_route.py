@@ -200,11 +200,19 @@ def test_hook_copy_probe_matches_the_daemon() -> None:
 
 
 class _RoutingWorker:
+    def __init__(self, route: str = "sink") -> None:
+        self.route = route
+
     def _native_policy_snapshot(self, *_args: object, **_kwargs: object) -> object:
         return object()
 
     def _review_raw_hook_native(self, **_kwargs: object) -> dict[str, object]:
-        return {"harness": "cursor", "event_name": "PreToolUse", "result": {"decision": "deny"}}
+        return {
+            "harness": "cursor",
+            "event_name": "PreToolUse",
+            "containment_route": self.route,
+            "result": {"decision": "deny"},
+        }
 
 
 @posix_only
@@ -223,7 +231,12 @@ def test_a_probe_the_sink_takes_answers_with_the_rewritten_call(tmp_path: Path, 
     assert _respond(_PROBE, tmp_path, _RoutingWorker()) == routed  # type: ignore[arg-type]
     # The resident reads the edge the daemon reviewed, never a re-review.
     assert [params["edge"] for params in asked] == [
-        {"harness": "cursor", "event_name": "PreToolUse", "result": {"decision": "deny"}}
+        {
+            "harness": "cursor",
+            "event_name": "PreToolUse",
+            "containment_route": "sink",
+            "result": {"decision": "deny"},
+        }
     ]
     assert asked[0]["payload"] == _PROBE
 
@@ -235,3 +248,18 @@ def test_a_probe_the_resident_cannot_answer_is_a_plain_allow(tmp_path: Path, mon
     monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
     monkeypatch.setattr(native_hook_render, "native_render_cli", lambda *_a, **_k: None)
     assert _respond(_PROBE, tmp_path, _RoutingWorker()) == {"policy_action": "allow"}  # type: ignore[arg-type]
+
+
+@posix_only
+@pytest.mark.parametrize("edge_route", ["none", "grant"])
+def test_a_probe_the_edge_does_not_route_to_the_sink_skips_the_resident(
+    tmp_path: Path, monkeypatch, edge_route: str
+) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    asked: list[str] = []
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", lambda kind, *_a, **_k: asked.append(kind))
+    worker = _RoutingWorker(edge_route)
+    assert _respond(_PROBE, tmp_path, worker) == {"policy_action": "allow"}  # type: ignore[arg-type]
+    assert asked == []
