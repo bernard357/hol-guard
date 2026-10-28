@@ -686,6 +686,7 @@ dependencies = [
  "guard-scanner",
  "guard-secure-fs",
  "hex",
+ "hmac",
  "idna",
  "libc",
  "mailparse",

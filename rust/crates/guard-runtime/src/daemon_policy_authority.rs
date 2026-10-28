@@ -44,6 +44,7 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
+use hmac::{Hmac, Mac};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -496,28 +497,9 @@ fn write_json_string(s: &str, out: &mut Vec<u8>) {
 /// Raw HMAC-SHA256 over an arbitrary message (single-shot; the crate's
 /// `hmac_sha256` is label+nonce shaped for the resident protocol).
 pub(crate) fn hmac_sha256_raw(key: &[u8], message: &[u8]) -> Vec<u8> {
-    const BLOCK: usize = 64;
-    let mut key_block = [0u8; BLOCK];
-    if key.len() > BLOCK {
-        let digest = Sha256::digest(key);
-        key_block[..digest.len()].copy_from_slice(&digest);
-    } else {
-        key_block[..key.len()].copy_from_slice(key);
-    }
-    let mut inner_pad = [0x36u8; BLOCK];
-    let mut outer_pad = [0x5cu8; BLOCK];
-    for index in 0..BLOCK {
-        inner_pad[index] ^= key_block[index];
-        outer_pad[index] ^= key_block[index];
-    }
-    let mut inner = Sha256::new();
-    inner.update(inner_pad);
-    inner.update(message);
-    let inner_digest = inner.finalize();
-    let mut outer = Sha256::new();
-    outer.update(outer_pad);
-    outer.update(inner_digest);
-    outer.finalize().to_vec()
+    let mut mac = <Hmac<Sha256>>::new_from_slice(key).expect("hmac accepts any key length");
+    mac.update(message);
+    mac.finalize().into_bytes().to_vec()
 }
 
 /// `daemon_state_matches_current_runtime` (runtime_peer.py:105-:135):
@@ -1314,5 +1296,40 @@ mod tests {
             "tables": REQUIRED_DAEMON_TABLES,
         });
         assert!(!healthz_payload_is_current(&outdated_compatibility));
+    }
+}
+
+#[cfg(test)]
+mod hmac_vectors_tests {
+    use super::hmac_sha256_raw;
+
+    fn tag_hex(key: &[u8], message: &[u8]) -> String {
+        hmac_sha256_raw(key, message)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    /// RFC 4231 test cases 1, 2 and 6. The discovery tag authenticates what the
+    /// daemon is willing to answer with, so it has to stay byte-identical to
+    /// HMAC-SHA256 whichever implementation computes it; case 6 covers a key
+    /// longer than the 64-byte block.
+    #[test]
+    fn the_tag_matches_the_published_hmac_sha256_vectors() {
+        assert_eq!(
+            tag_hex(&[0x0b; 20], b"Hi There"),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        );
+        assert_eq!(
+            tag_hex(b"Jefe", b"what do ya want for nothing?"),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(
+            tag_hex(
+                &[0xaa; 131],
+                b"Test Using Larger Than Block-Size Key - Hash Key First"
+            ),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
     }
 }
