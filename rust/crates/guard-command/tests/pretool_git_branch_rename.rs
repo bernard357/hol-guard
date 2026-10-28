@@ -72,6 +72,11 @@ fn branch_creation_at_a_start_point_is_quiet_only_in_the_plain_form() {
     let reviewed = |command: &str| {
         let result = at_tree(command);
         assert_ne!(result.reason_code, WRITE, "{command}");
+        assert_ne!(
+            result.minimum_action, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
     };
     let contained = |command: &str| {
         let result = at_tree(command);
