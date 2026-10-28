@@ -55,7 +55,10 @@ fn an_absolute_cd_into_the_workspace_is_peeled_on_every_host() {
     let root = workspace("plan-absolute-cd", true);
     std::fs::create_dir_all(root.join("sub")).expect("sub");
     let workspace_path = root.to_str().expect("workspace path");
-    let command = format!("cd {} && pytest -q", root.join("sub").display());
+    // Spelled as a user types it: the fixture root is canonical, which on
+    // Windows carries a `\\?\` prefix whose `?` the peel reads as a glob.
+    let sub = crate::runtime_read_paths::strip_verbatim_prefix(root.join("sub"));
+    let command = format!("cd {} && pytest -q", sub.display());
 
     for peels_relative_inside in [true, false] {
         let answer = wrapper_plan(

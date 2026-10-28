@@ -9,10 +9,10 @@ that turn a finding into a failure.
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from typing import Any
 
+import tomllib
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +55,7 @@ def test_the_tool_is_a_digest_verified_pinned_release() -> None:
 
     assert len(env["CARGO_DENY_SHA256"]) == 64
     assert "sha256sum --check --strict" in install["run"]
-    assert f"/download/${{CARGO_DENY_VERSION}}/" in install["run"]
+    assert "/download/${CARGO_DENY_VERSION}/" in install["run"]
 
     cache = next(step for step in _steps() if step.get("id") == "cargo-deny-cache")
     # A cache key that outlives a version bump would serve the old binary.
