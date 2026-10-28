@@ -1,4 +1,4 @@
-use super::settle;
+use super::{settle, settle_within};
 use crate::context_digest_package_scripts::package_json_scripts;
 use guard_contracts::{
     GuardHookEnvelopeV2, GuardHookLocalCliRulesV1, GuardHookSourceMetadataV2,
@@ -7,6 +7,7 @@ use guard_contracts::{
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 const SCHEMA: &str = "
 create table local_cli_grant (
@@ -137,6 +138,53 @@ fn an_unreadable_grant_blocks_an_allowed_call_as_unverified() {
     let rule = settle(&envelope, "claude-code", "PreToolUse", &allowed())
         .unwrap()
         .unwrap();
+    assert!(rule.blocked);
+    assert!(reason(&rule.harness_response).contains("could not check"));
+}
+
+/// An exclusive hold on the home's storage gate, as a writer takes it, so a
+/// check that needs the shared hold waits behind it.
+fn hold_gate_exclusive(guard_home: &str) -> fs::File {
+    let gate = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(Path::new(guard_home).join(crate::hook_evidence_store_gate::STORAGE_GATE_FILE_NAME))
+        .unwrap();
+    fs2::FileExt::lock_exclusive(&gate).unwrap();
+    gate
+}
+
+#[test]
+fn a_rule_not_read_in_time_leaves_a_review_standing() {
+    let (envelope, _) = case("review-late", Some("blocked"), false);
+    let _writer = hold_gate_exclusive(&envelope.source.guard_home);
+    assert_eq!(
+        settle_within(
+            &envelope,
+            "claude-code",
+            "PreToolUse",
+            &review("network_target"),
+            Duration::from_millis(50),
+        ),
+        Ok(None)
+    );
+}
+
+#[test]
+fn a_rule_not_read_in_time_blocks_an_allowed_call_as_unverified() {
+    let (envelope, _) = case("allow-late", Some("blocked"), false);
+    let _writer = hold_gate_exclusive(&envelope.source.guard_home);
+    let rule = settle_within(
+        &envelope,
+        "claude-code",
+        "PreToolUse",
+        &allowed(),
+        Duration::from_millis(50),
+    )
+    .unwrap()
+    .unwrap();
     assert!(rule.blocked);
     assert!(reason(&rule.harness_response).contains("could not check"));
 }

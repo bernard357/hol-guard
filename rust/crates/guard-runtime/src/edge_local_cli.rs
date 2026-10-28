@@ -10,11 +10,15 @@
 //! as unverified. A review is checked outside Watch: a block applies to any
 //! review, and an allow lifts only an overridable review due to
 //! non-recognition alone, so a review is read only while some CLI grant
-//! exists. A rule the edge cannot read leaves the review standing. The daemon still applies each answer where it did before:
+//! exists. A rule the edge cannot read leaves the review standing, and so
+//! does one it cannot read in time: the check runs beside the edge and is
+//! abandoned at its wait, so a slow launch never costs the review its
+//! answer. The daemon still applies each answer where it did before:
 //! a granted containment answers an allowed call first, and a saved
 //! exact-action block wins over a custom allow.
 
 use std::path::Path;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use guard_contracts::{GuardHookEnvelopeV2, GuardHookLocalCliRuleV1, HookLocalCliRuleRequestV1};
@@ -25,6 +29,10 @@ use crate::hook_direct::local_cli::rule_op::{self, RuleVerdict};
 
 /// How long the check waits for a writer's exclusive storage hold.
 const STORAGE_GATE_WAIT: Duration = Duration::from_secs(2);
+/// How long the edge waits for the rule after its review. The daemon allows
+/// the edge five seconds past the review's budget for it; the rest is the
+/// answer's way back.
+const RULE_WAIT: Duration = Duration::from_secs(4);
 const REVIEW_ACTIONS: [&str; 2] = ["review", "require-reapproval"];
 
 /// The custom extension rule the daemon asked for, or `None` when it asked
@@ -34,6 +42,16 @@ pub(super) fn settle(
     harness: &str,
     event_name: &str,
     result: &Value,
+) -> Result<Option<GuardHookLocalCliRuleV1>, String> {
+    settle_within(envelope, harness, event_name, result, RULE_WAIT)
+}
+
+fn settle_within(
+    envelope: &GuardHookEnvelopeV2,
+    harness: &str,
+    event_name: &str,
+    result: &Value,
+    wait: Duration,
 ) -> Result<Option<GuardHookLocalCliRuleV1>, String> {
     let (Some(rules), "PreToolUse", Some(result)) = (
         envelope.local_cli_rules.as_ref(),
@@ -54,7 +72,7 @@ pub(super) fn settle(
         {
             return Ok(None);
         }
-        let verdict = checked(envelope, result, "allowed").unwrap_or(RuleVerdict::Unverified);
+        let verdict = checked(envelope, result, "allowed", wait).unwrap_or(RuleVerdict::Unverified);
         let response = match verdict {
             RuleVerdict::Blocked(name) => custom_block(harness, result, &name, recording_only),
             RuleVerdict::Unverified => block::unverified_response(harness, result, recording_only)
@@ -71,7 +89,7 @@ pub(super) fn settle(
             &envelope.source.guard_home,
         )
     {
-        match checked(envelope, result, "review") {
+        match checked(envelope, result, "review", wait) {
             Some(RuleVerdict::Blocked(name)) => (true, custom_block(harness, result, &name, false)),
             Some(RuleVerdict::Allowed) => {
                 let mut allowed = result.clone();
@@ -112,11 +130,12 @@ fn custom_block(
 }
 
 /// The rule's verdict under the shared storage hold, or `None` when the hold
-/// cannot be taken.
+/// cannot be taken or the verdict does not arrive within `wait`.
 fn checked(
     envelope: &GuardHookEnvelopeV2,
     result: &Map<String, Value>,
-    mode: &str,
+    mode: &'static str,
+    wait: Duration,
 ) -> Option<RuleVerdict> {
     let rules = envelope.local_cli_rules.as_ref()?;
     let request = HookLocalCliRuleRequestV1 {
@@ -136,16 +155,25 @@ fn checked(
         user_home: Some(rules.user_home.clone()),
         env: Some(rules.env.clone()),
     };
-    let _hold = crate::hook_evidence_store_gate::hold_storage_gate(
-        Path::new(&envelope.source.guard_home),
-        STORAGE_GATE_WAIT,
-    )
-    .ok()?;
-    Some(match mode {
-        // `settle` already found a block rule.
-        "allowed" => rule_op::allowed_verdict_with_block_rules(&request),
-        _ => rule_op::review_verdict(&request),
-    })
+    let (sender, receiver) = mpsc::sync_channel(1);
+    // An abandoned check finishes on its own and its answer is dropped.
+    std::thread::Builder::new()
+        .name("edge-local-cli-rule".to_owned())
+        .spawn(move || {
+            let Ok(_hold) = crate::hook_evidence_store_gate::hold_storage_gate(
+                Path::new(&request.guard_home),
+                STORAGE_GATE_WAIT,
+            ) else {
+                return;
+            };
+            let _ = sender.send(match mode {
+                // `settle` already found a block rule.
+                "allowed" => rule_op::allowed_verdict_with_block_rules(&request),
+                _ => rule_op::review_verdict(&request),
+            });
+        })
+        .ok()?;
+    receiver.recv_timeout(wait).ok()
 }
 
 #[cfg(test)]
