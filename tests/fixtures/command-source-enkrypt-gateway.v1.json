@@ -100,6 +100,9 @@
                   "interleaved_options_with_values": [
                     "--config-name",
                     "--config-id"
+                  ],
+                  "forbidden_flags_before_delimiter": [
+                    "--help"
                   ]
                 }
               }
@@ -437,6 +440,41 @@
       "expected_effective_segments": [
         0
       ],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_help_before_bulk",
+      "command": "secure-mcp-gateway --help config remove-all-servers --config-name staging",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_help_after_bulk",
+      "command": "secure-mcp-gateway config remove-all-servers --help",
+      "disabled_permissions": [],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
+      "rule_id": "command.enkrypt-gateway.bulk-config-removal"
+    },
+    {
+      "id": "enkrypt_disabled_permission_help",
+      "command": "secure-mcp-gateway --help config remove-all-servers",
+      "disabled_permissions": [
+        "command.enkrypt-gateway.permission.bulk-config-removal"
+      ],
+      "enabled_extensions": [
+        "command.enkrypt-gateway"
+      ],
+      "expected_action": "review",
+      "expected_effective_segments": [],
       "rule_id": "command.enkrypt-gateway.bulk-config-removal"
     }
   ],
