@@ -17,7 +17,7 @@
   "license": null,
   "name": "UpCloud upctl destructive purge review",
   "nativeSource": {
-    "digest": "ff308c588166c061715a05d3a2fa1445aa4883da15d525a36d055f1719681b59",
+    "digest": "80ae3c7a7dd90e89e97698c93d66cbe6b89e83c56c1cc5d2c073038aa359dc64",
     "path": "contributions/command-sources/command.upctl.json",
     "schemaVersion": "guard.command-extension-source.v1"
   },
