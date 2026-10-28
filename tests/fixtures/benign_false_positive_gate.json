@@ -32455,6 +32455,70 @@
       },
       "cwd": "org_app",
       "expect": "not_allow"
+    },
+    {
+      "id": "session-git-branch-create-at-remote-start",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-a origin/main"
+      }
+    },
+    {
+      "id": "session-git-branch-create-at-head",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-b HEAD"
+      }
+    },
+    {
+      "id": "session-git-branch-create-at-local-branch",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch fix/branch-start-c main"
+      }
+    },
+    {
+      "id": "session-git-branch-create-quiet-at-remote-start",
+      "cwd": "org_app",
+      "expect": "allow",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git branch -q fix/branch-start-d origin/main"
+      }
     }
   ],
   "mcp_cases": [
