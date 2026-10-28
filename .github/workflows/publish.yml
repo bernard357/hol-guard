@@ -541,6 +541,7 @@ jobs:
       contents: read
       pull-requests: read
       statuses: read
+      checks: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       channel: ${{ steps.version.outputs.channel }}
@@ -859,6 +860,26 @@ jobs:
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "Computed $CHANNEL version: $VERSION"
+      - name: Require a green Cargo supply chain run for the resolved source
+        # A stable repair resolves its source back to the release tag, which can
+        # be an older commit than the one this run was dispatched from. The gate
+        # before the build only saw the dispatch commit, so the audit is read
+        # again here, against the commit the build has actually checked out.
+        if: steps.version.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh api \
+            "repos/${REPOSITORY}/commits/${SOURCE_SHA}/check-runs?check_name=Cargo+supply+chain&per_page=100" \
+            --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at)[-1].conclusion // empty')
+          if [[ "$conclusion" != "success" ]]; then
+            echo "Cargo supply chain for ${SOURCE_SHA} is ${conclusion:-absent}; refusing to build a stable release" >&2
+            exit 1
+          fi
+          echo "Cargo supply chain for ${SOURCE_SHA}: success"
       - name: Select native wheel platforms
         id: native_wheel_matrix
         env:

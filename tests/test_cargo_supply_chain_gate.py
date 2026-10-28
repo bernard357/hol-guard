@@ -13,7 +13,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib  # type: ignore[no-redef]
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,7 +73,10 @@ def test_the_tool_is_a_digest_verified_pinned_release() -> None:
     env = install["env"]
     version = env["CARGO_DENY_VERSION"]
 
-    assert len(env["CARGO_DENY_SHA256"]) == 64
+    # The exact digest, not its shape: a new value has to be changed in two
+    # places, which is what makes swapping the audited binary a reviewed act.
+    assert env["CARGO_DENY_SHA256"] == "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+    assert version == "0.20.2"
     assert "sha256sum --check --strict" in install["run"]
     assert "/download/${CARGO_DENY_VERSION}/" in install["run"]
 
@@ -161,3 +168,16 @@ def test_a_stable_release_cannot_build_without_a_green_audit() -> None:
     assert '"$conclusion" != "success"' in run
     assert "require-supply-chain-audit" in jobs["build"]["needs"]
     assert "needs.require-supply-chain-audit.result == 'success'" in jobs["build"]["if"]
+
+    # A stable repair builds the release tag, which can be older than the commit
+    # the run was dispatched from, so the build reads the audit back for the
+    # source it resolved rather than trusting the gate above.
+    name = "Require a green Cargo supply chain run for the resolved source"
+    resolved = next(step for step in jobs["build"]["steps"] if step.get("name") == name)
+    assert resolved["env"]["SOURCE_SHA"] == "${{ steps.version.outputs.source_sha }}"
+    assert resolved["if"] == "steps.version.outputs.channel == 'stable'"
+    assert '"$conclusion" != "success"' in resolved["run"]
+    assert jobs["build"]["permissions"]["checks"] == "read"
+    assert jobs["build"]["steps"].index(resolved) < next(
+        index for index, step in enumerate(jobs["build"]["steps"]) if step.get("id") == "native_wheel_matrix"
+    )
