@@ -111,7 +111,7 @@ is enforcing less than macOS and Linux:
 | `workspace_review_claim_index.rs::sync_directories_before_commit` | Directory fsync, which Windows has no equivalent for, so the claim index commits unsynced. The shards are still persisted by the node writer, so the exposure is a claim lost to a crash, not a claim wrongly granted. Closable with `FlushFileBuffers` on the directory handles. |
 | `guard-secure-fs/src/lib.rs::open_immutable_blob` | Device, inode, link count and write-mode comparison; the arm compares length and mtime and the caller pairs it with a `GetFileInformationByHandle` file-id check. The file id proves the descriptor is the file that was stat'd, not that the file is immutable, so a writable blob is admitted. The caller rehashes what it streams. Closable with a share-mode or read-only-attribute check at open. |
 
-These fifteen are recorded, not fixed. Each needs a Win32 call Guard does not make
+These fourteen are recorded, not fixed. Each needs a Win32 call Guard does not make
 yet — `GetFileInformationByHandle`, `GetFinalPathNameByHandle`, `FlushFileBuffers`, or an ACL
 read — and each is a separate change with its own Windows test. The inventory is where they
 stay visible.
