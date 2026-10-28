@@ -1,0 +1,185 @@
+{
+  "schema": "guard.command-extension-source.v1",
+  "extension": {
+    "extension_id": "command.warden-cli",
+    "name": "Warden CLI local policy change review",
+    "version": "1.0.0",
+    "license": null,
+    "source": "built-in",
+    "required": false,
+    "risk_classes": [
+      "local_write",
+      "policy_bypass"
+    ],
+    "description": "Locally opt-in HOL-authored review for Warden CLI commands that rewrite MCP client configuration or apply a security policy. Warden maintains neither this Guard extension nor its releases.",
+    "homepage": "https://github.com/flyingsquirrel0419/warden-cli",
+    "executables": [
+      "warden"
+    ],
+    "action_classes": [
+      "MCP client configuration rewrite",
+      "security policy application"
+    ],
+    "aliases": [],
+    "conflicts": [],
+    "dependencies": [],
+    "ecosystem_ids": [],
+    "delegated_protection": null,
+    "icon": {
+      "kind": "none"
+    },
+    "publisher": {
+      "id": "community.kantorcodes",
+      "display_name": "Michael Kantor (HOL)",
+      "url": "https://github.com/kantorcodes"
+    },
+    "permissions": [
+      {
+        "permission_id": "command.warden-cli.permission.wrap-discovered",
+        "implementation_version": "1.0.0",
+        "label": "Review wrapping discovered MCP clients",
+        "description": "warden discover --wrap can rewrite existing local MCP client configurations.",
+        "default_enabled": true,
+        "configurable": true,
+        "typed_capabilities": [],
+        "action_classes": [
+          "MCP client configuration rewrite"
+        ],
+        "dependencies": [],
+        "conflicts": [],
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "deprecated": false,
+        "safer_guidance": [
+          "Run warden discover without --wrap to preview target MCP server configurations.",
+          "Inspect the signed policy repository and target policy before applying a local security-policy change."
+        ],
+        "risk_tier": "high",
+        "baseline_floor": "review",
+        "example_command": "warden discover --wrap"
+      },
+      {
+        "permission_id": "command.warden-cli.permission.apply-policy",
+        "implementation_version": "1.0.0",
+        "label": "Review applying new Warden policy",
+        "description": "warden policy apply writes a selected security policy into the local Warden configuration.",
+        "default_enabled": true,
+        "configurable": true,
+        "typed_capabilities": [],
+        "action_classes": [
+          "security policy application"
+        ],
+        "dependencies": [],
+        "conflicts": [],
+        "implied_permissions": [],
+        "introduced_version": "1.0.0",
+        "deprecated": false,
+        "safer_guidance": [
+          "Run warden discover without --wrap to preview target MCP server configurations.",
+          "Inspect the signed policy repository and target policy before applying a local security-policy change."
+        ],
+        "risk_tier": "high",
+        "baseline_floor": "review",
+        "example_command": "warden policy apply --repo https://github.com/example/policies --policy strict.yaml"
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "command.warden-cli.wrap-discovered",
+        "rule_version": "1.0.0",
+        "permission_id": "command.warden-cli.permission.wrap-discovered",
+        "title": "Review wrapping discovered MCP clients",
+        "description": "warden discover --wrap can rewrite existing local MCP client configurations.",
+        "severity": "high",
+        "risk_classes": [
+          "local_write",
+          "policy_bypass"
+        ],
+        "action_classes": [
+          "MCP client configuration rewrite"
+        ],
+        "safer_alternatives": [
+          "Run warden discover without --wrap to preview target MCP server configurations.",
+          "Inspect the signed policy repository and target policy before applying a local security-policy change."
+        ],
+        "default_mode": "review",
+        "safe_variants": [],
+        "native_capability": null,
+        "matcher": {
+          "op": "executable.v1",
+          "config": {
+            "executables": [
+              "warden",
+              "warden.exe",
+              "warden.cmd"
+            ],
+            "subcommands": [
+              "discover"
+            ],
+            "allow_leading_options": false,
+            "fail_secure_unknown_options": true,
+            "forbidden_flags": [],
+            "interspersed_flags": [
+              "--wrap",
+              "--json"
+            ],
+            "interspersed_options_with_values": [],
+            "inverse_flag_pairs": [],
+            "leading_options_with_values": [],
+            "options_with_values": [],
+            "required_flags": [
+              "--wrap"
+            ],
+            "required_flags_in_all_arguments": true,
+            "required_option_values": []
+          }
+        }
+      },
+      {
+        "rule_id": "command.warden-cli.apply-policy",
+        "rule_version": "1.0.0",
+        "permission_id": "command.warden-cli.permission.apply-policy",
+        "title": "Review applying new Warden policy",
+        "description": "warden policy apply writes a selected security policy into the local Warden configuration.",
+        "severity": "high",
+        "risk_classes": [
+          "local_write",
+          "policy_bypass"
+        ],
+        "action_classes": [
+          "security policy application"
+        ],
+        "safer_alternatives": [
+          "Run warden discover without --wrap to preview target MCP server configurations.",
+          "Inspect the signed policy repository and target policy before applying a local security-policy change."
+        ],
+        "default_mode": "review",
+        "safe_variants": [],
+        "native_capability": null,
+        "matcher": {
+          "op": "leading-subcommand.v1",
+          "config": {
+            "executables": [
+              "warden",
+              "warden.exe",
+              "warden.cmd"
+            ],
+            "subcommands": [
+              "policy",
+              "apply"
+            ]
+          }
+        }
+      }
+    ],
+    "project_markers": [],
+    "safer_alternatives": [
+      "Run warden discover without --wrap to preview target MCP server configurations.",
+      "Inspect the signed policy repository and target policy before applying a local security-policy change."
+    ],
+    "reference_urls": [
+      "https://github.com/flyingsquirrel0419/warden-cli/blob/main/src/cli/commands/discover.ts",
+      "https://github.com/flyingsquirrel0419/warden-cli/blob/main/src/cli/commands/policy.ts"
+    ]
+  }
+}
