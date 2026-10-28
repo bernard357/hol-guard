@@ -26,9 +26,11 @@ _REQUEST_SCHEMA = "guard-hook-render-request.v1"
 _RESULT_SCHEMA = "guard-hook-render-result.v1"
 _TIMEOUT_SECONDS = 5.0
 _MAX_REQUEST_BYTES = 256 * 1024
-# ``cli_hook_emit`` carries a whole daemon answer as escaped JSON text; the
-# resident gives that kind the larger budget too (``hook_render_max_bytes``).
+# ``cli_hook_emit`` carries a whole daemon answer as escaped JSON text and
+# ``cursor_shell_route`` carries the edge result the daemon already produced;
+# the resident gives both kinds the larger budget (``hook_render_max_bytes``).
 _CLI_HOOK_EMIT_MAX_REQUEST_BYTES = 4 * 1024 * 1024
+_CURSOR_ROUTE_MAX_REQUEST_BYTES = 4 * 1024 * 1024
 
 
 def _render_payload(
@@ -86,8 +88,13 @@ def native_render_cli(
     """
 
     wire: dict[str, object] = {"kind": kind, "harness": harness, "cli": dict(params)}
+    # Each kind names its own bound here rather than reading one out of a
+    # table, so the scan that compares every bound against the transport's
+    # ceiling can still read what this call offers.
     if kind == "cli_hook_emit":
         payload = _render_payload(wire, guard_home, deadline, max_request_bytes=_CLI_HOOK_EMIT_MAX_REQUEST_BYTES)
+    elif kind == "cursor_shell_route":
+        payload = _render_payload(wire, guard_home, deadline, max_request_bytes=_CURSOR_ROUTE_MAX_REQUEST_BYTES)
     else:
         payload = _render_payload(wire, guard_home, deadline, max_request_bytes=_MAX_REQUEST_BYTES)
     outcome = payload.get("outcome") if payload is not None else None

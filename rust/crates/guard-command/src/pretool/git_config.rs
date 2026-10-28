@@ -10,7 +10,7 @@ mod pager;
 #[path = "git_config_textconv.rs"]
 mod textconv;
 
-pub(super) use super::git_config_trust::{clean_environment, trusted_command};
+pub(super) use super::git_config_trust::{clean_environment, trusted_command, trusted_launch};
 
 const CONFIG_LIMIT: u64 = 65_536;
 

@@ -7,6 +7,7 @@
 //! back as an `error` status, because the executor treats each the same way:
 //! the verified read ends and the command goes back to ordinary review.
 
+#[cfg(unix)]
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use guard_contracts::{

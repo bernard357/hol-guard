@@ -257,6 +257,7 @@ def pause_native_pre_tool_for_approval(
         connector=connector,
         policy_binding_verified=True,
         claude_notice=canonical_harness(harness) == "claude-code",
+        codex_live_wait=canonical_harness(harness) == "codex",
     )
     if queued is None:
         failed = dict(native_result)
@@ -297,6 +298,7 @@ def queue_native_pre_tool_review(
     bound_bash: Mapping[str, object] | None = None,
     claude_notice: bool = False,
     policy_binding_verified: bool = False,
+    codex_live_wait: bool = False,
 ) -> dict[str, object] | None:
     if not policy_binding_verified:
         try:
@@ -320,6 +322,7 @@ def queue_native_pre_tool_review(
         ):
             return None
     request_id = uuid.uuid4().hex
+    live_wait = _codex_live_wait(store, payload, request_id, guard_home, workspace) if codex_live_wait else None
     review = {
         "result": dict(native_result),
         "native_receipt": dict(native_receipt) if native_receipt is not None else None,
@@ -348,6 +351,8 @@ def queue_native_pre_tool_review(
             guard_home=guard_home,
             deadline=deadline,
         )
+        if live_wait is not None:
+            fields = {**fields, "continuation_snapshot": live_wait[1]}
         request = GuardApprovalRequest(
             **cast("dict[str, Any]", {key: value for key, value in fields.items() if key != "changed_fields"}),
             changed_fields=tuple(cast("list[str]", fields["changed_fields"])),
@@ -375,6 +380,10 @@ def queue_native_pre_tool_review(
         stored = lookup(_persist_review(persist, request, now, claude_review))
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
+    if live_wait is not None and isinstance(stored, dict):
+        from .hook_native_review_codex_live_wait import seed_codex_live_wait
+
+        seed_codex_live_wait(store, request_id=request_id, now=datetime.now(tz=timezone.utc))
     if connector is not None and isinstance(stored, dict):
         record_native_review_connector_context(
             store,
@@ -403,6 +412,31 @@ def _persist_review(
         # The notice is best effort: a combined write the resident refuses
         # (too large, older resident) still queues the review.
         return persist(request, now)
+
+
+def _codex_live_wait(
+    store: object,
+    payload: Mapping[str, object],
+    request_id: str,
+    guard_home: Path,
+    workspace: Path | None,
+) -> tuple[dict[str, object], dict[str, object]] | None:
+    """The waiting bridge's metadata and the snapshot it earns, when it can be resumed."""
+    from .hook_native_review_codex_live_wait import (
+        codex_live_wait_metadata,
+        codex_live_wait_snapshot,
+        link_codex_live_wait,
+    )
+
+    now = datetime.now(tz=timezone.utc)
+    metadata = codex_live_wait_metadata(payload=payload, guard_home=guard_home, workspace=workspace, now=now)
+    if metadata is None:
+        return None
+    snapshot = codex_live_wait_snapshot(store, request_id=request_id, metadata=metadata, now=now)
+    if snapshot is None:
+        return None
+    linked = link_codex_live_wait(store, request_id=request_id, metadata=metadata, workspace=workspace, now=now)
+    return (metadata, snapshot) if linked else None
 
 
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:

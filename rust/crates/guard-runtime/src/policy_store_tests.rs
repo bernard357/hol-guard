@@ -170,6 +170,7 @@ fn pre_tool_envelope(
         observe_local_cli: false,
         record_receipt: false,
         structured_output_config: None,
+        containment_sink: None,
     }
 }
 

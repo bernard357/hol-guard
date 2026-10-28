@@ -445,6 +445,7 @@ fn answer(
         observe_local_cli: false,
         record_receipt: false,
         structured_output_config: None,
+        containment_sink: None,
     };
     let (edge, fence_wait) = fence::evaluate(envelope, policy_store)?;
     if let Some(scope) = cursor_probe {
@@ -624,7 +625,7 @@ pub(crate) mod claude_prompt_text;
 #[path = "hook_direct_contained.rs"]
 pub(crate) mod contained;
 #[path = "hook_direct_cursor.rs"]
-mod cursor;
+pub(crate) mod cursor;
 #[path = "hook_direct_edge.rs"]
 mod edge;
 #[path = "hook_direct_fence.rs"]

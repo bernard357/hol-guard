@@ -1,22 +1,14 @@
-"""Assertions for compound developer inspection on hosts with different path models."""
+"""Assertions for compound developer inspection."""
 
 from __future__ import annotations
 
-import os
-
 
 def assert_leading_cd_inspection_allowed(artifact: dict[str, object] | None) -> None:
-    """Require the POSIX allow and an explicit review on Windows.
+    """Require the leading ``cd`` inspection to be allowed on every host.
 
-    The native developer-inspection kernel recovers the root of a leading
-    ``cd`` through POSIX path text, so a Windows drive path does not resolve
-    to a bounded inspection root. The command then falls back to review
-    instead of being allowed. Keep that boundary closed until the kernel has
-    Windows path semantics.
+    The live hook resolves the root of a leading ``cd`` against the verified
+    working directory, with each host's own path semantics, so a Windows drive
+    path bounds the inspection the same way a POSIX path does.
     """
 
-    if os.name == "nt":
-        assert artifact is not None
-        assert artifact["policy_action"] != "allow"
-    else:
-        assert artifact is None
+    assert artifact is None

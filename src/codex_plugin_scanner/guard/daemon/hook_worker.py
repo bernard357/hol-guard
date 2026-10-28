@@ -173,6 +173,7 @@ class HookWorker(HookWorkerNativeMixin):
         observe_local_cli: bool = False,
         record_receipt: bool = False,
         structured_output_config: Mapping[str, object] | None = None,
+        containment_sink: bool = False,
     ) -> dict[str, object] | None:
         runtime_status = self._native_runtime_status()
         store_path = getattr(self.store, "path", None)
@@ -205,6 +206,7 @@ class HookWorker(HookWorkerNativeMixin):
                 else None
             ),
             structured_output_config=structured_output_config,
+            containment_sink=containment_sink,
         )
 
     def _native_runtime_status(self) -> NativeRuntimeStatus:

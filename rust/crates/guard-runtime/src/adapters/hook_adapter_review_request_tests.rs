@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 const TOKEN: &str = "guard-approval-context:v1:abc";
 const RECEIPTS: &str = include_str!("../../testdata/guard_store/native_receipt_vectors.json");
+#[cfg(unix)]
 const DAEMON_REQUESTS: &str =
     include_str!("../../testdata/hook_direct_review/review_request_vectors.json");
 

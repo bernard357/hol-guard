@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from tests.developer_inspection_test_support import assert_leading_cd_inspection_allowed
-from tests.git_execution_test_support import assert_host_git_proof_result
 from tests.live_hook_review_support import (
     LIVE_REVIEWS_RETIRED_ALLOW,
     live_allows_retired_review_on,
+    live_decision,
     live_shell_review,
     quietly_allowed,
 )
@@ -330,10 +330,18 @@ def test_compound_git_and_filesystem_inspection_requires_host_binary_proof(live_
         home=home,
     )
 
-    assert_host_git_proof_result(artifact is None, cwd=workspace)
-    if os.name == "nt":
+    # The native proof resolves Git on the search path and requires it to sit in
+    # a trusted install location. The Rust suite covers a planted Git; here the
+    # host's own Git decides, and only the hook knows which locations it trusts
+    # (Program Files on Windows, a user-owned Homebrew tree on macOS). The Git
+    # read on its own asks that same question, so the compound must give the
+    # same answer.
+    git_alone = _artifact(f"cd {_shell_path(workspace)} && git -C repository status --short", home=home)
+    if git_alone is None:
+        assert artifact is None
+    else:
         assert artifact is not None
-        assert artifact["policy_action"] != "allow"
+        assert live_decision(artifact) != "allow"
 
 
 @pytest.mark.xfail(

@@ -184,12 +184,18 @@ fn verdict(
                     // repository configuration to read, and the directory
                     // may not be there to probe in at all. Operations that
                     // keep running without a repository, and inline `-c`
-                    // settings, are not such a route and stay probed.
+                    // settings, are not such a route and stay probed. The
+                    // route says nothing about which Git runs, so the binary
+                    // the search path finds must still be a trusted one.
                     if super::git_helper_context::routes_to_no_repository(
                         segments[index],
                         read_context,
                     ) {
-                        return Some(true);
+                        return Some(super::git_config::trusted_launch(
+                            executable,
+                            read_context,
+                            execution_environment,
+                        ));
                     }
                     super::git_config::execution_free(
                         executable,

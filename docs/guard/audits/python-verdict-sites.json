@@ -297,16 +297,6 @@
     },
     {
       "file": "src/codex_plugin_scanner/guard/daemon/cursor_shell_route.py",
-      "func": "_probe_response",
-      "root": "hook",
-      "reading": "routes-guard-own-sink",
-      "actions": [
-        "allow"
-      ],
-      "note": "beforeShellExecution routing for Guard's own approval sink. The call still gets reviewed where it runs; the sink opens the request owner-only, checks its digest and re-authorizes the command."
-    },
-    {
-      "file": "src/codex_plugin_scanner/guard/daemon/cursor_shell_route.py",
       "func": "cursor_shell_route_response",
       "root": "hook",
       "reading": "routes-guard-own-sink",
@@ -314,6 +304,16 @@
         "allow"
       ],
       "note": "Same route: an argv shape that matches Guard's own sink is passed through to it, and the sink does the authorizing."
+    },
+    {
+      "file": "src/codex_plugin_scanner/guard/daemon/cursor_shell_route.py",
+      "func": "_probe_response",
+      "root": "hook",
+      "reading": "renders-native",
+      "actions": [
+        "allow"
+      ],
+      "note": "The edge's own route: a probe the native edge does not route to the sink gets the plain allow the resident would have answered, and the shell call itself is still judged at execution."
     },
     {
       "file": "src/codex_plugin_scanner/guard/daemon/hook_fail_closed.py",

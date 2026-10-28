@@ -1,6 +1,6 @@
 # HOL Guard native runtime hardening PRD
 
-Status: accepted follow-up for `release/3.0`.
+Status: accepted follow-up, tracked on `main`. Reconciled 2026-10-28 against `main` at `1aed1f43fb`, shipping as 3.58.0. The program was planned on a `release/3.0` branch and did not land that way: the work merged to `main` through ordinary PRs, and `release/3.0` is now historical.
 
 ## Objective
 
@@ -110,7 +110,7 @@ Corpora must cover:
 - destructive SQL, migrations, schema resets, backups, cloud databases, clusters, namespaces, buckets, IAM, secrets, and broad resource groups;
 - binary, policy, approval, hook, socket, daemon, and evidence tampering.
 
-An uncertain dangerous command pauses. Native PreToolUse may first contribute tightening-only signals. Native low-risk allow authority is a later gate requiring POSIX, PowerShell, CMD, wrapper, redirect, substitution, effect, and policy parity.
+An uncertain dangerous command pauses. Native PreToolUse allow authority has shipped: `runtime_transition_admission.py` admits a native runtime only after the native edge answers a known-allow and a known-deny probe and its receipts reconcile against runtime identity, policy generation, and policy digest. Python checks those receipts and never recomputes a verdict. Parity across POSIX, PowerShell, CMD, wrappers, redirects, substitutions, effects, and policy is now held by the Gauntlet release gate and the benign false-pause gate rather than by withholding authority.
 
 ## Cross-platform release matrix
 
@@ -204,9 +204,9 @@ Do not remove the active Python differential-test oracle while this PRD requires
 6. DX, diagnostics, privacy, repair, and rollout controls.
 7. Dedicated eligible PostToolUse default-`auto` PR with installed-wheel and rollback evidence.
 8. Separate future expansion of native authority only after the remaining independent security and catastrophic-risk gates pass.
-9. Separate future PreToolUse authority PR.
+9. PreToolUse authority. Shipped; the admission probe above is the gate that keeps it honest.
 
-`release/3.0` must not be merged into `main` as part of this work.
+The program ships from `main`. The earlier rule that `release/3.0` must not be merged into `main` is retired, because the work landed on `main` directly.
 
 ## Definition of done
 

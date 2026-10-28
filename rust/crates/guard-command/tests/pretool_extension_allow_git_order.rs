@@ -74,7 +74,9 @@ fn checkout(label: &str, pager: bool) -> (PathBuf, FixtureCleanup) {
     git(&root, &project, &["add", "-A"]);
     git(&root, &project, &["commit", "--quiet", "-m", "fixture"]);
     std::fs::write(project.join("src/index.ts"), "export const a = 2;\n").unwrap();
-    let root = root.canonicalize().unwrap();
+    // Git for Windows reads no global configuration from a `\\?\` home, so the
+    // fixture spells the root the way a user's home is spelled.
+    let root = fixture::canonical_spelling(&root);
     (root.clone(), FixtureCleanup(root))
 }
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from ..cli.commands_support_command_activity import hook_post_succeeded
 from ..native_codex_binding_capture import CodexBindingCaptureWriter
-from ..native_hook_containment_route import edge_containment_route
+from ..native_hook_containment_route import edge_routed_shape
 from ..native_hook_decision import NativeHookDecisionError
 from ..native_policy_snapshot_harness_postures import recording_only_for_binding
 from ..native_resident_client import (
@@ -51,6 +51,9 @@ def _edge_harness_response(edge: Mapping[str, object]) -> dict[str, object]:
 
 
 _NATIVE_PRE_TOOL_APPROVAL_ACTIONS = frozenset({"review", "require-reapproval"})
+# `containment_rewrite` answers the edge gives once it rewrote a sink route.
+_EDGE_CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
+_EDGE_REWRITE_INVALID = "native_containment_rewrite_invalid"
 
 
 class _HookWorkerMetrics(Protocol):
@@ -312,6 +315,9 @@ class HookWorkerNativeMixin:
                 local_cli_rules=True,
                 observe_local_cli=True,
                 record_receipt=callable(getattr(self.activity_writer, "submit_native_decision_receipt", None)),
+                # The edge rewrites a call it routes to the contained sink in
+                # the same answer.
+                containment_sink=True,
                 **({"structured_output_config": structured_view} if structured_view is not None else {}),
             )
             refreshed = (
@@ -409,17 +415,10 @@ class HookWorkerNativeMixin:
                         ),
                         True,
                     )
+            # The resident stamped its route on the edge answer, and the decoder
+            # refuses an unstamped one; Python never picks a route.
+            containment = edge.get("containment_route", "none")
             try:
-                # The resident routes the call, as on the CLI path; without its
-                # answer the host gets the outage shape, never a route picked here.
-                containment = edge_containment_route(
-                    edge,
-                    native_result,
-                    event_name=native_event,
-                    recording_only=recording_only,
-                    guard_home=guard_home,
-                    deadline=deadline,
-                )
                 contained = None
                 if containment == "grant":
                     contained = granted_containment_response(
@@ -476,7 +475,14 @@ class HookWorkerNativeMixin:
                 if native_result and not isinstance(edge.get("harness_response"), dict)
                 else _edge_harness_response(edge)
             )
-            if containment == "sink":
+            # The edge rewrote the sink route itself when it says so; an edge
+            # that did not is asked, and no answer is the outage response. Its
+            # routed allow is held to the shape the resident's answer is.
+            rewrite = edge.get("containment_rewrite") if containment == "sink" else None
+            if rewrite == "routed" and not edge_routed_shape(rendered, payload):
+                error = NativeHookDecisionError(_EDGE_REWRITE_INVALID)
+                return _containment_outage(self, payload, native_harness, error, guard_home, deadline)
+            if containment == "sink" and rewrite not in _EDGE_CONTAINMENT_REWRITES:
                 try:
                     rendered = route_zcode_containment(
                         rendered,
