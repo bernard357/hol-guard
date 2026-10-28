@@ -103,7 +103,8 @@ def _decode_edge(payload: object) -> dict[str, Any] | None:
     ):
         return None
     # Every resident stamps its containment route; an edge without one would
-    # skip containment, so it is refused rather than read as `none`.
+    # skip containment, so it is refused rather than read as `none`. An older
+    # resident may still stamp `grant`, which nothing routes on any more.
     route = payload.get("containment_route")
     if not isinstance(route, str) or route not in {"none", "sink", "grant"}:
         return None
