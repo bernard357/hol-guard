@@ -24,7 +24,7 @@ handlers are recognized and excluded from the user hook inventory.
 
 ## What Guard installs
 
-`hol-guard install muse` writes five Guard-managed hook groups into the
+`hol-guard install muse` writes six Guard-managed hook groups into the
 `hooks` section of the user settings file:
 
 | Event | Matcher | Purpose |
@@ -34,6 +34,7 @@ handlers are recognized and excluded from the user hook inventory.
 | `UserPromptSubmit` | none (all prompts) | Prompt screening |
 | `PostToolUse` | none (all tools) | Observation after tool execution |
 | `SessionStart` | none | Guard context for the session |
+| `Stop` | none | Session-stop observation |
 
 No matcher is set on purpose: Muse reads an omitted matcher as every
 tool, so shell, file read/write, search, web, MCP (`mcp__*`), and
@@ -65,8 +66,9 @@ Muse 1.4.14 with `muse plugins hook test` and a live `muse exec` run):
 - A `PreToolUse` block is a `hookSpecificOutput.permissionDecision:
   "deny"` envelope with the reason, on exit 0 so Muse reads the JSON.
 - A `UserPromptSubmit` block is `{"decision": "block", "reason": ...}`.
-- `PostToolUse` and `SessionStart` cannot undo or block a completed
-  action; Guard adds `additionalContext` and otherwise stays silent.
+- `PostToolUse`, `SessionStart`, and `Stop` cannot undo or block a
+  completed action; Guard adds `additionalContext` and otherwise stays
+  silent.
 - `PermissionRequest` defers to Muse's own approval prompt (no
   decision) while a review is pending; the `PreToolUse` verdict for the
   same call remains the decision boundary. A final block still denies.

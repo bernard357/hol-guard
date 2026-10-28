@@ -344,13 +344,11 @@ pub(crate) fn detect(args: &Value) -> KindResult {
         if let Some(payload) = config(&mut inventory, &manifest_path, "plugin manifest")? {
             plugin_manifest(&mut inventory, &PROJECT, &manifest_path, &payload)?;
         }
+        // The workspace `.agents/skills` root belongs to shared discovery, which
+        // already walks it for Muse; walking it again here would publish the same
+        // skill under a second artifact id.
         skill_roots.push((
-            under(workspace, &[".agents", "skills"]),
-            workspace.clone(),
-            &PROJECT,
-        ));
-        skill_roots.push((
-            under(workspace, &[".Muse", "skills"]),
+            under(workspace, &[".muse", "skills"]),
             workspace.clone(),
             &PROJECT,
         ));

@@ -31,6 +31,7 @@ MUSE_GUARD_EVENTS: tuple[str, ...] = (
     "UserPromptSubmit",
     "PostToolUse",
     "SessionStart",
+    "Stop",
 )
 
 

@@ -10,11 +10,12 @@ import pytest
 from codex_plugin_scanner.guard.adapters import get_adapter, list_adapters
 from codex_plugin_scanner.guard.adapters.base import HarnessContext
 from codex_plugin_scanner.guard.adapters.muse import MuseHarnessAdapter
-from codex_plugin_scanner.guard.adapters.muse_config import is_guard_managed_hook_command
+from codex_plugin_scanner.guard.adapters.muse_config import MUSE_GUARD_EVENTS, is_guard_managed_hook_command
 from codex_plugin_scanner.guard.adapters.muse_hook_render import (
     apply_muse_pretool_approval_wait,
     muse_bridge_response,
 )
+from codex_plugin_scanner.guard.daemon.hook_fail_closed import fail_closed_response, unmanaged_passthrough
 from codex_plugin_scanner.guard.inventory_contract import _agent_type
 
 FIXTURES = Path(__file__).parent / "fixtures" / "muse"
@@ -98,7 +99,7 @@ class TestMuseAdapterIdentity:
         contract = contract_for("muse")
         assert contract is not None
         events = {row.event for row in contract.capability_events}
-        assert {"PreToolUse", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "SessionStart"} <= events
+        assert {"PreToolUse", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "SessionStart", "Stop"} <= events
 
     def test_environment_attribution(self) -> None:
         from codex_plugin_scanner.guard.runtime.harness_attribution import resolve_environment_harness
@@ -150,6 +151,27 @@ class TestMuseDetect:
         assert "echo user-pretool" in commands
         assert not any(command and "HOL_GUARD_MANAGED_MUSE" in command for command in commands)
 
+    def test_workspace_agent_skill_is_published_once(self, tmp_path: Path) -> None:
+        ctx = _ctx(tmp_path, workspace=True)
+        assert ctx.workspace_dir is not None
+        skill = ctx.workspace_dir / ".agents" / "skills" / "release-notes" / "SKILL.md"
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        skill.write_text("# Release notes\n", encoding="utf-8")
+        result = MuseHarnessAdapter().detect(ctx)
+        skills = [a for a in result.artifacts if a.artifact_type == "skill"]
+        assert len(skills) == 1
+        assert skills[0].artifact_id == "muse:project:skill:.agents/skills:release-notes"
+
+    def test_project_muse_skill_root_is_detected(self, tmp_path: Path) -> None:
+        ctx = _ctx(tmp_path, workspace=True)
+        assert ctx.workspace_dir is not None
+        skill = ctx.workspace_dir / ".muse" / "skills" / "changelog" / "SKILL.md"
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        skill.write_text("# Changelog\n", encoding="utf-8")
+        result = MuseHarnessAdapter().detect(ctx)
+        names = {a.name for a in result.artifacts if a.artifact_type == "skill"}
+        assert names == {"changelog"}
+
     def test_unparseable_settings_warns_and_is_still_found(self, tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         path = _settings_path(ctx)
@@ -167,7 +189,7 @@ class TestMuseInstallUninstall:
             lambda *args, **kwargs: {"shim_path": str(ctx.guard_home / "bin" / "guard-muse"), "notes": []},
         )
 
-    def test_install_writes_five_managed_event_groups(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_writes_six_managed_event_groups(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ctx = _ctx(tmp_path)
         self._patch_shims(monkeypatch, ctx)
         manifest = MuseHarnessAdapter().install(ctx)
@@ -181,6 +203,7 @@ class TestMuseInstallUninstall:
             "UserPromptSubmit",
             "PostToolUse",
             "SessionStart",
+            "Stop",
         }
         # No matcher: Muse reads an omitted matcher as every tool.
         for groups in hooks.values():
@@ -199,6 +222,56 @@ class TestMuseInstallUninstall:
         assert _managed_timeout("PreToolUse") > 30
         assert _managed_timeout("PermissionRequest") == 30
         assert _managed_timeout("UserPromptSubmit") == 30
+        # Muse has to outlast the bridge client, or it kills the bridge while
+        # the approval is still open and the call falls through unjudged.
+        assert _managed_timeout("PreToolUse") > MuseHarnessAdapter._bridge_timeout_seconds(ctx)
+
+    def test_update_refresh_keeps_the_installed_bridge_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from codex_plugin_scanner.guard.adapters.bounded_cli_hook_bridge import (
+            _render_bounded_hook_script,
+            bounded_hook_script_path,
+        )
+        from codex_plugin_scanner.guard.cli.update_bounded_hook_refresh import refresh_bounded_hook_clients
+        from codex_plugin_scanner.guard.store import GuardStore
+
+        ctx = _ctx(tmp_path)
+        self._patch_shims(monkeypatch, ctx)
+        MuseHarnessAdapter().install(ctx)
+        script_path = bounded_hook_script_path(ctx.guard_home, "muse")
+        assert script_path is not None
+        # A packaged install points the hook at this stable client; write the
+        # body install rendered so the refresh has a current client to keep.
+        installed = _render_bounded_hook_script(
+            guard_home=ctx.guard_home,
+            harness="muse",
+            timeout_seconds=MuseHarnessAdapter._bridge_timeout_seconds(ctx),
+        )
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(installed, encoding="utf-8")
+        store = GuardStore(ctx.guard_home)
+        store.set_managed_install("muse", True, None, {"harness": "muse"}, "2026-10-08T00:00:00+00:00")
+
+        refreshed, warnings = refresh_bounded_hook_clients(context=ctx, store=store)
+
+        assert warnings == []
+        assert refreshed == []
+        assert script_path.read_text(encoding="utf-8") == installed
+
+    def test_install_refuses_a_non_list_hooks_event_value(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ctx = _ctx(tmp_path)
+        _write(_settings_path(ctx), {"schema_version": 1, "hooks": {"PreToolUse": {"hooks": []}}})
+        self._patch_shims(monkeypatch, ctx)
+
+        with pytest.raises(ValueError, match=r"non-list hooks\.PreToolUse"):
+            MuseHarnessAdapter().install(ctx)
+
+        # Guard refuses rather than replacing a value it cannot merge.
+        payload = json.loads(_settings_path(ctx).read_text(encoding="utf-8"))
+        assert payload["hooks"]["PreToolUse"] == {"hooks": []}
 
     def test_install_preserves_user_settings_and_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ctx = _ctx(tmp_path)
@@ -226,7 +299,7 @@ class TestMuseInstallUninstall:
         adapter.install(ctx)
         second = _settings_path(ctx).read_text(encoding="utf-8")
         assert json.loads(first) == json.loads(second)
-        assert len(_managed_commands(json.loads(second))) == 5
+        assert len(_managed_commands(json.loads(second))) == len(MUSE_GUARD_EVENTS)
 
     def test_install_creates_backup_and_state(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ctx = _ctx(tmp_path)
@@ -316,6 +389,59 @@ class TestMuseHookRender:
     def test_session_start_adds_guard_context(self) -> None:
         stdout, _stderr, _exit_code = muse_bridge_response({"policy_action": "allow"}, event_name="SessionStart")
         assert "HOL Guard" in json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_stop_uses_stop_event_name_and_never_denies(self) -> None:
+        stdout, _stderr, exit_code = muse_bridge_response(
+            {"policy_action": "block", "reason": "output flagged"}, event_name="Stop"
+        )
+        assert exit_code == 0
+        payload = json.loads(stdout)
+        # Muse rejects a hookSpecificOutput whose event name mismatches.
+        assert payload["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert "permissionDecision" not in payload["hookSpecificOutput"]
+
+    def test_fail_closed_permission_request_denies(self) -> None:
+        # The fail-closed PermissionRequest envelope carries its verdict under
+        # hookSpecificOutput.decision.behavior and names no policy_action.
+        stdout, _stderr, exit_code = muse_bridge_response(
+            fail_closed_response("muse", "PermissionRequest"), event_name="PermissionRequest"
+        )
+        assert exit_code == 0
+        assert json.loads(stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_fail_closed_pre_tool_denies(self) -> None:
+        stdout, _stderr, exit_code = muse_bridge_response(
+            fail_closed_response("muse", "PreToolUse"), event_name="PreToolUse"
+        )
+        assert exit_code == 0
+        assert json.loads(stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_fail_closed_prompt_blocks(self) -> None:
+        stdout, _stderr, exit_code = muse_bridge_response(
+            fail_closed_response("muse", "UserPromptSubmit"), event_name="UserPromptSubmit"
+        )
+        assert exit_code == 0
+        assert json.loads(stdout)["decision"] == "block"
+
+    def test_verdictless_answer_denies_a_deciding_event(self) -> None:
+        stdout, _stderr, exit_code = muse_bridge_response({"reason_code": "whatever"}, event_name="PreToolUse")
+        assert exit_code == 0
+        payload = json.loads(stdout)
+        assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "could not read a verdict" in payload["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_verdictless_answer_is_silence_on_an_observing_event(self) -> None:
+        assert muse_bridge_response({"reason_code": "whatever"}, event_name="PostToolUse") == ("", "", 0)
+
+    def test_unmanaged_passthrough_stays_silent(self) -> None:
+        # Guard does not manage this app; a continue reply must not deny the call.
+        assert muse_bridge_response(unmanaged_passthrough("muse"), event_name="PreToolUse") == ("", "", 0)
+
+    def test_unknown_policy_action_is_restrictive(self) -> None:
+        stdout, _stderr, _exit_code = muse_bridge_response(
+            {"policy_action": "tomorrow", "reason": "unreadable"}, event_name="PreToolUse"
+        )
+        assert json.loads(stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 class TestMuseApprovalResume:

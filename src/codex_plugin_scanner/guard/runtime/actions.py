@@ -292,6 +292,8 @@ _HARNESS_NAMES = (
     "cline",
     "cline-cli",
     "cline-vscode",
+    "muse",
+    "muse-code",
 )
 
 
@@ -398,6 +400,7 @@ normalize_devin_hook_payload = _harness_normalizer("devin", "Normalize a Devin C
 normalize_pi_payload = _harness_normalizer("pi", "Normalize a Pi extension event payload.")
 normalize_omp_payload = _harness_normalizer("omp", "Normalize an OMP extension event payload.")
 normalize_kimi_payload = _harness_normalizer("kimi", "Normalize a Kimi Code native-hook payload.")
+normalize_muse_payload = _harness_normalizer("muse", "Normalize a Muse hook payload.")
 
 
 __all__ = [

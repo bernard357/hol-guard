@@ -220,5 +220,16 @@ AGENT_EVENT_CAPABILITIES: dict[str, tuple[HarnessEventCapability, ...]] = {
             ("Session context does not prove that later tool calls were reviewed.",),
             "src/codex_plugin_scanner/guard/adapters/muse.py:_sync_managed_hook_groups",
         ),
+        _capability(
+            "muse",
+            "Stop",
+            "native_hook",
+            "observe",
+            ("observe",),
+            "Session lifecycle failures are recorded; the hook observes the stop and cannot block it.",
+            "Muse must invoke the managed Stop hook when a session stops.",
+            ("Stop observation does not prove that earlier tool calls were reviewed.",),
+            "src/codex_plugin_scanner/guard/adapters/muse.py:_sync_managed_hook_groups",
+        ),
     ),
 }

@@ -391,6 +391,52 @@ def test_generated_client_waits_for_grok_approval_over_http(tmp_path: Path) -> N
     assert json.loads(stdout)["policy_action"] == "allow"
 
 
+def test_generated_muse_review_pretool_denies_on_exit_zero(tmp_path: Path) -> None:
+    module = _load_script(tmp_path, harness="muse")
+    stdout, stderr, code = module._to_native(
+        {"policy_action": "review", "reason": "Approval required."},
+        "PreToolUse",
+    )
+    payload = json.loads(stdout)
+
+    # Muse reads an ask envelope as no decision and runs the tool.
+    assert code == 0
+    assert stderr == ""
+    assert payload["decision"] == "deny"
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_generated_client_waits_for_muse_approval_over_http(tmp_path: Path) -> None:
+    module = _load_script(tmp_path, harness="muse", timeout_seconds=8)
+    host, port, server = _serve(
+        {
+            ("POST", "/v1/hooks/muse"): {
+                "policy_action": "review",
+                "reason": "needs review",
+                "primary_approval_request_id": "req-1",
+                "approval_requests": [{"request_id": "req-1"}],
+            },
+            ("GET", "/v1/requests/req-1"): {"resolution_action": "allow"},
+        }
+    )
+    try:
+        _write_daemon_files(module, host=host, port=port)
+        stdin = json.dumps(
+            {"hook_event_name": "PreToolUse", "tool_name": "bash", "tool_input": {"command": "cat .env"}}
+        )
+        stdout, _stderr, code = module._post_hook(stdin)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert code == 0
+    payload = json.loads(stdout)
+    assert payload["decision"] == "allow"
+    assert payload["policy_action"] == "allow"
+    # Muse rejects a bare allow; the reviewed input rides along.
+    assert payload["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert payload["hookSpecificOutput"]["updatedInput"] == {"command": "cat .env"}
+
+
 def test_generated_client_main_uses_unavailable_matrix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_script(tmp_path, harness="grok")
     stdin = io.BytesIO(b'{"hook_event_name":"SessionStart"}')

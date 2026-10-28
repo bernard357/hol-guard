@@ -114,7 +114,7 @@ def _rendered_bridge_answer(
                     store=GuardStore(guard_home),
                     timeout_seconds=wait_seconds,
                 )
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError, sqlite3.Error):
             answer = dict(parsed)
         return muse_bridge_response(answer, event_name=event_name, guard_home=guard_home, deadline=deadline)
     from ..native_hook_render import native_cli_hook_emit

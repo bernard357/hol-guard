@@ -116,6 +116,10 @@ def _permission_decision(policy_action: str) -> str | None:
         # must say deny instead of ask to stay consistent.
         if HARNESS == "zcode" and policy_action == "sandbox-required":
             return "deny"
+        # Muse reads an ask envelope as no decision and runs the tool, so
+        # a Guard review pauses as a deny the approval wait can resume.
+        if HARNESS == "muse":
+            return "deny"
         return "ask"
     if policy_action == "block":
         return "deny"
@@ -234,7 +238,7 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
             if permission_decision != "allow" or "unreachable" in reason.lower():
                 hook_specific["permissionDecisionReason"] = reason or f"HOL Guard {policy_action} this action"
         payload["hookSpecificOutput"] = hook_specific
-        if HARNESS in {"grok", "openclaw"} and permission_decision is not None:
+        if HARNESS in {"grok", "openclaw", "muse"} and permission_decision is not None:
             payload["decision"] = "allow" if permission_decision == "allow" else "deny"
             payload["policy_action"] = policy_action
             if permission_decision != "allow" and reason:
@@ -293,13 +297,15 @@ def _failure_payload(event_name: str, reason: str) -> tuple[dict[str, object], i
         return {"decision": decision, "reason": reason}, (2 if HARNESS == "hermes" else 0)
     if _is_permission_event(event_name):
         return {"continue": False, "stopReason": reason, "systemMessage": reason}, 0
+    # Muse reads the JSON envelope on exit 0; exit 2 would discard it
+    # and substitute stderr, so its deny travels in the envelope.
     return {
         "hookSpecificOutput": {
             "hookEventName": event_name,
             "permissionDecision": "deny",
             "permissionDecisionReason": reason,
         }
-    }, 2
+    }, (0 if HARNESS == "muse" else 2)
 
 
 def _fail(input_text: str, *, reason: str = _FAILURE_REASON) -> int:

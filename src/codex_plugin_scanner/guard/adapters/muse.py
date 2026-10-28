@@ -7,9 +7,9 @@ Claude-Code-shaped: ``{"<Event>": [{"matcher": <regex>, "hooks": [{"type":
 its MCP registrations. Guard inventories hooks, MCP servers, skills, and
 installed plugin manifests through the native ``muse_detect`` kind;
 installs Guard-managed ``PreToolUse``, ``PermissionRequest``,
-``UserPromptSubmit``, ``PostToolUse``, and ``SessionStart`` hooks into the
-user ``settings.json`` ``hooks`` section (idempotently, without touching
-other keys); and routes Muse hook events through the shared Guard
+``UserPromptSubmit``, ``PostToolUse``, ``SessionStart``, and ``Stop``
+hooks into the user ``settings.json`` ``hooks`` section (idempotently,
+without touching other keys); and routes Muse hook events through the shared Guard
 runtime. A blocked ``PreToolUse`` call whose approval is granted resumes
 the identical call inside the hook, like Oh My Pi's approval resume: the
 bounded bridge waits for the approval and then allows the original call
@@ -170,12 +170,21 @@ class MuseHarnessAdapter(HarnessAdapter):
             guard_home=context.guard_home,
             cli_args=guard_args,
             harness="muse",
-            timeout_seconds=max(
-                _GUARD_HOOK_INTERNAL_TIMEOUT_SECONDS,
-                MuseHarnessAdapter._approval_wait_hook_timeout_seconds(context)
-                + _MUSE_MANAGED_HOOK_TIMEOUT_GRACE_SECONDS,
-            ),
+            timeout_seconds=MuseHarnessAdapter._bridge_timeout_seconds(context),
             prepared_files=prepared_files,
+        )
+
+    @staticmethod
+    def _bridge_timeout_seconds(context: HarnessContext) -> int:
+        """Deadline the bridge client enforces on itself, in seconds.
+
+        Muse's own hook timeout has to outlast this, or Muse kills the bridge
+        before it can answer and the call falls through unjudged.
+        """
+
+        return max(
+            _GUARD_HOOK_INTERNAL_TIMEOUT_SECONDS,
+            MuseHarnessAdapter._approval_wait_hook_timeout_seconds(context) + _MUSE_MANAGED_HOOK_TIMEOUT_GRACE_SECONDS,
         )
 
     @staticmethod
@@ -219,6 +228,13 @@ class MuseHarnessAdapter(HarnessAdapter):
             existing_hooks = payload.get("hooks")
             if existing_hooks is not None and not isinstance(existing_hooks, dict):
                 raise ValueError("Muse settings have a non-object hooks value; Guard will not rewrite it.")
+            if isinstance(existing_hooks, dict):
+                for event_name, entries in existing_hooks.items():
+                    if entries is not None and not isinstance(entries, list):
+                        raise ValueError(
+                            f"Muse settings have a non-list hooks.{event_name} value; Guard will not rewrite it. "
+                            "Fix the file, then rerun hol-guard install muse."
+                        )
         prepared_shim = prepare_guard_shim(
             self.harness,
             context,
@@ -370,13 +386,23 @@ class MuseHarnessAdapter(HarnessAdapter):
             else:
                 hooks.pop(event_name, None)
 
-        long_timeout = self._approval_wait_hook_timeout_seconds(context)
+        # Every managed timeout stays above the bridge's own deadline so Muse
+        # waits for Guard's answer instead of killing the bridge mid-review.
+        bridge_timeout = self._bridge_timeout_seconds(context)
+        long_timeout = bridge_timeout + _MUSE_MANAGED_HOOK_TIMEOUT_GRACE_SECONDS
+        # Events that never wait for an approval only have to outlast the
+        # client's own floor.
+        short_timeout = max(
+            _MUSE_MANAGED_HOOK_TIMEOUT_SECONDS,
+            _GUARD_HOOK_INTERNAL_TIMEOUT_SECONDS + _MUSE_MANAGED_HOOK_TIMEOUT_GRACE_SECONDS,
+        )
         managed_groups: list[tuple[str, int]] = [
             ("PreToolUse", long_timeout),
-            ("PermissionRequest", _MUSE_MANAGED_HOOK_TIMEOUT_SECONDS),
-            ("UserPromptSubmit", _MUSE_MANAGED_HOOK_TIMEOUT_SECONDS),
+            ("PermissionRequest", short_timeout),
+            ("UserPromptSubmit", short_timeout),
             ("PostToolUse", long_timeout),
-            ("SessionStart", _MUSE_MANAGED_HOOK_TIMEOUT_SECONDS),
+            ("SessionStart", short_timeout),
+            ("Stop", short_timeout),
         ]
         for event_name, timeout in managed_groups:
             handler: dict[str, object] = {
