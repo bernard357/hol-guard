@@ -53,7 +53,7 @@ fn evaluate(command: &str) -> PreToolResultV1 {
 }
 
 #[test]
-fn projects_literal_output_redirects_and_quoted_cat_heredocs() {
+fn projects_literal_output_redirects_and_quoted_heredocs_read_as_data() {
     for (command, projected, writes_file) in [
         ("ls > /dev/null", "ls", false),
         ("pnpm test > /tmp/test.log 2>&1", "pnpm test    2>&1", true),
@@ -65,6 +65,17 @@ fn projects_literal_output_redirects_and_quoted_cat_heredocs() {
             "cat",
             true,
         ),
+        // A heredoc body is data on standard input, so a program that reads
+        // it as data carries no more than the write the target check proves.
+        ("sort <<'EOF' > out.txt\nb\na\nEOF", "sort", true),
+        ("jq . <<'EOF' > parsed.json\nnull\nEOF", "jq .", true),
+        (
+            "tee config.json <<'EOF'\nhello\nEOF",
+            "tee config.json",
+            false,
+        ),
+        ("grep foo <<'EOF'\nfoo\nEOF", "grep foo", false),
+        ("wc -l <<'EOF'\na\nEOF", "wc -l", false),
         ("ls > /dev/null && git status", "ls   && git status", false),
         // The shell carries its whole script, so the projection leaves the
         // command the script names and that command keeps its own floors.
@@ -105,6 +116,17 @@ fn keeps_redirects_that_can_execute_hide_input_or_reach_sensitive_paths_unprojec
     for command in [
         "sh <<'EOF'\nrm -rf ~\nEOF",
         "python3 - <<'EOF'\nimport os\nEOF",
+        // Programs that run, apply or install what they read keep their
+        // review: none of these looks like an interpreter.
+        "xargs <<'EOF'\nrm -rf ~\nEOF",
+        "psql <<'EOF'\nDROP TABLE users;\nEOF",
+        "patch -p1 <<'EOF'\n--- a/x\nEOF",
+        "crontab - <<'EOF'\n* * * * * id\nEOF",
+        // A filter is one plain command, so a pipe into a shell, an
+        // environment assignment and a path override each keep the review.
+        "sort <<'EOF' | sh\nid\nEOF",
+        "FOO=1 sort <<'EOF' > out.txt\nb\nEOF",
+        "PATH=/tmp sort <<'EOF' > out.txt\nb\nEOF",
         "cat <<EOF > notes.txt\n$(id)\nEOF",
         "cat <<'EOF' > notes.txt\nunterminated",
         "cat <<< 'inline'",

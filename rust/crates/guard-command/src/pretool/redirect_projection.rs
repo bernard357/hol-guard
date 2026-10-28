@@ -13,6 +13,8 @@ use targets::{
 
 #[path = "redirect_git_chain.rs"]
 pub(super) mod git_chain;
+#[path = "redirect_heredoc.rs"]
+mod heredoc;
 #[path = "redirect_leading_chain.rs"]
 mod leading_chain;
 #[path = "redirect_targets.rs"]
@@ -201,14 +203,9 @@ pub(super) fn project(
     {
         return None;
     }
-    // A heredoc body is stdin. Only `cat` is known to treat it as data.
-    if saw_heredoc
-        && !(model.segments.len() == 1
-            && model.segments[0].wrapper_chain.is_empty()
-            && model.segments[0].environment_names.is_empty()
-            && model.segments[0].executable.as_deref() == Some("cat")
-            && model.segments[0].arguments.is_empty())
-    {
+    // A heredoc body is stdin, so the command has to be one that reads it as
+    // data rather than running it.
+    if saw_heredoc && !heredoc::reads_data(&model) {
         return None;
     }
     // A quoted heredoc is literal data, but the bare `cat` that remains reads
@@ -217,6 +214,7 @@ pub(super) fn project(
     // outside that sandbox, so the write checked above is all that is left to
     // prove, and a no-op stands in for the command.
     let command = if saw_heredoc
+        && heredoc::is_bare_cat(&model)
         && bounded_writes
         && writes_file
         && targets.iter().all(|target| {
