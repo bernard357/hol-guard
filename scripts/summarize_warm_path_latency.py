@@ -15,6 +15,8 @@ from warm_path_stats import median, percentile, spread_ratio
 _PATH_TITLES = {"hook": "Warm benign PreToolUse hook (process spawn to exit)", "mcp": "Warm non-package MCP tools/call"}
 # A run set is reported as noisy when per-round p95 values span more than this share of their median.
 NOISE_SPREAD = 0.15
+# Distinct refusal reasons carried into the summary for one target.
+REASON_LIMIT = 6
 
 
 def _rows(document: dict[str, object], path: str, label: str) -> list[dict[str, object]]:
@@ -80,6 +82,35 @@ def _setup_statuses(rows: list[dict[str, object]]) -> dict[str, int]:
     return statuses
 
 
+def _non_allow_detail(rows: list[dict[str, object]]) -> dict[str, object]:
+    """Where the refused samples landed and why, over the rounds that recorded it.
+
+    A pooled count cannot tell a warm-up window apart from a steady refusal, and
+    one class can cover several reasons, so the per-round counts, the sample runs
+    and the first distinct reasons are carried through to the summary.
+    """
+
+    per_round: dict[str, int] = {}
+    runs: dict[str, list[list[int]]] = {}
+    reasons: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        detail = r["phase"].get("non_ok")  # type: ignore[union-attr]
+        if not isinstance(detail, dict):
+            continue
+        label = str(r["round"])
+        per_round[label] = int(detail["count"])
+        if detail["runs"]:
+            runs[label] = detail["runs"]  # type: ignore[assignment]
+        for reason in detail["reasons"]:  # type: ignore[union-attr]
+            key = (str(reason["class"]), str(reason["detail"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            reasons.append({"round": r["round"], **reason})
+    return {"per_round": per_round, "runs": runs, "reasons": reasons[:REASON_LIMIT]}
+
+
 def summarize_label(rows: list[dict[str, object]]) -> dict[str, object]:
     per_round = {q: [float(r["phase"]["stats_ms"][q]) for r in rows] for q in ("p50", "p95", "p99")}  # type: ignore[index]
     pooled = [value for r in rows for value in r["phase"]["samples_ms"]]  # type: ignore[index]
@@ -100,6 +131,7 @@ def summarize_label(rows: list[dict[str, object]]) -> dict[str, object]:
         "pooled_p99_ms": percentile(pooled, 99),
         "classes": classes,
         "non_allow": sum(int(r["phase"]["non_allow"]) for r in rows),  # type: ignore[index]
+        "non_allow_detail": _non_allow_detail(rows),
         "client_cpu_ms_per_call": _optional_median([r["phase"].get("client_cpu_ms_per_call") for r in rows]),  # type: ignore[union-attr]
         "service_cpu_ms_per_call": median([float(r["phase"]["service_cpu_ms_per_call"]) for r in rows]),  # type: ignore[index]
         "service_rss_mb": median([float(r["phase"]["service"]["rss_mb"]) for r in rows]),  # type: ignore[index]
@@ -202,6 +234,28 @@ def render_markdown(document: dict[str, object], summary: dict[str, object]) -> 
             roles = _format_roles(s["service_roles"], s.get("service_role_cpu_ms_per_call"))
             lines.append(
                 f"Service by role (median), `{summary[role]}`: {roles}." + (f" Setup: {setup}." if setup else "")
+            )
+        for role in ("baseline", "candidate"):
+            s = entry[role]
+            if not s["non_allow"]:
+                continue
+            detail = s["non_allow_detail"]
+            per_round = ", ".join(f"round {key} x{count}" for key, count in sorted(detail["per_round"].items()))
+            reasons = "; ".join(
+                f"`{reason['class']}` at round {reason['round']} sample {reason['index']}"
+                + (f": {reason['detail']}" if reason["detail"] else "")
+                for reason in detail["reasons"]
+            )
+            runs = ", ".join(
+                "round {key} {spans}".format(key=key, spans=",".join(f"{first}-{last}" for first, last in value))
+                for key, value in sorted(detail["runs"].items())
+            )
+            lines.append(
+                f"Non-allow samples, `{summary[role]}`: {s['non_allow']}"
+                + (f" ({per_round})" if per_round else "")
+                + "."
+                + (f" Sample runs: {runs}." if runs else "")
+                + (f" Reasons: {reasons}." if reasons else "")
             )
         flags = []
         if entry["noisy"]:
