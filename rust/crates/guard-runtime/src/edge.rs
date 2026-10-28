@@ -19,10 +19,12 @@ use crate::native_hook_receipt::{
 #[path = "edge_identity.rs"]
 mod edge_identity;
 use edge_identity::{
-    canonical_identity_digest, request_id_is_safe, request_payload_identity, review_anchor_digest,
-    MAX_EVENT_BYTES, MAX_HARNESS_BYTES, MAX_PATH_BYTES,
+    canonical_identity_digest, request_id_is_safe, request_payload_identity, MAX_EVENT_BYTES,
+    MAX_HARNESS_BYTES, MAX_PATH_BYTES,
 };
-pub(crate) use edge_identity::{policy_generation_matches, stable_policy_identity};
+pub(crate) use edge_identity::{
+    policy_generation_matches, review_anchor_digest, stable_policy_identity,
+};
 #[path = "edge_local_cli.rs"]
 mod edge_local_cli;
 #[path = "edge_result_check.rs"]

@@ -190,7 +190,7 @@ pub(super) fn canonical_identity_digest(value: &Value, error_code: &str) -> Resu
 /// `policy_digest` are deliberately absent: both move whenever the publisher
 /// republishes, including for observed state that cannot weaken a verdict, and
 /// a moved anchor strands the approval the identical retry was meant to find.
-pub(super) fn review_anchor_digest(
+pub(crate) fn review_anchor_digest(
     envelope: &GuardHookEnvelopeV2,
     snapshot: Option<&PolicySnapshotV3>,
 ) -> Result<String, String> {
