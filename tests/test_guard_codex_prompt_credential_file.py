@@ -1,4 +1,4 @@
-"""The resident prompt-file credential scan behind ``_codex_prompt_credential_file_artifact``."""
+"""The resident prompt-file credential scan."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_plugin_scanner.guard.cli.commands_support_codex_paths import _codex_prompt_credential_file_artifact
+from tests.codex_prompt_credential_file import codex_prompt_credential_file_artifact
 
 # The resident's Codex tool-output review models POSIX paths and refuses
 # Windows outright (``native_codex_tool_output._platform_is_supported``).
@@ -21,7 +21,7 @@ _CONFIG_PATH = "/workspace/.codex/config.toml"
 
 
 def _review(prompt_text: str, cwd: Path):
-    return _codex_prompt_credential_file_artifact(
+    return codex_prompt_credential_file_artifact(
         prompt_text=prompt_text,
         cwd=cwd,
         config_path=_CONFIG_PATH,

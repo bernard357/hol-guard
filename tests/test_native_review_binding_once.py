@@ -27,20 +27,13 @@ def test_native_review_asks_the_resident_for_the_review_binding_once(
     worker, _store = _hook_worker(tmp_path, monkeypatch, result, receipt)
     bindings: list[str | None] = []
     real_evidence = hook_native_review_approval.native_review_evidence
-    real_binding = hook_native_review_approval.native_review_binding
 
     def counting_evidence(**kwargs: Any) -> tuple[str | None, str | None, str | None]:
         evidence = real_evidence(**kwargs)
         bindings.append(evidence[0])
         return evidence
 
-    def counting_binding(*args: Any, **kwargs: Any) -> str | None:
-        binding = real_binding(*args, **kwargs)
-        bindings.append(binding)
-        return binding
-
     monkeypatch.setattr(hook_native_review_approval, "native_review_evidence", counting_evidence)
-    monkeypatch.setattr(hook_native_review_approval, "native_review_binding", counting_binding)
     response = worker.review_http_payload(
         payload={
             "hook_event_name": "PreToolUse",

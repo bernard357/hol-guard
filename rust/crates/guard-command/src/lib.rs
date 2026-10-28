@@ -55,7 +55,6 @@ mod command_ascii_comparison;
 mod command_candidate_common;
 mod command_common_cli_matchers;
 pub mod command_expression_match;
-mod compound_artifact;
 mod credential_store_names;
 pub mod cursor_shell_command;
 pub mod editor_task_risk;
@@ -407,7 +406,6 @@ pub mod typescript_launch_evidence;
 #[cfg(test)]
 #[path = "../../../test_support/unique_nanos.rs"]
 mod unique_nanos;
-mod unmodeled_shell_artifact;
 
 pub mod package_context_environment;
 

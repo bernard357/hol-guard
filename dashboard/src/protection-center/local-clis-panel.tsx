@@ -24,7 +24,7 @@ import { catalogRevisionChanged, commandPermissionChanges, mcpCatalogCopy, mcpTo
 import { McpProviderActions, type ProviderActionDraft } from "./mcp-provider-actions";
 import { ProviderWorkflows } from "./provider-workflows";
 import { bulkPolicyCopy, connectorGroupOutcomeCopy, continuityCopy, customExtensionStateLabel, detailCatalogHeading, detailCatalogHelper, detailPolicyCopy, FRESH_TOTP_REQUIRED_MESSAGE, isFreshTotpRequired, keepChoicesCopy, mcpPermissionStatusLabel, nativePublicationMessage, randomToken, SUGGESTED_RULES_NOTICE } from "./local-cli-panel-copy";
-import { connectorGroupOutcome, connectorSetupMatch, customExtensionDisplayName, hasSuggestedRules, prefillSuggestedStates, type ConnectorSetupLink } from "./custom-extension-profile";
+import { allowedEarlierVersion, connectorGroupOutcome, connectorSetupMatch, connectorSetupReady, customExtensionDisplayName, hasSuggestedRules, prefillSuggestedStates, type ConnectorSetupLink } from "./custom-extension-profile";
 import { ConnectorSetupBanner } from "./connector-setup-banner";
 import { CustomExtensionReviewModal } from "./local-cli-review-modal";
 import { LocalCliCapabilities } from "./local-cli-capabilities";
@@ -184,7 +184,7 @@ export function LocalCliDetail(props: {
         ...(pending !== "unset" && Object.keys(providerDrafts).length > 0
           ? { provider_actions: Object.values(providerDrafts) } : {}),
         // Same endpoint and proof as any other change; the daemon re-checks the request belongs to this connector.
-        ...(recommended && pending === "allowed" && props.setupLink && setupMatch === "ready"
+        ...(recommended && pending === "allowed" && props.setupLink && connectorSetupReady(setupMatch)
           ? { connector_group_request_id: props.setupLink.requestId } : {}),
         ...credentials,
       };
@@ -254,7 +254,14 @@ export function LocalCliDetail(props: {
         <div className="mt-5 flex flex-wrap gap-3">
           {added ? (
             <>
-              {props.item.state === "allowed" ? (
+              {allowedEarlierVersion(props.item) ? (
+                // The allow covers an earlier version of the file, so it no longer applies; allowing again binds this one.
+                // Opened from a held request, it also releases the requests held on it, like the banner.
+                <button type="button" className="min-h-11 rounded-xl bg-brand-blue px-4 text-sm font-semibold text-white"
+                  onClick={connectorSetupReady(setupMatch) ? requestRecommended : requestAllow}>
+                  Allow this version
+                </button>
+              ) : props.item.state === "allowed" ? (
                 <p className="inline-flex min-h-11 items-center rounded-xl bg-slate-100 px-4 text-sm font-semibold text-brand-dark">
                   {props.item.surface === "mcp"
                     ? mcpPermissionStatusLabel(props.nativePublication, props.item.permission_scope)

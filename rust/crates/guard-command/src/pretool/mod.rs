@@ -79,6 +79,7 @@ mod bun_eval;
 mod chain_temporary;
 mod clone_siblings;
 mod compound_reason;
+mod control_flow_chain;
 mod control_flow_flatten;
 mod fanout_reads;
 mod filter_pattern_text;
@@ -176,6 +177,7 @@ mod search_scope_walk;
 mod secret_aliases;
 pub(crate) mod sed_edits;
 mod segment_proof;
+pub(crate) mod shell_literal;
 mod shell_script;
 mod sink_peel;
 mod stderr_merge;
@@ -810,6 +812,7 @@ const MAX_REWRITE_ROUNDS: usize = 3;
 fn rewritten_command_list(command: &str) -> Option<String> {
     for_loop_unroll::unroll(command)
         .or_else(|| control_flow_flatten::flatten(command))
+        .or_else(|| control_flow_chain::spliced(command))
         .or_else(|| list_wrapper::unwrapped(command))
 }
 

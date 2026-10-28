@@ -7422,6 +7422,37 @@
    "rationale": "Argument validation for the filter stage is the classifier's, not the sink's: a grep naming a file or reading patterns, and a ripgrep spelling its own valued options, never reach the filter chain at all, so the native tests replace the ValueError the Python sink used to raise."
   },
   {
+   "old_node": "tests/test_prompt_system_message_lazy_reason.py::test_claude_asks_for_no_reason_it_will_not_show",
+   "source_sha256": "b1644e0ce525c79bfe740ab3290f5fa7cffd2a7fd7d2eec9d2ef792fce9551a6",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python prompt system-message composers, which read the resident's reason only when they showed one. The resident composes the prompt notice itself now, so no Python caller reads a reason it does not show."
+  },
+  {
+   "old_node": "tests/test_prompt_system_message_lazy_reason.py::test_codex_asks_for_no_reason_a_running_prompt_will_not_show",
+   "source_sha256": "b1644e0ce525c79bfe740ab3290f5fa7cffd2a7fd7d2eec9d2ef792fce9551a6",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python prompt system-message composers, which read the resident's reason only when they showed one. The resident composes the prompt notice itself now, so no Python caller reads a reason it does not show."
+  },
+  {
+   "old_node": "tests/test_prompt_system_message_lazy_reason.py::test_a_paused_codex_prompt_still_reads_the_residents_reason",
+   "source_sha256": "b1644e0ce525c79bfe740ab3290f5fa7cffd2a7fd7d2eec9d2ef792fce9551a6",
+   "replacement_nodes": [],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Exercises the retired Python prompt system-message composers, which read the resident's reason only when they showed one. The resident composes the prompt notice itself now, so no Python caller reads a reason it does not show."
+  },
+  {
+   "old_node": "tests/test_claude_prompt_notice_vectors.py::test_claude_prompt_notice_vectors_are_current",
+   "source_sha256": "a20c6c1dc48d0cf4edcce8aecfc6d9a2ef7180afea26d2e4416b86f1dca0a138",
+   "replacement_nodes": [
+    "rust/crates/guard-runtime/src/hook_direct_claude_prompt_text_tests.rs::the_notice_matches_the_daemon",
+    "rust/crates/guard-runtime/src/hook_direct_claude_prompt_text_tests.rs::a_reason_the_daemon_would_stringify_defers"
+   ],
+   "status": "obsolete_implementation_assertion",
+   "rationale": "Re-ran the retired Python prompt notice against its recorded vectors. The recorded vectors stay and the native prompt-notice suite replays them."
+  },
+  {
    "old_node": "tests/test_codex_bridge_early_proxy.py::test_codex_bridge_proxy_answers_allow_before_guard_imports",
    "source_sha256": "b1df34010bc2c39140830a6d0185783ebb7b9e431b4f9c73e7aa2c416c0c9234",
    "replacement_nodes": [

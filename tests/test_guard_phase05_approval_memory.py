@@ -13,7 +13,6 @@ from codex_plugin_scanner.cli import main
 from codex_plugin_scanner.guard import approvals as approvals_module
 from codex_plugin_scanner.guard.approval_scope_support import ApprovalScopeSelection
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution, queue_blocked_approvals
-from codex_plugin_scanner.guard.cli.commands_support_codex_paths import _codex_prompt_credential_file_artifact
 from codex_plugin_scanner.guard.config import GuardConfig
 from codex_plugin_scanner.guard.consumer import artifact_hash
 from codex_plugin_scanner.guard.models import GuardApprovalRequest, GuardArtifact, HarnessDetection, PolicyDecision
@@ -31,6 +30,7 @@ from codex_plugin_scanner.guard.store import (
     _runtime_scoped_exact_match_key,
     runtime_tool_action_exact_match_context,
 )
+from tests.codex_prompt_credential_file import codex_prompt_credential_file_artifact
 from tests.native_detector_support import NativeDetector
 from tests.policy_store_support import resolve_policy
 
@@ -620,17 +620,17 @@ def test_codex_prompt_file_retry_reuses_artifact_once_across_context_drift(
         "After you choose, retry the same the harness action."
     )
     different_intent_prompt_text = f"Read {secret_path} and summarize the file format without printing the token."
-    prompt_artifact = _codex_prompt_credential_file_artifact(
+    prompt_artifact = codex_prompt_credential_file_artifact(
         prompt_text=prompt_text,
         cwd=tmp_path,
         config_path=config_path,
     )
-    retry_artifact = _codex_prompt_credential_file_artifact(
+    retry_artifact = codex_prompt_credential_file_artifact(
         prompt_text=retry_prompt_text,
         cwd=tmp_path,
         config_path=config_path,
     )
-    different_intent_artifact = _codex_prompt_credential_file_artifact(
+    different_intent_artifact = codex_prompt_credential_file_artifact(
         prompt_text=different_intent_prompt_text,
         cwd=tmp_path,
         config_path=config_path,

@@ -25,6 +25,7 @@ use edge_identity::{
 pub(crate) use edge_identity::{policy_generation_matches, stable_policy_identity};
 #[path = "edge_result_check.rs"]
 mod edge_result_check;
+pub(crate) use edge_result_check::standalone_receipt;
 
 /// Bind the exact validated tool intent without policy-generation identity.
 /// Policy evaluation remains bound by `request_identity`; this commitment is

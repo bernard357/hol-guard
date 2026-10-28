@@ -227,6 +227,14 @@
    "body": "9f1d3ea48453"
   },
   {
+   "file": "rust/crates/guard-command/src/pretool/generic_cursor_compaction_writes.rs",
+   "item": "fn plain_note(_metadata: &std::fs::Metadata) -> bool",
+   "verdict": "windows-unsupported",
+   "note": "Unix proves an existing compaction note has one link and no execute bit before Cursor overwrites it. The link count is unstable on Windows, so an existing note fails closed and keeps its review; a write to a new segment name still passes because nothing exists to alias.",
+   "cfg": "not(unix)",
+   "body": "ff97d5ea05af"
+  },
+  {
    "file": "rust/crates/guard-command/src/pretool/git_hook_files.rs",
    "item": "fn is_executable(metadata: &fs::Metadata) -> bool",
    "verdict": "posix-primitive",

@@ -23,22 +23,14 @@ def queue_bound_bash_review(
 ) -> None:
     from ..daemon.hook_native_review_approval import queue_native_pre_tool_review
     from ..daemon.native_review_records import record_silent_native_review_event
-    from ..native_decision_receipt import receipt_matches_edge, validate_native_decision_receipt
+    from ..native_decision_receipt import edge_receipt
 
     review = prepared["review"]
     if not isinstance(review, dict) or not isinstance(review.get("decision"), dict):
         raise NativeBashError("native_bash_review_evidence_invalid")
     decision = review["decision"]
-    receipt = validate_native_decision_receipt(review.get("receipt"))
-    if receipt is None or not receipt_matches_edge(
-        {
-            "harness": harness,
-            "event_name": "PreToolUse",
-            "payload_kind": receipt["payload_kind"],
-            "result": decision,
-        },
-        receipt,
-    ):
+    receipt = edge_receipt(harness, decision, review.get("receipt"), guard_home=Path(store.guard_home))
+    if receipt is None:
         raise NativeBashError("native_bash_review_evidence_invalid")
     queued = queue_native_pre_tool_review(
         store,

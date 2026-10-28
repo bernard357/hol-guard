@@ -257,7 +257,7 @@ fn adapter_envelope(input: &RequestInput<'_>, query: &EnvelopeQuery<'_>) -> Opti
 }
 
 /// The plain JSON `value` in the adapter's tagged wire form.
-fn tagged(value: &Value) -> Value {
+pub(crate) fn tagged(value: &Value) -> Value {
     match value {
         Value::Array(items) => {
             let mut wire = vec![Value::String("l".to_owned())];
@@ -376,7 +376,7 @@ pub(super) fn finish(
 
 /// `_envelope_from_native(...).with_pre_execution_result("review").to_dict()`,
 /// for an answer whose fields already have their typed shapes.
-fn review_envelope(envelope: Value) -> Option<Map<String, Value>> {
+pub(crate) fn review_envelope(envelope: Value) -> Option<Map<String, Value>> {
     let Value::Object(mut envelope) = envelope else {
         return None;
     };
@@ -405,7 +405,7 @@ fn review_envelope(envelope: Value) -> Option<Map<String, Value>> {
     Some(envelope)
 }
 
-fn result_command_category(result: &Object) -> Option<String> {
+pub(crate) fn result_command_category(result: &Object) -> Option<String> {
     let evidence = result.get("command_extensions")?.as_object()?;
     ["observations", "permission_observations"]
         .into_iter()
