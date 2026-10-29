@@ -287,3 +287,26 @@ fn plain_records_land_in_the_store() {
     assert_eq!(count(&home, "guard_events"), 2);
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn a_receipt_committed_before_a_later_read_fails_is_not_handed_back() {
+    let (receipts, inventory) = vectors();
+    let home = temp_home("relay-receipt-post-commit");
+    build_database(&home.join("guard.db"), &receipts, &inventory);
+    // The outbox generation is read after the commit; a wake table without
+    // its column fails that read with the receipt already written.
+    rusqlite::Connection::open(home.join("guard.db"))
+        .unwrap()
+        .execute_batch(
+            "create table guard_review_outbox_wake_state (singleton integer primary key)",
+        )
+        .unwrap();
+    let before = count(&home, "runtime_receipts");
+    let unwritten = write(
+        home.to_str().unwrap(),
+        vec![record("forward", "policy", "allow")],
+    );
+    assert!(unwritten.is_empty(), "{unwritten:?}");
+    assert_eq!(count(&home, "runtime_receipts"), before + 1);
+    let _ = std::fs::remove_dir_all(&home);
+}

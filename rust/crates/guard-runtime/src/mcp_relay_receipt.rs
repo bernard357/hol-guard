@@ -151,8 +151,11 @@ fn records_of(composed: Vec<(Value, Map<String, Value>)>) -> Vec<Value> {
     composed.into_iter().map(|(record, _)| record).collect()
 }
 
+/// Whether the receipt is in the store: a failure after the commit (the
+/// outbox generation read) leaves it written, so the daemon must not write it
+/// again under a fresh receipt id.
 fn store(guard_home: &str, busy_timeout_ms: u64, args: Map<String, Value>) -> bool {
-    crate::guard_store_op::evaluate(&GuardStoreRequestV1 {
+    let (outcome, committed) = crate::guard_store_op::evaluate_committing(&GuardStoreRequestV1 {
         schema: GUARD_STORE_REQUEST_SCHEMA.to_owned(),
         request_id: "mcp-relay-receipt".to_owned(),
         store_path: Path::new(guard_home)
@@ -164,8 +167,8 @@ fn store(guard_home: &str, busy_timeout_ms: u64, args: Map<String, Value>) -> bo
         source: "mcp-relay".to_owned(),
         busy_timeout_ms,
         args,
-    })
-    .is_ok()
+    });
+    outcome.is_ok() || committed
 }
 
 /// The values `build_receipt` and the store call draw fresh for each write.
