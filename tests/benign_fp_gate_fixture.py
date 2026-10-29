@@ -301,8 +301,8 @@ def build_fixture(root: Path) -> BenignFixture:
     # the whole file body with each read of it.
     _write(parent / "docs" / "large-guide.md", "# Guide\n" + "Plain guide paragraph text.\n" * 1600)
     _write(parent / ".agents" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\nSynthetic skill body.\n")
-    # Git treats a link as a file, so `node_modules/` alone leaves the borrowed
-    # `dashboard/node_modules` link below unignored.
+    _write(parent / "integrations" / "app" / ".claude-plugin" / "plugin.json", '{"author": "Example"}\n')
+    # Git treats a link as a file: `node_modules/` alone leaves the `dashboard/node_modules` link unignored.
     _write(parent / ".gitignore", "node_modules/\ndashboard/node_modules\n")
     _git(parent, "add", "-A", home=home)
     _git(parent, "commit", "--quiet", "-m", "fixture base", home=home)

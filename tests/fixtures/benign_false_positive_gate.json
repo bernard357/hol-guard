@@ -33036,6 +33036,54 @@
       "expect": "allow"
     },
     {
+      "id": "read-user-tmp-worktree-claude-plugin-manifest",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${USER_TMP_WORKTREE}/integrations/app/.claude-plugin/plugin.json"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "write-user-tmp-worktree-claude-plugin-manifest",
+      "fix_area": "write",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "write",
+      "tool_input": {
+        "path": "${USER_TMP_WORKTREE}/integrations/app/.claude-plugin/plugin.json",
+        "content": "{\"author\": \"Sample\"}\n"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "read-user-tmp-sibling-codex-plugin-manifest-keeps-review",
+      "fix_area": "read",
+      "harnesses": [
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "read",
+      "tool_input": {
+        "path": "${USER_TMP_SIBLING}/plugins/app/.codex-plugin/plugin.json"
+      },
+      "cwd": "parent",
+      "expect": "not_allow"
+    },
+    {
       "id": "read-repo-well-known-agent-card",
       "fix_area": "read",
       "harnesses": [

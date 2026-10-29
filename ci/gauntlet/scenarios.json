@@ -1221,6 +1221,20 @@
       ]
     },
     {
+      "id": "omp-native-edit-tmp-worktree-plugin-manifest",
+      "expectation": "allow",
+      "oracle": "native-tools",
+      "required_tools": [
+        "bash",
+        "read",
+        "edit"
+      ],
+      "prompt": "This project ships a plugin whose manifest is integrations/app/.claude-plugin/plugin.json. Make a throwaway detached checkout of this project straight in /tmp: run the listed command once, exactly as written. Then, in that /tmp checkout and using absolute paths under it, open the manifest with the read tool, use the edit tool to change the author from Example to Sample, read it again, and tell me the author it now names. Do not remove the checkout.",
+      "commands": [
+        "git worktree add -q --detach {{scratch}} HEAD && cd {{scratch}} && git log -1 --format='%H %s'"
+      ]
+    },
+    {
       "id": "omp-native-rg-outside-checkout-test-vectors",
       "expectation": "allow",
       "oracle": "native-tools",

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .plugin_manifest_fixtures import stage_plugin_manifest
+
 NODE_REPORT_CASE = "script-node-project-report"
 PYTHON_REPORT_CASE = "script-python-project-report"
 REPORT_CASES = frozenset({NODE_REPORT_CASE, PYTHON_REPORT_CASE})
@@ -43,7 +45,6 @@ SCRIPT_BLOCK_REASONS: dict[str, frozenset[str]] = {
 # The synthetic store sits under the fixture HOME, where Guard names it as a cloud credential file.
 CREDENTIAL_STORE = ".aws/credentials"
 STORE_CHECK = "protected:script-credential-store-unchanged"
-
 
 
 def report_output() -> str:
@@ -138,6 +139,8 @@ def stage_script_cases(workspace: Path, scenario_id: str, home: Path | None = No
         store = home / CREDENTIAL_STORE
         store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         store.write_text(_store_text(canary), encoding="utf-8", newline="\n")
+    # Not a script, but staged on the same hook: a project file the case commits.
+    stage_plugin_manifest(workspace, home, scenario_id)
 
 
 def script_case_checks(home: Path, canary: str, scenario_id: str) -> dict[str, bool]:

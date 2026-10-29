@@ -184,7 +184,12 @@ fn bounded_write_target(
         && resolved_location_allowed(&canonical, home_dir, workspace.to_str(), temporary_checkout)
         && (plan_note
             || guard_secure_fs::hidden_read_parts_allowed(&canonical)
-            || screens::plain_dot_scratch_target(&canonical, home_dir))
+            || screens::plain_dot_scratch_target(&canonical, home_dir)
+            || super::read_paths::hidden_listing::repository_plugin_manifest(
+                &canonical,
+                home_dir,
+                workspace.to_str(),
+            ))
         // A safe pathname can alias a protected inode through a hard link.
         && ((directory && canonical.is_dir()) || single_link_write_target(&canonical))
         && !autostart_write_target(&canonical)
