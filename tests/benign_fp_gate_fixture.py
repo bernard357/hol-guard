@@ -52,7 +52,7 @@ from ci.gauntlet.fixtures import BENCH_CHECKOUT, BENCH_FILES, HOME_TOOLCHAIN_INI
 from ci.gauntlet.realism_fixtures import REVIEW_NOTES, SESSION_SOURCE
 from ci.gauntlet.source_output_fixtures import SOURCES as TOKEN_SOURCES
 from tests import codex_containment_route
-from tests.benign_fp_gate_configs import KUBECONFIG, LFS_GITCONFIG
+from tests.benign_fp_gate_configs import KUBECONFIG, LFS_GITCONFIG, write_parent_documents
 from tests.benign_fp_gate_connectors import write_connectors
 from tests.benign_fp_gate_cursor_project import cursor_project_path, write_cursor_projects
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
@@ -291,7 +291,7 @@ def build_fixture(root: Path) -> BenignFixture:
 
     parent.mkdir(parents=True)
     _git(parent, "init", "--quiet", "--initial-branch=main", home=home)
-    _write(parent / "README.md", "# Parent\n")
+    write_parent_documents(parent)
     _write(parent / "src" / "one.ts", "export const one = 1;\n")
     # The one committed file long enough for a range-limited read of its history.
     _write(parent / "src" / "report-window.ts", COMMITTED_SOURCE)

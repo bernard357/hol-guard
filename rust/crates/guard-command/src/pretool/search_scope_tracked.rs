@@ -16,6 +16,9 @@ const STORE_DIRECTORIES: &[&str] = &[
     ".aws", ".ssh", ".gnupg", ".kube", ".docker", ".azure", ".gcloud", ".config", ".npm",
 ];
 
+#[path = "tracked_credential_names.rs"]
+pub(super) mod names;
+
 #[derive(Default)]
 pub(super) struct TrackedFiles {
     indexes: HashMap<PathBuf, Option<HashSet<Vec<u8>>>>,

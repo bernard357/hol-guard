@@ -48,6 +48,8 @@ pub(super) struct GenericSignals {
     pub(super) content_sensitive: bool,
     pub(super) sensitive_target: bool,
     pub(super) independent_sensitive_target: bool,
+    /// Bypass intent or a credential word outside the path values.
+    pub(super) non_path_sensitive_target: bool,
     pub(super) event_hint: Option<String>,
 }
 
@@ -367,3 +369,6 @@ pub(super) use nested_json::parse_strict_nested_json;
 #[path = "generic_signals.rs"]
 mod signals;
 pub(super) use signals::{extract_generic_signals, EMBEDDED_ARGUMENT_KEYS};
+
+#[path = "generic_tracked_names.rs"]
+mod tracked_names;
