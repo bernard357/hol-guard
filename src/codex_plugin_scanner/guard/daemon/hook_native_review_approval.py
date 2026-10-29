@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import sqlite3
 import time
@@ -314,9 +315,8 @@ def queue_native_pre_tool_review(
             native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
         except ValueError:
             return None
-    persist = getattr(store, "add_silent_native_review_approval_request" if silent else "add_approval_request", None)
-    lookup = getattr(store, "get_approval_request", None)
-    if not callable(persist) or not callable(lookup):
+    queue = getattr(store, "queue_review_approval_request", None)
+    if not callable(queue):
         return None
     if bound_bash is not None:
         from .native_review_bound_bash import valid_bound_bash_review
@@ -386,7 +386,7 @@ def queue_native_pre_tool_review(
         else None
     )
     try:
-        stored = lookup(_persist_review(persist, request, now, claude_review))
+        stored = _persist_review(functools.partial(queue, silent=silent), request, now, claude_review)
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if live_wait is not None and isinstance(stored, dict):

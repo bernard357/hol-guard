@@ -100,6 +100,9 @@ class _QueueStore(_Store):
     def get_approval_request(self, request_id: str) -> dict[str, object]:
         return self.rows[request_id]
 
+    def queue_review_approval_request(self, request: object, now: str, **_options: object) -> dict[str, object]:
+        return self.get_approval_request(self.add_approval_request(request, now))  # type: ignore[arg-type]
+
     def approval_desktop_notified_at(self, request_id: str) -> str | None:
         group = self.rows[request_id]["queue_group_id"]
         for other, row in self.rows.items():
