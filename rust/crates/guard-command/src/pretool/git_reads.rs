@@ -61,10 +61,16 @@ pub(super) fn safe_git_arguments(
                 return leading_safe
                     && allow_helper_context
                     && super::git_grep::targets(rest).is_some_and(|targets| {
+                        // The tracked proof reads the working-tree file, so it
+                        // covers only pathspecs Git searches there: after a
+                        // `--` with no revision before it, and without
+                        // `--cached`, which searches the index instead.
+                        let working_tree = targets.first().is_some_and(|first| first == "--")
+                            && !rest.iter().any(|argument| argument == "--cached");
                         !targets.iter().any(|value| {
                             value.starts_with(':')
                                 || (super::sensitive_read_path_argument(value)
-                                    && !tracked_target(value, leading, context))
+                                    && !(working_tree && tracked_target(value, leading, context)))
                         })
                     });
             }

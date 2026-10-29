@@ -234,7 +234,7 @@ fn repository_root(path: &Path) -> Option<&Path> {
 /// declared kind is the only reliable mark. Outside JSON, which is decoded
 /// here, an escape can spell `kind` or `Secret` past the plain reading, so a
 /// document holding a backslash is not proven either.
-fn secret_object(text: &str) -> bool {
+pub(in crate::pretool) fn secret_object(text: &str) -> bool {
     declared_kind(text)
         || match serde_json::from_str::<Value>(text) {
             Ok(value) => json_secret_kind(&value),

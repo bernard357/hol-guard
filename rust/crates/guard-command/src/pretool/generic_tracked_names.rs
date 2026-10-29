@@ -68,30 +68,61 @@ const EDIT_PAIRS: [(&str, &str); 4] = [
     ("old_str", "new_str"),
 ];
 
+/// Escapes that spell a letter in JSON, YAML or TOML strings, and the YAML
+/// line continuation that joins two halves of a word.
+const LETTER_ESCAPES: [&str; 5] = ["\\u", "\\U", "\\x", "\\\n", "\\\r"];
+
 /// Whether a string anywhere in `payload` declares a Kubernetes `Secret`, or
-/// a substring edit in it adds the word. An edit that turns a tracked
-/// document into a `Secret` manifest keeps the signal, though the file on
-/// disk still proves clean.
+/// a substring edit or whole-file body in it may. An edit or write that turns
+/// a tracked document into a `Secret` manifest keeps the signal, though the
+/// file on disk still proves clean.
 pub(super) fn declares_secret_object(payload: &Value) -> bool {
     match payload {
         Value::String(text) => names::declares_secret_object(text),
         Value::Array(items) => items.iter().any(declares_secret_object),
-        Value::Object(map) => adds_secret_word(map) || map.values().any(declares_secret_object),
+        Value::Object(map) => {
+            adds_secret_word(map)
+                || writes_unproven_body(map)
+                || map.values().any(declares_secret_object)
+        }
         _ => false,
     }
 }
 
-/// Whether an edit's new text holds the word `secret` more often than its old
-/// text. `old_string: ConfigMap` with `new_string: Secret` names no `kind`
-/// in either string. A unified diff needs no such count: it replaces whole
-/// lines, so the `kind` key travels with its value.
+/// Whether an edit's new text holds the word `secret`, or an escape that can
+/// spell it or `kind`, more often than its old text. `old_string: ConfigMap`
+/// with `new_string: Secret` names no `kind` in either string, and
+/// `"\u006bind": "\u0053ecret"` names neither word plainly. A unified diff
+/// needs no such count: it replaces whole lines, so the `kind` key travels
+/// with its value.
 fn adds_secret_word(map: &serde_json::Map<String, Value>) -> bool {
-    let count = |key: &str| {
-        map.get(key)
-            .and_then(Value::as_str)
-            .map(|text| text.to_ascii_lowercase().matches("secret").count())
-    };
-    EDIT_PAIRS
+    let text = |key: &str| map.get(key).and_then(Value::as_str);
+    EDIT_PAIRS.iter().any(|(old, new)| {
+        text(new).is_some_and(|added| {
+            let removed = text(old).unwrap_or("");
+            secret_words(added) > secret_words(removed)
+                || letter_escapes(added) > letter_escapes(removed)
+        })
+    })
+}
+
+fn secret_words(text: &str) -> usize {
+    text.to_ascii_lowercase().matches("secret").count()
+}
+
+fn letter_escapes(text: &str) -> usize {
+    LETTER_ESCAPES
         .iter()
-        .any(|(old, new)| count(new).is_some_and(|added| added > count(old).unwrap_or(0)))
+        .map(|escape| text.matches(escape).count())
+        .sum()
+}
+
+/// Whether a whole-file body would fail the proof the file on disk is held
+/// to once written: a `Secret` kind, or an escape outside decoded JSON.
+fn writes_unproven_body(map: &serde_json::Map<String, Value>) -> bool {
+    ["content", "contents"].iter().any(|key| {
+        map.get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(names::secret_object)
+    })
 }

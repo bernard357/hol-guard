@@ -344,10 +344,41 @@ fn manifests_untracked_copies_and_credential_words_keep_the_signal() {
         serde_json::json!({"tool_name": "Edit", "tool_input": {
             "file_path": project.join(CATALOG), "old_string": "List", "new_string": "Secret"
         }}),
+        // Escapes can spell `kind` and `Secret` past every plain reading.
+        serde_json::json!({"tool_name": "Edit", "tool_input": {
+            "file_path": project.join(CATALOG),
+            "old_string": r#""id""#, "new_string": r#""\u006bind": "\u0053ecret", "id""#
+        }}),
+        serde_json::json!({"tool_name": "Write", "tool_input": {
+            "file_path": project.join(CATALOG),
+            "content": "\"\\u006bind\": \"\\u0053ecret\"\nmetadata:\n  name: app\n"
+        }}),
     ] {
         assert!(
             hook(call.clone(), &home, &project).action.sensitive_target,
             "{call}"
+        );
+    }
+}
+
+/// The tracked proof reads the working-tree file, so a grep of the index or
+/// of a revision, or one whose operand Git may take for a revision, searches
+/// content the proof never read.
+#[cfg(unix)]
+#[test]
+fn git_grep_of_other_content_than_the_proven_file_keeps_review() {
+    let (home, project) = hook_fixture();
+    for form in ["-n List HEAD --", "--cached -n List --", "-n List"] {
+        let named = hook(bash(&format!("git grep {form} {CATALOG}")), &home, &project);
+        let ordinary = hook(
+            bash(&format!("git grep {form} {ORDINARY}")),
+            &home,
+            &project,
+        );
+        assert_ne!(
+            (named.reason_code, named.minimum_action),
+            (ordinary.reason_code, ordinary.minimum_action),
+            "{form}"
         );
     }
 }
