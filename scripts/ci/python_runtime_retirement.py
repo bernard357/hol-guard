@@ -346,12 +346,14 @@ def _declared_names(body: Sequence[ast.stmt]) -> dict[str, ast.stmt]:
     return declared
 
 
-def _binds_beyond_this_block(body: Sequence[ast.stmt]) -> bool:
-    """Whether a block answers for names no static read of it can list.
+def _module_binds_beyond_this_read(body: Sequence[ast.stmt]) -> bool:
+    """Whether a module answers for names no static read of it can list.
 
     A module exporting through `__getattr__` or a star import still resolves an
     attribute this gate never sees, so calling that attribute missing would
-    reject an entry point the installed command loads.
+    reject an entry point the installed command loads. Only a module body
+    counts: a class's own `__getattr__` serves its instances, not an attribute
+    read off the class itself, so it cannot rescue a stranded target.
     """
     for node in body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "__getattr__":
@@ -364,8 +366,9 @@ def _binds_beyond_this_block(body: Sequence[ast.stmt]) -> bool:
 def _attribute_resolves(source: str, attribute: str) -> bool:
     """Whether every component of a dotted entry-point attribute still exists."""
     body: Sequence[ast.stmt] = ast.parse(source).body
+    module_level = True
     for component in attribute.split("."):
-        if _binds_beyond_this_block(body):
+        if module_level and _module_binds_beyond_this_read(body):
             return True
         node = _declared_names(body).get(component)
         if node is None:
@@ -374,7 +377,12 @@ def _attribute_resolves(source: str, attribute: str) -> bool:
             # An imported or assigned name holds a value no static read follows,
             # so whatever hangs below it is out of this gate's reach.
             return True
+        if node.bases or node.keywords:
+            # A base class or a metaclass supplies attributes from a definition
+            # this read never visits, so the rest of the path is unknowable here.
+            return True
         body = node.body
+        module_level = False
     return True
 
 

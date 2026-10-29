@@ -346,3 +346,34 @@ def test_entry_point_accepts_an_attribute_the_module_exports_dynamically(
     _write_module(root, "src/example/exports.py", "def main() -> int:\n    return 0\n")
     _write_module(root, "src/example/live_cli.py", source)
     assert len(check(retired_repository)) == 1
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["class Command(Base):", "class Command(metaclass=Meta):"],
+)
+def test_entry_point_accepts_an_attribute_a_class_inherits(
+    retired_repository: tuple[Path, dict[str, object]], header: str
+) -> None:
+    root, _ = retired_repository
+    _declare_entry_point(root, "example.live_cli:Command.main")
+    _write_module(
+        root,
+        "src/example/live_cli.py",
+        f"from example.base import Base, Meta\n\n\n{header}\n    pass\n",
+    )
+    assert len(check(retired_repository)) == 1
+
+
+def test_entry_point_class_getattr_does_not_rescue_a_missing_class_attribute(
+    retired_repository: tuple[Path, dict[str, object]],
+) -> None:
+    root, _ = retired_repository
+    _declare_entry_point(root, "example.live_cli:Command.absent")
+    _write_module(
+        root,
+        "src/example/live_cli.py",
+        "class Command:\n    def __getattr__(self, name: str) -> object:\n        raise AttributeError(name)\n",
+    )
+    with pytest.raises(RuntimeError, match="missing attribute"):
+        check(retired_repository)
