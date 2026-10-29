@@ -223,7 +223,6 @@ def test_oversize_policy_input_fails_closed_with_an_explicit_code(monkeypatch: p
     for call in (
         lambda: native_prepare_payload("codex", {"tool_input": huge}),
         lambda: adapter.native_command_text("Bash", huge),
-        lambda: adapter.native_apply_patch_paths({"input": huge["command"]}),
         lambda: adapter.native_action_envelope(
             "codex", "PreToolUse", {"tool_input": huge, "tool_response": "y" * 100}, workspace=None, home_dir=None
         ),

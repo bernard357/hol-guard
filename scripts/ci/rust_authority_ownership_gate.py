@@ -390,7 +390,6 @@ def _ordered_call_names(node: ast.AST) -> list[str]:
 _CONTAINMENT_ADAPTER = Path("src/codex_plugin_scanner/guard/adapters/zcode_contained_tests.py")
 _CONTAINMENT_DAEMON = Path("src/codex_plugin_scanner/guard/daemon/hook_worker_native.py")
 _CONTAINMENT_TRANSPORT = Path("src/codex_plugin_scanner/guard/native_hook_containment_route.py")
-_CONTAINMENT_GRANT = Path("src/codex_plugin_scanner/guard/daemon/hook_contained_grant.py")
 # The routing tables the resident's ``containment_route``/``containment_sink`` replaced.
 _RETIRED_CONTAINMENT_TABLES = frozenset(
     {"_PROFILES", "_ROUTED_HARNESSES", "_SINK_HARNESSES", "_WINDOWS_PROFILES", "_WINDOWS_SINK_HARNESSES"}
@@ -430,8 +429,6 @@ def _assert_containment_routed_by_resident() -> None:
             imported.add(node.module.split(".")[0])
     if imported & {"os", "tempfile", "shlex", "json", "hashlib"}:
         raise RuntimeError(f"containment adapter writes or quotes the sink request itself: {sorted(imported)}")
-    if "native_containment_rewrite(" not in _read(_CONTAINMENT_GRANT):
-        raise RuntimeError("a granted containment review is not rewritten by the resident")
     # The daemon routes by the route the resident stamped on its edge answer
     # and never asks for, or computes, one of its own.
     daemon = _read(_CONTAINMENT_DAEMON)

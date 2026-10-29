@@ -11,6 +11,7 @@ from ..adapters.diagnostic_probes import skipped_command_probe
 from ..native_policy_snapshot_constants import NATIVE_RUNTIME_STATE_DIRECTORY
 from ..native_resident_watchdog import published_process_alive, published_resident_process
 from ..resident_state_prune import probe_owner_lock
+from .doctor_native_diagnosis import native_runtime_diagnosis, native_runtime_message
 
 
 class _NativeAvailabilityFields(TypedDict):
@@ -26,16 +27,6 @@ class NativeAvailabilityResult(_NativeAvailabilityFields, total=False):
 
 
 _MAX_STATE_BYTES = 64 * 1024
-
-# Two Guard installs (for example a desktop app and a package-manager CLI) share
-# one home-wide resident. Only one owns it; the other is healthy, not broken.
-_REASON_MESSAGES = {
-    "native_resident_owner_busy": (
-        "Another Guard install on this account owns the native resident runtime, so this "
-        "install cannot start its own. Nothing crashed and no restarts were used. Keep one "
-        "Guard install per user, or keep both on the same version so they share one runtime."
-    ),
-}
 
 
 def _published_generations(state_base: Path, runtime_sha256: str) -> tuple[int, bool]:
@@ -100,7 +91,7 @@ def _owner_busy(guard_home: Path | None, runtime_sha256: str | None) -> bool:
 
 def _with_reason(result: NativeAvailabilityResult, reason: str) -> NativeAvailabilityResult:
     result["reason_code"] = reason
-    message = _REASON_MESSAGES.get(reason)
+    message = native_runtime_message(reason)
     if message is not None:
         result["message"] = message
     return result
@@ -220,6 +211,12 @@ def native_runtime_section(
         "daemon_http": daemon_admission_snapshot(),
         "resident": native_resident_presence(guard_home, _passive_runtime_sha256()),
     }
+    # A reason code is the runtime layer's word for its own decision. When that
+    # decision leaves protection off, the report also has to say what is wrong
+    # and what fixes it, which the code itself never does.
+    diagnosis = native_runtime_diagnosis(availability["reason_code"], available=availability["available"])
+    if diagnosis is not None:
+        section["diagnosis"] = diagnosis
     bundled_runtime = bundled_native_runtime_report()
     if bundled_runtime is not None:
         section["bundled"] = bundled_runtime

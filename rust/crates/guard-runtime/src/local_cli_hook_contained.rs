@@ -23,6 +23,7 @@ use crate::local_cli_hook_op::Launch;
 pub(crate) const ALLOW_CONTAINED_WITH_GRANT: &str = "allow-contained-with-grant";
 /// The review `workspace_contained` leaves when the sandbox cannot run the
 /// program; `guard_command::pretool::workspace_contained::OUTSIDE_ROOTS_REASON`.
+#[cfg(test)]
 pub(crate) const OUTSIDE_ROOTS_REASON: &str =
     "native_workspace_containment_executable_outside_roots";
 /// The reason code a sandbox-bound command the grant widens is routed to;

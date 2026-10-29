@@ -25,6 +25,11 @@ pub const HOOK_DECISION_CONTAINMENT_REWRITE_FEATURE: &str = "hook-decision-conta
 /// for an envelope that carries `containment_sink`.
 pub const EDGE_CONTAINMENT_REWRITE_FEATURE: &str = "edge-containment-rewrite-v1";
 
+/// Advertised when the PreToolUse edge also answers Cursor's route probe for
+/// a call it routes to the sink, for an envelope that carries
+/// `containment_sink`.
+pub const EDGE_CURSOR_PROBE_FEATURE: &str = "edge-cursor-probe-v1";
+
 /// The native PreToolUse result a hook answers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

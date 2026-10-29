@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -200,19 +201,38 @@ def test_hook_copy_probe_matches_the_daemon() -> None:
 
 
 class _RoutingWorker:
-    def __init__(self, route: str = "sink") -> None:
+    def __init__(
+        self,
+        route: str = "sink",
+        *,
+        features: tuple[str, ...] = (),
+        answer: dict[str, object] | None = None,
+        mark: str = "routed",
+    ):
         self.route = route
+        self.features = features
+        self.answer = answer
+        self.mark = mark
+        self.containment_sink: list[object] = []
 
     def _native_policy_snapshot(self, *_args: object, **_kwargs: object) -> object:
         return object()
 
-    def _review_raw_hook_native(self, **_kwargs: object) -> dict[str, object]:
-        return {
+    def _native_runtime_status(self) -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(features=self.features))
+
+    def _review_raw_hook_native(self, **kwargs: object) -> dict[str, object]:
+        self.containment_sink.append(kwargs.get("containment_sink"))
+        edge: dict[str, object] = {
             "harness": "cursor",
             "event_name": "PreToolUse",
             "containment_route": self.route,
             "result": {"decision": "deny"},
         }
+        if self.answer is not None:
+            edge["containment_rewrite"] = self.mark
+            edge["harness_response"] = self.answer
+        return edge
 
 
 @posix_only
@@ -261,5 +281,81 @@ def test_a_probe_the_edge_does_not_route_to_the_sink_skips_the_resident(
     monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
     monkeypatch.setattr(native_hook_render, "native_render_cli", lambda kind, *_a, **_k: asked.append(kind))
     worker = _RoutingWorker(edge_route)
+    assert _respond(_PROBE, tmp_path, worker) == {"policy_action": "allow"}  # type: ignore[arg-type]
+    assert asked == []
+
+
+@posix_only
+def test_a_probe_the_edge_answers_skips_the_resident(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    routed = {"policy_action": "allow", "reason_code": _ROUTED, "hookSpecificOutput": {"updatedInput": _SINK}}
+    asked: list[str] = []
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", lambda kind, *_a, **_k: asked.append(kind))
+    worker = _RoutingWorker(features=(route._EDGE_PROBE_FEATURE,), answer=routed)
+    assert _respond(_PROBE, tmp_path, worker) == routed  # type: ignore[arg-type]
+    # The edge is asked for the sink rewrite, and the resident never renders.
+    assert worker.containment_sink == [True]
+    assert asked == []
+
+
+@posix_only
+def test_an_older_resident_still_renders_the_probe(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    routed = {"policy_action": "allow", "reason_code": _ROUTED, "hookSpecificOutput": {"updatedInput": _SINK}}
+    asked: list[str] = []
+
+    def render(kind: str, *_args: object, **_kwargs: object) -> tuple[str, object]:
+        asked.append(kind)
+        return ("document", {"value": routed})
+
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", render)
+    # Without the feature, an answer the edge carries anyway is not trusted.
+    worker = _RoutingWorker(answer={"policy_action": "allow"})
+    assert _respond(_PROBE, tmp_path, worker) == routed  # type: ignore[arg-type]
+    assert worker.containment_sink == [False]
+    assert asked == ["cursor_shell_route"]
+
+
+@posix_only
+@pytest.mark.parametrize(
+    ("mark", "answer"),
+    [
+        # The generic rewrite keeps the receipt rather than the probe's allow.
+        ("kept", {"policy_action": "block", "decision": "deny", "reason_code": "native_contained_execution_required"}),
+        ("routed", {"policy_action": "allow"}),
+    ],
+)
+def test_an_edge_answer_that_is_not_a_probe_answer_still_renders(
+    tmp_path: Path, monkeypatch, mark: str, answer: dict[str, object]
+) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    routed = {"policy_action": "allow", "reason_code": _ROUTED, "hookSpecificOutput": {"updatedInput": _SINK}}
+    asked: list[str] = []
+
+    def render(kind: str, *_args: object, **_kwargs: object) -> tuple[str, object]:
+        asked.append(kind)
+        return ("document", {"value": routed})
+
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", render)
+    # A resident replaced after the feature was read answers with its own rewrite.
+    worker = _RoutingWorker(features=(route._EDGE_PROBE_FEATURE,), answer=answer, mark=mark)
+    assert _respond(_PROBE, tmp_path, worker) == routed  # type: ignore[arg-type]
+    assert asked == ["cursor_shell_route"]
+
+
+@posix_only
+def test_a_probe_the_edge_keeps_is_its_plain_allow(tmp_path: Path, monkeypatch) -> None:
+    from codex_plugin_scanner.guard import native_hook_render, native_policy_snapshot_harness_postures
+
+    asked: list[str] = []
+    monkeypatch.setattr(native_policy_snapshot_harness_postures, "recording_only_for_binding", lambda *_: False)
+    monkeypatch.setattr(native_hook_render, "native_render_cli", lambda kind, *_a, **_k: asked.append(kind))
+    worker = _RoutingWorker(features=(route._EDGE_PROBE_FEATURE,), answer={"policy_action": "allow"}, mark="kept")
     assert _respond(_PROBE, tmp_path, worker) == {"policy_action": "allow"}  # type: ignore[arg-type]
     assert asked == []

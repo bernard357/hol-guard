@@ -492,26 +492,6 @@ def native_workspace_label(
     return result["text"]
 
 
-def native_apply_patch_paths(tool_input: object, *, guard_home: Path | str | None = None) -> tuple[str, ...]:
-    """Return the target paths named by an apply-patch tool input."""
-
-    if not isinstance(tool_input, Mapping):
-        return ()
-
-    def build(shrunk: bool) -> _Built | None:
-        if shrunk:
-            return None
-        tagger = _Tagger()
-        query: dict[str, object] = {"kind": "apply_patch_paths", "tool_input": _tagged(tagger, tool_input)}
-        return query, tagger
-
-    result = _call(build, guard_home=guard_home, deadline=None, shape="plain")
-    paths = result.get("paths") if isinstance(result, dict) and set(result) == {"paths"} else None
-    if not isinstance(paths, list) or not all(isinstance(item, str) for item in paths):
-        raise NativeHookAdapterError(_INVALID)
-    return tuple(paths)
-
-
 __all__ = [
     "HOOK_ADAPTER_FEATURE",
     "ClinePayloadError",
@@ -519,7 +499,6 @@ __all__ = [
     "UnsupportedHarnessError",
     "hook_adapter_memo",
     "native_action_envelope",
-    "native_apply_patch_paths",
     "native_command_text",
     "native_review_request",
     "native_workspace_label",

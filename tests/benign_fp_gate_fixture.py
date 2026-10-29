@@ -95,12 +95,16 @@ class BenignFixture:
     # The same worktree named through a linked ancestor, as a macOS host spells
     # any `/tmp` checkout: `/tmp` resolves to `/private/tmp`.
     linked_worktree: Path
+    # A linked worktree in the per-user temporary directory ``$TMPDIR`` names:
+    # below ``/private/var/folders`` on macOS, ``/tmp`` elsewhere.
+    user_tmp_worktree: Path
 
     def cleanup(self) -> None:
         """Remove the directories this fixture created outside its own root."""
         shutil.rmtree(self.private_tmp, ignore_errors=True)
         shutil.rmtree(self.contained_requests, ignore_errors=True)
         shutil.rmtree(self.tmp_worktree.parent, ignore_errors=True)
+        shutil.rmtree(self.user_tmp_worktree.parent, ignore_errors=True)
         shutil.rmtree(self.tmp_org.parent, ignore_errors=True)
         shutil.rmtree(self.scratch, ignore_errors=True)
         shutil.rmtree(self.stage, ignore_errors=True)
@@ -135,6 +139,7 @@ class BenignFixture:
             "${ORG_CLONE}": str(self.org.parent / "app-portal-clone"),
             "${PORTAL_WEB_HEAD}": head_commit(self.org),
             "${TMP_ORG}": str(self.tmp_org),
+            "${USER_TMP_WORKTREE}": str(self.user_tmp_worktree),
             "${TMP_ORG_WT}": str(self.tmp_org.parent / "app-followup"),
             "${TMP_REMOTE}": str(self.tmp_org.parent / "remote" / "app.git"),
             # The live Gauntlet's fixture root and its fresh scratch leaf directly in /tmp.
@@ -156,9 +161,11 @@ class BenignFixture:
             "parent": self.parent,
             "nested": self.nested,
             "tmp_worktree": self.tmp_worktree,
+            "user_tmp_worktree": self.user_tmp_worktree,
             "gitlink_repo": self.gitlink_repo,
             "org": self.org,
             "edge_clone": self.home / "edge-clone",
+            "home_project": self.home / "project",
             "org_app": self.org / "app-portal",
             "org_wt": self.org.parent / "app-portal-fix",
             "org_clone": self.org.parent / "app-portal-clone",
@@ -365,6 +372,10 @@ def build_fixture(root: Path) -> BenignFixture:
     # Workspace as a linked worktree under the system temp area whose registered siblings are outside cwd.
     tmp_worktree = Path(tempfile.mkdtemp(prefix="wt.", dir=_system_tmp())).resolve() / "workspace"
     _git(parent, "worktree", "add", "--quiet", "-b", "tmp-feature", str(tmp_worktree), home=home)
+    user_tmp_worktree = Path(tempfile.mkdtemp(prefix="wt.", dir=tempfile.gettempdir())).resolve() / "workspace"
+    _git(parent, "worktree", "add", "--quiet", "-b", "user-tmp-feature", str(user_tmp_worktree), home=home)
+    # A hidden tool directory inside it, which never takes a dependency link.
+    (user_tmp_worktree / ".cache").mkdir()
 
     # Tracked gitlink plus a filter attribute: must remain reviewable.
     gitlink_repo.mkdir(parents=True)
@@ -545,6 +556,7 @@ def build_fixture(root: Path) -> BenignFixture:
         scratch,
         stage,
         linked_worktree,
+        user_tmp_worktree,
     )
     _write(fixture.scratch_copy, "export const reportWindow = 'report-window-marker';\n")
     _write(

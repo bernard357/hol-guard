@@ -63,9 +63,7 @@ from codex_plugin_scanner.guard.runtime import wrapper_run as wrapper_run
 from codex_plugin_scanner.guard.runtime.approval_context import (
     APPROVAL_CONTEXT_TOKEN_PREFIX,
 )
-from codex_plugin_scanner.guard.runtime.secret_file_request_services import constants_core
 from codex_plugin_scanner.guard.runtime.secret_file_requests import (
-    extract_sensitive_file_write_request,
     extract_sensitive_tool_action_request,
 )
 from codex_plugin_scanner.guard.store import (
@@ -14200,19 +14198,6 @@ def test_guard_runtime_does_not_target_harmless_inline_process_command(tmp_path)
     assert match is None or match.reason_code != "pytest_restricted_profile_required"
 
 
-def test_guard_runtime_allows_apply_patch_to_non_sensitive_source_file(tmp_path):
-    patch = """*** Begin Patch
-*** Update File: src/codex_plugin_scanner/guard/runtime/secret_file_requests.py
-@@
-+def _shell_interpreter_flag_payload(parts: list[str], index: int) -> object:
-+    return _interpreter_flag_payload(parts, index)
-*** End Patch"""
-
-    match = extract_sensitive_file_write_request("apply_patch", {"input": patch}, cwd=tmp_path)
-
-    assert match is None
-
-
 def test_guard_runtime_does_not_execute_classify_apply_patch_content(tmp_path):
     patch = """*** Begin Patch
 *** Update File: docs/notes.md
@@ -14221,48 +14206,6 @@ def test_guard_runtime_does_not_execute_classify_apply_patch_content(tmp_path):
 *** End Patch"""
 
     match = extract_sensitive_tool_action_request("apply_patch", patch, cwd=tmp_path)
-
-    assert match is None
-
-
-def test_guard_runtime_blocks_apply_patch_to_sensitive_file(tmp_path):
-    patch = """*** Begin Patch
-*** Update File: .env
-@@
--TOKEN=old
-+TOKEN=new
-*** End Patch"""
-
-    match = extract_sensitive_file_write_request("apply_patch", {"input": patch}, cwd=tmp_path)
-
-    assert match is not None
-    assert match.path_class == "local .env file"
-
-
-def test_guard_runtime_checks_all_apply_patch_payload_keys(tmp_path):
-    sensitive_patch = """*** Begin Patch
-*** Update File: .env
-@@
--TOKEN=old
-+TOKEN=new
-*** End Patch"""
-
-    match = extract_sensitive_file_write_request(
-        "apply_patch",
-        {"patch": "no patch headers", "input": sensitive_patch},
-        cwd=tmp_path,
-    )
-
-    assert match is not None
-    assert match.path_class == "local .env file"
-
-
-def test_guard_runtime_ignores_patch_syntax_for_other_write_tools(tmp_path):
-    match = extract_sensitive_file_write_request(
-        "write",
-        {"input": "*** Update File: .env\n..."},
-        cwd=tmp_path,
-    )
 
     assert match is None
 
@@ -15060,13 +15003,6 @@ def test_guard_runtime_keeps_mutating_pytest_flags_sensitive(tmp_path):
 
     assert binary_match is not None
     assert binary_match.action_class == "destructive shell command"
-
-
-def test_guard_runtime_keeps_pytest_allowlist_disjoint_from_mutating_flags():
-    pytest_mutating_flags = constants_core._PYTHON_MODULE_MUTATING_FLAGS["pytest"]
-
-    assert constants_core._PYTEST_SAFE_FLAGS.isdisjoint(pytest_mutating_flags)
-    assert constants_core._PYTEST_SAFE_FLAGS_WITH_VALUES.isdisjoint(pytest_mutating_flags)
 
 
 def _resident_risk_classes(artifact: GuardArtifact, guard_home: Path) -> object:

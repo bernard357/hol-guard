@@ -249,11 +249,12 @@ def test_the_resident_route_matches_the_retired_python_edge(native_approval_reus
     assert _route(home, contained, watch=True) == "none"
     assert _route(home, contained, event="PostToolUse") == "none"
     assert _route(home, contained, event=None) == "none"
-    assert _route(home, _review()) == "grant"
-    assert _route(home, _review(action={"action_type": "shell"})) == "grant"
+    # An outside-roots review keeps its answer: an allowed CLI lifts it in the
+    # edge's custom rule, so nothing routes it.
     assert _route(home, _review(), watch=True) == "none"
-    # Only a review the saved-approval path could also override reaches the grant.
     for result in (
+        _review(),
+        _review(action={"action_type": "shell"}),
         _review(reason_code="native_policy_review"),
         _review(minimum_action="allow"),
         _review(policy_action="require-reapproval"),

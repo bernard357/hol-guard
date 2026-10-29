@@ -111,8 +111,9 @@ fn with(mut inputs: Value, field: &str, value: Value) -> Value {
 #[test]
 fn a_review_keeps_allow_once_and_always_allow() {
     // An ordinary review is not routed: it keeps its card with Allow once and
-    // Always allow. Only an outside-roots review a grant may lift asks the
-    // grant, and the sink never takes a review receipt itself.
+    // Always allow, an outside-roots review included: an allowed CLI lifts
+    // that one in the edge's custom rule. The sink never takes a review
+    // receipt itself.
     assert_eq!(
         route(&route_inputs(
             "review",
@@ -131,7 +132,7 @@ fn a_review_keeps_allow_once_and_always_allow() {
     );
     assert_eq!(
         route(&route_inputs("review", "review", OUTSIDE_ROOTS)),
-        "grant"
+        "none"
     );
     let review = with(
         pytest_inputs("macos", "claude-code"),
@@ -184,36 +185,6 @@ fn watch_and_other_events_are_never_routed() {
         json!(true),
     );
     assert_eq!(route(&watched_review), "none");
-}
-
-#[test]
-fn guard_control_and_package_reviews_never_reach_the_grant() {
-    for action_type in [
-        json!("guard_control"),
-        json!("guard-control"),
-        json!("guard_control_operation"),
-        json!("guard-control-operation"),
-        json!("package"),
-        json!(["shell"]),
-        json!({"kind": "shell"}),
-    ] {
-        let inputs = with(
-            route_inputs("review", "review", OUTSIDE_ROOTS),
-            "action_type",
-            action_type,
-        );
-        assert_eq!(route(&inputs), "none", "{inputs}");
-    }
-    for action_type in [Value::Null, json!(7), json!("shell")] {
-        let inputs = with(
-            route_inputs("review", "review", OUTSIDE_ROOTS),
-            "action_type",
-            action_type,
-        );
-        assert_eq!(route(&inputs), "grant", "{inputs}");
-    }
-    let partial = route_inputs("review", "block", OUTSIDE_ROOTS);
-    assert_eq!(route(&partial), "none");
 }
 
 #[test]

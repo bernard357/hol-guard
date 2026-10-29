@@ -245,6 +245,7 @@ def render_runtime_status(section: dict[str, object]) -> str:
     message = availability.get("message")
     if isinstance(message, str) and message:
         lines.append(f"  {message}")
+    lines.extend(_render_diagnosis(section.get("diagnosis"), reported=message if isinstance(message, str) else None))
     lines.extend(_render_resident(section.get("resident")))
     bundled = section.get("bundled")
     if isinstance(bundled, dict):
@@ -255,6 +256,32 @@ def render_runtime_status(section: dict[str, object]) -> str:
     lines.append(f"  Daemon HTTP gate, this process: {_render_counters(section.get('daemon_http'))}")
     lines.append("Those counters cover this command only. The hook and the daemon keep their own.")
     return "\n".join(lines) + "\n"
+
+
+def _render_diagnosis(diagnosis: object, *, reported: str | None) -> list[str]:
+    """Print the plain-language diagnosis under the reason code it explains.
+
+    The summary is skipped only when the availability line above it already
+    carried that same text, so a shared resident is explained once rather than
+    twice while a diagnosis that says something else is still printed. The
+    action and the per-slot evidence are printed either way.
+    """
+
+    if not isinstance(diagnosis, dict):
+        return []
+    lines: list[str] = []
+    summary = diagnosis.get("summary")
+    if isinstance(summary, str) and summary and summary != reported:
+        lines.append(f"  {summary}")
+    action = diagnosis.get("action")
+    if isinstance(action, str) and action:
+        lines.append(f"  What to do: {action}")
+    candidates = diagnosis.get("candidates")
+    rows = [item for item in candidates if isinstance(item, dict)] if isinstance(candidates, list) else []
+    if rows:
+        found = ", ".join(f"{row.get('slot', 'unknown')} {row.get('state', 'unknown')}" for row in rows)
+        lines.append(f"  Runtime binary, by install slot: {found}.")
+    return lines
 
 
 def _render_resident(resident: object) -> list[str]:

@@ -49,7 +49,7 @@ pub(in super::super) fn proven(
 }
 
 /// The `git worktree add` segment directly followed by a `cd`, a routed
-/// `git -C` read, or a `mkdir`.
+/// `git -C` read, a `mkdir`, or an `ln`.
 fn worktree_index(model: &CanonicalCommandV1) -> Option<usize> {
     let index = model.segments.iter().position(|segment| {
         segment
@@ -59,7 +59,7 @@ fn worktree_index(model: &CanonicalCommandV1) -> Option<usize> {
             && super::parse(segment).is_some()
     })?;
     let next = model.segments.get(after_creation(model, index))?;
-    (matches!(next.executable.as_deref(), Some("cd" | "mkdir"))
+    (matches!(next.executable.as_deref(), Some("cd" | "mkdir" | "ln"))
         || super::chain_route::routed_position(next).is_some())
     .then_some(index)
 }
@@ -124,6 +124,7 @@ fn prove(
         return false;
     }
     let entered = next.executable.as_deref() == Some("cd");
+    let linked = next.executable.as_deref() == Some("ln");
     let boundary = super::separator_between(model, after - 1, after);
     // `&&` straight after the add tests the add's own exit status, so the
     // checkout is there before anything reads it. A stage of the add's own
@@ -131,18 +132,17 @@ fn prove(
     // spellings prove the add ran only through the `cd`: the checkout proof
     // read the destination and found nothing there, so entering it succeeds
     // only once the add has created it, and a failed `cd` stops the `&&`
-    // that carries the reads.
-    if !matches!(
-        (
-            boundary.as_deref().map(str::trim),
-            after == add + 1,
-            entered
-        ),
-        (Some("&&"), true, _) | (Some("&&" | ";"), _, true)
-    ) {
+    // that carries the reads. An `ln` into the checkout fails the same way
+    // while the checkout is not there, and its `&&` carries the rest.
+    let joined = match boundary.as_deref().map(str::trim) {
+        Some("&&") => after == add + 1 || entered || linked,
+        Some(";") => entered,
+        _ => false,
+    };
+    if !joined {
         return false;
     }
-    let Some((destination, chdir)) = super::proven_checkout(
+    let Some((destination, chdir, commit)) = super::proven_checkout(
         creation,
         fetch_before,
         context,
@@ -165,15 +165,19 @@ fn prove(
         ..context
     };
     let first = if entered { after + 1 } else { after };
-    // Without a `cd` the chain must read the new checkout: an add followed
-    // only by `mkdir` keeps the review work-tree updates give later writes.
+    // Without a `cd` the chain must read or link into the new checkout: an
+    // add followed only by `mkdir` keeps the review work-tree updates give
+    // later writes.
     if !entered
         && !segments[first..]
             .iter()
-            .any(|segment| segment.executable.as_deref() == Some("git"))
+            .any(|segment| matches!(segment.executable.as_deref(), Some("git" | "ln")))
     {
         return false;
     }
+    // A second `ln` to the same path would follow the first link and write
+    // into the directory it points at.
+    let mut linked_paths = Vec::new();
     (first..segments.len()).all(|index| {
         let joined = super::separator_between(model, index - 1, index);
         if !joined
@@ -201,6 +205,24 @@ fn prove(
         }
         if segment.executable.as_deref() == Some("mkdir") {
             return proven_mkdir(segment, &destination, context);
+        }
+        if segment.executable.as_deref() == Some("ln") {
+            return super::links::proven_link(
+                segment,
+                creation,
+                &destination,
+                commit.as_deref(),
+                context,
+                repository,
+                deadline,
+                execution_environment,
+            )
+            .is_some_and(|path| {
+                let key = path.to_string_lossy().to_ascii_lowercase();
+                let fresh = !linked_paths.contains(&key);
+                linked_paths.push(key);
+                fresh
+            });
         }
         routed_read(
             model,

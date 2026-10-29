@@ -18,7 +18,6 @@ from ..native_resident_client import (
 from ..native_resident_revival import native_unavailable_reason
 from ..native_runtime import NativeRuntimeStatus
 from .hook_availability_policy import availability_harness_response
-from .hook_contained_grant import granted_containment_response
 from .hook_evidence_dispatch import run_hook_evidence
 from .hook_fail_closed import render_pre_tool, render_recording_only_pre_tool
 from .hook_native_review_approval import (
@@ -418,23 +417,6 @@ class HookWorkerNativeMixin:
             # The resident stamped its route on the edge answer, and the decoder
             # refuses an unstamped one; Python never picks a route.
             containment = edge.get("containment_route", "none")
-            try:
-                contained = None
-                if containment == "grant":
-                    contained = granted_containment_response(
-                        self.store,
-                        native_result,
-                        harness=native_harness,
-                        payload=payload,
-                        guard_home=guard_home,
-                        home_dir=home_dir,
-                        workspace=workspace,
-                        deadline=deadline,
-                    )
-            except NativeHookDecisionError as error:
-                return _containment_outage(self, payload, native_harness, error, guard_home, deadline)
-            if contained is not None:
-                return (_record_native_pre_activity(self, native_harness, payload, contained, accepted_receipt), True)
             action = str(native_result.get("minimum_action") or "")
             if action in _NATIVE_PRE_TOOL_APPROVAL_ACTIONS:
                 response = pause_native_pre_tool_for_approval(
