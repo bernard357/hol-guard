@@ -28,8 +28,10 @@ _MAX_STAMPED_PATH_BYTES = 32 * 1024
 _DEFAULT_EQUIVALENT_PAGER = re.compile(r"(?:cat|less(?: -[ABCEFGIJKLMNQRSUVWXacdefgimnqrsuw~]+)*)?")
 # `NODE_OPTIONS` flags that only size the heap or change diagnostics; none
 # loads code, reads a file or opens a port. The pattern has no backslash or
-# brace so generated hook sources can embed it unchanged. Native runtimes apply
-# the same rule in `guard_contracts::node_options_inert`.
+# brace so generated hook sources can embed it unchanged. The rule itself is
+# owned by `guard_contracts::node_options_inert`; these senders run inside the
+# host before Guard's runtime is reached, so they carry a copy that
+# tests/test_hook_node_options_inert.py holds to the Rust test table.
 _INERT_NODE_OPTION = (
     "--(?:(?:no[-_]warnings|no[-_]deprecation|enable[-_]source[-_]maps"
     "|trace[-_]warnings|trace[-_]deprecation|trace[-_]uncaught)"
