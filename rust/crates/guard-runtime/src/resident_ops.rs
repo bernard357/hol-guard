@@ -806,6 +806,9 @@ pub(crate) fn evaluate_resident_bytes_with_cancellation(
             | ResidentOperationV1::ContainmentHealthProbe(_) => {
                 Err("native_operation_unavailable_on_this_platform".to_owned())
             }
+            ResidentOperationV1::ResidentHealth(request) => {
+                crate::resident_health_op::evaluate_resident_health(&request)
+            }
             ResidentOperationV1::Health(_request) => encode_response(&serde_json::json!({
                 "status": "ready",
                 "protocol_version": crate::RESIDENT_PROTOCOL_VERSION,

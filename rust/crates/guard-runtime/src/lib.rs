@@ -729,6 +729,7 @@ mod request_context_shell;
 mod resident_client;
 mod resident_diagnostics;
 mod resident_endpoint;
+mod resident_health_op;
 mod resident_inspection_host;
 mod resident_inspection_services;
 mod resident_op_features;

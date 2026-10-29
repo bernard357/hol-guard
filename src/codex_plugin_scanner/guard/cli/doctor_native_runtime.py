@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from ..adapters.diagnostic_probes import skipped_command_probe
 from ..native_policy_snapshot_constants import NATIVE_RUNTIME_STATE_DIRECTORY
@@ -165,6 +165,10 @@ class NativeResidentPresence(TypedDict):
     live: bool | None
     owner_lock_held: bool | None
     generations: int
+    # The serving resident's own answer about itself, present only when one was
+    # already running and answered. Its absence is not a fault: it says the
+    # question went unanswered, never that the resident is unhealthy.
+    serving: NotRequired[dict[str, Any] | None]
 
 
 def native_resident_presence(guard_home: Path | None, runtime_sha256: str | None) -> NativeResidentPresence:
@@ -204,12 +208,21 @@ def native_runtime_section(
     from .update_commands import bundled_native_runtime_report
 
     availability = doctor_native_availability(guard_home)
+    resident = native_resident_presence(guard_home, _passive_runtime_sha256())
+    if resident["live"] is True and guard_home is not None:
+        # Only ever asked of a resident that is already serving, so the report
+        # stays a passive observation. The question rides the resident's
+        # reserved control lane, so a busy resident answers it too: a published
+        # pid alone cannot tell a wedged resident from a working one.
+        from ..native_resident_health import native_resident_health
+
+        resident["serving"] = native_resident_health(guard_home=guard_home)
     section: dict[str, object] = {
         "availability": availability,
         # The HTTP gate counts this process only; a fresh CLI invocation
         # reports its own zeros, not the daemon's totals.
         "daemon_http": daemon_admission_snapshot(),
-        "resident": native_resident_presence(guard_home, _passive_runtime_sha256()),
+        "resident": resident,
     }
     # A reason code is the runtime layer's word for its own decision. When that
     # decision leaves protection off, the report also has to say what is wrong
