@@ -29,16 +29,22 @@ pub(in crate::pretool) fn tracked_document(canonical: &Path, cwd: Option<&str>) 
     };
     let same_tree =
         repository_root(&workspace).is_some_and(|root| repository_root(canonical) == Some(root));
-    guard_secure_fs::source_document_extension(canonical)
-        && !canonical
+    (same_tree || super::super::worktree_writes::same_repository_worktree(&workspace, canonical))
+        && committed_document(canonical)
+}
+
+/// Whether `path` is a small, secret-free document listed in the index of
+/// whichever repository holds it. A recursive search reads every file it
+/// reaches, so a sibling checkout's committed catalog entry is held to the
+/// same proof as one in the session's own repository.
+pub(in crate::pretool) fn committed_document(path: &Path) -> bool {
+    guard_secure_fs::source_document_extension(path)
+        && !path
             .components()
             .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"))
-        && guard_secure_fs::sensitive_path_family(canonical).is_none()
-        && (same_tree
-            || super::super::worktree_writes::same_repository_worktree(&workspace, canonical))
-        && TrackedFiles::default().non_secret(canonical)
-        && std::fs::read(canonical)
-            .is_ok_and(|bytes| !secret_object(&String::from_utf8_lossy(&bytes)))
+        && guard_secure_fs::sensitive_path_family(path).is_none()
+        && TrackedFiles::default().non_secret(path)
+        && std::fs::read(path).is_ok_and(|bytes| !secret_object(&String::from_utf8_lossy(&bytes)))
 }
 
 /// Whether `value`, a path as a command or tool spelled it, resolves to a

@@ -406,9 +406,8 @@ pub(super) fn descendant_allowed(path: &Path, root: &Path, is_file: bool) -> boo
         .to_ascii_lowercase();
     !SECRET_EXTENSIONS.contains(&extension.as_str())
         && (!guard_secure_fs::credential_named_path(relative)
-            || path
-                .strip_prefix(root)
-                .is_ok_and(|relative| synthetic_fixture(root, relative)))
+            || synthetic_fixture(root, relative)
+            || crate::pretool::search_scope_tracked::names::committed_document(path))
 }
 
 /// Directories that hold a project's test data.
