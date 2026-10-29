@@ -81,6 +81,7 @@ fn run_as(lane: &Lane, harness: &str, home_dir: Option<&str>, payload: Value) ->
         home_dir: home_dir.map(str::to_owned),
         workspace: None,
         deadline_budget_ms: None,
+        emergency_safe_only: false,
         payload,
     };
     serde_json::from_slice(&evaluate(request, &lane.fixture.store).unwrap()).unwrap()
