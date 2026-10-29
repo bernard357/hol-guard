@@ -514,6 +514,8 @@ mod hook_direct_evidence;
 mod hook_env_stamp;
 #[cfg(all(test, unix))]
 mod mcp_config_discovery_tests;
+#[path = "adapters/detection/muse_detect.rs"]
+mod muse_detect;
 mod pack_lifecycle;
 mod pack_preparation;
 // The seams the evidence writer runs on. Each is reached through

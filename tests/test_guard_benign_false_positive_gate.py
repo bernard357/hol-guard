@@ -48,7 +48,14 @@ _CASES_PATH = Path(__file__).parent / "fixtures" / "benign_false_positive_gate.j
 _DOCUMENT = json.loads(_CASES_PATH.read_text(encoding="utf-8"))
 _PENDING_FIX: dict[str, str] = _DOCUMENT["pending_fix"]
 
-_SHELL_TOOL = {"codex": "Bash", "zcode": "Bash", "claude-code": "Bash", "omp": "bash", "cursor": "Shell"}
+_SHELL_TOOL = {
+    "codex": "Bash",
+    "zcode": "Bash",
+    "claude-code": "Bash",
+    "omp": "bash",
+    "cursor": "Shell",
+    "muse": "bash",
+}
 _READ_TOOL = {"zcode": "Read", "claude-code": "Read", "omp": "read", "cursor": "Read"}
 _GLOB_TOOL = {"claude-code": "Glob", "omp": "glob"}
 _GREP_TOOL = {"claude-code": "Grep", "omp": "grep"}
@@ -566,7 +573,7 @@ def test_pending_fix_entries_name_real_benign_cases() -> None:
 
 
 def test_every_harness_and_tool_family_is_exercised() -> None:
-    assert {case.harness for case in _CASES} == {"codex", "zcode", "claude-code", "omp", "cursor"}
+    assert {case.harness for case in _CASES} == {"codex", "zcode", "claude-code", "omp", "cursor", "muse"}
     omp_tools = {_tool_name(case) for case in _CASES if case.harness == "omp"}
     assert {"bash", "read", "glob", "grep", "eval", "task", "wait"} <= omp_tools
     assert sum(case.expect == "not_allow" for case in _CASES) >= 6

@@ -246,7 +246,7 @@ def test_a_setup_case_is_replayed_as_setup() -> None:
 
 def test_expansion_covers_pi_and_every_harness() -> None:
     cases = expand()
-    assert {c.harness for c in cases} == {"codex", "zcode", "claude-code", "omp", "pi", "cursor"}
+    assert {c.harness for c in cases} == {"codex", "zcode", "claude-code", "omp", "pi", "cursor", "muse"}
     ids = {c.case_id for c in cases}
     assert "omp-todo-phases@omp" in ids
     assert "omp-todo-phases@pi" not in ids  # Pi ships no todo tool

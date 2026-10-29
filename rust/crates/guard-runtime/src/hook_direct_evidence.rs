@@ -82,11 +82,15 @@ struct QueueState {
 impl QueueState {
     /// Queue one encoded record, or hand it back when the queue is full.
     fn push(&mut self, record: Value, bytes: usize, native: bool) -> Result<(), Value> {
-        if self.records.len() >= MAX_QUEUED_RECORDS || self.bytes + bytes > MAX_QUEUED_BYTES {
+        if !self.holds(bytes) {
             return Err(record);
         }
         self.append(record, bytes, native);
         Ok(())
+    }
+
+    fn holds(&self, bytes: usize) -> bool {
+        self.records.len() < MAX_QUEUED_RECORDS && self.bytes + bytes <= MAX_QUEUED_BYTES
     }
 
     /// Queue one encoded record past the queue's limits.
@@ -112,6 +116,13 @@ impl Default for QueueState {
             acked_through: 0,
         }
     }
+}
+
+fn unmarked(mut record: Value, marker: &str) -> Value {
+    if let Some(fields) = record.as_object_mut() {
+        fields.remove(marker);
+    }
+    record
 }
 
 pub(crate) struct DirectEvidenceQueue {
@@ -209,6 +220,48 @@ impl DirectEvidenceQueue {
     /// Where the resident returns receipts it could not write.
     pub(crate) fn unwritten(&self) -> Unwritten {
         Unwritten(Arc::clone(&self.state))
+    }
+
+    /// Queue one record, marking it with `marker` when `record_receipt`
+    /// records its receipt first; hand it back when the queue cannot hold it.
+    ///
+    /// The room check, the receipt and the push share one lock, so a receipt
+    /// is recorded only for a record the queue takes. The record goes
+    /// unmarked when the receipt is refused or the marked record would not
+    /// fit; the drain then submits the receipt, which the writer dedupes.
+    pub(crate) fn try_offer_recorded(
+        &self,
+        mut record: Value,
+        marker: &str,
+        record_receipt: impl FnOnce() -> bool,
+    ) -> Result<(), Value> {
+        let Ok(encoded) = serde_json::to_vec(&record) else {
+            return Err(record);
+        };
+        let bytes = encoded.len();
+        if bytes > MAX_RECORD_BYTES {
+            return Err(record);
+        }
+        let Some(fields) = record.as_object_mut() else {
+            return Err(record);
+        };
+        fields.insert(marker.to_owned(), Value::Bool(true));
+        let marked_bytes = serde_json::to_vec(&record).map_or(usize::MAX, |encoded| encoded.len());
+        let Ok(mut state) = self.state.lock() else {
+            return Err(unmarked(record, marker));
+        };
+        if !state.holds(bytes) {
+            return Err(unmarked(record, marker));
+        }
+        if marked_bytes <= MAX_RECORD_BYTES && state.holds(marked_bytes) && record_receipt() {
+            // Its receipt is already written.
+            state.append(record, marked_bytes, false);
+        } else {
+            let record = unmarked(record, marker);
+            let native = crate::mcp_relay_receipt::is_plain(&record);
+            state.append(record, bytes, native);
+        }
+        Ok(())
     }
 
     /// Acknowledge records the daemon already has, then copy the next page.

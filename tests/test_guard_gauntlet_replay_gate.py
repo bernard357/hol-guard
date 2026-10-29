@@ -174,7 +174,7 @@ def test_replayed_payload_is_quiet_offers_always_or_blocks(
 
 
 def test_every_harness_and_attack_class_is_covered() -> None:
-    assert {case.harness for case in _CASES} == {"codex", "zcode", "claude-code", "omp", "pi", "cursor"}
+    assert {case.harness for case in _CASES} == {"codex", "zcode", "claude-code", "omp", "pi", "cursor", "muse"}
     attacks = {
         "neg-read-aws-credentials",
         "neg-env-exfil-curl",

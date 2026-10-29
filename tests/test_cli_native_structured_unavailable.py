@@ -101,7 +101,6 @@ def _emit_unavailable(
     output = io.StringIO()
     rc = authority.route_native_hook(
         _Args(harness=harness),  # type: ignore[arg-type]
-        config=None,
         context=context,
         payload={"hook_event_name": event_name},
         runtime_workspace=context.workspace_dir,
@@ -160,7 +159,6 @@ def test_cli_worker_construction_failure_withholds_posttool_destination(
     output = io.StringIO()
     rc = authority.route_native_hook(
         _Args(harness=harness),  # type: ignore[arg-type]
-        config=None,
         context=context,
         payload={"hook_event_name": "PostToolUse"},
         runtime_workspace=context.workspace_dir,

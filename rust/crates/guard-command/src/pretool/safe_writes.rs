@@ -171,10 +171,17 @@ fn bounded_write_target(
     {
         return false;
     }
-    (canonical.starts_with(&workspace)
-        || super::worktree_writes::same_repository_worktree(&workspace, &canonical)
-        || verified_home.is_some())
-        && resolved_location_allowed(&canonical, home_dir, workspace.to_str(), false)
+    let inside = canonical.starts_with(&workspace);
+    let linked =
+        !inside && super::worktree_writes::same_repository_worktree(&workspace, &canonical);
+    // `git worktree add "$TMPDIR/<name>"` puts a checkout of this repository
+    // in the user's private temporary directory below `/private/var`. That
+    // checkout is the user's own work, not system state; every other location
+    // screen still runs on the path.
+    let temporary_checkout =
+        linked && super::read_paths::inside_private_temporary_directory(&canonical, home_dir);
+    (inside || linked || verified_home.is_some())
+        && resolved_location_allowed(&canonical, home_dir, workspace.to_str(), temporary_checkout)
         && (plan_note
             || guard_secure_fs::hidden_read_parts_allowed(&canonical)
             || screens::plain_dot_scratch_target(&canonical, home_dir))

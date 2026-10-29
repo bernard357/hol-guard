@@ -34,7 +34,15 @@ GATE_DOCUMENT = json.loads((FIXTURES / "benign_false_positive_gate.json").read_t
 
 # Tool names each harness really sends, by the case's abstract tool family. Pi names its built-ins
 # like omp, but ships only bash, read, edit, write, grep, find and ls.
-SHELL = {"codex": "Bash", "zcode": "Bash", "claude-code": "Bash", "omp": "bash", "pi": "bash", "cursor": "Shell"}
+SHELL = {
+    "codex": "Bash",
+    "zcode": "Bash",
+    "claude-code": "Bash",
+    "omp": "bash",
+    "pi": "bash",
+    "cursor": "Shell",
+    "muse": "bash",
+}
 READ = {"zcode": "Read", "claude-code": "Read", "omp": "read", "pi": "read", "cursor": "Read"}
 GLOB = {"claude-code": "Glob", "omp": "glob"}
 GREP = {"claude-code": "Grep", "omp": "grep", "pi": "grep"}

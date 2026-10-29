@@ -102,6 +102,17 @@ def _worker(
         }
         receipt["decision_id"] = hashlib.sha256(canonical_receipt_bytes(receipt)).hexdigest()
         rendered["receipt"] = receipt
+        rendered.setdefault(
+            "harness_response",
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": result["reason"],
+                },
+                "policy_action": result["policy_action"],
+            },
+        )
         return with_review_evidence(rendered, **kwargs)
 
     monkeypatch.setattr(

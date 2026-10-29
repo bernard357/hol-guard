@@ -137,12 +137,27 @@ fn verdict(
     // Past this point every Git read is probed in one directory. A later
     // `cd` the read prefixes above did not account for moves the reads after
     // it somewhere this probe never looked.
-    if git_after_later_cd(model) {
+    //
+    // `git worktree add <path> && cd <path> && ...` with only Git and GitHub
+    // after the `cd` is the exception: that Git runs in a linked worktree the
+    // worktree proof showed reads this repository's configuration, so its
+    // reads are probed here, where the checkout's configuration lives now.
+    let entered = super::worktree_add::chain::reads_in_entered_checkout(
+        model,
+        context,
+        deadline,
+        execution_environment,
+    );
+    if !entered && git_after_later_cd(model) {
         return Verdict::Review;
     }
     // `cd ../app && git status` runs the read in `../app`, so it is probed
     // there. The `cd` itself writes nothing a later read could pick up.
-    let destination = super::segment_proof::git_read_cwd_compound_context(model, context);
+    let destination = if entered {
+        None
+    } else {
+        super::segment_proof::git_read_cwd_compound_context(model, context)
+    };
     let read_context = super::PathContext {
         cwd: destination.as_deref().or(context.cwd),
         ..context

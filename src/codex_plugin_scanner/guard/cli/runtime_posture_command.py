@@ -8,8 +8,14 @@ Both are read only.
 Prints the executables configured MCP servers launch with their inferred family,
 version and identity assurance, matched against runtime advisories from the
 locally cached, signed supply-chain bundle when one is present. Nothing is
-started, no running process is enumerated, no Cloud call is made, and no
-setting, approval or policy changes. Unknown stays unknown.
+started, no Cloud call is made, and no setting, approval or policy changes.
+Unknown stays unknown.
+
+``--instances`` additionally asks the native probe which of those runtimes are
+running here and carries what it saw into the Guard home, so a later probe can
+still name a process whose launch path it no longer covers. That reads other
+processes and writes a file, so it is left off by default and reviewed like any
+other command that does.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ def configure_runtime_parser(guard_subparsers: argparse._SubParsersAction[argpar
     )
     _add_guard_common_args(runtime_parser)
     runtime_parser.add_argument("--json", action="store_true")
+    runtime_parser.add_argument("--instances", action="store_true")
     runtime_subparsers = runtime_parser.add_subparsers(dest="runtime_command", parser_class=FriendlyArgumentParser)
     posture_parser = runtime_subparsers.add_parser(
         "posture",
@@ -41,6 +48,7 @@ def configure_runtime_parser(guard_subparsers: argparse._SubParsersAction[argpar
     )
     _add_guard_common_args(posture_parser, suppress_defaults=True)
     posture_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    posture_parser.add_argument("--instances", action="store_true", default=argparse.SUPPRESS)
     status_parser = runtime_subparsers.add_parser(
         "status",
         help="Show whether Guard's own native runtime is available and whether a resident is running",
@@ -82,7 +90,9 @@ def run_runtime_posture_command(
         skipped_harnesses=skipped,
         advisory_bundle=advisory_bundle,
         advisory_bundle_reason=bundle_reason,
-        instance_home=context.guard_home,
+        # Enumerating running processes and keeping what was seen is a read of
+        # more than this command's own subject, so it waits to be asked for.
+        instance_home=context.guard_home if getattr(args, "instances", False) else None,
     )
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))
@@ -245,6 +255,7 @@ def render_runtime_status(section: dict[str, object]) -> str:
     message = availability.get("message")
     if isinstance(message, str) and message:
         lines.append(f"  {message}")
+    lines.extend(_render_diagnosis(section.get("diagnosis"), reported=message if isinstance(message, str) else None))
     lines.extend(_render_resident(section.get("resident")))
     bundled = section.get("bundled")
     if isinstance(bundled, dict):
@@ -255,6 +266,32 @@ def render_runtime_status(section: dict[str, object]) -> str:
     lines.append(f"  Daemon HTTP gate, this process: {_render_counters(section.get('daemon_http'))}")
     lines.append("Those counters cover this command only. The hook and the daemon keep their own.")
     return "\n".join(lines) + "\n"
+
+
+def _render_diagnosis(diagnosis: object, *, reported: str | None) -> list[str]:
+    """Print the plain-language diagnosis under the reason code it explains.
+
+    The summary is skipped only when the availability line above it already
+    carried that same text, so a shared resident is explained once rather than
+    twice while a diagnosis that says something else is still printed. The
+    action and the per-slot evidence are printed either way.
+    """
+
+    if not isinstance(diagnosis, dict):
+        return []
+    lines: list[str] = []
+    summary = diagnosis.get("summary")
+    if isinstance(summary, str) and summary and summary != reported:
+        lines.append(f"  {summary}")
+    action = diagnosis.get("action")
+    if isinstance(action, str) and action:
+        lines.append(f"  What to do: {action}")
+    candidates = diagnosis.get("candidates")
+    rows = [item for item in candidates if isinstance(item, dict)] if isinstance(candidates, list) else []
+    if rows:
+        found = ", ".join(f"{row.get('slot', 'unknown')} {row.get('state', 'unknown')}" for row in rows)
+        lines.append(f"  Runtime binary, by install slot: {found}.")
+    return lines
 
 
 def _render_resident(resident: object) -> list[str]:

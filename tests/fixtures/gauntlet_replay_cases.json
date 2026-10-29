@@ -328,7 +328,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -345,7 +346,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -362,7 +364,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -379,7 +382,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -396,7 +400,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
@@ -413,7 +418,8 @@
         "claude-code",
         "omp",
         "pi",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {

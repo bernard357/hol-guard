@@ -87,7 +87,7 @@ _TRANSIENT_RESIDENT_PUBLICATION_ERRORS = TRANSIENT_PUBLICATION_ERRORS | {"native
 # Harnesses whose PermissionRequest hook gets no decision, so the harness
 # shows its own approval prompt. Each raises it only after its PreToolUse
 # hook reviewed the same call.
-_PERMISSION_PASSTHROUGH_HARNESSES = frozenset({"codex", "copilot", "devin", "zcode"})
+_PERMISSION_PASSTHROUGH_HARNESSES = frozenset({"codex", "copilot", "devin", "zcode", "muse"})
 # The Claude hook fields the resident's lifecycle answers read: the session,
 # the prompt's kind and the tool it names.
 _CLAUDE_LIFECYCLE_FIELDS = ("session_id", "notification_type", "tool_name", "message", "title")

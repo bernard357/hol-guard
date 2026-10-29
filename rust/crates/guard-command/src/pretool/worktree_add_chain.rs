@@ -344,3 +344,157 @@ pub(crate) fn new_checkout_route(
             == Some(destination))
     .then_some(position)
 }
+
+/// The `cd` segments that enter exactly the checkout an earlier
+/// `git worktree add` of the same command creates, when every command after
+/// them is `git` or `gh`.
+///
+/// Entering the new checkout is what `git -C <path>` does for one step, so an
+/// extension Allow that covers the add and each Git or GitHub step after it
+/// covers the `cd` as well; those steps keep their own rules and floors.
+/// Their repository is the same one either way, because a linked worktree
+/// shares it. Any other command after the `cd` would have its paths judged
+/// against the shell's directory instead of the checkout, so it leaves the
+/// `cd` uncovered and the command keeps its review.
+///
+/// The bounded `head`, `tail` or `wc` stages of the steps after the `cd` are
+/// named too. They read only what the stage before them prints and name no
+/// path, so the directory they run in does not matter; the general proof,
+/// which follows no `cd` after the first step, would leave them uncovered
+/// where their `git -C` twins are not.
+pub(crate) fn entered_checkouts(
+    model: &CanonicalCommandV1,
+    context: super::super::PathContext<'_>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> Vec<usize> {
+    let Some((_, cd)) = entered_checkout(model, context, execution_environment) else {
+        return Vec::new();
+    };
+    // A `git` or `gh` stage keeps its own permission; only the stages that
+    // read standard input are named here.
+    let stage = |index: &usize| {
+        model.segments[*index].pipeline_index > 0
+            && super::chain_route::stdin_stage(
+                &model.segments[*index],
+                context,
+                execution_environment,
+            )
+    };
+    std::iter::once(cd)
+        .chain((cd + 1..model.segments.len()).filter(stage))
+        .collect()
+}
+
+/// Whether the command's Git after the `cd` that [`entered_checkouts`] names
+/// may be probed in the shell's own directory: the add takes no `-C` and the
+/// worktree proof holds for it. That proof rejects per-worktree
+/// configuration, every include and any filter the checked-out tree could
+/// select, so the new checkout reads the same configuration as the
+/// repository it shares, and a read helper-free here is helper-free there.
+pub(in super::super) fn reads_in_entered_checkout(
+    model: &CanonicalCommandV1,
+    context: super::super::PathContext<'_>,
+    deadline: Option<Instant>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> bool {
+    let Some((add, _)) = entered_checkout(model, context, execution_environment) else {
+        return false;
+    };
+    // Anything before the add may move the start point, so the proof then
+    // admits only the standard LFS filter.
+    matches!(
+        super::proven_checkout(
+            &model.segments[add],
+            add > 0,
+            context,
+            deadline,
+            execution_environment,
+        ),
+        Some((_, None, _))
+    )
+}
+
+/// The `git worktree add` and the `cd` into the checkout it creates, as
+/// [`entered_checkouts`] describes them.
+fn entered_checkout(
+    model: &CanonicalCommandV1,
+    context: super::super::PathContext<'_>,
+    execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
+) -> Option<(usize, usize)> {
+    if model.confidence != "exact" || model.path_overridden || !model.wrapper_chain.is_empty() {
+        return None;
+    }
+    // After the `cd` the shell looks up `git` and `gh` again, and a relative
+    // search path entry then names a folder of the new checkout, whose
+    // contents come from the ref it checks out.
+    let search_path = execution_environment
+        .map(|environment| std::ffi::OsString::from(&environment.path))
+        .or_else(|| std::env::var_os("PATH"))?;
+    if !std::env::split_paths(&search_path).all(|directory| directory.is_absolute()) {
+        return None;
+    }
+    let is = |segment: &CommandSegmentV1, names: &[&str]| {
+        segment.executable.as_deref().is_some_and(|value| {
+            let basename = super::super::executable_basename(value);
+            names.contains(&basename)
+        })
+    };
+    for (add, segment) in model.segments.iter().enumerate() {
+        // The add resolves its destination against the reported cwd, which
+        // is the shell's directory only until something changes it.
+        if is(segment, &["cd", "pushd", "popd"]) {
+            return None;
+        }
+        if segment.pipeline_index != 0 || !is(segment, &["git"]) {
+            continue;
+        }
+        let Some((_, destination, _)) = super::planned_checkout(segment, context) else {
+            continue;
+        };
+        let after = after_creation(model, add);
+        let next = model.segments.get(after)?;
+        if next.executable.as_deref() != Some("cd") || next.pipeline_index != 0 {
+            return None;
+        }
+        let joined = super::separator_between(model, after - 1, after)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|separator| matches!(separator, "&&" | ";"));
+        // A relative path after the `cd` names a file of the new checkout,
+        // which the ref supplies. A bare name uses the search path checked
+        // above. The add refuses an existing destination, so an absolute
+        // path that resolves now names a program outside it; one that does
+        // not resolve could only come from the checkout.
+        let resolved_outside = |later: &CommandSegmentV1| {
+            later.executable.as_deref().is_some_and(|value| {
+                !value.contains(['/', '\\'])
+                    || (Path::new(value).is_absolute()
+                        && std::fs::canonicalize(value)
+                            .is_ok_and(|resolved| !resolved.starts_with(&destination)))
+            })
+        };
+        // A later pipeline stage reads only what the step before it prints:
+        // a bounded `head`, `tail` or `wc` with no path of its own.
+        let rest_is_git = model.segments[after + 1..].iter().all(|later| {
+            resolved_outside(later)
+                && (is(later, &["git", "gh"])
+                    || (later.pipeline_index > 0
+                        && super::chain_route::stdin_stage(later, context, execution_environment)))
+        });
+        // If the add fails, the `cd` fails too and a `git` or `gh` step after
+        // `;` runs in the original checkout, judged by its own permission with
+        // its reads probed there. No proof here follows `||`.
+        let sequenced = (after + 1..model.segments.len()).all(|index| {
+            super::separator_between(model, index - 1, index)
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|separator| matches!(separator, "&&" | "|" | ";"))
+        });
+        return (joined
+            && rest_is_git
+            && sequenced
+            && super::chain_route::cd_target(next, context).as_ref() == Some(&destination))
+        .then_some((add, after));
+    }
+    None
+}

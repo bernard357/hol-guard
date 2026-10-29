@@ -76,6 +76,15 @@ def test_a_drained_answer_is_recorded_like_a_daemon_allow(tmp_path: Path, accept
     assert activity["receipt_id"] == RECEIPT["decision_id"]
 
 
+def test_a_receipt_the_resident_recorded_is_not_submitted_again(tmp_path: Path, accepted_receipts: None) -> None:
+    host = _host(tmp_path)
+    assert record_direct_hook_evidence(host, _record(receipt_recorded=True))
+
+    assert host.activity_writer.receipts == []
+    [activity] = host.activity_writer.activity
+    assert activity["receipt_id"] == RECEIPT["decision_id"]
+
+
 class _EventStore:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
