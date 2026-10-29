@@ -56,7 +56,7 @@ fn separates_a_loaded_resident_from_a_dead_one() {
     // A refusal moves the counter while the status stays `serving`: the caller
     // reads load, not death. A dead resident sends no reply at all. The counter
     // is process-wide, so another test's refusal may lift it further.
-    assert!(after.overloaded_requests >= before + 1);
+    assert!(after.overloaded_requests > before);
     assert_eq!(after.status, "serving");
 }
 
