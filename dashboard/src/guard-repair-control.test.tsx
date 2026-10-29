@@ -72,6 +72,36 @@ const attentionMarkup = renderToStaticMarkup(<GuardRepairStepList steps={attenti
 assert.match(attentionMarkup, /Needs you/);
 assert.doesNotMatch(attentionMarkup, /Fixed/);
 
+// A step that stopped at its own cleanup budget left work behind, so another
+// run does advance even though the hooks step is still waiting on the user.
+const mixedReport = normalizeRepairReport({
+  schema: "guard.repair.v1",
+  dry_run: false,
+  status: "partial",
+  summary: "x",
+  steps: [
+    {
+      step: "onefile_leaks",
+      title: "Leaked extraction folders",
+      status: "changed",
+      summary: "Reclaimed 25 leaked folder(s), about 40 MB. Run repair again to continue.",
+      budget_exhausted: true,
+    },
+    {
+      step: "hooks",
+      title: "Harness hooks",
+      status: "changed",
+      summary: "Reinstalled hooks for: claude-code. Still needs attention: codex.",
+      needs_attention: ["codex"],
+    },
+  ],
+});
+assert.equal(mixedReport.steps[0].budget_exhausted, true);
+assert.equal(mixedReport.steps[1].budget_exhausted, false);
+assert.match(repairHeadline(mixedReport), /Run Repair Guard again to continue the cleanup/);
+assert.doesNotMatch(repairHeadline(mixedReport), /reaches the same answer/);
+assert.match(repairHeadline(mixedReport), /Harness hooks/);
+
 const idleRepair = renderToStaticMarkup(<GuardRepairControl description="Hooks timing out?" />);
 assert.match(idleRepair, /Repair Guard/);
 assert.doesNotMatch(idleRepair, /role="dialog"/);

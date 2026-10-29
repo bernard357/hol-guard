@@ -47,9 +47,13 @@ export function repairHeadline(report: GuardRepairReport): string {
     // Repair reports "partial" for a step that needs the user as well as for
     // one that failed. Only the second is worth another run; telling the user
     // to repair again when nothing failed sends them round a loop that ends
-    // where it started.
+    // where it started. A step that ran out of budget is the exception: it
+    // left work another run picks up.
     const waiting = repairAttentionTitles(report.steps);
     const named = waiting.length > 0 ? ` Still waiting on you: ${waiting.join(", ")}.` : "";
+    if (report.steps.some((step) => step.budget_exhausted)) {
+      return `No repair step failed. Run Repair Guard again to continue the cleanup it could not finish.${named}`;
+    }
     return `No repair step failed, and running repair again reaches the same answer.${named}`;
   }
   if (report.status === "repaired") return "Guard was repaired. Restart any coding-agent session that was blocked.";

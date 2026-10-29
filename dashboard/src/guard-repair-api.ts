@@ -16,6 +16,8 @@ export type GuardRepairStep = {
   summary: string;
   /** What this step found that only the user can settle, such as apps whose hooks stayed broken. */
   needs_attention: string[];
+  /** The step stopped at its own budget, so another run has more to do here. */
+  budget_exhausted: boolean;
 };
 
 export type GuardRepairReport = {
@@ -74,6 +76,7 @@ export function normalizeRepairReport(payload: unknown): GuardRepairReport {
       needs_attention: Array.isArray(item.needs_attention)
         ? item.needs_attention.filter((entry): entry is string => typeof entry === "string")
         : [],
+      budget_exhausted: item.budget_exhausted === true,
     });
   }
   return {
@@ -165,6 +168,7 @@ export async function runGuardRepair(options: {
           status: "ok",
           summary: "All managed hooks verified.",
           needs_attention: [],
+          budget_exhausted: false,
         },
       ],
     };

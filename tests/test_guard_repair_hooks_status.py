@@ -112,3 +112,25 @@ def test_a_failed_step_still_asks_for_another_run(tmp_path: Path, monkeypatch: p
 
     assert step["status"] == "error"
     assert "Some steps failed. Re-run `hol-guard repair`" in str(report["summary"])
+
+
+def test_budget_exhausted_cleanup_still_asks_for_another_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A step that ran out of budget left work behind, even when another step waits on the user."""
+
+    context, store = _setup(tmp_path, monkeypatch, still_broken={"codex"})
+    hooks = repair_engine.repair_hooks(context, store, dry_run=False)
+    leaks = {
+        "step": "onefile_leaks",
+        "title": "Leaked extraction folders",
+        "status": "changed",
+        "summary": "Reclaimed 25 leaked folder(s), about 40 MB. Run repair again to continue.",
+        "budget_exhausted": True,
+    }
+
+    report = repair_engine.build_report([leaks, hooks], dry_run=False)
+    summary = str(report["summary"])
+
+    assert report["status"] == "partial"
+    assert "No step failed. Run `hol-guard repair` again to continue the cleanup it could not finish." in summary
+    assert "reaches the same answer" not in summary
+    assert "These still need attention: Harness hooks." in summary

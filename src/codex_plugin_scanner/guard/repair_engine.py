@@ -357,6 +357,12 @@ def _step_needs_attention(step: dict[str, object]) -> bool:
     return isinstance(attention, list) and bool(attention)
 
 
+def _step_ran_out_of_budget(step: dict[str, object]) -> bool:
+    """A step that stopped at its own budget with work left for the next run."""
+
+    return step.get("budget_exhausted") is True
+
+
 def build_report(steps: list[dict[str, object]], *, dry_run: bool) -> dict[str, object]:
     statuses = [str(item["status"]) for item in steps]
     if "error" in statuses or any(_step_needs_attention(item) for item in steps):
@@ -387,6 +393,11 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
     attention = [item for item in steps if _step_needs_attention(item)]
     if status == "partial" and any(str(item["status"]) == "error" for item in steps):
         lines.append("Some steps failed. Re-run `hol-guard repair`; if it persists, run `hol-guard doctor --json`.")
+    elif status == "partial" and any(_step_ran_out_of_budget(item) for item in steps):
+        # Nothing failed, but a step stopped at its own budget with work left.
+        # Another run picks that work up, even though it cannot settle what the
+        # steps below are waiting on.
+        lines.append("No step failed. Run `hol-guard repair` again to continue the cleanup it could not finish.")
     elif status == "partial":
         # Nothing here failed: the steps ran and found something only the user
         # can settle. Sending them back through repair would meet the same
