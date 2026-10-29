@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 # ruff: noqa: F403,F405
 from .native_approval_queue_identity import UNAVAILABLE as APPROVAL_QUEUE_IDENTITY_UNAVAILABLE
 from .native_approval_queue_identity import ApprovalQueueIdentityUnavailableError
@@ -11,6 +13,8 @@ from .native_consumer_artifact_project import NativeConsumerProjectError
 from .native_guard_store import NativeGuardStoreUnavailable
 from .native_signal_projection import NativeSignalProjectionUnavailableError
 from .store_base import *
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class StoreApprovalsMixin:
@@ -74,24 +78,35 @@ class StoreApprovalsMixin:
     def add_silent_native_review_approval_request(self, request: GuardApprovalRequest, now: str) -> str:
         # A review the agent never sees: the resident queues it and writes its
         # ``approval.created`` event, without marking a prompt as shown, in the
-        # same transaction. The event stays best effort.
-        return self._queue_approval_request(
+        # same transaction. The event stays best effort: the resident names
+        # the failure code when it could not write it.
+        queued = self._native_queue_call(
             "add_silent_native_review_approval_request",
             {"request": request.to_dict(), "now": now, "daemon": True},
         )
+        if not isinstance(queued, dict) or not isinstance(queued.get("request_id"), str) or not queued["request_id"]:
+            raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
+        request_id: str = queued["request_id"]
+        event_error = queued.get("event_error")
+        if event_error is not None:
+            _LOGGER.warning("Silent review inbox row saved without approval.created (%s)", event_error)
+        return request_id
 
     def _queue_approval_request(self, method: str, args: dict[str, object]) -> str:
+        request_id = self._native_queue_call(method, args)
+        if not isinstance(request_id, str) or not request_id:
+            raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
+        return request_id
+
+    def _native_queue_call(self, method: str, args: dict[str, object]) -> object:
         try:
-            request_id = self._native_store_call(method, args)
+            return self._native_store_call(method, args)
         except NativeGuardStoreUnavailable as error:
             raise NativeSignalProjectionUnavailableError(error.reason) from error
         except ValueError as error:
             if str(error) == APPROVAL_QUEUE_IDENTITY_UNAVAILABLE:
                 raise ApprovalQueueIdentityUnavailableError(reason="rejected") from error
             raise
-        if not isinstance(request_id, str) or not request_id:
-            raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
-        return request_id
 
     def queue_blocked_approvals(self, args: dict[str, object]) -> tuple[list[dict[str, object]], Exception | None]:
         # The resident writes one request per reviewable item, each under its

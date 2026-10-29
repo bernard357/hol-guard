@@ -154,7 +154,12 @@ fn replay(daemon: bool) {
             assert_eq!(unchanged(&after), unchanged(&before), "{name}: rolled back");
         } else {
             assert_eq!(reply["status"], "ok", "{name}: {reply}");
-            assert_eq!(reply["payload"], scenario["result"], "{name}");
+            let result = if daemon {
+                json!({"request_id": scenario["result"], "event_error": null})
+            } else {
+                scenario["result"].clone()
+            };
+            assert_eq!(reply["payload"], result, "{name}");
             assert_eq!(after, expected(&scenario["after"], name), "{name}: rows");
             check_queued(&connection, scenario, name);
         }
@@ -234,11 +239,57 @@ fn the_daemon_keeps_a_review_whose_event_cannot_be_written() {
     let (reply, connection, home) =
         write_over_unreadable_row("silent-review-unreadable-daemon", true);
     assert_eq!(reply["status"], "ok", "{reply}");
-    assert_eq!(reply["payload"], "r-old", "{reply}");
+    assert_eq!(
+        reply["payload"],
+        json!({"request_id": "r-old", "event_error": "native_guard_store_invalid"}),
+        "{reply}"
+    );
     let (name, count, events) = queued_and_events(&connection);
     assert_eq!(
         (name.as_str(), count, events),
         ("NewBash", 2, 0),
+        "queued, no event"
+    );
+    drop(connection);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_daemon_keeps_a_review_when_the_event_insert_fails() {
+    // Any failed event write, not only an unreadable row, rolls back to the
+    // savepoint alone: the queued review and its outbox entry stand.
+    let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+    let source = vectors["source"].as_str().unwrap();
+    let scenario = vectors["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "dedupe_keeps_stored_fields")
+        .unwrap();
+    let home = temp_home("silent-review-event-insert-fails");
+    let db = home.join("guard.db");
+    seed(&db, &vectors, scenario);
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "create trigger refuse_event before insert on guard_events \
+             begin select raise(abort, 'refused'); end;",
+        )
+        .unwrap();
+    let reply = write(&home, source, scenario, true);
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert_eq!(
+        reply["payload"],
+        json!({"request_id": scenario["result"], "event_error": "native_guard_store_integrity_error"}),
+        "{reply}"
+    );
+    let connection = Connection::open(&db).unwrap();
+    let mut expected_rows = expected(&scenario["after"], "event-insert-fails");
+    expected_rows["guard_events"] =
+        expected(&scenario["before"], "event-insert-fails")["guard_events"].clone();
+    assert_eq!(
+        tables(&connection, "event-insert-fails"),
+        expected_rows,
         "queued, no event"
     );
     drop(connection);

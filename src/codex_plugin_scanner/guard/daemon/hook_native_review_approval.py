@@ -305,7 +305,6 @@ def queue_native_pre_tool_review(
             native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
         except ValueError:
             return None
-    # A silent review's ``approval.created`` event is written with it.
     persist = getattr(store, "add_silent_native_review_approval_request" if silent else "add_approval_request", None)
     lookup = getattr(store, "get_approval_request", None)
     if not callable(persist) or not callable(lookup):

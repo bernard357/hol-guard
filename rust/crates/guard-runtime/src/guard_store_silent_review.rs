@@ -20,7 +20,7 @@
 
 use guard_contracts::ApprovalScopeItemV1;
 use rusqlite::Connection;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::approval_scope_contract::{contract, text as scope_text, View};
 use crate::guard_store_approval_write::{add_native_review_approval_request, add_request};
@@ -68,11 +68,12 @@ const ENVELOPE_KEYS: [&str; 26] = [
 /// `native_approval_scope._RAW_PAYLOAD_KEYS`.
 const RAW_PAYLOAD_KEYS: [&str; 2] = ["permission_mode", "permissionMode"];
 
-/// Queue the review and write its `approval.created` event. Returns the
-/// stored request id. On the hook path it returns `null` (nothing written)
-/// while legacy rows wait for the daemon; with `daemon` set it backfills them
-/// itself and, like the daemon always did, keeps the queued review when its
-/// event cannot be written.
+/// Queue the review and write its `approval.created` event. On the hook path
+/// it returns the stored request id, or `null` (nothing written) while legacy
+/// rows wait for the daemon. With `daemon` set it backfills them itself and
+/// returns `{request_id, event_error}`: like the daemon always did, it keeps
+/// the queued review when its event cannot be written, under a savepoint so
+/// any failed event write is undone alone, and names the failure code.
 pub(crate) fn add_silent_native_review_approval_request(
     connection: &Connection,
     source: &str,
@@ -90,11 +91,25 @@ pub(crate) fn add_silent_native_review_approval_request(
         };
         request_id
     };
-    match record_event(connection, &request_id, now) {
-        Err(StoreError::Invalid(_)) if daemon => {}
-        recorded => recorded?,
+    if !daemon {
+        record_event(connection, &request_id, now)?;
+        return Ok(Value::String(request_id));
     }
-    Ok(Value::String(request_id))
+    // Whatever stops the event, the queued review stands; the daemon logs
+    // the failure code.
+    connection.execute_batch("savepoint silent_review_event")?;
+    let event_error = match record_event(connection, &request_id, now) {
+        Ok(()) => {
+            connection.execute_batch("release silent_review_event")?;
+            Value::Null
+        }
+        Err(error) => {
+            connection
+                .execute_batch("rollback to silent_review_event; release silent_review_event")?;
+            Value::from(error.code())
+        }
+    };
+    Ok(json!({"request_id": request_id, "event_error": event_error}))
 }
 
 fn record_event(connection: &Connection, request_id: &str, now: &str) -> StoreResult<()> {
