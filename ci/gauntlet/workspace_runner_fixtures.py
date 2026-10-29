@@ -10,9 +10,16 @@ recognised as local rather than as a package fetched for the occasion.
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 WORKSPACE_JEST_CASE = "omp-native-workspace-npx-jest"
+# Where nvm, the way most developers install Node, keeps each release.
+_NODE_VERSIONS = ".nvm/versions/node"
+_NODE_VERSION = re.compile(r"v\d+\.\d+\.\d+")
 _VERSION = "30.0.5"
 _FILES = {
     "package.json": (
@@ -54,3 +61,38 @@ def add_workspace_test_runner(workspace: Path, scenario_id: str | None) -> None:
     link.mkdir(parents=True, exist_ok=True)
     # npm links each bin relative to node_modules/.bin.
     (link / "jest").symlink_to(Path("../jest/bin/jest.js"))
+
+
+def workspace_node_bin(home: Path) -> Path | None:
+    """The fixture's own Node directory, once a case has planted one."""
+    root = home / _NODE_VERSIONS
+    if not root.is_dir():
+        return None
+    for version in sorted(root.iterdir()):
+        if (version / "bin" / "node").is_file():
+            return version / "bin"
+    return None
+
+
+def add_workspace_node_runtime(home: Path, scenario_id: str | None) -> None:
+    """Give the fixture home the nvm Node install the contained runner trusts.
+
+    The read-only runner profile runs the workspace's entry point under Node,
+    and it accepts only a Node that the request's own home or a system prefix
+    owns. The host's Node is copied, not linked, so nothing the fixture does
+    can reach the file the host runs.
+    """
+    if scenario_id != WORKSPACE_JEST_CASE:
+        return
+    located = shutil.which("node")
+    if located is None:
+        raise RuntimeError("Gauntlet prerequisite is missing: node")
+    source = Path(os.path.realpath(located))
+    version = subprocess.run(
+        [str(source), "--version"], capture_output=True, text=True, timeout=30, check=True
+    ).stdout.strip()
+    if not _NODE_VERSION.fullmatch(version):
+        raise RuntimeError(f"Node reported an unexpected version for the fixture toolchain: {version}")
+    target = home / _NODE_VERSIONS / version / "bin" / "node"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)

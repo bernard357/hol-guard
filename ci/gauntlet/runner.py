@@ -71,6 +71,7 @@ from .session_folder import seed_session_folder, session_cwd
 from .source_identity import source_identity
 from .summary import inference_usage, render_summary_markdown
 from .supply_chain import stage_supply_chain
+from .workspace_runner_fixtures import workspace_node_bin
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -306,6 +307,10 @@ def run_case(
                 environment["GAUNTLET_WATCH_WORKSPACE"] = str(fixture.workspace)
             if scenario.oracle == "blocked-extension" or scenario.id in BUSINESS_CLI_CASES | GITHUB_STUB_CASES:
                 environment["PATH"] = str(fixture.root / "bin") + os.pathsep + environment["PATH"]
+            # The contained runner resolves Node from the request's own PATH, and
+            # trusts the one this fixture's home owns rather than the host's.
+            if node_bin := workspace_node_bin(fixture.home):
+                environment["PATH"] = str(node_bin) + os.pathsep + environment["PATH"]
             environment.update(
                 GUARD_GAUNTLET_OBSERVER_LOG=str(guard_log),
                 GUARD_GAUNTLET_DAEMON_PORT=str(daemon._server.server_address[1]),
@@ -495,7 +500,7 @@ def run_suite(
     executable = omp or shutil.which("omp")
     if not executable or not Path(executable).is_file():
         raise RuntimeError("install the repository-pinned Oh My Pi CLI before running Gauntlet")
-    for name in ("git", "rg", "curl", "bun"):
+    for name in ("git", "rg", "curl", "bun", "node"):
         if shutil.which(name) is None:
             raise RuntimeError(f"Gauntlet prerequisite is missing: {name}")
     _, identity, capabilities = probe._probe_native_identity()
