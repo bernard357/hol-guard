@@ -34,6 +34,12 @@ def write_long_lived_clones(home: Path, git: Callable[..., str]) -> None:
             modules = clone / "dashboard/node_modules/vite"
             modules.mkdir(parents=True)
             (modules / "package.json").write_text('{"name": "vite"}\n', encoding="utf-8")
+            (modules / "bin").mkdir()
+            (modules / "bin/vite").write_text("#!/bin/sh\necho vite\n", encoding="utf-8")
+            # npm links each bin relative to node_modules/.bin.
+            shims = clone / "dashboard/node_modules/.bin"
+            shims.mkdir()
+            (shims / "vite").symlink_to(Path("../vite/bin/vite"))
             tracked += [".gitignore", "dashboard/package.json"]
         git(clone, "add", *tracked, home=home)
         git(clone, "commit", "--quiet", "-m", "long-lived base", home=home)

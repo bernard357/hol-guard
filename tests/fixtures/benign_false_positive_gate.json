@@ -12782,6 +12782,23 @@
       "expect": "allow"
     },
     {
+      "id": "git-worktree-add-long-lived-clone-link-then-list-shared-bin",
+      "fix_area": "worktree-add",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "cursor",
+        "omp",
+        "zcode"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git -C ${HOME}/project worktree add ${HOME}/project-listed -b fix/listed-lane 2>&1 | tail -1 && ln -s ${HOME}/project/dashboard/node_modules ${HOME}/project-listed/dashboard/node_modules && ls -d ${HOME}/project-listed/dashboard/node_modules/.bin/vite"
+      },
+      "cwd": "home_project",
+      "expect": "allow"
+    },
+    {
       "id": "git-worktree-add-long-lived-clone-new-branch-from-origin",
       "fix_area": "worktree-add",
       "harnesses": [
