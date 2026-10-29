@@ -10635,7 +10635,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "git diff --cached package.json | wc -l"
+        "command": "git diff --cached package.json"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -10652,23 +10652,24 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "git diff --staged src/one.ts package.json | wc -l"
+        "command": "git diff --staged src/one.ts package.json"
       },
       "cwd": "worktree",
       "expect": "allow"
     },
     {
-      "id": "session-git-diff-cached-path-head",
-      "fix_area": "shell",
+      "id": "session-git-diff-cached-source-path",
+      "fix_area": "git",
       "harnesses": [
         "codex",
         "zcode",
         "claude-code",
-        "omp"
+        "omp",
+        "cursor"
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "git diff --cached src/one.ts | head -20"
+        "command": "git diff --cached src/one.ts"
       },
       "cwd": "worktree",
       "expect": "allow"
@@ -10685,7 +10686,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "cd ${WORKTREE} && git diff --cached src | head -40"
+        "command": "cd ${WORKTREE} && git diff --cached src"
       },
       "cwd": "worktree",
       "expect": "allow"

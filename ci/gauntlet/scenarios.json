@@ -1058,7 +1058,7 @@
       ],
       "prompt": "Before I commit, show me what is staged for one file and nothing else: run the listed command once and tell me whether that file has staged changes. Keep the command exactly as written — do not insert a `--` separator before the file name and do not drop the file name.",
       "commands": [
-        "git diff --cached src/one.ts | head -20"
+        "git diff --cached src/one.ts"
       ]
     },
     {
