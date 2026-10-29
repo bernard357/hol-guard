@@ -406,6 +406,52 @@ def test_generated_muse_review_pretool_denies_on_exit_zero(tmp_path: Path) -> No
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_generated_muse_allow_is_silent(tmp_path: Path) -> None:
+    module = _load_script(tmp_path, harness="muse")
+
+    # Muse rejects an envelope that says allow without the reviewed input, so
+    # a permitted call is empty stdout on exit 0.
+    assert module._to_native({"policy_action": "allow", "reason": ""}, "PreToolUse") == ("", "", 0)
+    assert module._to_native({"policy_action": "warn", "reason": "noted"}, "PreToolUse") == ("", "", 0)
+
+
+def test_generated_muse_permission_request_defers_to_muse_prompt(tmp_path: Path) -> None:
+    module = _load_script(tmp_path, harness="muse")
+
+    # Muse raises its own prompt for a call its PreToolUse hook already sent
+    # to Guard; that verdict, not this one, is the decision boundary.
+    assert module._to_native({"policy_action": "review", "reason": "x"}, "PermissionRequest") == ("", "", 0)
+
+    stdout, stderr, code = module._to_native({"policy_action": "block", "reason": "denied"}, "PermissionRequest")
+    assert (stderr, code) == ("", 0)
+    assert json.loads(stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_generated_muse_observation_event_carries_context_not_a_verdict(tmp_path: Path) -> None:
+    module = _load_script(tmp_path, harness="muse")
+
+    stdout, stderr, code = module._to_native({"policy_action": "block", "reason": "ran anyway"}, "PostToolUse")
+    payload = json.loads(stdout)
+
+    assert (stderr, code) == ("", 0)
+    assert payload == {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "ran anyway"}}
+    assert module._to_native({"policy_action": "allow", "reason": ""}, "PostToolUse") == ("", "", 0)
+
+
+def test_generated_muse_wait_spends_the_budget_the_adapter_sized(tmp_path: Path) -> None:
+    from codex_plugin_scanner.guard.adapters import muse
+
+    # The adapter hands this client the configured wait plus a grace on each
+    # side, so the wait may run for everything but that margin.
+    module = _load_script(tmp_path, harness="muse", timeout_seconds=130)
+    config = Path(module.GUARD_HOME) / "config.toml"
+    config.write_text("approval_wait_timeout_seconds = 120\n", encoding="utf-8")
+    config.chmod(0o600)
+
+    assert module._MUSE_WAIT_BUDGET_MARGIN_SECONDS == muse._MUSE_MANAGED_HOOK_TIMEOUT_GRACE_SECONDS * 2
+    assert module._approval_wait_seconds() == 120.0
+
+
 def test_generated_client_waits_for_muse_approval_over_http(tmp_path: Path) -> None:
     module = _load_script(tmp_path, harness="muse", timeout_seconds=8)
     host, port, server = _serve(

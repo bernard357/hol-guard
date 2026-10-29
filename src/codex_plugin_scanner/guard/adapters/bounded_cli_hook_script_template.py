@@ -88,6 +88,11 @@ _APPROVAL_KEYS = (
     "guardApprovalUrl",
     "approval_requests",
 )
+# Muse sizes its own hook timeout from this client's budget: the configured
+# approval wait plus this margin, twice the grace the adapter adds on each
+# side. Holding the margin back lets the wait run for as long as the user
+# configured instead of the fraction the other harnesses use.
+_MUSE_WAIT_BUDGET_MARGIN_SECONDS = 10.0
 _FAILURE_REASON = "HOL Guard could not complete a trusted hook decision. Retry or repair Guard from a terminal."
 _AUTHORITY_MARKER = "native command extension policy"
 _AUTHORITY_REMEDIATION = (
@@ -357,6 +362,13 @@ def _approval_wait_seconds() -> float:
         else:
             if parsed >= 0:
                 configured = parsed
+    if HARNESS == "muse":
+        # The Muse adapter sizes this client's budget from the same configured
+        # wait, so the wait only has to leave the adapter's margin back. The
+        # fraction below is tuned for a harness whose hook timeout is fixed,
+        # and it stays the floor for a budget too small to hold the margin.
+        budget = float(TIMEOUT_SECONDS)
+        return min(max(configured, 0.0), max(budget - _MUSE_WAIT_BUDGET_MARGIN_SECONDS, budget * 0.4))
     return min(max(configured, 0.0), min(float(TIMEOUT_SECONDS) * 0.4, 80.0))
 
 

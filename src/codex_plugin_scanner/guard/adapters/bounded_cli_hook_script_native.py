@@ -116,10 +116,6 @@ def _permission_decision(policy_action: str) -> str | None:
         # must say deny instead of ask to stay consistent.
         if HARNESS == "zcode" and policy_action == "sandbox-required":
             return "deny"
-        # Muse reads an ask envelope as no decision and runs the tool, so
-        # a Guard review pauses as a deny the approval wait can resume.
-        if HARNESS == "muse":
-            return "deny"
         return "ask"
     if policy_action == "block":
         return "deny"
@@ -166,6 +162,140 @@ def _copy_approval_metadata(source: dict[str, object], payload: dict[str, object
             payload[key] = value
 
 
+_MUSE_WAITABLE_ACTIONS = frozenset({"review", "require-reapproval"})
+_MUSE_RESTRICTIVE_ACTIONS = frozenset({"review", "require-reapproval", "sandbox-required", "block"})
+# Events where Guard's answer decides whether the work happens. An answer that
+# names no verdict is restrictive on these and silence everywhere else.
+_MUSE_DECIDING_EVENTS = frozenset({"pretooluse", "pretoolcall", "permissionrequest", "userpromptsubmit"})
+_MUSE_GATING_EVENTS = frozenset({"pretooluse", "pretoolcall", "permissionrequest", "permissionrequestv2"})
+_MUSE_SESSION_CONTEXT = "HOL Guard protection is active for this workspace."
+_MUSE_UNREADABLE_VERDICT = "HOL Guard could not read a verdict for this action."
+
+
+def _muse_behavior(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    word = value.strip().lower()
+    if word == "allow":
+        return "allow"
+    if word in {"deny", "block"}:
+        return "block"
+    if word == "ask":
+        return "review"
+    return None
+
+
+def _muse_action(daemon_response: dict[str, object]) -> str | None:
+    # Guard's action for this answer, or None when it names no verdict at all.
+    # An action this client cannot place reads as "block", the way every other
+    # unplaceable action here does.
+    policy_action = daemon_response.get("policy_action")
+    if isinstance(policy_action, str) and policy_action.strip():
+        return _canonical_policy_action(policy_action)
+    word = _muse_behavior(daemon_response.get("decision"))
+    if word is not None:
+        return word
+    hook_specific = daemon_response.get("hookSpecificOutput")
+    if isinstance(hook_specific, dict):
+        word = _muse_behavior(hook_specific.get("permissionDecision"))
+        if word is not None:
+            return word
+        # The PermissionRequest envelope carries its verdict one level deeper.
+        nested = hook_specific.get("decision")
+        if isinstance(nested, dict):
+            word = _muse_behavior(nested.get("behavior"))
+            if word is not None:
+                return word
+    proceed = daemon_response.get("continue")
+    if proceed is True:
+        return "allow"
+    if proceed is False:
+        return "block"
+    return None
+
+
+def _muse_reason(daemon_response: dict[str, object], action: str | None) -> str:
+    for key in ("reason", "permission_decision_reason"):
+        value = daemon_response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    hook_specific = daemon_response.get("hookSpecificOutput")
+    if isinstance(hook_specific, dict):
+        value = hook_specific.get("permissionDecisionReason")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if action is None:
+        return _MUSE_UNREADABLE_VERDICT
+    return "HOL Guard blocked this action (" + action + ")"
+
+
+def _muse_context(daemon_response: dict[str, object]) -> str | None:
+    hook_specific = daemon_response.get("hookSpecificOutput")
+    if isinstance(hook_specific, dict):
+        value = hook_specific.get("additionalContext")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    value = daemon_response.get("additional_context")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _muse_payload(payload: dict[str, object]) -> tuple[str, str, int]:
+    return json.dumps(payload, ensure_ascii=True, separators=(",", ":")), "", 0
+
+
+def _muse_native(daemon_response: dict[str, object], event_name: str) -> tuple[str, str, int]:
+    # Muse's wire contract, answered here the way the resident bridge answers
+    # it. A permitted call is empty stdout and exit 0: Muse rejects an envelope
+    # that says allow without the reviewed input, so this client never writes a
+    # bare allow. Only an event that gates the call carries a verdict; an
+    # observation event carries Guard's note as context or nothing at all.
+    action = _muse_action(daemon_response)
+    compact = _compact(event_name)
+    restrictive = compact in _MUSE_DECIDING_EVENTS if action is None else action in _MUSE_RESTRICTIVE_ACTIONS
+    reason = _muse_reason(daemon_response, action)
+    if compact in {"userpromptsubmit", "userpromptsubmitted"}:
+        if restrictive:
+            return _muse_payload({"decision": "block", "reason": reason})
+        context = _muse_context(daemon_response)
+        if context is None:
+            return "", "", 0
+        prompt_entries = {"hookEventName": "UserPromptSubmit", "additionalContext": context}
+        return _muse_payload({"hookSpecificOutput": prompt_entries})
+    if compact in _MUSE_GATING_EVENTS:
+        if not restrictive:
+            return "", "", 0
+        if compact.startswith("permissionrequest") and action in _MUSE_WAITABLE_ACTIONS:
+            # Muse raises its own approval prompt for a call its PreToolUse
+            # hook already sent to Guard; that verdict stays the boundary.
+            return "", "", 0
+        gating = "PreToolUse" if compact in {"pretooluse", "pretoolcall"} else "PermissionRequest"
+        payload: dict[str, object] = {
+            "decision": "deny",
+            # The action travels with the decision so the approval wait below
+            # can tell a review it may resume from a block it may not.
+            "policy_action": action or "block",
+            "reason": reason,
+            "hookSpecificOutput": {
+                "hookEventName": gating,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            },
+        }
+        _copy_approval_metadata(daemon_response, payload)
+        return _muse_payload(payload)
+    context = _muse_context(daemon_response)
+    if context is None and restrictive:
+        context = reason
+    if context is None and compact == "sessionstart":
+        context = _MUSE_SESSION_CONTEXT
+    if context is None:
+        return "", "", 0
+    canonical = {"sessionstart": "SessionStart", "stop": "Stop"}.get(compact, "PostToolUse")
+    return _muse_payload({"hookSpecificOutput": {"hookEventName": canonical, "additionalContext": context}})
+
+
 def _hermes_policy(daemon_response: dict[str, object]) -> tuple[str, str]:
     decision = daemon_response.get("decision")
     reason = str(daemon_response.get("reason") or daemon_response.get("permission_decision_reason") or "")
@@ -195,6 +325,8 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
         or _compact(event_name) in {"userpromptsubmit", "userpromptsubmitted"}
     ):
         return "{}", "", 0
+    if HARNESS == "muse":
+        return _muse_native(daemon_response, event_name)
     if HARNESS == "hermes":
         policy_action, reason = _hermes_policy(daemon_response)
         decision = "allow" if policy_action in {"allow", "warn"} else "block"
@@ -238,7 +370,7 @@ def _to_native(daemon_response: dict[str, object], event_name: str) -> tuple[str
             if permission_decision != "allow" or "unreachable" in reason.lower():
                 hook_specific["permissionDecisionReason"] = reason or f"HOL Guard {policy_action} this action"
         payload["hookSpecificOutput"] = hook_specific
-        if HARNESS in {"grok", "openclaw", "muse"} and permission_decision is not None:
+        if HARNESS in {"grok", "openclaw"} and permission_decision is not None:
             payload["decision"] = "allow" if permission_decision == "allow" else "deny"
             payload["policy_action"] = policy_action
             if permission_decision != "allow" and reason:
