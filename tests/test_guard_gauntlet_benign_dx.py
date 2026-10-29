@@ -192,8 +192,13 @@ def test_worktree_borrows_gitignored_modules_from_the_main_checkout(tmp_path: Pa
 
 def test_linked_modules_build_and_doctl_reads_run_on_the_host(tmp_path: Path) -> None:
     fixture = create_fixture(tmp_path / "fx", realistic=True)
-    build = _shell(fixture, commands_for("omp-native-shell-linked-modules-build")[0])
+    command = commands_for("omp-native-shell-linked-modules-build")[0]
+    build = _shell(fixture, command)
     assert build.returncode == 0 and VITE_BUILD_MARKER in build.stdout, build.stderr
+    # The marker is the finished build's own line, not a sign the entry ran:
+    # the same entry without `build` prints no build at all.
+    unbuilt = _shell(fixture, command.replace(" build ", " ", 1))
+    assert VITE_BUILD_MARKER not in unbuilt.stdout, unbuilt.stdout
     for command in commands_for("omp-native-shell-doctl-reads"):
         result = _shell(fixture, command)
         assert result.returncode == 0 and result.stdout.strip(), (command, result.stderr)
@@ -215,8 +220,11 @@ def test_the_linked_install_carries_the_node_entry_bun_is_handed(tmp_path: Path)
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is not installed on this host")
-    build = _shell(fixture, command.replace("bun ", f"{shlex.quote(node)} ", 1))
+    on_node = command.replace("bun ", f"{shlex.quote(node)} ", 1)
+    build = _shell(fixture, on_node)
     assert build.returncode == 0 and VITE_BUILD_MARKER in build.stdout, build.stderr
+    unbuilt = _shell(fixture, on_node.replace(" build ", " ", 1))
+    assert VITE_BUILD_MARKER not in unbuilt.stdout, unbuilt.stdout
 
 
 def test_docker_stand_in_answers_only_the_registry_manifest_query(tmp_path: Path) -> None:

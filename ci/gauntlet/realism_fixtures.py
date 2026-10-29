@@ -80,6 +80,14 @@ VITE_STUB = (
     "# Synthetic stand-in for the installed vite CLI: no network, no writes.\n"
     "set -eu\n"
     'user=$(id -un)\n[ -n "$user" ]\n'
+    # Only `vite build` prints a build. Any other invocation fails the way the
+    # real CLI would, so the marker answers for a finished build and not for
+    # the entry having been reached.
+    'build=\n'
+    'for argument in "$@"; do\n'
+    '  if [ "$argument" = build ]; then build=1; fi\n'
+    'done\n'
+    '[ -n "$build" ] || { printf \'vite stand-in: expected the build command\\n\' >&2; exit 1; }\n'
     f"printf 'vite v{VITE_VERSION} building for production...\\n'\n"
     "printf 'dist/index.html  0.40 kB\\n'\n"
     f"printf '{VITE_BUILD_MARKER}\\n'\n"
@@ -90,6 +98,12 @@ VITE_STUB = (
 # Both entries print the same build, so one output check answers for either spelling.
 VITE_STUB_NODE = (
     "// Synthetic stand-in for the installed vite CLI: no network, no writes.\n"
+    "// Only `vite build` prints a build, so the marker answers for a finished\n"
+    "// build and not for the entry having been reached.\n"
+    "if (!process.argv.slice(2).includes('build')) {\n"
+    "  process.stderr.write('vite stand-in: expected the build command\\n');\n"
+    "  process.exit(1);\n"
+    "}\n"
     "process.stdout.write(\n"
     f"  'vite v{VITE_VERSION} building for production...\\n' +\n"
     "  'dist/index.html  0.40 kB\\n' +\n"
