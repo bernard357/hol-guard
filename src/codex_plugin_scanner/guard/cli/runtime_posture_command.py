@@ -8,8 +8,14 @@ Both are read only.
 Prints the executables configured MCP servers launch with their inferred family,
 version and identity assurance, matched against runtime advisories from the
 locally cached, signed supply-chain bundle when one is present. Nothing is
-started, no running process is enumerated, no Cloud call is made, and no
-setting, approval or policy changes. Unknown stays unknown.
+started, no Cloud call is made, and no setting, approval or policy changes.
+Unknown stays unknown.
+
+``--instances`` additionally asks the native probe which of those runtimes are
+running here and carries what it saw into the Guard home, so a later probe can
+still name a process whose launch path it no longer covers. That reads other
+processes and writes a file, so it is left off by default and reviewed like any
+other command that does.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ def configure_runtime_parser(guard_subparsers: argparse._SubParsersAction[argpar
     )
     _add_guard_common_args(runtime_parser)
     runtime_parser.add_argument("--json", action="store_true")
+    runtime_parser.add_argument("--instances", action="store_true")
     runtime_subparsers = runtime_parser.add_subparsers(dest="runtime_command", parser_class=FriendlyArgumentParser)
     posture_parser = runtime_subparsers.add_parser(
         "posture",
@@ -41,6 +48,7 @@ def configure_runtime_parser(guard_subparsers: argparse._SubParsersAction[argpar
     )
     _add_guard_common_args(posture_parser, suppress_defaults=True)
     posture_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    posture_parser.add_argument("--instances", action="store_true", default=argparse.SUPPRESS)
     status_parser = runtime_subparsers.add_parser(
         "status",
         help="Show whether Guard's own native runtime is available and whether a resident is running",
@@ -82,7 +90,9 @@ def run_runtime_posture_command(
         skipped_harnesses=skipped,
         advisory_bundle=advisory_bundle,
         advisory_bundle_reason=bundle_reason,
-        instance_home=context.guard_home,
+        # Enumerating running processes and keeping what was seen is a read of
+        # more than this command's own subject, so it waits to be asked for.
+        instance_home=context.guard_home if getattr(args, "instances", False) else None,
     )
     if getattr(args, "json", False):
         stream.write(json.dumps(payload, indent=2, sort_keys=True))

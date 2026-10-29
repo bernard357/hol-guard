@@ -35,10 +35,12 @@
 //!
 //! `hol-guard runtime` and `hol-guard runtime posture` print the executables
 //! the configured MCP servers would launch and the advisory coverage Guard
-//! already holds for them. Nothing is started, no running process is
-//! enumerated and no setting, approval or policy changes; the bare form runs
-//! the same read. `posture` is the subcommand's only verb, so no write verb
-//! hides behind these shapes.
+//! already holds for them. Nothing is started, no Cloud call is made and no
+//! setting, approval or policy changes; the bare form runs the same read.
+//! These four shapes are exact: `runtime posture --instances`, which asks
+//! which of those runtimes are running here and writes what it saw into the
+//! Guard home, matches none of them and is reviewed like any other command
+//! that reads other processes.
 //!
 //! Like every other bare-name proof here, the inherited `PATH` is a host trust
 //! input: Rust has no resolved executable identity. A launcher sitting in the
@@ -265,10 +267,22 @@ fn help_path(words: &[&str]) -> bool {
         [subcommand, verbs @ ..] => {
             HELP_SUBCOMMANDS.contains(subcommand)
                 && verbs.len() <= MAX_HELP_VERBS
+                && !verbs
+                    .first()
+                    .is_some_and(|verb| VERBS_TAKING_A_REMAINDER.contains(&(*subcommand, *verb)))
                 && verbs.iter().all(|verb| subcommand_verb(verb))
         }
     }
 }
+
+/// Verbs whose parser takes a trailing `argparse.REMAINDER`, named with the
+/// subcommand that reaches them. `hol-guard verified-read local cat --help`
+/// puts `--help` into that remainder, so the bounded read runs instead of
+/// usage printing. The same reason keeps `protect`, `pytest-contained` and
+/// `run-shim` out of `HELP_SUBCOMMANDS` one level up; here only the verb is
+/// affected, so `verified-read --help` and `verified-read github-pr --help`
+/// still print their usage.
+const VERBS_TAKING_A_REMAINDER: &[(&str, &str)] = &[("verified-read", "local")];
 
 /// How deep a help path may go below its subcommand. Guard's deepest nest is
 /// two verbs below the subcommand (`command controls patterns`), and a path
@@ -288,8 +302,8 @@ fn subcommand_verb(word: &str) -> bool {
 /// collects an approval row. Three subcommands are deliberately absent:
 /// `protect`, `pytest-contained` and `run-shim` each take a trailing
 /// `argparse.REMAINDER`, so `hol-guard protect npm --help` would run `npm
-/// --help` rather than print help, and [`help_path`] only shape-checks the
-/// word after the subcommand.
+/// --help` rather than print help. A verb one level down can swallow a help
+/// flag the same way; [`VERBS_TAKING_A_REMAINDER`] names those.
 const HELP_SUBCOMMANDS: &[&str] = &[
     "abom",
     "admin",
