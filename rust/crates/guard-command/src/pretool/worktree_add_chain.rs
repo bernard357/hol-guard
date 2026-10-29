@@ -460,23 +460,17 @@ fn entered_checkout(
             .as_deref()
             .map(str::trim)
             .is_some_and(|separator| matches!(separator, "&&" | ";"));
-        // After the `cd` the shell resolves a path-qualified relative name
-        // against the new checkout, whose contents come from the ref it
-        // checks out. A bare name is looked up on the absolute search path
-        // checked above. An absolute path names code the checked-out tree
-        // cannot supply only when it already resolves to a program outside
-        // the destination: the add refuses a destination that exists, so a
-        // spelling that resolves now resolves somewhere else, and one that
-        // does not resolve now could only be supplied by the checkout.
+        // A relative path after the `cd` names a file of the new checkout,
+        // which the ref supplies. A bare name uses the search path checked
+        // above. The add refuses an existing destination, so an absolute
+        // path that resolves now names a program outside it; one that does
+        // not resolve could only come from the checkout.
         let resolved_outside = |later: &CommandSegmentV1| {
             later.executable.as_deref().is_some_and(|value| {
-                if !value.contains(['/', '\\']) {
-                    return true;
-                }
-                let path = Path::new(value);
-                path.is_absolute()
-                    && std::fs::canonicalize(path)
-                        .is_ok_and(|resolved| !resolved.starts_with(&destination))
+                !value.contains(['/', '\\'])
+                    || (Path::new(value).is_absolute()
+                        && std::fs::canonicalize(value)
+                            .is_ok_and(|resolved| !resolved.starts_with(&destination)))
             })
         };
         // A later pipeline stage reads only what the step before it prints:
@@ -487,10 +481,9 @@ fn entered_checkout(
                     || (later.pipeline_index > 0
                         && super::chain_route::stdin_stage(later, context, execution_environment)))
         });
-        // After a failed add the `cd` fails too, and a step after `;` runs in
-        // the original checkout. That step is `git` or `gh` judged by its own
-        // permission there, with its reads probed there, so either directory
-        // runs only what the Allow covers. No proof here follows `||`.
+        // If the add fails, the `cd` fails too and a `git` or `gh` step after
+        // `;` runs in the original checkout, judged by its own permission with
+        // its reads probed there. No proof here follows `||`.
         let sequenced = (after + 1..model.segments.len()).all(|index| {
             super::separator_between(model, index - 1, index)
                 .as_deref()
