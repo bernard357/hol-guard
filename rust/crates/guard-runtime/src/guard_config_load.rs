@@ -100,8 +100,17 @@ pub(crate) fn approval_wait_timeout_seconds(
     guard_home: &Path,
     workspace: Option<&Path>,
 ) -> Result<i64, String> {
-    let managed = effective_managed_policy(&load_managed_policy(&ManagedPolicySource::native()))
-        .map(|policy| ManagedInput {
+    approval_wait_timeout_seconds_under(guard_home, workspace, &ManagedPolicySource::native())
+}
+
+/// `approval_wait_timeout_seconds` under the managed policy `source` loads.
+pub(crate) fn approval_wait_timeout_seconds_under(
+    guard_home: &Path,
+    workspace: Option<&Path>,
+    source: &ManagedPolicySource,
+) -> Result<i64, String> {
+    let managed =
+        effective_managed_policy(&load_managed_policy(source)).map(|policy| ManagedInput {
             settings: policy.settings.clone(),
             locked_settings: policy.locked_settings.iter().cloned().collect(),
         });

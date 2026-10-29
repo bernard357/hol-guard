@@ -115,9 +115,19 @@ fn a_bridge_that_cannot_wait_is_queued_as_a_manual_retry() {
         (args("codex", facts(json!(90), json!(7))), &guard_home),
         (args("codex", facts(json!(90), Value::Null)), &no_wait),
     ];
-    for (args, guard_home) in cases {
+    for (mut args, guard_home) in cases {
+        // A snapshot the caller sent along cannot make the request resumable.
+        args.get_mut("request").unwrap()["continuation_snapshot"] = json!({
+            "capability": "suspended-response",
+            "hookAttached": true,
+            "waitDeadline": "2026-10-29T12:10:00+00:00",
+        });
         let prepared = prepare("add_approval_request", &args, guard_home).unwrap();
         assert!(!prepared.contains_key(FACTS_KEY), "{args:?}");
+        assert!(
+            prepared["request"].get("continuation_snapshot").is_none(),
+            "{args:?}"
+        );
         assert!(built(&prepared).is_none(), "{args:?}");
         assert!(!prepared.contains_key("codex_live_wait"), "{args:?}");
         assert_eq!(prepared[NOT_LIVE_KEY], true, "{args:?}");

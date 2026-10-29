@@ -11,9 +11,10 @@ use serde_json::{json, Map, Value};
 
 use crate::codex_hook_bridge::MAX_APPROVAL_WAIT_SECONDS;
 use crate::codex_hook_identity::process_identity_matches;
-use crate::guard_config_load::approval_wait_timeout_seconds;
+use crate::guard_config_load::approval_wait_timeout_seconds_under;
 use crate::guard_store_json::add_seconds_utc_isoformat;
 use crate::guard_store_outbox_identity::{correlation_id, validated_continuation_snapshot};
+use crate::managed_policy_load::ManagedPolicySource;
 
 /// The queue write's argument naming the waiting hook's raw facts.
 pub(crate) const FACTS_KEY: &str = "codex_live_wait_facts";
@@ -46,7 +47,11 @@ pub(crate) fn prepare(
             request.insert("continuation_snapshot".to_owned(), snapshot);
             prepared.insert("codex_live_wait".to_owned(), link);
         }
-        _ => {
+        (_, request) => {
+            // Only a wait the resident built may make the request resumable.
+            if let Some(Value::Object(request)) = request {
+                request.remove("continuation_snapshot");
+            }
             prepared.insert(NOT_LIVE_KEY.to_owned(), Value::Bool(true));
         }
     }
@@ -73,8 +78,12 @@ fn build(facts: &Value, args: &Map<String, Value>, guard_home: &Path) -> Option<
     if !process_identity_matches(process) {
         return None;
     }
-    let configured =
-        approval_wait_timeout_seconds(guard_home, workspace.map(PathBuf::from).as_deref()).ok()?;
+    let configured = approval_wait_timeout_seconds_under(
+        guard_home,
+        workspace.map(PathBuf::from).as_deref(),
+        &managed_policy_source(),
+    )
+    .ok()?;
     let wait_seconds = configured.clamp(0, MAX_APPROVAL_WAIT_SECONDS).min(outer);
     if wait_seconds <= 0 {
         return None;
@@ -106,6 +115,24 @@ fn build(facts: &Value, args: &Map<String, Value>, guard_home: &Path) -> Option<
         "workspace": workspace,
     });
     Some((link, Value::Object(snapshot)))
+}
+
+/// This machine's managed policy. Tests read an unmanaged machine root, so
+/// the host's own policy never changes their waits.
+#[cfg(not(test))]
+fn managed_policy_source() -> ManagedPolicySource {
+    ManagedPolicySource::native()
+}
+
+#[cfg(test)]
+fn managed_policy_source() -> ManagedPolicySource {
+    ManagedPolicySource {
+        system: crate::managed_policy_load::MachineSystem::Other,
+        policy_path: None,
+        write_cache: false,
+        machine_root: Some(std::env::temp_dir().join("hol-guard-live-wait-unmanaged-machine")),
+        registry: crate::managed_policy_registry::RegistryAuthority::Native,
+    }
 }
 
 #[cfg(test)]
