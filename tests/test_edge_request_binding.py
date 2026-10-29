@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,9 +16,7 @@ from codex_plugin_scanner.guard.native_runtime import (
 )
 
 VECTORS = json.loads(
-    (Path(__file__).resolve().parent / "fixtures" / "edge-request-binding.v1.json").read_text(
-        encoding="utf-8"
-    )
+    (Path(__file__).resolve().parent / "fixtures" / "edge-request-binding.v1.json").read_text(encoding="utf-8")
 )
 _BINDING_FEATURE = "edge-request-binding-v1"
 _FEATURES = (
@@ -63,9 +60,7 @@ def _install_resident(
             features=(*_FEATURES, *((_BINDING_FEATURE,) if binding else ())),
         ),
     )
-    monkeypatch.setattr(
-        "codex_plugin_scanner.guard.native_hook_edge.native_runtime_status", lambda: status
-    )
+    monkeypatch.setattr("codex_plugin_scanner.guard.native_hook_edge.native_runtime_status", lambda: status)
     monkeypatch.setattr(
         "codex_plugin_scanner.guard.native_hook_edge.native_record_resident_failure",
         lambda *args, **kwargs: None,
@@ -81,9 +76,7 @@ def _install_resident(
         sent.append(envelope)
         return json.dumps(answer(envelope), separators=(",", ":")).encode()
 
-    monkeypatch.setattr(
-        "codex_plugin_scanner.guard.native_hook_edge.native_resident_client_request", client
-    )
+    monkeypatch.setattr("codex_plugin_scanner.guard.native_hook_edge.native_resident_client_request", client)
     return sent
 
 
@@ -120,9 +113,7 @@ def test_only_an_answer_naming_this_request_is_read_as_its_verdict(
         assert native_hook_route() == "native_fail_safe"
 
 
-def test_a_review_that_was_given_no_request_id_mints_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_review_that_was_given_no_request_id_mints_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Without an id of its own the hot path had nothing to bind: a stale answer
     # on a reused stream would have been read as this review's verdict.
     def echo(envelope: dict[str, object]) -> dict[str, object]:
@@ -140,9 +131,7 @@ def test_a_review_that_was_given_no_request_id_mints_one(
     assert minted[0] != minted[1]
 
 
-def test_a_minted_id_still_refuses_another_request_s_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_minted_id_still_refuses_another_request_s_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _install_resident(tmp_path, monkeypatch, lambda envelope: VECTORS["vectors"][0]["edge"])
     assert _review(tmp_path) is None
     assert native_hook_route() == "native_fail_safe"
@@ -153,9 +142,7 @@ def test_a_resident_that_predates_the_echo_keeps_the_caller_s_own_binding(
 ) -> None:
     # Such a resident derives its own id, so minting one would fail every
     # review closed. It keeps answering, bound only when the caller named one.
-    sent = _install_resident(
-        tmp_path, monkeypatch, lambda envelope: VECTORS["vectors"][0]["edge"], binding=False
-    )
+    sent = _install_resident(tmp_path, monkeypatch, lambda envelope: VECTORS["vectors"][0]["edge"], binding=False)
     assert _review(tmp_path) is not None
     assert sent[-1]["request_id"] is None
     assert _review(tmp_path, request_id=VECTORS["foreign_request_id"]) is None

@@ -25,7 +25,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
@@ -89,7 +89,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
@@ -150,7 +150,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
@@ -213,7 +213,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
@@ -277,7 +277,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
@@ -341,7 +341,7 @@
             "version": 1,
             "harness": "claude",
             "event": "PreToolUse",
-            "action_type": "shell",
+            "action_type": "unknown",
             "operation": "unknown",
             "bounded": true,
             "sensitive_target": false
