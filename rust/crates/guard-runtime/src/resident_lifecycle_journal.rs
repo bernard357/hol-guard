@@ -8,13 +8,22 @@
 //! the question a support request actually asks -- is this install's enforcement
 //! healthy, or has it been failing all day?
 //!
-//! This journal answers that and nothing more. It holds a rolling day's counts
+//! This journal answers that and nothing more. It holds the last day's counts
 //! of starts, the three ways a run ends, and starts the restart budget refused,
-//! plus a fixed code naming the last event and when it happened. There is no
-//! path, no command, no process id, no stderr and no free text in it, so the
-//! file can be read out to a user, or carried in a support bundle, without
-//! anybody having to redact it first. The shape is fixed, so the file stays a
-//! few hundred bytes however long the install runs.
+//! plus a fixed code naming the last event and when it happened. The day really
+//! does roll: the counts live in hourly buckets and a bucket leaves the journal
+//! only once it is itself a day old, so a failure recorded minutes ago is never
+//! dropped because an older event happened to open the window.
+//!
+//! There is no path, no command, no process id, no stderr and no free text in
+//! it. The shareable artifact is [`health`]'s snapshot, whose times are ages in
+//! seconds rather than wall-clock instants; it can be read out to a user or
+//! carried in a support bundle without anybody having to redact it first. The
+//! file behind it is an ordinary private runtime file: it holds the same counts
+//! against coarse hourly keys, which is a weaker trail than a log but still a
+//! trail, so it stays inside the private state directory. The shape is fixed
+//! either way, so the file stays a few hundred bytes however long an install
+//! runs.
 //!
 //! Every write is best effort. A journal is an observation of the runtime, not
 //! a part of it: a busy lock, a full disk or a damaged file must never change
@@ -29,29 +38,37 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::private_file::recover_interrupted_replace;
 use super::private_file::{read_private_bytes, write_private};
 
-/// How much history one journal covers. A day is long enough that a user who
-/// noticed something this morning can still see it this evening, and short
+/// How finely the day is cut. An hour is coarse enough that the file is a
+/// weaker record of when a person was working than any log beside it, and fine
+/// enough that a day expires an hour at a time rather than all at once.
+const JOURNAL_BUCKET_MS: u64 = 60 * 60 * 1_000;
+/// How many of those hours one journal covers. A day is long enough that a user
+/// who noticed something this morning can still see it this evening, and short
 /// enough that an install which has since been repaired stops reporting the
 /// failures it has recovered from.
-const JOURNAL_WINDOW_MS: u64 = 24 * 60 * 60 * 1_000;
+const JOURNAL_BUCKETS: u64 = 24;
+const JOURNAL_WINDOW_MS: u64 = JOURNAL_BUCKETS * JOURNAL_BUCKET_MS;
 const JOURNAL_SCHEMA: &str = "hol-guard-resident-lifecycle-journal.v1";
 const JOURNAL_FILE: &str = "lifecycle-journal.json";
 const JOURNAL_LOCK_FILE: &str = "lifecycle-journal.lock";
-/// A journal write is one small read and write under the lock, exactly like a
-/// budget update, and it is taken on the exit path where a supervisor and a
-/// spawning client can meet. Waiting briefly for an ordinary overlap costs
-/// less than losing the event.
+/// A journal write is one small read and write under the lock, and on the exit
+/// path a supervisor has nobody waiting on it. Waiting briefly for an ordinary
+/// overlap there costs less than losing the event.
 const JOURNAL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 const JOURNAL_LOCK_RETRIES: u32 = 20;
 
 /// Something worth counting that happened to this install's resident.
 ///
-/// This is the whole vocabulary of the journal. A caller cannot describe an
-/// event in its own words, which is what keeps a path or a command out of the
-/// file by construction rather than by review.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// This is the whole vocabulary of the journal, on the way in and on the way
+/// back out: the stored code is read as this enum, so a file somebody edited
+/// cannot put a word of its own into a snapshot that is meant to be shareable
+/// unread. A caller cannot describe an event in its own words either, which is
+/// what keeps a path or a command out of the file by construction rather than
+/// by review.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum Event {
-    /// A spawn was charged and the resident was started.
+    /// A resident was started and is running.
     Started,
     /// A run ended the way a healthy one does.
     ExitedOrderly,
@@ -77,49 +94,132 @@ impl Event {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// One hour's counts, keyed by the hour since the epoch it belongs to.
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Journal {
-    schema: String,
-    window_start_ms: u64,
+struct HourCounts {
+    hour: u64,
     starts: u32,
     orderly_exits: u32,
     failed_exits: u32,
     premature_exits: u32,
     refused_starts: u32,
-    last_event: String,
-    last_event_ms: u64,
 }
 
-impl Journal {
-    fn new(now: u64) -> Self {
-        Self {
-            schema: JOURNAL_SCHEMA.to_owned(),
-            window_start_ms: now,
-            starts: 0,
-            orderly_exits: 0,
-            failed_exits: 0,
-            premature_exits: 0,
-            refused_starts: 0,
-            last_event: String::new(),
-            last_event_ms: 0,
-        }
-    }
-
-    fn apply(&mut self, event: Event, now: u64) {
-        let counter = match event {
+impl HourCounts {
+    fn counter(&mut self, event: Event) -> &mut u32 {
+        match event {
             Event::Started => &mut self.starts,
             Event::ExitedOrderly => &mut self.orderly_exits,
             Event::ExitedFailed => &mut self.failed_exits,
             Event::ExitedPremature => &mut self.premature_exits,
             Event::StartRefused => &mut self.refused_starts,
+        }
+    }
+
+    /// Fold a second record of the same hour into this one. Two can only exist
+    /// in a file somebody wrote by hand, but a reader that kept both would let
+    /// that file grow without bound.
+    fn absorb(&mut self, other: &Self) {
+        self.starts = self.starts.saturating_add(other.starts);
+        self.orderly_exits = self.orderly_exits.saturating_add(other.orderly_exits);
+        self.failed_exits = self.failed_exits.saturating_add(other.failed_exits);
+        self.premature_exits = self.premature_exits.saturating_add(other.premature_exits);
+        self.refused_starts = self.refused_starts.saturating_add(other.refused_starts);
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Journal {
+    schema: String,
+    hours: Vec<HourCounts>,
+    last_event: Option<Event>,
+    last_event_ms: u64,
+}
+
+/// The day's counts, summed over the hours still inside the window.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Totals {
+    starts: u32,
+    orderly_exits: u32,
+    failed_exits: u32,
+    premature_exits: u32,
+    refused_starts: u32,
+}
+
+const fn hour_of(ms: u64) -> u64 {
+    ms / JOURNAL_BUCKET_MS
+}
+
+impl Journal {
+    fn new() -> Self {
+        Self {
+            schema: JOURNAL_SCHEMA.to_owned(),
+            hours: Vec::new(),
+            last_event: None,
+            last_event_ms: 0,
+        }
+    }
+
+    /// Drop everything that is no longer part of the day this moment is in.
+    ///
+    /// An hour is dropped when it is a day old, and also when it is in the
+    /// future: a clock that has been set back would otherwise leave counts it
+    /// can never expire, reported as a day that never ages. The same bound
+    /// applies to the last event, so a stale code cannot outlive its hour.
+    fn retain_window(&mut self, now: u64) {
+        let current = hour_of(now);
+        self.hours
+            .retain(|bucket| bucket.hour <= current && current - bucket.hour < JOURNAL_BUCKETS);
+        self.hours.sort_by_key(|bucket| bucket.hour);
+        self.hours.dedup_by(|later, kept| {
+            if later.hour == kept.hour {
+                kept.absorb(later);
+                true
+            } else {
+                false
+            }
+        });
+        if self.last_event_ms > now || now - self.last_event_ms >= JOURNAL_WINDOW_MS {
+            self.last_event = None;
+            self.last_event_ms = 0;
+        }
+    }
+
+    fn apply(&mut self, event: Event, now: u64) {
+        let current = hour_of(now);
+        let bucket = match self.hours.iter_mut().find(|bucket| bucket.hour == current) {
+            Some(bucket) => bucket,
+            None => {
+                self.hours.push(HourCounts {
+                    hour: current,
+                    ..HourCounts::default()
+                });
+                self.hours.last_mut().expect("bucket just pushed")
+            }
         };
-        // An install that somehow reaches four billion of anything inside a day
-        // is already past the point where one more matters; it must not be the
-        // thing that panics a supervisor on its way out.
+        // An install that somehow reaches four billion of anything inside an
+        // hour is already past the point where one more matters; it must not be
+        // the thing that panics a supervisor on its way out.
+        let counter = bucket.counter(event);
         *counter = counter.saturating_add(1);
-        self.last_event = event.code().to_owned();
+        self.last_event = Some(event);
         self.last_event_ms = now;
+    }
+
+    fn totals(&self) -> Totals {
+        let mut totals = Totals::default();
+        for bucket in &self.hours {
+            totals.starts = totals.starts.saturating_add(bucket.starts);
+            totals.orderly_exits = totals.orderly_exits.saturating_add(bucket.orderly_exits);
+            totals.failed_exits = totals.failed_exits.saturating_add(bucket.failed_exits);
+            totals.premature_exits = totals
+                .premature_exits
+                .saturating_add(bucket.premature_exits);
+            totals.refused_starts = totals.refused_starts.saturating_add(bucket.refused_starts);
+        }
+        totals
     }
 }
 
@@ -133,12 +233,14 @@ pub(crate) struct LifecycleHealth {
     pub failed_exits: u32,
     pub premature_exits: u32,
     pub refused_starts: u32,
-    /// The fixed code of the most recent event, empty on a journal that has
-    /// been created but never written to.
-    pub last_event: String,
+    /// The fixed code of the most recent event, empty on a journal whose last
+    /// event has itself aged out (and then `last_event_age_seconds` is 0). Typed as a fixed string so no text a file
+    /// carried can reach a reader through this field.
+    pub last_event: &'static str,
     /// How long ago the most recent event was, in seconds. Relative, so a
     /// published snapshot does not carry a wall-clock trail of the user's day.
     pub last_event_age_seconds: u64,
+    /// How long ago the oldest hour still counted here began.
     pub window_age_seconds: u64,
 }
 
@@ -152,11 +254,11 @@ pub(crate) struct LifecycleHealth {
 /// deliberately a property of the window rather than of the last event: an
 /// install that crashes every few minutes and recovers in between is not
 /// healthy, however good its most recent run looked.
-fn health_state(journal: &Journal) -> &'static str {
-    if journal.last_event == Event::StartRefused.code() {
+fn health_state(journal: &Journal, totals: &Totals) -> &'static str {
+    if journal.last_event == Some(Event::StartRefused) {
         return "critical";
     }
-    if journal.failed_exits > 0 || journal.premature_exits > 0 || journal.refused_starts > 0 {
+    if totals.failed_exits > 0 || totals.premature_exits > 0 || totals.refused_starts > 0 {
         return "degraded";
     }
     "healthy"
@@ -227,9 +329,11 @@ fn now_ms() -> Result<u64, String> {
 ///
 /// A file that fails to parse, or carries another schema, is treated as absent
 /// rather than as an error to report: the journal is not authority, and the
-/// next event rewrites it from a fresh window. Discarding one damaged day's
+/// next event rewrites it from an empty day. Discarding one damaged day's
 /// counts is cheaper than letting a corrupt file stop the runtime recording
-/// anything ever again.
+/// anything ever again. A file whose last event is not one of this module's
+/// codes fails to parse for exactly that reason, so an edited vocabulary costs
+/// the same day and reaches no reader.
 fn read_existing(path: &Path, private_root: &Path) -> Option<Journal> {
     let bytes = read_private_bytes(path, private_root, "lifecycle_journal").ok()??;
     let value = crate::strict_json_value(&bytes).ok()?;
@@ -241,25 +345,42 @@ fn read_existing(path: &Path, private_root: &Path) -> Option<Journal> {
 }
 
 fn load_for_window(path: &Path, private_root: &Path, now: u64) -> Journal {
-    match read_existing(path, private_root) {
-        // A window that has closed is not this day, so its counts are not
-        // this day's counts.
-        Some(journal) if now.saturating_sub(journal.window_start_ms) < JOURNAL_WINDOW_MS => journal,
-        _ => Journal::new(now),
-    }
+    let mut journal = read_existing(path, private_root).unwrap_or_else(Journal::new);
+    journal.retain_window(now);
+    journal
 }
 
-/// Count one event against this install's day.
+/// Count one event against this install's day, waiting briefly for the lock.
 ///
 /// Nothing is returned, and that is the point: every caller is on a path whose
-/// result belongs to the runtime, not to the journal.
+/// result belongs to the runtime, not to the journal. This is the supervisor's
+/// way in, where nobody is holding a deadline open behind the write.
 pub(super) fn record(scope: &Path, event: Event) {
-    let _ = record_at(scope, event, None);
+    let _ = record_at(scope, event, None, true);
 }
 
-fn record_at(scope: &Path, event: Event, at_ms: Option<u64>) -> Result<(), String> {
+/// Count one event without ever waiting for the lock.
+///
+/// The spawn path runs under a client's deadline. Sleeping on a contended
+/// journal there could spend that deadline and still leave a resident started
+/// for an answer the caller can no longer wait for, so a journal that is busy
+/// at this moment loses the event instead.
+pub(super) fn record_without_waiting(scope: &Path, event: Event) {
+    let _ = record_at(scope, event, None, false);
+}
+
+fn record_at(
+    scope: &Path,
+    event: Event,
+    at_ms: Option<u64>,
+    wait_for_lock: bool,
+) -> Result<(), String> {
     let private_root = crate::resident_state::private_root_for_scope(scope)?;
-    let _lock = acquire_journal_lock_waiting(scope, &private_root)?;
+    let _lock = if wait_for_lock {
+        acquire_journal_lock_waiting(scope, &private_root)?
+    } else {
+        acquire_journal_lock(scope, &private_root)?
+    };
     let path = scope.join(JOURNAL_FILE);
     #[cfg(windows)]
     recover_interrupted_replace(&path, &private_root)?;
@@ -282,22 +403,30 @@ pub(super) fn health(scope: &Path) -> Result<Option<LifecycleHealth>, String> {
     let _lock = acquire_journal_lock_waiting(scope, &private_root)?;
     let path = scope.join(JOURNAL_FILE);
     let now = now_ms()?;
-    let Some(journal) = read_existing(&path, &private_root) else {
+    let Some(mut journal) = read_existing(&path, &private_root) else {
         return Ok(None);
     };
-    if now.saturating_sub(journal.window_start_ms) >= JOURNAL_WINDOW_MS {
+    journal.retain_window(now);
+    let Some(oldest) = journal.hours.first() else {
         return Ok(None);
-    }
+    };
+    let window_start_ms = oldest.hour.saturating_mul(JOURNAL_BUCKET_MS);
+    let totals = journal.totals();
     Ok(Some(LifecycleHealth {
-        state: health_state(&journal),
-        starts: journal.starts,
-        orderly_exits: journal.orderly_exits,
-        failed_exits: journal.failed_exits,
-        premature_exits: journal.premature_exits,
-        refused_starts: journal.refused_starts,
-        last_event: journal.last_event.clone(),
-        last_event_age_seconds: now.saturating_sub(journal.last_event_ms) / 1_000,
-        window_age_seconds: now.saturating_sub(journal.window_start_ms) / 1_000,
+        state: health_state(&journal, &totals),
+        starts: totals.starts,
+        orderly_exits: totals.orderly_exits,
+        failed_exits: totals.failed_exits,
+        premature_exits: totals.premature_exits,
+        refused_starts: totals.refused_starts,
+        last_event: journal.last_event.map_or("", Event::code),
+        // A journal with no event left to name has no age to report either,
+        // rather than the age of the epoch.
+        last_event_age_seconds: match journal.last_event {
+            Some(_) => now.saturating_sub(journal.last_event_ms) / 1_000,
+            None => 0,
+        },
+        window_age_seconds: now.saturating_sub(window_start_ms) / 1_000,
     }))
 }
 

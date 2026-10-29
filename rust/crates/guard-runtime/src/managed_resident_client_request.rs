@@ -405,6 +405,14 @@ fn client_request_with_deadline_inner(
             std::process::id(),
             overall_deadline,
         )?;
+        // There is a resident now, so this is the point where the day gains a
+        // start. Recorded without waiting for the journal's lock: the client's
+        // deadline still has the startup wait to pay for, and a lost count is
+        // worth less than the wait it would have cost.
+        super::lifecycle_journal::record_without_waiting(
+            &scope,
+            super::lifecycle_journal::Event::Started,
+        );
         Ok((generation, token, spawned))
     })?;
     let deadline = overall_deadline.min(Instant::now() + startup_limit(payload));

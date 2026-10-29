@@ -17,6 +17,10 @@ fn stored(scope: &Path) -> Journal {
     serde_json::from_slice(&encoded).unwrap()
 }
 
+fn record_at_time(scope: &Path, event: Event, at_ms: u64) {
+    record_at(scope, event, Some(at_ms), true).unwrap();
+}
+
 #[test]
 fn an_install_with_no_history_reports_nothing_rather_than_a_healthy_day() {
     let scope = scope_named("empty");
@@ -117,16 +121,14 @@ fn the_journal_holds_nothing_but_counts_and_this_module_s_own_vocabulary() {
     assert!(!text.contains("s3cr3t"), "{text}");
     assert!(!text.contains("private-home"), "{text}");
 
-    let allowed_keys = [
-        "schema",
-        "window_start_ms",
+    let allowed_keys = ["schema", "hours", "last_event", "last_event_ms"];
+    let allowed_hour_keys = [
+        "hour",
         "starts",
         "orderly_exits",
         "failed_exits",
         "premature_exits",
         "refused_starts",
-        "last_event",
-        "last_event_ms",
     ];
     let allowed_strings = [
         JOURNAL_SCHEMA,
@@ -145,6 +147,14 @@ fn the_journal_holds_nothing_but_counts_and_this_module_s_own_vocabulary() {
             serde_json::Value::String(text) => {
                 assert!(allowed_strings.contains(&text.as_str()), "{text}");
             }
+            serde_json::Value::Array(hours) => {
+                for hour in hours {
+                    for (key, count) in hour.as_object().unwrap() {
+                        assert!(allowed_hour_keys.contains(&key.as_str()), "{key}");
+                        assert!(count.is_number(), "{count}");
+                    }
+                }
+            }
             other => panic!("unexpected journal value {other}"),
         }
     }
@@ -154,34 +164,123 @@ fn the_journal_holds_nothing_but_counts_and_this_module_s_own_vocabulary() {
 }
 
 #[test]
-fn yesterday_s_failures_stop_being_reported_once_the_window_closes() {
+fn an_hour_leaves_the_day_on_its_own_rather_than_taking_the_rest_with_it() {
     let scope = scope_named("window");
     let now = now_ms().unwrap();
-    let yesterday = now - JOURNAL_WINDOW_MS;
 
-    record_at(&scope, Event::ExitedFailed, Some(yesterday)).unwrap();
-    assert_eq!(stored(&scope).failed_exits, 1);
+    record_at_time(&scope, Event::ExitedFailed, now - JOURNAL_WINDOW_MS);
+    record_at_time(&scope, Event::Started, now - JOURNAL_BUCKET_MS);
+    record_at_time(&scope, Event::ExitedOrderly, now);
 
-    // The next event opens a fresh window rather than adding to a day that
-    // has already closed.
-    record_at(&scope, Event::Started, Some(now)).unwrap();
+    // The failure's own hour is a day old and is gone. The two hours after it
+    // are not, and they are still counted.
     let journal = stored(&scope);
-    assert_eq!(journal.failed_exits, 0);
-    assert_eq!(journal.starts, 1);
-    assert_eq!(journal.window_start_ms, now);
-    assert_eq!(health_state(&journal), "healthy");
+    let totals = journal.totals();
+    assert_eq!(totals.failed_exits, 0);
+    assert_eq!(totals.starts, 1);
+    assert_eq!(totals.orderly_exits, 1);
+    assert_eq!(journal.hours.len(), 2);
 
     fs::remove_dir_all(scope).unwrap();
 }
 
 #[test]
-fn a_journal_left_behind_by_a_window_that_closed_is_not_reported_as_today() {
+fn a_failure_minutes_old_is_still_reported_a_day_after_the_first_event() {
+    // The bug this guards against: a window pinned to the first event drops
+    // everything at its boundary, so a refusal seconds before it reads back as
+    // no history at all, and the next event reads back as a healthy day.
+    let scope = scope_named("rolling");
+    let now = now_ms().unwrap();
+
+    record_at_time(
+        &scope,
+        Event::Started,
+        now - JOURNAL_WINDOW_MS + JOURNAL_BUCKET_MS,
+    );
+    record_at_time(&scope, Event::StartRefused, now - JOURNAL_BUCKET_MS);
+
+    let health = health(&scope).unwrap().unwrap();
+    assert_eq!(health.state, "critical");
+    assert_eq!(health.refused_starts, 1);
+
+    // And a start after it leaves the refusal in the day it happened in.
+    record_at_time(&scope, Event::Started, now);
+    let journal = stored(&scope);
+    assert_eq!(journal.totals().refused_starts, 1);
+    assert_eq!(health_state(&journal, &journal.totals()), "degraded");
+
+    fs::remove_dir_all(scope).unwrap();
+}
+
+#[test]
+fn a_journal_whose_every_hour_is_a_day_old_is_not_reported_as_today() {
     let scope = scope_named("stale");
     let stale = now_ms().unwrap() - JOURNAL_WINDOW_MS;
 
-    record_at(&scope, Event::ExitedFailed, Some(stale)).unwrap();
+    record_at_time(&scope, Event::ExitedFailed, stale);
 
     assert!(health(&scope).unwrap().is_none());
+
+    fs::remove_dir_all(scope).unwrap();
+}
+
+#[test]
+fn a_clock_set_back_does_not_leave_counts_that_never_expire() {
+    // An hour the clock has not reached yet cannot age out by waiting, so a
+    // journal written before a rollback would otherwise report its failures
+    // for as long as the clock took to catch up.
+    let scope = scope_named("rollback");
+    let now = now_ms().unwrap();
+
+    record_at_time(&scope, Event::ExitedFailed, now + JOURNAL_WINDOW_MS);
+    assert!(health(&scope).unwrap().is_none());
+
+    record_at_time(&scope, Event::Started, now);
+    let journal = stored(&scope);
+    assert_eq!(journal.hours.len(), 1);
+    assert_eq!(journal.totals().failed_exits, 0);
+    assert_eq!(journal.totals().starts, 1);
+
+    fs::remove_dir_all(scope).unwrap();
+}
+
+#[test]
+fn a_journal_naming_an_event_this_module_never_writes_reaches_no_reader() {
+    // A same-user process can edit this file. The reader refuses its word
+    // rather than republishing it in a snapshot meant to be shareable unread.
+    let scope = scope_named("vocabulary");
+    record(&scope, Event::Started);
+    let smuggled = stored(&scope);
+    let mut value = serde_json::to_value(&smuggled).unwrap();
+    value["last_event"] = serde_json::Value::String("/home/a-person/secret-project".to_owned());
+    fs::write(
+        scope.join(JOURNAL_FILE),
+        serde_json::to_vec(&value).unwrap(),
+    )
+    .unwrap();
+
+    assert!(health(&scope).unwrap().is_none());
+
+    fs::remove_dir_all(scope).unwrap();
+}
+
+#[test]
+fn a_hand_written_journal_cannot_make_the_file_grow_without_bound() {
+    let scope = scope_named("bounded");
+    let now = now_ms().unwrap();
+    let mut journal = Journal::new();
+    for index in 0..200u64 {
+        journal.hours.push(HourCounts {
+            hour: hour_of(now) - index % 12,
+            starts: 1,
+            ..HourCounts::default()
+        });
+    }
+
+    journal.retain_window(now);
+
+    assert_eq!(journal.hours.len(), 12);
+    assert_eq!(journal.totals().starts, 200);
 
     fs::remove_dir_all(scope).unwrap();
 }
@@ -229,14 +328,14 @@ fn every_event_has_its_own_counter() {
     record(&scope, Event::ExitedPremature);
     record(&scope, Event::StartRefused);
 
-    let journal = stored(&scope);
+    let totals = stored(&scope).totals();
     assert_eq!(
         (
-            journal.starts,
-            journal.orderly_exits,
-            journal.failed_exits,
-            journal.premature_exits,
-            journal.refused_starts,
+            totals.starts,
+            totals.orderly_exits,
+            totals.failed_exits,
+            totals.premature_exits,
+            totals.refused_starts,
         ),
         (1, 1, 1, 1, 1)
     );
