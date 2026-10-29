@@ -490,15 +490,30 @@ mod workspace_prefix_tests {
     #[test]
     fn a_parent_step_leaves_the_workspace_the_path_is_spelled_from() {
         let workspace = Path::new("/projects/app");
-        assert!(inside_workspace(Path::new("/projects/app/src/main.rs"), workspace));
-        assert!(inside_workspace(Path::new("/projects/app/build/../src"), workspace));
-        assert!(inside_workspace(Path::new("/projects/app/./src"), workspace));
-        assert!(!inside_workspace(Path::new("/projects/app/../other"), workspace));
+        assert!(inside_workspace(
+            Path::new("/projects/app/src/main.rs"),
+            workspace
+        ));
+        assert!(inside_workspace(
+            Path::new("/projects/app/build/../src"),
+            workspace
+        ));
+        assert!(inside_workspace(
+            Path::new("/projects/app/./src"),
+            workspace
+        ));
+        assert!(!inside_workspace(
+            Path::new("/projects/app/../other"),
+            workspace
+        ));
         assert!(!inside_workspace(
             Path::new("/projects/app/../../../etc/hosts"),
             workspace
         ));
-        assert!(!inside_workspace(Path::new("/projects/app-sibling"), workspace));
+        assert!(!inside_workspace(
+            Path::new("/projects/app-sibling"),
+            workspace
+        ));
         assert!(!inside_workspace(Path::new("/etc/hosts"), workspace));
     }
 
