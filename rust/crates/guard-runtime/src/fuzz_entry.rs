@@ -111,9 +111,13 @@ pub fn contained_path(data: &[u8]) {
     let _ = guard_command::contained_argv::evaluate("contained_target", &value);
 }
 
+/// One fuzz entry point: it takes the fuzzer's bytes and must not panic on any
+/// of them.
+pub type FuzzEntryPoint = fn(&[u8]);
+
 /// Every entry point with the corpus directory it replays, so a new target
 /// cannot be added without a seed corpus beside it.
-pub const FUZZ_ENTRY_POINTS: &[(&str, fn(&[u8]))] = &[
+pub const FUZZ_ENTRY_POINTS: &[(&str, FuzzEntryPoint)] = &[
     ("resident_frame", resident_frame),
     ("command_request", command_request),
     ("shell_command", shell_command),
