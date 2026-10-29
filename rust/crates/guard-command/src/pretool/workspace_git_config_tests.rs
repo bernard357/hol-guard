@@ -14,7 +14,7 @@ fn denials(config: &str, workspace: &Path) -> Option<Vec<PathBuf>> {
 }
 
 #[test]
-fn workspace_includes_and_escaping_relative_hooks_keep_the_command_at_review() {
+fn workspace_includes_and_outside_hooks_keep_the_command_at_review() {
     let ws = Path::new("/w/repo");
     // Relative includes resolve against `.git/`, so both name workspace files.
     assert_eq!(denials("[include]\n\tpath = ../.gitconfig\n", ws), None);
@@ -23,6 +23,8 @@ fn workspace_includes_and_escaping_relative_hooks_keep_the_command_at_review() {
         denials("[includeIf \"gitdir:/w/\"]\n\tpath = /w/repo/cfg\n", ws),
         None
     );
+    assert_eq!(denials("[core]\n\thooksPath = /outside/hooks\n", ws), None);
+    assert_eq!(denials("[core]\n\thooksPath = ~/hooks\n", ws), None);
     assert_eq!(denials("[core]\n\thooksPath = ../hooks\n", ws), None);
     // An include outside the workspace is not writable from the sandbox.
     assert_eq!(
@@ -411,12 +413,13 @@ fn large_repository_config_is_read_within_the_bound() {
 }
 
 #[test]
-fn repository_hooks_outside_the_workspace_are_read_like_global_ones() {
+fn repository_hooks_below_home_are_read_like_global_ones() {
     let root = scratch("repo-home-hooks");
     let (home, repo) = (root.join("home"), root.join("repo"));
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     std::fs::create_dir_all(home.join("empty-hooks")).unwrap();
-    for value in ["~/empty-hooks", "~/missing/hooks", "/usr/share/git-hooks"] {
+    let absolute = format!("{}/empty-hooks", home.display());
+    for value in ["~/empty-hooks", "~/missing/hooks", absolute.as_str()] {
         let text = format!("[core]\n\thooksPath = {value}\n");
         std::fs::write(repo.join(".git/config"), text).unwrap();
         assert_eq!(
@@ -431,7 +434,13 @@ fn repository_hooks_outside_the_workspace_are_read_like_global_ones() {
         workspace_write_denials(&repo, Some(&home)),
         Some(vec![repo.join(".hooks")])
     );
-    for value in ["../hooks", "~other/hooks", "~/hooks # note"] {
+    for value in [
+        "../hooks",
+        "~other/hooks",
+        "~/hooks # note",
+        "/tmp/hooks",
+        "~",
+    ] {
         let text = format!("[core]\n\thooksPath = {value}\n");
         std::fs::write(repo.join(".git/config"), text).unwrap();
         assert_eq!(workspace_write_denials(&repo, Some(&home)), None, "{value}");
