@@ -75,6 +75,12 @@ def test_stage_from_wheel_applies_the_runtime_bound(tmp_path: Path) -> None:
     runtime_path, _ = MODULE.stage_from_wheel(wheel, tmp_path / "exact", max_runtime_bytes=len(runtime), **stage)
     assert runtime_path.read_bytes() == runtime
 
+    with pytest.raises(MODULE.NativeRuntimeStageError, match="wrong size"):
+        MODULE.refresh_identity(tmp_path / "exact", max_runtime_bytes=len(runtime) - 1)
+    with pytest.raises(MODULE.NativeRuntimeStageError, match="runtime bound"):
+        MODULE.refresh_identity(tmp_path / "exact", max_runtime_bytes=MODULE._MAX_UNPUBLISHED_RUNTIME_BYTES + 1)
+    assert MODULE.refresh_identity(tmp_path / "exact", max_runtime_bytes=len(runtime)).is_file()
+
 def _bundle_binding(source_sha: str = "a" * 40) -> dict[str, object]:
     return {
         "schema": "guard.command-pack-bundle.v1",

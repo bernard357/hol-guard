@@ -18,7 +18,8 @@ _PROTOCOL_VERSION = 1
 _MAX_WHEEL_BYTES = 256 * 1024 * 1024
 _MAX_RUNTIME_BYTES = 128 * 1024 * 1024
 # Development wheels build the runtime at opt-level 0 and are never published.
-_MAX_UNPUBLISHED_RUNTIME_BYTES = 768 * 1024 * 1024
+# The runtime's own resident-state reader refuses anything larger.
+_MAX_UNPUBLISHED_RUNTIME_BYTES = 512 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 16 * 1024
 _SHA40 = 40
 _SHA64 = 64
@@ -160,6 +161,11 @@ def _write_file(path: Path, payload: bytes, mode: int) -> None:
         raise NativeRuntimeStageError(f"staged native path is world-writable: {path.name}")
 
 
+def _check_runtime_bound(max_runtime_bytes: int) -> None:
+    if max_runtime_bytes <= 0 or max_runtime_bytes > _MAX_UNPUBLISHED_RUNTIME_BYTES:
+        raise NativeRuntimeStageError(f"runtime bound must be between 1 and {_MAX_UNPUBLISHED_RUNTIME_BYTES} bytes")
+
+
 def stage_from_wheel(
     wheel: Path,
     destination: Path,
@@ -170,8 +176,7 @@ def stage_from_wheel(
 ) -> tuple[Path, Path]:
     """Extract and seal the native runtime from one attested platform wheel."""
 
-    if max_runtime_bytes <= 0 or max_runtime_bytes > _MAX_UNPUBLISHED_RUNTIME_BYTES:
-        raise NativeRuntimeStageError(f"runtime bound must be between 1 and {_MAX_UNPUBLISHED_RUNTIME_BYTES} bytes")
+    _check_runtime_bound(max_runtime_bytes)
     if not wheel.is_file():
         raise NativeRuntimeStageError("attested native wheel is missing")
     wheel_size = wheel.stat().st_size
@@ -202,9 +207,10 @@ def stage_from_wheel(
     return runtime_path, manifest_path
 
 
-def refresh_identity(destination: Path) -> Path:
+def refresh_identity(destination: Path, max_runtime_bytes: int = _MAX_RUNTIME_BYTES) -> Path:
     """Rewrite manifest size and digest after Apple signing changes the runtime bytes."""
 
+    _check_runtime_bound(max_runtime_bytes)
     runtime_matches = [path for path in (destination / name for name in _RUNTIME_NAMES) if path.is_file()]
     if len(runtime_matches) != 1:
         raise NativeRuntimeStageError("staged native runtime must contain exactly one hol-guard-runtime binary")
@@ -213,7 +219,7 @@ def refresh_identity(destination: Path) -> Path:
     if not manifest_path.is_file():
         raise NativeRuntimeStageError("staged native runtime manifest is missing")
     runtime = runtime_path.read_bytes()
-    if not runtime or len(runtime) > _MAX_RUNTIME_BYTES:
+    if not runtime or len(runtime) > max_runtime_bytes:
         raise NativeRuntimeStageError("staged native runtime is the wrong size")
     manifest = _decode_manifest(manifest_path.read_bytes())
     manifest["runtime_sha256"] = _sha256(runtime)
@@ -246,7 +252,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.refresh_identity:
-            path = refresh_identity(args.destination)
+            path = refresh_identity(args.destination, args.max_runtime_bytes)
             print(path)
             return 0
         if args.wheel is None or not args.expected_version or not args.expected_target:
