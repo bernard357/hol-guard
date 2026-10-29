@@ -24,6 +24,7 @@ RUST_READERS = (
 DEVELOPMENT_WHEEL_BUILDS = (
     "scripts/ci/build-native-wheel-macos.sh",
     ".github/workflows/gauntlet-full-task-runtime.yml",
+    ".github/workflows/gauntlet-installed-acceptance.yml",
 )
 
 

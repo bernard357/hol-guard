@@ -17,6 +17,8 @@ _MANIFEST_SCHEMA = "hol-guard-native-runtime.v1"
 _PROTOCOL_VERSION = 1
 _MAX_WHEEL_BYTES = 256 * 1024 * 1024
 _MAX_RUNTIME_BYTES = 128 * 1024 * 1024
+# Development wheels build the runtime at opt-level 0 and are never published.
+_MAX_UNPUBLISHED_RUNTIME_BYTES = 768 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 16 * 1024
 _SHA40 = 40
 _SHA64 = 64
@@ -164,9 +166,12 @@ def stage_from_wheel(
     *,
     expected_version: str,
     expected_target: str,
+    max_runtime_bytes: int = _MAX_RUNTIME_BYTES,
 ) -> tuple[Path, Path]:
     """Extract and seal the native runtime from one attested platform wheel."""
 
+    if max_runtime_bytes <= 0 or max_runtime_bytes > _MAX_UNPUBLISHED_RUNTIME_BYTES:
+        raise NativeRuntimeStageError(f"runtime bound must be between 1 and {_MAX_UNPUBLISHED_RUNTIME_BYTES} bytes")
     if not wheel.is_file():
         raise NativeRuntimeStageError("attested native wheel is missing")
     wheel_size = wheel.stat().st_size
@@ -180,7 +185,7 @@ def stage_from_wheel(
         names = {_safe_member_name(info.filename).as_posix() for info in archive.infolist() if not info.is_dir()}
         runtime_name = _runtime_member_name(names)
         manifest_name = f"{_NATIVE_DIR}/{_MANIFEST_NAME}"
-        runtime = _read_member(archive, runtime_name, _MAX_RUNTIME_BYTES)
+        runtime = _read_member(archive, runtime_name, max_runtime_bytes)
         manifest_bytes = _read_member(archive, manifest_name, _MAX_MANIFEST_BYTES)
     manifest = _decode_manifest(manifest_bytes)
     if manifest["package_version"] != expected_version:
@@ -229,6 +234,15 @@ def main() -> int:
     parser.add_argument("--expected-version")
     parser.add_argument("--expected-target")
     parser.add_argument("--refresh-identity", action="store_true")
+    parser.add_argument(
+        "--max-runtime-bytes",
+        type=int,
+        default=_MAX_RUNTIME_BYTES,
+        help=(
+            "Largest runtime to stage, in bytes. The default suits the shipped release profile; "
+            "raise it only for bundles that are never published, such as installed acceptance."
+        ),
+    )
     args = parser.parse_args()
     try:
         if args.refresh_identity:
@@ -242,6 +256,7 @@ def main() -> int:
             args.destination,
             expected_version=args.expected_version,
             expected_target=args.expected_target,
+            max_runtime_bytes=args.max_runtime_bytes,
         )
         print(runtime_path)
         print(manifest_path)
