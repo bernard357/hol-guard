@@ -48,7 +48,7 @@ mod private_file;
 mod requested_stop;
 #[path = "resident_failure_log.rs"]
 mod resident_failure_log;
-pub(crate) use lifecycle_journal::{lifecycle_health, LifecycleHealth};
+pub(crate) use lifecycle_journal::lifecycle_health;
 #[path = "resident_state_retirement.rs"]
 mod resident_state_retirement;
 #[path = "resident_restart_budget.rs"]
