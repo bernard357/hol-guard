@@ -48,9 +48,9 @@ def _leaves_the_workspace(argument: str) -> bool:
     /etc/jest.config.js``. Every tail of the group is screened, since which
     letter takes the value is yargs-parser's to decide.
 
-    Jest reads inline JSON with ``JSON.parse``, which turns a ``\\uXXXX``
-    escape into its character after this screen has looked at the raw text, so
-    a quoted argument carrying such an escape goes to review instead.
+    Jest reads inline JSON with ``JSON.parse``, which turns a ``\\u`` escape
+    into its character after this screen has looked at the raw text, so a
+    quoted argument carrying such an escape goes to review instead.
     """
     if '"' in argument and "\\u" in argument:
         return True
