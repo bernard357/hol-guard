@@ -11646,6 +11646,57 @@
       "expect": "not_allow"
     },
     {
+      "id": "home-hooks-checkout-perl-in-place-edit",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "perl -pi -e 's/Draft/Final/' docs/release-notes.md"
+      },
+      "cwd": "org_home_hooks",
+      "expect": "allow"
+    },
+    {
+      "id": "home-hooks-checkout-merge-ff-only",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git merge --ff-only origin/main"
+      },
+      "cwd": "org_home_hooks",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-home-hooks-checkout-write-hook",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "printf '#!/bin/sh\\necho merged\\n' > ~/.app-hooks/empty/post-merge"
+      },
+      "cwd": "org_home_hooks",
+      "expect": "not_allow"
+    },
+    {
       "id": "neg-git-fetch-then-merge-ff-only-post-merge-hook",
       "fix_area": "negative",
       "harnesses": [

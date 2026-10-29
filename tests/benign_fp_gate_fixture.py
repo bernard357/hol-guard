@@ -58,7 +58,7 @@ from tests.benign_fp_gate_cursor_project import cursor_project_path, write_curso
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
 from tests.benign_fp_gate_feature_app import build_feature_app, feature_app_path
 from tests.benign_fp_gate_git import _git, _session_worktree, _signed_checkout, _stopped_rebase
-from tests.benign_fp_gate_hooked_clone import hooked_worktree_path, write_hooked_clone
+from tests.benign_fp_gate_hooked_clone import hooked_cwds, write_hooked_clone
 from tests.benign_fp_gate_long_lived_clone import write_long_lived_clones
 from tests.benign_fp_gate_paths import materialise
 from tests.benign_fp_gate_projects import (
@@ -169,7 +169,7 @@ class BenignFixture:
             "org_app": self.org / "app-portal",
             "org_wt": self.org.parent / "app-portal-fix",
             "org_clone": self.org.parent / "app-portal-clone",
-            "org_hooked": hooked_worktree_path(self.org),
+            **hooked_cwds(self.org),
             "tmp_org": self.tmp_org,
             "org_rebase": self.org.parent / "app-portal-rebase",
             "org_rebase_exec": self.org.parent / "app-portal-rebase-exec",

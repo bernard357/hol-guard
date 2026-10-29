@@ -324,7 +324,8 @@ pub(crate) fn helper_write_denials(config: &str, workspace: &Path) -> Option<Vec
 /// work tree `root`; those outside `workspace` but inside `root` cannot be
 /// written by the sandbox and are skipped. `None` keeps the command at
 /// review: an include of repository configuration this reader never parses,
-/// a hook directory outside the work tree, or a list beyond its bound.
+/// a relative hook directory outside the work tree, or a list beyond its
+/// bound.
 fn helper_denials(
     config: &str,
     root: &Path,
@@ -345,12 +346,20 @@ fn helper_denials(
                 return None;
             }
         } else if key == "hookspath" {
-            // Relative hook directories resolve against the work tree. An
-            // inline comment or escape would move the path Git uses.
+            // A relative hook directory resolves against the work tree and
+            // must stay inside it. An absolute or `~/` one outside the
+            // workspace is as far from the sandbox as the same setting in
+            // global configuration. An inline comment or escape would move
+            // the path Git uses.
             if value.contains(['#', ';', '\\']) {
                 return None;
             }
-            candidates.push(inside(root, root, &value)?);
+            let relative = !value.trim().trim_matches('"').starts_with(['~', '/']);
+            let path = expand(root, home, &value)?;
+            if relative && !path.starts_with(root) {
+                return None;
+            }
+            candidates.push(path);
         } else if section != "branch" && section != "user" && !names_data(section, key) {
             helper_word_denials(&mut denials, &value, root, home, workspace)?;
         }
@@ -380,6 +389,8 @@ fn helper_word_denials(
     home: Option<&Path>,
     workspace: &Path,
 ) -> Option<()> {
+    let value = echoed::mask_echoed_text(value);
+    let value = value.as_str();
     if value.contains(['`', '\\', '*', '?', '[']) {
         return None;
     }
@@ -460,6 +471,9 @@ fn bare_variable(word: &str) -> bool {
 
 #[path = "workspace_git_config_entries.rs"]
 mod config_entries;
+
+#[path = "workspace_git_config_echoed.rs"]
+mod echoed;
 
 #[cfg(test)]
 #[path = "workspace_git_config_tests.rs"]

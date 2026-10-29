@@ -10,6 +10,8 @@ import pytest
 
 from ci.gauntlet.catalog import load_catalog
 from ci.gauntlet.clone_fixtures import (
+    HOME_HOOKS_CASE,
+    HOME_HOOKS_NOTES,
     LONG_LIVED_BRANCH,
     LONG_LIVED_CLONE_CASE,
     LONG_LIVED_WORKTREE_CASE,
@@ -303,6 +305,20 @@ def test_long_lived_clone_worktree_fixture_adds_both_sibling_worktrees(tmp_path:
         assert arguments[:3] == ["git", "-C", str(main)]
         _git(main, fixture.home, *arguments[3:])
     assert long_lived_clone_checks(fixture.workspace, LONG_LIVED_WORKTREE_CASE) == {"long-lived-worktrees-added": True}
+
+
+def test_home_hooks_clone_fixture_points_hooks_and_credentials_outside_the_work_tree(tmp_path: Path) -> None:
+    scenario = {s.id: s for s in load_catalog()}[HOME_HOOKS_CASE]
+    assert (scenario.expectation, scenario.oracle) == ("allow", "native-tools")
+    fixture = create_fixture(tmp_path / "fx", realistic=True, scenario_id=HOME_HOOKS_CASE)
+    assert _git(fixture.workspace, fixture.home, "config", "--get", "core.hooksPath").strip() == "~/.app-hooks/empty"
+    assert (fixture.home / ".app-hooks/empty").is_dir()
+    helper = _git(fixture.workspace, fixture.home, "config", "--get-all", "credential.helper")
+    assert "!f() { echo" in helper and "$(gh auth token" in helper
+    assert long_lived_clone_checks(fixture.workspace, HOME_HOOKS_CASE) == {"home-hooks-notes-edited": False}
+    notes = fixture.workspace / HOME_HOOKS_NOTES
+    notes.write_text(notes.read_text(encoding="utf-8").replace("Draft", "Final"), encoding="utf-8")
+    assert long_lived_clone_checks(fixture.workspace, HOME_HOOKS_CASE) == {"home-hooks-notes-edited": True}
 
 
 @pytest.mark.parametrize("case", [FAST_FORWARD_CASE, FAST_FORWARD_HOOK_CASE])

@@ -14,7 +14,7 @@ fn denials(config: &str, workspace: &Path) -> Option<Vec<PathBuf>> {
 }
 
 #[test]
-fn workspace_includes_and_outside_hooks_keep_the_command_at_review() {
+fn workspace_includes_and_escaping_relative_hooks_keep_the_command_at_review() {
     let ws = Path::new("/w/repo");
     // Relative includes resolve against `.git/`, so both name workspace files.
     assert_eq!(denials("[include]\n\tpath = ../.gitconfig\n", ws), None);
@@ -23,8 +23,7 @@ fn workspace_includes_and_outside_hooks_keep_the_command_at_review() {
         denials("[includeIf \"gitdir:/w/\"]\n\tpath = /w/repo/cfg\n", ws),
         None
     );
-    assert_eq!(denials("[core]\n\thooksPath = /outside/hooks\n", ws), None);
-    assert_eq!(denials("[core]\n\thooksPath = ~/hooks\n", ws), None);
+    assert_eq!(denials("[core]\n\thooksPath = ../hooks\n", ws), None);
     // An include outside the workspace is not writable from the sandbox.
     assert_eq!(
         denials("[include]\n\tpath = /etc/gitconfig.d/team\n", ws),
@@ -409,4 +408,54 @@ fn large_repository_config_is_read_within_the_bound() {
     std::fs::write(root.join(".git/config"), &config).unwrap();
     assert!(super::repository_config(&root).is_err());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn repository_hooks_outside_the_workspace_are_read_like_global_ones() {
+    let root = scratch("repo-home-hooks");
+    let (home, repo) = (root.join("home"), root.join("repo"));
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(home.join("empty-hooks")).unwrap();
+    for value in ["~/empty-hooks", "~/missing/hooks", "/usr/share/git-hooks"] {
+        let text = format!("[core]\n\thooksPath = {value}\n");
+        std::fs::write(repo.join(".git/config"), text).unwrap();
+        assert_eq!(
+            workspace_write_denials(&repo, Some(&home)),
+            Some(vec![]),
+            "{value}"
+        );
+    }
+    let inside = format!("[core]\n\thooksPath = {}/.hooks\n", repo.display());
+    std::fs::write(repo.join(".git/config"), inside).unwrap();
+    assert_eq!(
+        workspace_write_denials(&repo, Some(&home)),
+        Some(vec![repo.join(".hooks")])
+    );
+    for value in ["../hooks", "~other/hooks", "~/hooks # note"] {
+        let text = format!("[core]\n\thooksPath = {value}\n");
+        std::fs::write(repo.join(".git/config"), text).unwrap();
+        assert_eq!(workspace_write_denials(&repo, Some(&home)), None, "{value}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn text_a_helper_echoes_is_data_but_its_substitutions_are_screened() {
+    let ws = Path::new("/w/repo");
+    let helper = |value: &str| denials(&format!("[credential]\n\thelper = {value}\n"), ws);
+    let answer = r#""!f() { echo \"username=x-access-token\"; echo \"password=$(gh auth token --hostname example.com)\"; }; f""#;
+    assert!(helper(answer).is_some());
+    let local = r#""!f() { echo \"password=$(./tools/token read)\"; }; f""#;
+    assert!(helper(local).unwrap().contains(&ws.join("tools/token")));
+    for value in [
+        r#""!f() { echo \"./my tool.sh\" | sh; }; f""#,
+        r#""!echo() { sh \"$@\"; }; echo \"./my tool.sh\"""#,
+        r#""!f() { echo \"x\" > \"./a b\"; }; f""#,
+        r#""!f() { echo \"$(cat \"a b\")\"; }; f""#,
+        r#""!f() { echo \"$HOME/a b\"; }; f""#,
+        r#""!sh -c \"./my tool.sh\"""#,
+        r#""!alias echo=sh; echo \"./my tool.sh\"""#,
+    ] {
+        assert_eq!(helper(value), None, "{value}");
+    }
 }

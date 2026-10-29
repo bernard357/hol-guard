@@ -585,6 +585,7 @@
       "src/pretool/workspace_contained_sibling.rs",
       "src/pretool/workspace_contained_vendored.rs",
       "src/pretool/workspace_git_config.rs",
+      "src/pretool/workspace_git_config_echoed.rs",
       "src/pretool/workspace_git_config_entries.rs",
       "src/pretool/workspace_git_environment.rs",
       "src/pretool/workspace_git_keeps_work.rs",
