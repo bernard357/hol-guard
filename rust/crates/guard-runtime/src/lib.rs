@@ -398,6 +398,7 @@ mod guard_store_native_receipts_tests;
 mod guard_store_native_review_consume;
 #[cfg(test)]
 mod guard_store_native_review_consume_tests;
+mod guard_store_native_review_queue;
 mod guard_store_observed_mcp;
 mod guard_store_op;
 mod guard_store_outbox_append;

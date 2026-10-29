@@ -64,21 +64,29 @@ class StoreApprovalsMixin:
             "add_approval_request", {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown}
         )
 
-    def queue_review_approval_request(
+    def queue_native_review(
         self,
-        request: GuardApprovalRequest,
+        review: dict[str, object],
         now: str,
         *,
+        extension_allow_hint: dict[str, object] | None = None,
         silent: bool = False,
-        claude_review: dict[str, object] | None = None,
+        claude_key: dict[str, object] | None = None,
         codex_live_wait: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
-        """Queue a native review and answer the row it was stored as.
+        """Queue a paused native review and answer the row it was stored as.
 
-        The resident reads the row back in the queue write's own transaction,
-        so the hook pays one round trip instead of a write and a read. A
-        resident that predates the read-back, or could not read the row,
-        answers the request id alone and the row is read separately.
+        ``review`` is the ``review_request`` query (``native_review_query``):
+        the resident builds the approval request from it and queues it in the
+        same call, and reads the row back in the queue write's own
+        transaction. A row it could not read is read separately.
+
+        ``silent`` queues a review the agent never sees: its
+        ``approval.created`` event is written in the same transaction, best
+        effort, without marking a prompt as shown. ``claude_key`` is the
+        integrity key a prompted Claude review's permission notice is signed
+        with, also best effort; it rides in the top-level args the request
+        digest leaves out.
 
         ``codex_live_wait`` names the waiting Codex bridge (``process``,
         ``timeout_seconds`` and ``workspace``). The resident proves it live,
@@ -87,32 +95,24 @@ class StoreApprovalsMixin:
         (``not_live``), or a wait the resident could not link or seed, leaves
         the request a manual retry.
         """
-        method = "add_approval_request"
-        args: dict[str, object] = {"request": request.to_dict(), "now": now}
+        args: dict[str, object] = {
+            "review": review,
+            "extension_allow_hint": extension_allow_hint,
+            "now": now,
+            "silent": silent,
+            "claude_notice": claude_key is not None,
+        }
+        if claude_key is not None:
+            args["integrity_key_b64"] = claude_key["integrity_key_b64"]
+            args["integrity_key_id"] = claude_key["integrity_key_id"]
         if codex_live_wait is not None:
             args["codex_live_wait_facts"] = codex_live_wait
-        if silent:
-            # A review the agent never sees: its ``approval.created`` event is
-            # written in the same transaction, best effort, without marking a
-            # prompt as shown; the resident names the code of a failed event.
-            method, args["daemon"] = "add_silent_native_review_approval_request", True
-        elif claude_review is not None:
-            # The resident also builds and signs the Claude permission notice
-            # for a newly queued request, best effort. The key rides in the
-            # top-level args the request digest leaves out.
-            method = "add_claude_approval_request"
-            args["claude_review"] = claude_review["review"]
-            args["integrity_key_b64"] = claude_review["integrity_key_b64"]
-            args["integrity_key_id"] = claude_review["integrity_key_id"]
         try:
             # `Path.resolve` of a relative config path starts from this process's directory.
             cwd: str | None = os.getcwd()
         except OSError:
             cwd = None
-        queued = self._native_queue_call(method, {**args, "return_row": True, "cwd": cwd})
-        if isinstance(queued, str) and queued:
-            # A resident that predates the read-back answers the id alone.
-            queued = {"request_id": queued}
+        queued = self._native_queue_call("queue_native_review", {**args, "return_row": True, "cwd": cwd})
         if not isinstance(queued, dict) or not isinstance(queued.get("request_id"), str) or not queued["request_id"]:
             raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
         if queued.get("event_error") is not None:

@@ -433,12 +433,12 @@ class _ApprovalStore:
     def get_approval_request(self, request_id: str) -> dict[str, object]:
         return self.rows[request_id]
 
-    def queue_review_approval_request(self, request: object, now: str, **_options: object) -> dict[str, object]:
-        return self.get_approval_request(self.add_approval_request(request, now))  # type: ignore[arg-type]
+    def queue_native_review(self, review: dict[str, object], now: str, **_options: object) -> dict[str, object]:
+        return self.get_approval_request(self.add_approval_request(SimpleNamespace(**review), now))  # type: ignore[arg-type]
 
 
 def _native_request(harness: str, payload: dict[str, object], review: dict[str, object], **_k: object) -> dict:
-    """The resident's ``review_request`` answer, reduced to what these tests read."""
+    """The request the resident builds from the ``review_request`` query, reduced to what these tests read."""
 
     request_id = review["request_id"]
     tool_input = payload["tool_input"]
@@ -476,7 +476,7 @@ def _queue(
 
     monkeypatch.setattr(review, "record_native_review_connector_context", record)
     monkeypatch.setattr(review, "native_review_policy_binding", lambda **_kwargs: None)
-    monkeypatch.setattr(review, "native_review_request", _native_request)
+    monkeypatch.setattr(review, "native_review_query", _native_request)
     monkeypatch.setattr(review, "native_review_hint", lambda *_a, **_k: None)
     queued = review.queue_native_pre_tool_review(
         _ApprovalStore(),

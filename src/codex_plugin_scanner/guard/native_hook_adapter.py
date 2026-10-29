@@ -74,13 +74,6 @@ _MAX_PLAIN_CHARS = _MAX_PLAIN_BYTES // 4
 _PASS_THROUGH_ROOT_KEYS = frozenset({"output", "stderr", "stdout", "tool_response"})
 _REDACTED = "[redacted]"
 
-# The ``GuardApprovalRequest`` fields a ``review_request`` answer sets.
-_REVIEW_REQUEST_FIELDS = (
-    "request_id harness artifact_id artifact_name artifact_hash policy_action recommended_scope changed_fields"
-    " source_scope config_path review_command approval_url workspace artifact_type launch_target risk_summary"
-    " action_envelope_json raw_command_text queue_group_id"
-)
-_REVIEW_REQUEST_KEYS = frozenset(_REVIEW_REQUEST_FIELDS.split())
 # The ``GuardActionEnvelope.to_dict`` fields an ``action_envelope`` answer sets.
 _ENVELOPE_FIELDS = (
     "schema_version action_id harness event_name action_type workspace workspace_hash tool_name command"
@@ -347,6 +340,24 @@ def _envelope_call(
 ) -> dict[str, object]:
     """Send ``query(envelope)`` for one hook payload; the answer must carry exactly ``keys``."""
 
+    build = _envelope_builder(harness, event_name, payload, query, workspace=workspace, home_dir=home_dir)
+    result = _call(build, guard_home=guard_home, deadline=deadline, shape="envelope")
+    if not isinstance(result, dict) or set(result) != keys:
+        raise NativeHookAdapterError(_INVALID)
+    return result
+
+
+def _envelope_builder(
+    harness: str,
+    event_name: str,
+    payload: Mapping[str, object],
+    query: Callable[[dict[str, object]], dict[str, object]],
+    *,
+    workspace: Path | str | None,
+    home_dir: Path | str | None,
+) -> _Builder:
+    """Build ``query(envelope)`` for one hook payload, optionally without its pass-through blobs."""
+
     def build(shrunk: bool) -> _Built | None:
         source: Mapping[str, object] | None = _without_pass_through_blobs(payload) if shrunk else payload
         if source is None:
@@ -364,10 +375,7 @@ def _envelope_call(
         }
         return query(envelope), tagger
 
-    result = _call(build, guard_home=guard_home, deadline=deadline, shape="envelope")
-    if not isinstance(result, dict) or set(result) != keys:
-        raise NativeHookAdapterError(_INVALID)
-    return result
+    return build
 
 
 def native_action_envelope(
@@ -395,32 +403,32 @@ def native_action_envelope(
     )
 
 
-def native_review_request(
+def native_review_query(
     harness: str,
     payload: Mapping[str, object],
     review: Mapping[str, object],
     *,
     workspace: Path | str | None,
     home_dir: Path | str | None,
-    guard_home: Path | str | None = None,
-    deadline: float | None = None,
 ) -> dict[str, object]:
-    """Return the resident's ``GuardApprovalRequest`` fields for one paused ``PreToolUse``.
+    """Return the ``review_request`` query the resident builds one paused ``PreToolUse``'s request from.
 
     ``review`` carries the pause's own facts (native result, receipt, request ID, binding).
     """
 
-    return _envelope_call(
+    build = _envelope_builder(
         harness,
         "PreToolUse",
         payload,
-        lambda envelope: {"kind": "review_request", "envelope": envelope, **review},
-        _REVIEW_REQUEST_KEYS,
+        lambda envelope: {"envelope": envelope, **review},
         workspace=workspace,
         home_dir=home_dir,
-        guard_home=guard_home,
-        deadline=deadline,
     )
+    request, _tagger = _build_request(build)
+    query = request["query"]
+    if not isinstance(query, dict):
+        raise NativeHookAdapterError(_INVALID)
+    return query
 
 
 def _plain(query: dict[str, object]) -> _Builder:
@@ -500,6 +508,6 @@ __all__ = [
     "hook_adapter_memo",
     "native_action_envelope",
     "native_command_text",
-    "native_review_request",
+    "native_review_query",
     "native_workspace_label",
 ]

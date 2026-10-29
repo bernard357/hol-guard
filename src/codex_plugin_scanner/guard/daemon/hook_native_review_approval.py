@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from ..live_process_identity import CODEX_BROWSER_WAIT_PROCESS_KEY, CODEX_BROWSER_WAIT_TIMEOUT_SECONDS_KEY
-from ..models import GuardApprovalRequest
-from ..native_hook_adapter import NativeHookAdapterError, native_review_request
+from ..native_hook_adapter import NativeHookAdapterError, native_review_query
 from ..native_hook_authority_state import hook_authority_integrity_key
 from .hook_fail_closed import (
     canonical_harness,
@@ -33,7 +31,6 @@ from .hook_native_review_binding import (
 from .hook_native_saved_approval import native_saved_decision_response
 from .hook_request_parsing import native_review_launch_target as _native_review_launch_target
 from .hook_request_parsing import native_review_tool_name as _native_review_tool_name
-from .hook_request_parsing import pre_tool_command
 from .native_review_allow_hint import native_review_hint
 from .native_review_connector import (
     connector_agent_reason,
@@ -316,7 +313,7 @@ def queue_native_pre_tool_review(
             native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
         except ValueError:
             return None
-    queue = getattr(store, "queue_review_approval_request", None)
+    queue = getattr(store, "queue_native_review", None)
     if not callable(queue):
         return None
     if bound_bash is not None:
@@ -352,22 +349,8 @@ def queue_native_pre_tool_review(
         ),
     }
     try:
-        fields = native_review_request(
-            harness,
-            payload,
-            review,
-            workspace=workspace,
-            home_dir=home_dir,
-            guard_home=guard_home,
-            deadline=deadline,
-        )
-        request = GuardApprovalRequest(
-            **cast("dict[str, Any]", {key: value for key, value in fields.items() if key != "changed_fields"}),
-            changed_fields=tuple(cast("list[str]", fields["changed_fields"])),
-            extension_allow_hint=native_review_hint(
-                store, payload, native_result, workspace, home_dir, deadline, connector
-            ),
-        )
+        query = native_review_query(harness, payload, review, workspace=workspace, home_dir=home_dir)
+        hint = native_review_hint(store, payload, native_result, workspace, home_dir, deadline, connector)
     except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
         # Never make an action approvable when its details could not be safely presented.
         # Exception messages can contain private tool input; log only the error class and, for
@@ -376,18 +359,18 @@ def queue_native_pre_tool_review(
         _LOGGER.warning("Native review presentation failed for %s (%s)", request_id, reason)
         return None
     now = datetime.now(tz=timezone.utc).isoformat()
-    # A prompted Claude review also gets the permission notice its
-    # PermissionRequest hook answers from; the resident builds and signs it in
-    # the same store write.
-    claude_review = (
-        _claude_review_notice(store, harness, payload, native_result, review_binding, request, deadline)
-        if claude_notice
-        else None
-    )
     try:
-        # A waiting Codex hook's operation and resume record are written in the same store call.
-        persist = functools.partial(queue, silent=silent, codex_live_wait=live_wait)
-        stored = _persist_review(persist, request, now, claude_review)
+        # The resident builds the request from the query and queues it in one
+        # store call. A waiting Codex hook's operation and resume record, and
+        # a prompted Claude review's permission notice, are written with it.
+        stored = queue(
+            query,
+            now,
+            extension_allow_hint=hint,
+            silent=silent,
+            claude_key=_claude_notice_key(store, deadline) if claude_notice else None,
+            codex_live_wait=live_wait,
+        )
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if connector is not None and isinstance(stored, dict):
@@ -402,22 +385,6 @@ def queue_native_pre_tool_review(
         )
     raise_connector_setup_notice(store, stored, connector)
     return stored if isinstance(stored, dict) else None
-
-
-def _persist_review(
-    persist: Callable[..., object],
-    request: GuardApprovalRequest,
-    now: str,
-    claude_review: dict[str, object] | None,
-) -> object:
-    if claude_review is None:
-        return persist(request, now)
-    try:
-        return persist(request, now, claude_review=claude_review)
-    except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
-        # The notice is best effort: a combined write the resident refuses
-        # (too large, older resident) still queues the review.
-        return persist(request, now)
 
 
 def _codex_live_wait(payload: Mapping[str, object], workspace: Path | None) -> dict[str, object] | None:
@@ -437,24 +404,15 @@ def _native_review_artifact_id(harness: str, tool_name: str) -> str:
     return f"{harness}:native-pretool:{tool_name}"
 
 
-def _claude_review_notice(
-    store: object,
-    harness: str,
-    payload: Mapping[str, object],
-    native_result: Mapping[str, object],
-    binding: str | None,
-    request: GuardApprovalRequest,
-    deadline: float | None,
-) -> dict[str, object] | None:
-    """The facts the resident needs to sign a Claude review's notice, or ``None``.
+def _claude_notice_key(store: object, deadline: float | None) -> dict[str, object] | None:
+    """The integrity key a prompted Claude review's notice is signed with, or ``None``.
 
     The notice is best effort, as the retired Python notice was: without an
     integrity key, or once reading it leaves too little of the hook deadline
     for the queue write, the review still queues and the hook falls back to
     its ordinary prompt. The key goes in the store request's top-level
     ``integrity_key_b64`` and ``integrity_key_id`` args, which the request
-    digest never covers. The hook payload carries only what the notice reads,
-    so the command is not copied in full a second time.
+    digest never covers.
     """
 
     if not _notice_time_left(deadline):
@@ -462,26 +420,9 @@ def _claude_review_notice(
     key = hook_authority_integrity_key(cast("GuardStore", store), create_key=True)
     if key is None or not _notice_time_left(deadline):
         return None
-    hook_payload = {name: payload[name] for name in _NOTICE_PAYLOAD_FIELDS if name in payload}
-    command = pre_tool_command(payload)
-    if command:
-        hook_payload["tool_input"] = {"command": command}
-    return {
-        "review": {
-            "harness": harness,
-            "hook_payload": hook_payload,
-            "reason": native_result.get("reason"),
-            "review_binding": binding,
-            "config_path": request.config_path,
-            "source_scope": request.source_scope,
-        },
-        **key,
-    }
+    return key
 
 
-# What the resident's notice reads from the hook payload: the session and the
-# tool name fields (`TOOL_NAME_FIELDS`); the command goes under `tool_input`.
-_NOTICE_PAYLOAD_FIELDS = ("session_id", "tool_name", "toolName", "tool")
 # Below this much of the hook deadline the notice is dropped, so the key read
 # never costs the review its queue write.
 _NOTICE_DEADLINE_MARGIN_SECONDS = 1.0

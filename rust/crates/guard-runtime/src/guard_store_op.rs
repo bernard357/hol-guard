@@ -61,6 +61,7 @@ use crate::guard_store_mcp_provider_reads as mcp_provider_reads;
 use crate::guard_store_mcp_workflow_reads as mcp_workflow_reads;
 use crate::guard_store_native_receipts as native_receipts;
 use crate::guard_store_native_review_consume as native_review_consume;
+use crate::guard_store_native_review_queue as native_review_queue;
 use crate::guard_store_observed_mcp as observed_mcp;
 use crate::guard_store_outbox_binding::{
     count_recoverable_unbound, load_binding, normalized_binding, reassign_quarantined,
@@ -182,17 +183,23 @@ fn evaluate_tracked(
     let path =
         crate::local_store_read::require_store_path(&request.store_path, &request.guard_home)
             .map_err(|_| StoreError::Invalid("native_guard_store_path_invalid"))?;
-    let kind = match method_kind(&request.method) {
+    // A paused review's request is built here and queued by the write it
+    // names, so everything below sees that method.
+    let delegated = (request.method == native_review_queue::METHOD)
+        .then(|| native_review_queue::delegate(&request.args))
+        .transpose()?;
+    let (method, request_args) = match &delegated {
+        Some(delegated) => (delegated.method, &delegated.args),
+        None => (request.method.as_str(), &request.args),
+    };
+    let kind = match method_kind(method) {
         Some(kind) => kind,
         None => return invalid("native_guard_store_method_unknown"),
     };
     // A waiting Codex hook's live wait is built before the store opens its
     // write: proving the bridge process live can spawn `ps`.
-    let prepared = crate::codex_live_wait_build::prepare(
-        &request.method,
-        &request.args,
-        Path::new(&request.guard_home),
-    );
+    let prepared =
+        crate::codex_live_wait_build::prepare(method, request_args, Path::new(&request.guard_home));
     // A warm call reuses a kept connection: reopening parsed the whole schema
     // on every call (see `guard_store_write_cache`).
     let connection = crate::guard_store_write_cache::open_read_write_cached(&path)?;
@@ -200,16 +207,15 @@ fn evaluate_tracked(
     apply_pragmas(&connection)?;
     // A total read only writes for the one-time rebuild a migration requests;
     // every other call stays lock-free.
-    let args = Args(prepared.as_ref().unwrap_or(&request.args));
+    let args = Args(prepared.as_ref().unwrap_or(request_args));
     // A retry's block check alone writes nothing: it keeps the lock-free read
     // the separate block lookup had.
-    let kind = if request.method == "settle_native_review_reuse" && !args.flag("spend")? {
+    let kind = if method == "settle_native_review_reuse" && !args.flag("spend")? {
         Kind::Read
-    } else if (request.method == "count_receipts"
+    } else if (method == "count_receipts"
         && kind == Kind::Read
         && receipt_rollups::rebuild_pending(&connection)?)
-        || (connect::is_state_read(&request.method)
-            && connect::read_persists_expiry(&connection, &args)?)
+        || (connect::is_state_read(method) && connect::read_persists_expiry(&connection, &args)?)
     {
         Kind::Write
     } else {
@@ -226,7 +232,7 @@ fn evaluate_tracked(
         &connection,
         &request.source,
         &request.guard_home,
-        &request.method,
+        method,
         &args,
         owner,
     );
