@@ -367,7 +367,7 @@ pub(crate) fn entered_checkouts(
     let is = |segment: &CommandSegmentV1, names: &[&str]| {
         segment.executable.as_deref().is_some_and(|value| {
             let basename = super::super::executable_basename(value);
-            names.iter().any(|name| *name == basename)
+            names.contains(&basename)
         })
     };
     for (add, segment) in model.segments.iter().enumerate() {
