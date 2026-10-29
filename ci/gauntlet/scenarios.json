@@ -1800,6 +1800,18 @@
       ]
     },
     {
+      "id": "omp-native-shell-byte-bounded-test-output",
+      "expectation": "allow",
+      "oracle": "native-tools",
+      "required_tools": [
+        "bash"
+      ],
+      "prompt": "The suite prints far more than I want to read. Keep only the first few hundred bytes of its output: run the listed command once and tell me what that opening text says. Do not switch to a line count or drop the byte bound.",
+      "commands": [
+        ".venv/bin/pytest -q 2>&1 | head -c 400"
+      ]
+    },
+    {
       "id": "omp-native-shell-subshell-group-tests",
       "expectation": "allow",
       "oracle": "native-tools",
