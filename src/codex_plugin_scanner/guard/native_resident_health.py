@@ -13,7 +13,6 @@ which leaves a caller unable to tell a loaded resident from a dead one.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from pathlib import Path
@@ -67,23 +66,6 @@ def _validated_lane(value: Any) -> dict[str, int] | None:
     return {field: value[field] for field in _LANE_FIELDS}
 
 
-def _request_digest(request: dict[str, str]) -> str:
-    """The digest Rust computes over this request.
-
-    Rust hashes the canonical JSON of the request it decoded: keys sorted,
-    no separator padding, non-ASCII escaped. That is CPython's own encoder
-    under ``sort_keys``, which is what the canonical writer was written to
-    match, so the two agree byte for byte.
-    """
-    material = json.dumps(
-        request,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return f"sha256:{hashlib.sha256(material).hexdigest()}"
-
-
 def _validated_result(decoded: Any, request: dict[str, str]) -> dict[str, Any] | None:
     if not isinstance(decoded, dict) or set(decoded) != _RESULT_FIELDS:
         return None
@@ -94,11 +76,11 @@ def _validated_result(decoded: Any, request: dict[str, str]) -> dict[str, Any] |
     for field in ("request_sha256", "runtime_version", "build_sha", "target"):
         if not isinstance(decoded[field], str) or not decoded[field]:
             return None
-    # The identifier says the reply answers a request of ours; the digest says
-    # it answers this one. A reply carrying another request's digest is not an
-    # answer to the question that was asked.
-    if decoded["request_sha256"] != _request_digest(request):
-        return None
+    # The reply names the digest Rust computed over the request it decoded.
+    # Python requires it to be there and leaves it at that: this request is a
+    # constant schema and the identifier compared above, so recomputing the
+    # digest here would add a second canonical encoder that has to stay byte
+    # identical to Rust's in order to repeat what that comparison already says.
     for field in ("protocol_version", "uptime_ms", "overloaded_requests"):
         value = decoded[field]
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:

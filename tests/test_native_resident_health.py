@@ -7,7 +7,6 @@ question went unanswered.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,17 +38,6 @@ def _reply(**overrides: Any) -> dict[str, Any]:
     return reply
 
 
-def _digest(request: dict[str, str]) -> str:
-    """The digest the Rust runtime returns for this request.
-
-    Spelled out here rather than imported, so a change to the canonical form
-    on either side of the boundary shows up as a failure instead of agreeing
-    with itself.
-    """
-    material = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return f"sha256:{hashlib.sha256(material.encode('utf-8')).hexdigest()}"
-
-
 class _Resident:
     """A stub resident that answers one request with the bytes it was given."""
 
@@ -78,13 +66,8 @@ class _Resident:
         return self.response
 
 
-def _answering(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any], *, sign: bool = True) -> _Resident:
-    """A resident that echoes the caller's request id, as the real one does.
-
-    ``sign`` controls whether it also returns the digest the real runtime
-    computes over the request it decoded. Turning it off is how a reply that
-    answers a different question reaches the caller.
-    """
+def _answering(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> _Resident:
+    """A resident that echoes the caller's request id, as the real one does."""
 
     resident = _Resident(None)
 
@@ -95,8 +78,6 @@ def _answering(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any], *, sign: 
         answered = dict(reply)
         if answered["request_id"] == "":
             answered["request_id"] = envelope["request"]["request_id"]
-        if sign:
-            answered["request_sha256"] = _digest(envelope["request"])
         return json.dumps(answered).encode("utf-8")
 
     resident.install(monkeypatch)
@@ -149,6 +130,7 @@ def test_a_resident_that_does_not_answer_reads_as_unanswered(monkeypatch: pytest
         {"evaluation": {"workers": 15}},
         {"control": {"workers": 1, "queue_capacity": -1, "extra": 0}},
         {"build_sha": ""},
+        {"request_sha256": ""},
     ],
 )
 def test_a_reply_that_is_not_the_contract_is_refused(
@@ -161,18 +143,6 @@ def test_a_reply_that_is_not_the_contract_is_refused(
 
 def test_a_reply_for_someone_elses_request_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _answering(monkeypatch, _reply(request_id="rh-somebody-else"))
-
-    assert transport.native_resident_health(guard_home=tmp_path) is None
-
-
-def test_a_reply_carrying_another_requests_digest_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The identifier alone cannot establish which question was answered.
-
-    This reply quotes our request id back at us and is otherwise the contract
-    in full. Only the digest says it was computed over a different request.
-    """
-    other = _digest({"schema": "guard-resident-health-request.v1", "request_id": "rh-elsewhere"})
-    _answering(monkeypatch, _reply(request_sha256=other), sign=False)
 
     assert transport.native_resident_health(guard_home=tmp_path) is None
 
