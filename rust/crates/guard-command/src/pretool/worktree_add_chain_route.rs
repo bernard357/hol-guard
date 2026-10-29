@@ -148,6 +148,21 @@ pub(super) fn cd_target(
     let [value] = segment.arguments.as_slice() else {
         return None;
     };
+    // An unquoted `~/` expands from the shell's HOME, as the add's
+    // destination does, and the absolute result skips the CDPATH search.
+    let expanded;
+    let value = if value.starts_with("~/") {
+        if cfg!(windows)
+            || !context.shell_home_matches
+            || !super::super::directory_targets::home_targets_unquoted(segment)
+        {
+            return None;
+        }
+        expanded = super::super::read_paths::expand_home_read_path(value, context.home_dir)?;
+        expanded.as_str()
+    } else {
+        value.as_str()
+    };
     if !segment.environment_names.is_empty()
         || !segment.wrapper_chain.is_empty()
         || segment.path_overridden

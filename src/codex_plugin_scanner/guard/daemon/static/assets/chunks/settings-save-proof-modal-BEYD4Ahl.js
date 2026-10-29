@@ -1,4 +1,4 @@
-import { bi as isGuardDemoMode, bj as isRecord, bk as fetchWithGuardAuth, r as reactExports, aF as fetchResolvedApprovalGate, j as jsxRuntimeExports, A as ActionButton, aG as ApprovalProofModal, T as Tag, ar as harnessPostureRows, bl as overrideRows, au as harnessRowTone, bm as harnessPostureSummary, bn as joinNames, bo as sortHarnessRows, av as PROTECTION_POSTURE_COPY, ax as globalPosture, as as selectHarnessPosture, bp as restartHarnessWatch, p as HiMiniMagnifyingGlass, bq as harnessWatchPrompt, aw as harnessPostureOptions, br as canRestartHarnessWatch, az as HiMiniEye, R as HiMiniShieldCheck, ay as harnessRowStatus, a2 as useFocusTrap, bs as HiMiniKey, S as SectionLabel } from "../guard-dashboard.js";
+import { bk as isGuardDemoMode, bl as isRecord, bm as fetchWithGuardAuth, r as reactExports, aH as fetchResolvedApprovalGate, j as jsxRuntimeExports, A as ActionButton, aI as ApprovalProofModal, T as Tag, at as harnessPostureRows, bn as overrideRows, aw as harnessRowTone, bo as harnessPostureSummary, bp as joinNames, bq as sortHarnessRows, ax as PROTECTION_POSTURE_COPY, az as globalPosture, au as selectHarnessPosture, br as restartHarnessWatch, p as HiMiniMagnifyingGlass, bs as harnessWatchPrompt, ay as harnessPostureOptions, bt as canRestartHarnessWatch, aB as HiMiniEye, P as HiMiniShieldCheck, aA as harnessRowStatus, a2 as useFocusTrap, bu as HiMiniKey, S as SectionLabel } from "../guard-dashboard.js";
 const HOOK_REMOVAL_CONFIRMATION = "remove-guard-hooks";
 class GuardRepairRequestError extends Error {
   status;
@@ -23,7 +23,8 @@ function normalizeRepairReport(payload) {
       title: typeof item.title === "string" ? item.title : item.step,
       status: STEP_STATUSES.has(String(item.status)) ? item.status : "error",
       summary: typeof item.summary === "string" ? item.summary : "",
-      needs_attention: Array.isArray(item.needs_attention) ? item.needs_attention.filter((entry) => typeof entry === "string") : []
+      needs_attention: Array.isArray(item.needs_attention) ? item.needs_attention.filter((entry) => typeof entry === "string") : [],
+      budget_exhausted: item.budget_exhausted === true
     });
   }
   return {
@@ -98,7 +99,8 @@ async function runGuardRepair(options = {}) {
           title: "Harness hooks",
           status: "ok",
           summary: "All managed hooks verified.",
-          needs_attention: []
+          needs_attention: [],
+          budget_exhausted: false
         }
       ]
     };
@@ -167,6 +169,9 @@ function repairHeadline(report) {
     }
     const waiting = repairAttentionTitles(report.steps);
     const named = waiting.length > 0 ? ` Still waiting on you: ${waiting.join(", ")}.` : "";
+    if (report.steps.some((step) => step.budget_exhausted)) {
+      return `No repair step failed. Run Repair Guard again to continue the cleanup it could not finish.${named}`;
+    }
     return `No repair step failed, and running repair again reaches the same answer.${named}`;
   }
   if (report.status === "repaired") return "Guard was repaired. Restart any coding-agent session that was blocked.";
