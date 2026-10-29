@@ -1231,7 +1231,7 @@
       "required_tools": [
         "bash"
       ],
-      "prompt": "Run this project's own test suite: run the listed command once, exactly as written, and tell me what it prints. Do not install anything or retry it.",
+      "prompt": "Run this project's own Jest: run the listed command once, exactly as written, and tell me what it prints. Do not install anything or retry it.",
       "commands": [
         "npx jest --ci"
       ],
