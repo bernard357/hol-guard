@@ -224,6 +224,12 @@ def bounded_output(output: OutputFilter | None) -> Iterator[None]:
             if diagnostics:
                 sys.stderr.write(diagnostics)
                 sys.stderr.flush()
+            # Only a chain can carry a byte bound, so only its text can hold the
+            # partial character `_write_through` exists for.
+            _write_through(destination, text)
         else:
             text = "".join(keep_lines(captured.getvalue().splitlines(keepends=True), output.kind, output.count))
-        _write_through(destination, text)
+            # A line bound cuts between characters, so this text keeps the
+            # stream's own encoding rather than being re-encoded as UTF-8.
+            destination.write(text)
+            destination.flush()

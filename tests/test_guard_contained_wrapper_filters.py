@@ -193,6 +193,16 @@ def test_a_partial_character_reaches_a_strict_stdout(monkeypatch: pytest.MonkeyP
     assert stream.buffer.getvalue() == b"h\xc3"
 
 
+def test_a_line_bound_keeps_the_streams_own_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`head -N` cuts between characters, so its text goes out as the stream encodes it."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="latin-1", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", stream)
+    head = OutputFilter("head", 1, True)
+    with bounded_output(head):
+        print("héllo")
+    assert stream.buffer.getvalue() == "héllo\n".encode("latin-1")
+
+
 def test_a_matcher_prints_back_the_pipeline_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A matcher fed a partial character returns its bytes, not a replacement one."""
 
