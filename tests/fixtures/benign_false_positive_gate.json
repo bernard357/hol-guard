@@ -11172,6 +11172,38 @@
       "expect": "allow"
     },
     {
+      "id": "session-linked-modules-bun-vite-entry",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${WORKTREE}/dashboard && bun node_modules/vite/bin/vite.js build 2>&1 | tail -12"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-linked-modules-bun-install-package",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${WORKTREE}/dashboard && bun install vite@5.0.0"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-linked-modules-vitest-file",
       "fix_area": "shell",
       "harnesses": [
