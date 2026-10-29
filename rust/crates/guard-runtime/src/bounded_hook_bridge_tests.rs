@@ -398,15 +398,14 @@ fn an_answer_the_bridge_cannot_write_back_pauses_the_hook() {
             "{other}"
         );
     }
-    // A lone surrogate beside its mapped range cannot be written back.
-    assert_eq!(
-        emergency_safe_response(&pre_tool_prepared(false, true), &answer, deadline),
-        None
-    );
+    // A lone surrogate beside its mapped range cannot be written back. A
+    // genuine character from that range on its own needs no unmapping, so it
+    // is written back like any other hook.
     assert_eq!(
         emergency_safe_response(&pre_tool_prepared(true, true), &answer, deadline),
         None
     );
+    assert!(emergency_safe_response(&pre_tool_prepared(false, true), &answer, deadline).is_some());
     // An answer that arrives past the deadline is no answer.
     assert_eq!(
         emergency_safe_response(&pre_tool_prepared(false, false), &answer, Instant::now()),
