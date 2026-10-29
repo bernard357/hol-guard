@@ -110,6 +110,40 @@ fn read_existing_budget(path: &Path, private_root: &Path) -> Result<Option<Resta
     Ok(Some(budget))
 }
 
+/// How many of a window's restarts a speculative spawn may leave behind. A
+/// prewarm is an optimisation: it must never be the reason the spawn a user is
+/// waiting on is refused, so it stops one restart short of the free ones and
+/// leaves that one for a real request.
+const SPECULATIVE_RESTART_CEILING: u32 = MAX_RESTARTS_PER_WINDOW - 1;
+
+/// Whether a spawn nobody is waiting on may run now.
+///
+/// This reads the budget and charges nothing: the spawn it admits is charged
+/// the ordinary way, so a prewarm that crash-loops still opens the circuit.
+/// What it stops is the opposite failure, where a run of failed prewarms
+/// spends the window and the session's first real hook meets a circuit that
+/// no request of its own opened.
+pub(super) fn speculative_spawn_allowed(scope: &Path) -> Result<bool, String> {
+    let private_root = crate::resident_state::private_root_for_scope(scope)?;
+    let _lock = acquire_budget_lock_waiting(scope, None)?;
+    let path = scope.join("restart-budget.json");
+    #[cfg(windows)]
+    recover_interrupted_replace(&path, &private_root)?;
+    let Some(budget) = read_existing_budget(&path, &private_root)? else {
+        return Ok(true);
+    };
+    let now = now_ms()?;
+    if budget.circuit_until_ms > now {
+        return Ok(false);
+    }
+    // A window that has already closed is reset by the next spawn, so its
+    // attempts are not attempts against the restart this would take.
+    if now.saturating_sub(budget.window_start_ms) >= RESTART_WINDOW_MS {
+        return Ok(true);
+    }
+    Ok(budget.attempts < SPECULATIVE_RESTART_CEILING)
+}
+
 pub(super) fn consume_for_spawn(
     state_base: &Path,
     scope: &Path,
