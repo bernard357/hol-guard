@@ -115,29 +115,6 @@ fn loopback_links_the_client_would_sign_are_never_shown_unsigned() {
     assert!(signed.starts_with("http://127.0.0.1:4781/approvals/a#guard-token=gld1."));
 }
 
-#[test]
-fn a_bridge_renders_any_link_it_reproduces_or_holds_no_token_for() {
-    let home = std::env::temp_dir().join(format!(
-        "hol-guard-review-link-{}-{}",
-        std::process::id(),
-        crate::unique_nanos::unique_nanos()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
-    let signed = "http://127.0.0.1:4781/requests/r1";
-    let unreproducible = "http://127.0.0.1:4781/requests/r1?x=1";
-    assert!(bridge_renders_review_url(signed, &home));
-    assert!(bridge_renders_review_url(unreproducible, &home));
-    std::fs::write(home.join(AUTH_TOKEN_FILE), b"").unwrap();
-    assert!(bridge_renders_review_url(signed, &home));
-    assert!(bridge_renders_review_url(
-        "https://guard.example/requests/r1",
-        &home
-    ));
-    assert!(!bridge_renders_review_url(unreproducible, &home));
-    assert_eq!(live_review_url(unreproducible, Some("key"), 0), None);
-    std::fs::remove_dir_all(home).unwrap();
-}
-
 /// The strip the Python fail-closed fallback replays, recorded in
 /// `tests/fixtures/guard-review-link-strip.v1.json` and read by
 /// `tests/test_review_link_strip_parity.py` as well. The fallback composes the

@@ -730,26 +730,23 @@ fn a_paused_codex_review_links_the_wait_its_bridge_holds_open() {
     }
 }
 
-/// Cursor's bridge signs a loopback link it reproduces with the daemon auth
-/// token, so its paused review is queued whether or not the home holds one; a
-/// link the bridge cannot reproduce stays with the daemon once a token exists.
+/// Cursor's bridge signs a loopback link the resident reproduces with the
+/// daemon auth token, so its paused review is queued whether or not the home
+/// holds one; a link the resident cannot reproduce stays with the daemon, as
+/// it does for every harness.
 #[cfg(unix)]
 #[test]
-fn a_paused_cursor_review_queues_unless_its_bridge_cannot_render_the_link() {
+fn a_paused_cursor_review_queues_whenever_its_link_renders() {
+    let unreproducible = "HTTP://127.0.0.1:4781";
     for (tag, origin, token_file, queues) in [
         ("cursor-signed-link", "http://127.0.0.1:4781", true, true),
         ("cursor-no-token", "http://127.0.0.1:4781", false, true),
-        (
-            "cursor-unreproducible-link",
-            "HTTP://127.0.0.1:4781",
-            true,
-            false,
-        ),
+        ("cursor-unreproducible-link", unreproducible, true, false),
         (
             "cursor-unreproducible-no-token",
-            "HTTP://127.0.0.1:4781",
+            unreproducible,
             false,
-            true,
+            false,
         ),
     ] {
         let home = store_home(tag, SILENT_VECTORS);
