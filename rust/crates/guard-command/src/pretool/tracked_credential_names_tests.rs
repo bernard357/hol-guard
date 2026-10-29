@@ -330,10 +330,13 @@ fn manifests_untracked_copies_and_credential_words_keep_the_signal() {
         // After a directory change the relative path names another file.
         bash(&format!("cd ../elsewhere && cat {CATALOG}")),
         bash(&format!("git -C ../elsewhere grep -n List -- {CATALOG}")),
-        // An edit that turns the catalog into a `Secret` manifest.
+        // Edits that turn the catalog into a `Secret` manifest.
         serde_json::json!({"tool_name": "Edit", "tool_input": {
             "file_path": project.join(CATALOG),
-            "old_string": ""id"", "new_string": ""kind": "Secret", "id""
+            "old_string": r#""id""#, "new_string": r#""kind": "Secret", "id""#
+        }}),
+        serde_json::json!({"tool_name": "Edit", "tool_input": {
+            "file_path": project.join(CATALOG), "old_string": "List", "new_string": "Secret"
         }}),
     ] {
         assert!(

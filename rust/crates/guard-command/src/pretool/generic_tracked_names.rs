@@ -60,14 +60,39 @@ impl GenericSignals {
     }
 }
 
-/// Whether a string anywhere in `payload` declares a Kubernetes `Secret`. An
-/// edit that turns a tracked document into a `Secret` manifest keeps the
-/// signal, though the file on disk still proves clean.
+/// The old and new text keys of the substring edits hosts send.
+const EDIT_PAIRS: [(&str, &str); 4] = [
+    ("old_string", "new_string"),
+    ("oldString", "newString"),
+    ("oldText", "newText"),
+    ("old_str", "new_str"),
+];
+
+/// Whether a string anywhere in `payload` declares a Kubernetes `Secret`, or
+/// a substring edit in it adds the word. An edit that turns a tracked
+/// document into a `Secret` manifest keeps the signal, though the file on
+/// disk still proves clean.
 pub(super) fn declares_secret_object(payload: &Value) -> bool {
     match payload {
         Value::String(text) => names::declares_secret_object(text),
         Value::Array(items) => items.iter().any(declares_secret_object),
-        Value::Object(map) => map.values().any(declares_secret_object),
+        Value::Object(map) => adds_secret_word(map) || map.values().any(declares_secret_object),
         _ => false,
     }
+}
+
+/// Whether an edit's new text holds the word `secret` more often than its old
+/// text. `old_string: ConfigMap` with `new_string: Secret` names no `kind`
+/// in either string. A unified diff needs no such count: it replaces whole
+/// lines, so the `kind` key travels with its value.
+fn adds_secret_word(map: &serde_json::Map<String, Value>) -> bool {
+    let count = |key: &str| {
+        map.get(key)
+            .and_then(Value::as_str)
+            .map(|text| text.to_ascii_lowercase().matches("secret").count())
+    };
+    EDIT_PAIRS.iter().any(|(old, new)| match count(new) {
+        Some(added) => added > count(old).unwrap_or(0),
+        None => false,
+    })
 }
