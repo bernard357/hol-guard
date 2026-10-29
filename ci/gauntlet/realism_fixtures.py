@@ -72,6 +72,9 @@ CHECK_SCRIPT = "#!/bin/sh\n# Quick local check.\nset -eu\ngit status --short >/d
 DEPLOY_SCRIPT = "#!/bin/sh\n# Prints the rollout plan only.\necho 'deploy plan: dashboard'\n"
 # `id -un` resolves the user through getpwuid, which a macOS sandbox without the
 # user-database service cannot answer; the name itself is never printed.
+# The line the build prints last. A scenario that pipes the build into `tail` keeps a
+# successful status even when the build failed, so its oracle requires this line.
+VITE_BUILD_MARKER = "built in 12ms"
 VITE_STUB = (
     "#!/bin/sh\n"
     "# Synthetic stand-in for the installed vite CLI: no network, no writes.\n"
@@ -79,16 +82,18 @@ VITE_STUB = (
     'user=$(id -un)\n[ -n "$user" ]\n'
     f"printf 'vite v{VITE_VERSION} building for production...\\n'\n"
     "printf 'dist/index.html  0.40 kB\\n'\n"
-    "printf 'built in 12ms\\n'\n"
+    f"printf '{VITE_BUILD_MARKER}\\n'\n"
 )
-# The package's own Node entry point, which Guard's contained build runs and which
-# `bun node_modules/vite/bin/vite.js` names directly. Windows has no other spelling.
+# The package's own Node entry point: a second entry of the same install, beside the
+# shell CLI the `.bin` link resolves to. `bun node_modules/vite/bin/vite.js` names it
+# directly, which is the spelling the report came from, and Windows has no other one.
+# Both entries print the same build, so one output check answers for either spelling.
 VITE_STUB_NODE = (
     "// Synthetic stand-in for the installed vite CLI: no network, no writes.\n"
     "process.stdout.write(\n"
     f"  'vite v{VITE_VERSION} building for production...\\n' +\n"
     "  'dist/index.html  0.40 kB\\n' +\n"
-    "  'built in 12ms\\n'\n"
+    f"  '{VITE_BUILD_MARKER}\\n'\n"
     ");\n"
 )
 DOCTL_STUB = (
