@@ -25780,6 +25780,22 @@
       "expect": "allow"
     },
     {
+      "id": "sibling-worktree-bounded-run-list",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${HOME}/other-project-wt && node --test 2>&1 | tail -4 && git status --short | tail -4"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
       "id": "redirect-quoted-angle-commit-trailer",
       "fix_area": "redirect",
       "harnesses": [

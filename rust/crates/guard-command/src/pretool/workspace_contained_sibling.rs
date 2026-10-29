@@ -37,13 +37,11 @@ fn sibling_list(
     let target = super::super::segment_proof::verified_cwd_list_context(model, context, true)?;
     let workspace = std::fs::canonicalize(context.cwd?).ok()?;
     let target = PathBuf::from(target);
-    // The sink joins only an `&&` list after a sibling root; a pipe would
-    // leave the `cd` to run under the session workspace's profile.
+    // The sink joins only an `&&` list after a sibling root; any pipe but a
+    // command's own output bound would leave the `cd` to run under the
+    // session workspace's profile.
     if target.starts_with(&workspace)
-        || model
-            .segments
-            .iter()
-            .any(|segment| segment.pipeline_index != 0)
+        || !joined_filters(model)
         || super::super::contained_wrapper::sibling_project_root(&target, context.home_dir?)
             .as_deref()
             != Some(target.as_path())
@@ -53,6 +51,48 @@ fn sibling_list(
     let mut rest = model.clone();
     rest.segments.remove(0);
     Some((target, rest))
+}
+
+/// Whether every pipe in the list is one `| head -N` or `| tail -N` on the
+/// command before it, optionally after `2>&1`: the only filter the sink keeps
+/// when it joins two or more commands, leaving it in the text the root runs.
+/// One command after the `cd` takes no pipe here; `sibling_cd_root` reads
+/// that shape, as the sink peels its filter itself.
+fn joined_filters(model: &CanonicalCommandV1) -> bool {
+    let commands = model
+        .segments
+        .iter()
+        .filter(|segment| segment.pipeline_index == 0)
+        .count();
+    if commands < 3 {
+        return model
+            .segments
+            .iter()
+            .all(|segment| segment.pipeline_index == 0);
+    }
+    model
+        .segments
+        .iter()
+        .enumerate()
+        .all(|(index, segment)| match segment.pipeline_index {
+            0 => {
+                segment.arguments.last().map(String::as_str) != Some("2>&1")
+                    || model
+                        .segments
+                        .get(index + 1)
+                        .is_some_and(|next| next.pipeline_index == 1)
+            }
+            1 => {
+                matches!(segment.executable.as_deref(), Some("head" | "tail"))
+                    && segment.environment_names.is_empty()
+                    && segment.wrapper_chain.is_empty()
+                    && !segment.path_overridden
+                    && super::super::contained_output_filters::head_tail_arguments(
+                        &segment.arguments,
+                    )
+            }
+            _ => false,
+        })
 }
 
 /// The repository root for `cd <absolute dir in a sibling repository> &&

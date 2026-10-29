@@ -151,7 +151,8 @@ def peel_contained_wrapper(
     when it names a sibling repository's root from `cwd`, such as a linked
     worktree beside the checkout, or, on Windows, a workspace directory joined
     by `&&`; after a cd into a sibling root, the core may be an `&&` list of
-    plain commands, which is re-authorized there. Only a cd into a sibling
+    plain commands, each optionally bounded by one `| head -N` or `| tail -N`,
+    which is re-authorized there. Only a cd into a sibling
     repository may end in `;` or carry `2>/dev/null`: the directory is resolved
     by native authority and nothing is peeled when it is gone, so the core
     never falls back to the session directory the way the shell would after a
