@@ -5042,7 +5042,8 @@
         "zcode",
         "claude-code",
         "omp",
-        "cursor"
+        "cursor",
+        "muse"
       ],
       "tool": "shell",
       "tool_input": {
