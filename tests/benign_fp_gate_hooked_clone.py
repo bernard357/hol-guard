@@ -55,5 +55,12 @@ def write_hooked_clone(org: Path, home: Path, git: Callable[..., str]) -> None:
     git(home_hooks, "config", "credential.helper", CREDENTIAL_HELPER, home=home)
     worktree = hooked_cwds(org)["org_home_hooks"]
     git(home_hooks, "worktree", "add", "--quiet", "-b", "fix/home-hooks", str(worktree), home=home)
+    # `origin/main` moves one commit past the worktree's branch, so the
+    # `--ff-only` merge case has something to fast-forward and would run
+    # `post-merge` if the hooks folder held one.
+    (home_hooks / "CHANGELOG.md").write_text("Upstream entry.\n", encoding="utf-8")
+    git(home_hooks, "add", "CHANGELOG.md", home=home)
+    git(home_hooks, "commit", "--quiet", "-m", "upstream entry", home=home)
+    git(home_hooks, "update-ref", "refs/remotes/origin/main", "HEAD", home=home)
     (worktree / "docs").mkdir()
     (worktree / "docs" / "release-notes.md").write_text("Draft release notes.\n", encoding="utf-8")

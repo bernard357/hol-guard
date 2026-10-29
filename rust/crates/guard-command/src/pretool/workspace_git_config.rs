@@ -206,7 +206,7 @@ fn denials_within(
 /// `None` when that ancestor cannot be resolved. A dangling link is `None`
 /// too: the sandbox could create its target, which host Git would follow.
 fn resolve(path: &Path) -> Option<PathBuf> {
-    let path = normalize(path);
+    let path = physical(path)?;
     let mut existing = path.as_path();
     let mut rest = Vec::new();
     loop {
@@ -254,7 +254,7 @@ fn expand(base: &Path, home: Option<&Path>, value: &str) -> Option<PathBuf> {
     } else {
         base.join(value)
     };
-    Some(normalize(&path))
+    physical(&path)
 }
 
 /// Adds `path` to the denials when it is inside the workspace. `None` when
@@ -285,6 +285,25 @@ fn deny_linked(denials: &mut Vec<PathBuf>, path: PathBuf, workspace: &Path) -> O
     let real = resolve(&path)?;
     deny(denials, path, workspace)?;
     deny(denials, real, workspace)
+}
+
+/// `path` with each `..` applied after following any link the path so far
+/// names, as Git does. `None` when that link cannot be resolved.
+fn physical(path: &Path) -> Option<PathBuf> {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                if result.symlink_metadata().is_ok() {
+                    result = result.canonicalize().ok()?;
+                }
+                result.pop();
+            }
+            Component::CurDir => {}
+            other => result.push(other.as_os_str()),
+        }
+    }
+    Some(result)
 }
 
 fn normalize(path: &Path) -> PathBuf {
@@ -346,12 +365,11 @@ fn helper_denials(
                 return None;
             }
         } else if key == "hookspath" {
-            // A relative hook directory resolves against the work tree and
-            // must stay inside it. An absolute or `~/` one may also name a
-            // folder below home, which the user owns and the sandbox cannot
-            // write, as global configuration often does. Anywhere else, such
-            // as a shared temporary folder, keeps the review. An inline
-            // comment or escape would move the path Git uses.
+            // A relative hook directory must stay inside the work tree. An
+            // absolute or `~/` one may also name a folder below home, which
+            // the sandbox cannot write, as global configuration often does.
+            // Anywhere else keeps the review, as does an inline comment or
+            // escape, which would move the path Git uses.
             if value.contains(['#', ';', '\\']) {
                 return None;
             }
@@ -449,7 +467,7 @@ fn helper_word_denials(
         } else {
             base.join(word)
         };
-        let path = normalize(&path);
+        let path = physical(&path)?;
         // A word naming the workspace or a directory that holds it is not a
         // program the sandbox could plant.
         if workspace.starts_with(&path) || folded_inside(workspace, &path) {

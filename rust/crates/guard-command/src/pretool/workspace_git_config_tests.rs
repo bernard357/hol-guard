@@ -448,23 +448,5 @@ fn repository_hooks_below_home_are_read_like_global_ones() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[test]
-fn text_a_helper_echoes_is_data_but_its_substitutions_are_screened() {
-    let ws = Path::new("/w/repo");
-    let helper = |value: &str| denials(&format!("[credential]\n\thelper = {value}\n"), ws);
-    let answer = r#""!f() { echo \"username=x-access-token\"; echo \"password=$(gh auth token --hostname example.com)\"; }; f""#;
-    assert!(helper(answer).is_some());
-    let local = r#""!f() { echo \"password=$(./tools/token read)\"; }; f""#;
-    assert!(helper(local).unwrap().contains(&ws.join("tools/token")));
-    for value in [
-        r#""!f() { echo \"./my tool.sh\" | sh; }; f""#,
-        r#""!echo() { sh \"$@\"; }; echo \"./my tool.sh\"""#,
-        r#""!f() { echo \"x\" > \"./a b\"; }; f""#,
-        r#""!f() { echo \"$(cat \"a b\")\"; }; f""#,
-        r#""!f() { echo \"$HOME/a b\"; }; f""#,
-        r#""!sh -c \"./my tool.sh\"""#,
-        r#""!alias echo=sh; echo \"./my tool.sh\"""#,
-    ] {
-        assert_eq!(helper(value), None, "{value}");
-    }
-}
+#[path = "workspace_git_config_shell_tests.rs"]
+mod shell;

@@ -8,8 +8,10 @@
 //! and are screened like any other helper word.
 //!
 //! The text stays data only while nothing can hand it back to a shell, so a
-//! value with a pipe, a redirect, a line break, an alias or a function named
-//! `echo` is left as written and keeps its review.
+//! value with a pipe, a redirect, a line break, an alias, a function named
+//! `echo`, a `$_` that re-reads the last argument or an unquoted `$(...)` that
+//! runs what `echo` prints is left as written and keeps its review. So is a
+//! command whose name is only partly `echo`, as in `echo'X'`.
 
 /// `value` with each quoted `echo` argument replaced by one plain word,
 /// followed by the commands its substitutions run. A span this reader cannot
@@ -17,6 +19,8 @@
 pub(super) fn mask_echoed_text(value: &str) -> String {
     let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
     if value.contains(['|', '<', '>', '\n', '\r'])
+        || compact.contains("$_")
+        || compact.contains("${_")
         || compact.contains("echo(")
         || value
             .split(|c: char| c.is_whitespace() || "!;&(){}".contains(c))
@@ -38,6 +42,9 @@ pub(super) fn mask_echoed_text(value: &str) -> String {
         let c = chars[index];
         if c.is_whitespace() {
             in_word = false;
+        } else if c == '(' && index > 0 && chars[index - 1] == '$' {
+            // An unquoted substitution runs what its commands print.
+            return value.to_owned();
         } else if ";&(){}".contains(c) {
             in_word = false;
             words = 0;
@@ -60,6 +67,11 @@ pub(super) fn mask_echoed_text(value: &str) -> String {
                             moved.extend(commands);
                         }
                         None => out.extend(&chars[index..=close]),
+                    }
+                    if words == 1 {
+                        // A quote in the command name makes it some other
+                        // command, such as a function `echoX`.
+                        first.push(c);
                     }
                     index = close + 1;
                     continue;
