@@ -121,7 +121,8 @@ def record_direct_hook_evidence(host: _DrainHost, record: object) -> bool:
     accepted = validate_native_decision_receipt(receipt, guard_home=host.guard_home) if receipt is not None else None
     if accepted is not None:
         submit = getattr(host.activity_writer, "submit_native_decision_receipt", None)
-        if callable(submit):
+        # A current resident queues the receipt with a running writer itself.
+        if callable(submit) and record.get("receipt_recorded") is not True:
             with suppress(Exception):
                 submit(receipt=accepted)
         capture = getattr(getattr(host, "capture_writer", None), "submit_native_capture", None)

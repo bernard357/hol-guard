@@ -322,6 +322,26 @@ fn with_running<T>(guard_home: &Path, act: impl FnOnce(&ResidentWriter) -> T) ->
     held.as_ref().map(act)
 }
 
+/// Run `act` with the live writer for `guard_home` while its slot is held,
+/// so the writer cannot exit or start draining in the meantime.
+///
+/// `None` means `act` did not run: no live writer runs for the home, or its
+/// slot is busy starting one (a journal replay) or draining one. This never
+/// waits on the slot and never starts a writer.
+fn with_live<T>(guard_home: &Path, act: impl FnOnce(&ResidentWriter) -> T) -> Option<T> {
+    let slot = slot(&canonical_home(guard_home));
+    let held = match slot.writer.try_lock() {
+        Ok(held) => held,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => return None,
+    };
+    let resident = held.as_ref()?;
+    if resident.writer.has_exited() || resident.writer.is_stopping() {
+        return None;
+    }
+    Some(act(resident))
+}
+
 /// Encode an edge answer that says its receipt was recorded, then queue
 /// `receipt` with the live writer for `guard_home`, holding that writer the
 /// whole time so it cannot exit or start draining between the two.
@@ -339,24 +359,40 @@ pub(crate) fn record_edge_receipt<E>(
     let Ok(Value::Object(receipt)) = serde_json::to_value(receipt) else {
         return None;
     };
-    let slot = slot(&canonical_home(guard_home));
-    let held = match slot.writer.try_lock() {
-        Ok(held) => held,
-        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-        Err(TryLockError::WouldBlock) => return None,
-    };
-    let resident = held.as_ref()?;
-    if resident.writer.has_exited() || resident.writer.is_stopping() {
-        return None;
-    }
-    let encoded = match encode() {
-        Ok(encoded) => encoded,
-        Err(error) => return Some(Err(error)),
-    };
-    resident
-        .writer
-        .submit_native_decision_receipt(&receipt)
-        .then_some(Ok(encoded))
+    with_live(guard_home, |resident| {
+        let encoded = match encode() {
+            Ok(encoded) => encoded,
+            Err(error) => return Some(Err(error)),
+        };
+        resident
+            .writer
+            .submit_native_decision_receipt(&receipt)
+            .then_some(Ok(encoded))
+    })
+    .flatten()
+}
+
+/// Queue a direct answer's evidence with `queue`, then its `receipt` with
+/// the live writer for `guard_home`, holding that writer the whole time.
+///
+/// The drain submits a record's command activity to this writer through the
+/// same slot, so the activity cannot reach the writer before the receipt it
+/// cites. Once `queue` succeeds the receipt is submitted whatever the writer
+/// answers: a writer that refuses it would refuse the drain's submission of
+/// the same receipt too. `None` means `queue` did not run, because no live
+/// writer is free to take the receipt, which then stays with the drain.
+pub(crate) fn record_direct_receipt<T, E>(
+    guard_home: &Path,
+    receipt: &Map<String, Value>,
+    queue: impl FnOnce() -> Result<T, E>,
+) -> Option<Result<T, E>> {
+    with_live(guard_home, |resident| {
+        let queued = queue();
+        if queued.is_ok() {
+            let _ = resident.writer.submit_native_decision_receipt(receipt);
+        }
+        queued
+    })
 }
 
 /// Run `act` while this Guard home's writer slot is held, as starting a

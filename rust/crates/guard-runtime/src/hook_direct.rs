@@ -608,7 +608,11 @@ fn answer(
         evidence[CONNECTOR_NOTICE_FIELD] = notice;
     }
     let evidence = fence::with_wait(evidence, fence_wait);
-    if !policy_store.direct_evidence().offer(evidence) {
+    if !crate::edge_receipt::offer_direct(
+        policy_store.direct_evidence(),
+        Path::new(&guard_home),
+        evidence,
+    ) {
         return Err(HookDirectDefer::EvidenceFull);
     }
     if let Some(snapshot) = snapshot {
