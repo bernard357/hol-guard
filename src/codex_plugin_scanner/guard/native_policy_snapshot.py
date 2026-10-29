@@ -80,11 +80,9 @@ _digest_v3 = _codec._digest_v3
 _runtime_state_directory = _windows_support._runtime_state_directory
 _scope_digest_v3 = _policy._scope_digest_v3
 _config_value = _policy._config_value
-_string_map = _policy._string_map
 _valid_u64_v3 = _contract._valid_u64_v3
 _valid_digest_v3 = _contract._valid_digest_v3
 _policy_snapshot_push_bytes_v3 = _contract._policy_snapshot_push_bytes_v3
-_stricter_action = _policy._stricter_action
 
 if TYPE_CHECKING:
     from .store import GuardStore
