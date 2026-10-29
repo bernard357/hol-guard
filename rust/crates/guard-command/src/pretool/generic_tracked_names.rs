@@ -91,8 +91,7 @@ fn adds_secret_word(map: &serde_json::Map<String, Value>) -> bool {
             .and_then(Value::as_str)
             .map(|text| text.to_ascii_lowercase().matches("secret").count())
     };
-    EDIT_PAIRS.iter().any(|(old, new)| match count(new) {
-        Some(added) => added > count(old).unwrap_or(0),
-        None => false,
-    })
+    EDIT_PAIRS
+        .iter()
+        .any(|(old, new)| count(new).is_some_and(|added| added > count(old).unwrap_or(0)))
 }
