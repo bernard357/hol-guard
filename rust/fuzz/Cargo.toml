@@ -69,3 +69,10 @@ path = "fuzz_targets/contained_path.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "registry_response"
+path = "fuzz_targets/registry_response.rs"
+test = false
+doc = false
+bench = false

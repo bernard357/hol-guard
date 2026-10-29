@@ -1,1 +1,0 @@
-copy a.txt b.txt & dir

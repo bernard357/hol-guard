@@ -3,14 +3,18 @@
 //! Each function takes the bytes a fuzzer produces and feeds them to a real
 //! parser on an untrusted boundary: the resident's request frame, a command
 //! model request, a shell command, scanned text, a harness's Python-flavoured
-//! JSON, prompt text, and the containment path screen. A target asserts
+//! JSON, prompt text, the containment argument screens, and a package
+//! registry's response body. A target asserts
 //! nothing beyond "this input does not crash the parser"; libFuzzer reports a
 //! panic, an abort, a sanitizer finding, or a timeout.
 //!
 //! Only parsing and classification is reachable from here. No entry point
 //! dispatches an operation, touches the store, writes a file, or starts a
 //! process, so a fuzzing run cannot have an effect outside its own process.
-//! Keep that true when adding one: a parser is fair game, an operation is not.
+//! Nor does one read the filesystem: a screen that resolves a path against the
+//! runner's own directory tree answers differently on every host, which makes
+//! a finding unreproducible and a corpus worthless. Keep both true when adding
+//! an entry point: a parser is fair game, an operation is not.
 //!
 //! The same functions replay the committed seed corpus as an ordinary test
 //! (`fuzz_entry_tests.rs`), so a crash found by a campaign becomes a seed that
@@ -39,8 +43,12 @@ pub fn command_request(data: &[u8]) {
     let _ = guard_command::parse_command(&request);
 }
 
-/// A shell command in one of the dialects Guard parses. The leading byte picks
-/// the dialect so a fuzzer can reach all three without a structured input.
+/// A shell command, in the one shape the command model actually parses. The
+/// parser answers anything that is not POSIX in a shell string with an
+/// `unsupported_` verdict before it tokenizes, so a target that offered a
+/// choice of dialects would spend its budget on that early return and never
+/// reach a pipeline, a redirect or a heredoc. The leading byte picks wrapper
+/// normalization instead, which is a branch that does reach different code.
 pub fn shell_command(data: &[u8]) {
     let Some((selector, rest)) = data.split_first() else {
         return;
@@ -51,19 +59,14 @@ pub fn shell_command(data: &[u8]) {
     if text.trim().is_empty() {
         return;
     }
-    let dialect = match *selector % 3 {
-        0 => "bash",
-        1 => "powershell",
-        _ => "cmd",
-    };
     let _ = guard_command::command_model::parse_shell_command(
         text,
         None,
         None,
-        dialect,
+        "posix",
         "shell_string",
         "fuzz",
-        true,
+        selector % 2 == 0,
     );
 }
 
@@ -102,13 +105,49 @@ pub fn prompt_text(data: &[u8]) {
     let _ = guard_command::prompt_analysis::extract_prompt_requests(text);
 }
 
-/// The containment path screen, which decides whether an argument points out
-/// of the workspace a contained run may touch.
+/// The containment screens a contained run is admitted by, every one of which
+/// reads a `command` array out of the request it is given.
+///
+/// `contained_target` is deliberately absent. It resolves a virtual-environment
+/// activation against the filesystem, so a campaign would be probing the
+/// runner's own directory tree and would reach host-dependent answers, which
+/// is both outside this module's promise and useless as a finding.
+pub const CONTAINED_ARGV_OPERATIONS: &[&str] = &[
+    "node_runtime_args",
+    "python_runtime_args",
+    "inline_eval",
+    "test_script",
+    "bun_vitest_invocation",
+    "tsx_test_invocation",
+    "vitest_arguments",
+    "contained_kind",
+    "launcher_program",
+    "transparent_prefix",
+];
+
+/// The containment argument screens, which decide whether a contained run's
+/// argv points out of the workspace it may touch. The leading byte picks one of
+/// the screens and the rest is the JSON request it reads.
 pub fn contained_path(data: &[u8]) {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(data) else {
+    let Some((selector, rest)) = data.split_first() else {
         return;
     };
-    let _ = guard_command::contained_argv::evaluate("contained_target", &value);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(rest) else {
+        return;
+    };
+    let operation =
+        CONTAINED_ARGV_OPERATIONS[usize::from(*selector) % CONTAINED_ARGV_OPERATIONS.len()];
+    let _ = guard_command::contained_argv::evaluate(operation, &value);
+}
+
+/// A package registry's response body. It arrives over the network from a host
+/// Guard does not control, and what it says decides which release a
+/// supply-chain review reasons about. The parse behind it is not only
+/// `serde_json`: a hand-written deserializer reads the key order of the
+/// `versions` object, because `serde_json::Map` sorts keys and the tie-break
+/// between equally ranked versions depends on the document's own order.
+pub fn registry_response(data: &[u8]) {
+    let _ = guard_command::registry_metadata_transport::parse_registry_document(data);
 }
 
 /// One fuzz entry point: it takes the fuzzer's bytes and must not panic on any
@@ -125,6 +164,7 @@ pub const FUZZ_ENTRY_POINTS: &[(&str, FuzzEntryPoint)] = &[
     ("python_json", python_json),
     ("prompt_text", prompt_text),
     ("contained_path", contained_path),
+    ("registry_response", registry_response),
 ];
 
 #[cfg(test)]

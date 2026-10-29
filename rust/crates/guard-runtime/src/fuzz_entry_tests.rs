@@ -71,11 +71,65 @@ fn entry_points_accept_empty_and_truncated_input() {
 }
 
 #[test]
-fn a_shell_command_entry_point_covers_every_dialect() {
-    for selector in 0u8..3 {
+fn a_shell_command_seed_reaches_the_parser_rather_than_the_dialect_gate() {
+    for selector in 0u8..2 {
         let mut input = vec![selector];
-        input.extend_from_slice(b"git status");
+        input.extend_from_slice(b"cd /tmp && rm -rf ./build");
         super::shell_command(&input);
+    }
+    // The arguments the entry point passes, parsed here so the test can see
+    // the answer. Anything other than POSIX in a shell string is answered
+    // before the parser tokenizes, so a target that offered a choice of
+    // dialects would be fuzzing that early return and nothing else.
+    let parsed = guard_command::command_model::parse_shell_command(
+        "cd /tmp && rm -rf ./build",
+        None,
+        None,
+        "posix",
+        "shell_string",
+        "fuzz",
+        true,
+    );
+    assert!(
+        !parsed
+            .uncertainty_reason
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("unsupported_"),
+        "the dialect the entry point sends is refused before parsing: {:?}",
+        parsed.uncertainty_reason
+    );
+    assert!(
+        parsed.segments.len() >= 2,
+        "the parser never read the chain: {:?}",
+        parsed.segments
+    );
+}
+
+#[test]
+fn every_contained_path_operation_is_one_the_screen_answers() {
+    let request = serde_json::json!({ "command": ["node", "-e", "require('fs')"] });
+    for operation in super::CONTAINED_ARGV_OPERATIONS {
+        assert!(
+            guard_command::contained_argv::evaluate(operation, &request).is_some(),
+            "{operation} is not an operation the containment screen answers, so the \
+             target replays its seeds into a no-op"
+        );
+    }
+    assert!(
+        !super::CONTAINED_ARGV_OPERATIONS.contains(&"contained_target"),
+        "contained_target resolves an activation against the filesystem, which makes \
+         a finding depend on the runner's own directory tree"
+    );
+}
+
+#[test]
+fn a_contained_path_seed_reaches_every_screen_in_turn() {
+    let request = br#"{"command":["npx","jest","-ic../outside/jest.config.js"]}"#;
+    for selector in 0..=u8::try_from(super::CONTAINED_ARGV_OPERATIONS.len()).unwrap() {
+        let mut input = vec![selector];
+        input.extend_from_slice(request);
+        super::contained_path(&input);
     }
 }
 
