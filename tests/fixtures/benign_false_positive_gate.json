@@ -12690,9 +12690,9 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "git worktree add ../app-portal-build -b build-lane HEAD && cd ../app-portal-build && npx vitest run"
+        "command": "git worktree add ../parent-repo-vitest-lane -b vitest-lane HEAD && cd ../parent-repo-vitest-lane && npx vitest run"
       },
-      "cwd": "org_app",
+      "cwd": "worktree",
       "expect": "allow",
       "requires_sandbox": true
     },

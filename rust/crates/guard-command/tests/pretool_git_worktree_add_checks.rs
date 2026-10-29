@@ -189,6 +189,11 @@ fn a_part_that_would_wait_keeps_the_chain_waiting() {
             format!("git worktree add --detach {checkout} HEAD && cd {checkout} && cat ~/.ssh/id_ed25519"),
             primary.clone(),
         ),
+        // Git answers for the new checkout's branch and hooks, not the root's.
+        (
+            format!("git worktree add --detach {checkout} HEAD && cd {checkout} && git commit --allow-empty -m wip"),
+            primary.clone(),
+        ),
         // Only the repository root stands in for the new checkout.
         (
             format!("git worktree add --detach {checkout} HEAD && cd {checkout} && {CHECKS}"),

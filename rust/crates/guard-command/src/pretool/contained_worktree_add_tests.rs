@@ -1,4 +1,4 @@
-use super::split;
+use super::{runs_git, split};
 
 fn parts(text: &str) -> Option<(String, String, String)> {
     split(text).map(|parts| (parts.add, parts.entered, parts.checks))
@@ -87,5 +87,19 @@ fn leaves_other_shapes_whole() {
         "git worktree add ../app-fix HEAD && cd ../app-fix && npm test 'unterminated",
     ] {
         assert_eq!(parts(text), None, "{text}");
+    }
+}
+
+#[test]
+fn git_steps_or_unparsed_checks_count_as_git() {
+    for checks in [
+        "git commit --allow-empty -m wip",
+        "bun run build && git push origin HEAD",
+        "npm test; /usr/bin/git status",
+    ] {
+        assert!(runs_git(checks), "{checks}");
+    }
+    for checks in ["bun run build", "cargo test && uv run pytest -q", "ls src"] {
+        assert!(!runs_git(checks), "{checks}");
     }
 }

@@ -6,11 +6,12 @@
 //! have nothing to read. Each part is judged on its own instead, as the
 //! extension controls set it: the add must pass as if it were the whole
 //! command, and the checks must pass, or run contained, from the repository
-//! root the new checkout copies. The sink then creates the checkout outside the
-//! sandbox, once Guard proves the add again, and judges
-//! `cd <checkout> && <checks>` once more against the real checkout before
-//! anything in it runs. The chain therefore admits nothing its parts would
-//! not admit separately.
+//! root the new checkout copies. Git steps in the checks keep the review,
+//! since that root does not stand in for the new branch and its hooks. The
+//! sink then creates the checkout outside the sandbox, once Guard proves the
+//! add again, and judges `cd <checkout> && <checks>` once more against the
+//! real checkout before anything in it runs. The chain therefore admits
+//! nothing its parts would not admit separately.
 use super::allowed;
 use crate::pretool::workspace_contained::{admitted_workspace, mark_contained};
 use crate::pretool::PathContext;
@@ -151,6 +152,11 @@ pub(crate) fn rejudge(
     if !judged(&parts.add).is_some_and(|add| allowed(&add)) {
         return raw;
     }
+    // Git answers for the new checkout's own branch and hooks, which the
+    // repository root does not stand in for, so Git checks keep the review.
+    if runs_git(&parts.checks) {
+        return raw;
+    }
     // Checks that pass on their own run directly once judged again; the rest
     // must run contained as they would from the repository root.
     let admitted = judged(&parts.checks).is_some_and(|checks| {
@@ -167,6 +173,26 @@ pub(crate) fn rejudge(
     mark_contained(&mut result);
     result.reason = REASON_TEXT.into();
     result
+}
+
+/// Whether any step of `checks` runs Git, or the checks do not parse exactly.
+fn runs_git(checks: &str) -> bool {
+    parse_command(&CommandModelRequestV1 {
+        command: checks.to_owned(),
+        dialect: "posix".into(),
+        transport: "shell_string".into(),
+        extraction_provenance: "pre-tool-generic".into(),
+    })
+    .ok()
+    .is_none_or(|model| {
+        model.confidence != "exact"
+            || model.segments.iter().any(|segment| {
+                segment
+                    .executable
+                    .as_deref()
+                    .is_some_and(|value| crate::pretool::executable_basename(value) == "git")
+            })
+    })
 }
 
 /// The chain's extension evidence loaded and matched without doubt. Any
