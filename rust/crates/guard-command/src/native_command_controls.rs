@@ -375,7 +375,14 @@ impl CompiledNativeCommandControls {
                 + usize::from(batch.evaluation_error.is_some()),
         };
         let explicit_allow = floor == "allow"
-            && self.explicit_allow(&result, &batch, command, context, enabled_uncertainty);
+            && self.explicit_allow(
+                &result,
+                &batch,
+                command,
+                context,
+                environment,
+                enabled_uncertainty,
+            );
         if enabled_uncertainty && !explicit_allow && rank(floor) < rank("review") {
             floor = "review";
             reason = "native_command_extension_uncertain";
@@ -421,6 +428,7 @@ impl CompiledNativeCommandControls {
         observations: &[NativeCommandObservationV1],
         permission_observations: &[NativeCommandPermissionObservationV1],
         context: crate::pretool::PathContext<'_>,
+        environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
     ) -> bool {
         if command.confidence != "exact"
             || command.path_overridden
@@ -460,7 +468,11 @@ impl CompiledNativeCommandControls {
         covered.extend(self.github_granted_segments(permission_observations));
         // A `cd` into the checkout a `git worktree add` of this command
         // creates is covered when the Git and GitHub steps after it are.
-        covered.extend(crate::pretool::entered_checkouts(command, context));
+        covered.extend(crate::pretool::entered_checkouts(
+            command,
+            context,
+            environment,
+        ));
         // A Git ref read after covered steps keeps the proof it has alone.
         covered.extend(crate::pretool::git_reads_after_allowed_steps(
             command, context, &benign, &covered,
@@ -488,6 +500,7 @@ impl CompiledNativeCommandControls {
         command: &CanonicalCommandV1,
         observations: &NativeCommandObservationsV1,
         context: crate::pretool::PathContext<'_>,
+        environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
     ) -> bool {
         observations.evaluation_error.is_none()
             && !crate::pretool::fixed_command_floor(command)
@@ -497,6 +510,7 @@ impl CompiledNativeCommandControls {
                 &observations.observations,
                 &observations.permission_observations,
                 context,
+                environment,
             )
     }
 }

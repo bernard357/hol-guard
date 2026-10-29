@@ -221,6 +221,12 @@ fn other_entries_and_steps_keep_their_review() {
         format!("{ADD} && cd ../app-review && python3 build.py && git commit -am 'Build'"),
         format!("{ADD} && cd ../app-review && git commit -am 'Build' && cd .. && ls"),
         format!("{ADD} || cd ../app-review && git commit --allow-empty -m 'Start review'"),
+        format!("{ADD} && cd ../app-review && git log -1 | cat README.md"),
+        format!("{ADD}; cd ../app-review; git commit --allow-empty -m 'Start review'"),
+        format!(
+            "{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review'; \
+             git push -u origin review"
+        ),
         "git worktree add -b review ../app-taken origin/main && cd ../app-taken \
          && git commit --allow-empty -m 'Start review'"
             .to_owned(),
@@ -244,6 +250,60 @@ fn an_allowed_chain_opens_a_pull_request_from_the_new_worktree() {
     );
     let result = evaluate(&home, &repository, "zcode", &command, &controls);
     assert_eq!(
+        result.minimum_action, "allow",
+        "{command}: {}",
+        result.reason_code
+    );
+}
+
+/// Git inspections in the new checkout, between steps the Allow covers. Each
+/// read runs where the `git -C ../app-review` twin runs it.
+#[test]
+fn an_allowed_chain_inspects_the_worktree_it_creates() {
+    let (_cleanup, home, repository) = repository("inspect");
+    let controls = git_github("enabled", &[]);
+    let mut failures = Vec::new();
+    for command in [
+        format!("{ADD} && cd ../app-review && git status && git push -u origin review"),
+        format!(
+            "{ADD} && cd ../app-review && git add -A && git status --short \
+             && git commit -m 'Update copy' && git push -u origin review"
+        ),
+        format!(
+            "{ADD} && cd ../app-review && git log --oneline | head -5 \
+             && git push -u origin review"
+        ),
+        format!(
+            "{ADD} && git -C ../app-review status && git -C ../app-review push -u origin review"
+        ),
+    ] {
+        let result = evaluate(&home, &repository, "omp", &command, &controls);
+        if result.minimum_action != "allow" {
+            failures.push(format!(
+                "{command}: {} {}",
+                result.minimum_action, result.reason_code
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A relative search path entry would find `git` or `gh` in the new
+/// checkout once the shell has entered it.
+#[test]
+fn a_relative_search_path_keeps_the_entry_reviewed() {
+    let (_cleanup, home, repository) = repository("search-path");
+    let controls = git_github("enabled", &[]);
+    let command =
+        format!("{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review'");
+    let result = fixture::evaluate_on_path(
+        ("omp", "PreToolUse"),
+        &json!({"tool_name":"bash", "tool_input":{"command":command}}),
+        (Some(&controls), None),
+        (home.to_str(), repository.to_str(), true),
+        format!("bin:{}", std::env::var("PATH").unwrap()),
+    );
+    assert_ne!(
         result.minimum_action, "allow",
         "{command}: {}",
         result.reason_code
