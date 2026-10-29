@@ -52,6 +52,7 @@ _DIRECT_HARNESSES = frozenset(
         "grok",
         "pi",
         "omp",
+        "muse",
     }
 )
 _PRE_TOOL_USE = "PreToolUse"
