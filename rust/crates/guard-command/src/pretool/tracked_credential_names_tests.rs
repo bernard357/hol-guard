@@ -122,10 +122,16 @@ fn escaped_or_hidden_secret_kinds_keep_review() {
 #[test]
 fn scripts_named_for_secrets_are_not_documents() {
     let (_, project) = fixture();
-    let name = "scripts/rotate-secrets.sh";
-    write(&project.join(name), "echo rotating\n");
-    write_index(&project.join(".git"), &[name]);
-    assert!(unproven(&project.join(name), cwd(&project)));
+    // `.sh` is source code, which the name screen already passes; these two
+    // are not, so their names keep the review though the index lists them.
+    let names = ["scripts/rotate-secrets.bash", "scripts/rotate-secrets.txt"];
+    for name in names {
+        write(&project.join(name), "echo rotating\n");
+    }
+    write_index(&project.join(".git"), &names);
+    for name in names {
+        assert!(unproven(&project.join(name), cwd(&project)), "{name}");
+    }
 }
 
 #[test]
