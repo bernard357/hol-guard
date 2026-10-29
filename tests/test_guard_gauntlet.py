@@ -257,9 +257,10 @@ def test_workspace_jest_install_is_scoped_to_its_own_case(tmp_path):
     )
     node = workspace_node_bin(fixture.home)
     assert node is not None and (node / "node").is_file()
-    assert node.parent.name == subprocess.run(
-        [str(node / "node"), "--version"], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    assert (
+        node.parent.name
+        == subprocess.run([str(node / "node"), "--version"], capture_output=True, text=True, check=True).stdout.strip()
+    )
     other = create_fixture(tmp_path / "plain", realistic=True, scenario_id="ordinary")
     assert not (other.workspace / "node_modules/jest").exists()
     assert workspace_node_bin(other.home) is None

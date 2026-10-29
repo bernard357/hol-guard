@@ -1716,6 +1716,78 @@
       }
     },
     {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "jest",
+          "-w",
+          "2",
+          "suite.test.ts"
+        ]
+      },
+      "expected": {
+        "value": [
+          "-w",
+          "2",
+          "suite.test.ts"
+        ]
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "npx",
+          "jest",
+          "--watchman"
+        ]
+      },
+      "expected": {
+        "value": [
+          "--watchman"
+        ]
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "npx",
+          "jest",
+          "--watch-all"
+        ]
+      },
+      "expected": {
+        "reason_code": "vitest_restricted_invalid_command",
+        "message": "Protected Jest requires a run that does not watch."
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "jest",
+          "--watch-all=false"
+        ]
+      },
+      "expected": {
+        "reason_code": "vitest_restricted_invalid_command",
+        "message": "Protected Jest requires a run that does not watch."
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "node",
+          "$ROOT/project/node_modules/jest/bin/jest.js"
+        ]
+      },
+      "expected": {
+        "value": []
+      }
+    },
+    {
       "operation": "contained_kind",
       "input": {
         "command": [

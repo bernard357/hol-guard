@@ -426,6 +426,11 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             "pnpm exec jest __tests__/one.test.ts",
             "jest -t \"keeps the index\"",
             "node /home/tester/project/node_modules/jest/bin/jest.js --ci",
+            "node /home/tester/project/node_modules/jest/bin/jest.js",
+            // `-w` is Jest's `--maxWorkers` and `--watchman` picks the file
+            // crawler; neither asks the run to keep watching.
+            "npx jest -w 2 __tests__/one.test.ts",
+            "npx jest --watchman",
         ] {
             let result = classify(harness, command);
             assert_eq!(result.decision, "deny", "{harness} {command}");
@@ -449,7 +454,8 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             "npx jest --setupFiles ../outside/setup.js",
             "npx jest ~/elsewhere/suite.test.ts",
             "jest --watchAll",
-            "npx jest -w",
+            // yargs takes a kebab spelling of every camelCase option name.
+            "npx jest --watch-all",
             "npx jest --watch=true",
             "bunx jest@evil",
             "bunx other",

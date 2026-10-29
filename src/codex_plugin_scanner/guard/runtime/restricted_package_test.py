@@ -15,12 +15,44 @@ PACKAGE_TEST_REASON = "native_package_test_readonly_containment_required"
 PACKAGE_TEST_PROFILE = "package-test-readonly-v1"
 
 
+def _option_name(argument: str) -> str:
+    """The option an argument names, lowercased and without separators or value."""
+    if not argument.startswith("--"):
+        return ""
+    return argument[2:].partition("=")[0].replace("-", "").replace("_", "").lower()
+
+
 def _watches(arguments: Sequence[str]) -> bool:
-    """A watching Jest run never finishes inside the sink."""
-    return any(
-        argument in {"-w", "--watch", "--watchAll"}
-        or argument.startswith("--watch=")
-        or argument.startswith("--watchAll=")
+    """A watching Jest run never finishes inside the sink.
+
+    Jest reads its options through yargs, which takes a kebab spelling of every
+    camelCase name, so the name is read with its separators removed. Watch mode
+    has no short spelling: ``-w`` is Jest's ``--maxWorkers`` and ``--watchman``
+    names the file crawler.
+    """
+    return any(_option_name(argument) in {"watch", "watchall"} for argument in arguments)
+
+
+def _leaves_the_workspace(value: str) -> bool:
+    """True when a value names a path this workspace does not hold."""
+    value = value.replace("\\", "/")
+    windows_root = len(value) >= 3 and value[0].isascii() and value[0].isalpha() and value[1:3] == ":/"
+    return (
+        value.startswith("/")
+        or value.startswith("~/")
+        or value == "~"
+        or windows_root
+        or any(segment == ".." for segment in value.split("/"))
+    )
+
+
+def _reads_its_own_workspace(arguments: Sequence[str]) -> bool:
+    """Jest loads its config, transforms, reporters, environment and test runner
+    from option values, so any of them can name a module outside the read-only
+    admission. Every argument is read, not a list of the options that take one.
+    """
+    return not any(
+        _leaves_the_workspace(argument.partition("=")[2] if argument.startswith("-") and "=" in argument else argument)
         for argument in arguments
     )
 
@@ -71,7 +103,10 @@ def resolve_package_test(command: Sequence[str], *, workspace: Path, cwd: Path |
         raise RestrictedPytestError("package_test_invalid_command", "Test shell effects need separate evaluation.")
     node = Path(tokens[0]).name in {"node", "nodejs"} and len(tokens) > 1 and tokens[1] == "--test"
     vitest = tokens[0] == "vitest" and len(tokens) > 1 and tokens[1] == "run"
-    jest = tokens[0] == "jest" and not _watches(tokens[1:])
+    # The manager appends what follows `--` to the script, so the sink runs both
+    # halves and both are read as one Jest call.
+    jest_arguments = (*tokens[1:], *trailing[1:])
+    jest = tokens[0] == "jest" and not _watches(jest_arguments) and _reads_its_own_workspace(jest_arguments)
     if not node and not vitest and not jest:
         raise RestrictedPytestError("package_test_invalid_command", "The test script is not a supported local runner.")
     return (*tokens, *trailing[1:])

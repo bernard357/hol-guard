@@ -379,13 +379,20 @@ fn test_script(scripts: &Map<String, Value>, arguments: &[String]) -> bool {
     {
         return false;
     }
+    // The manager appends what follows `--` to the script, so the sink runs
+    // both halves and both are read as one Jest call.
+    let passthrough = trailing.get(1..).unwrap_or_default();
     match tokens.as_slice() {
         [runner, rest @ ..] => {
             let flag = rest.first();
             (matches!(executable_basename(runner), "node" | "nodejs")
                 && flag.is_some_and(|flag| flag == "--test"))
                 || (runner == "vitest" && flag.is_some_and(|flag| flag == "run"))
-                || (runner == "jest" && crate::contained_argv::jest_contained_call(rest))
+                || (runner == "jest" && {
+                    let call: Vec<String> =
+                        rest.iter().chain(passthrough.iter()).cloned().collect();
+                    crate::contained_argv::jest_contained_call(&call)
+                })
         }
         _ => false,
     }

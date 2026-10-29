@@ -276,13 +276,28 @@ pub(crate) fn jest_contained_call(arguments: &[String]) -> bool {
 }
 
 /// A watching Jest run never finishes inside the sink, so only a call that
-/// asks for no watch is contained.
+/// asks for no watch is contained. Jest reads its options through yargs, which
+/// takes a kebab spelling of every camelCase name, so the name is read with
+/// its separators removed. Watch mode has no short spelling: `-w` is Jest's
+/// `--maxWorkers`, and `--watchman` names the file crawler, not the mode.
 pub(crate) fn jest_runs_once(arguments: &[String]) -> bool {
-    !arguments.iter().any(|argument| {
-        matches!(argument.as_str(), "-w" | "--watch" | "--watchAll")
-            || argument.starts_with("--watch=")
-            || argument.starts_with("--watchAll=")
-    })
+    !arguments
+        .iter()
+        .any(|argument| matches!(option_name(argument).as_str(), "watch" | "watchall"))
+}
+
+/// The option an argument names, lowercased and without its separators or its
+/// value, so `--watch-all=false` and `--watchAll` both read as `watchall`. An
+/// argument that is not a long option names nothing.
+fn option_name(argument: &str) -> String {
+    let Some(flag) = argument.strip_prefix("--") else {
+        return String::new();
+    };
+    let name = flag.split_once('=').map_or(flag, |(name, _)| name);
+    name.chars()
+        .filter(|character| *character != '-' && *character != '_')
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Jest loads its config, transforms, reporters, environment and test runner
@@ -426,9 +441,6 @@ pub fn contained_runner_invocation(
             } else {
                 return invalid_vitest();
             };
-            if args.len() < 2 {
-                return invalid_vitest();
-            }
             let mut call = vec![tool.to_owned()];
             call.extend_from_slice(&args[1..]);
             call
