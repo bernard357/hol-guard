@@ -212,6 +212,39 @@ fn a_receipt_the_resident_could_not_write_is_paged_to_the_daemon() {
 }
 
 #[test]
+fn a_full_queue_still_takes_back_every_receipt_the_resident_could_not_write() {
+    let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    assert!(queue.offer(plain.clone()));
+    assert!(queue.offer(plain.clone()));
+    let page = queue.acknowledge_and_peek(None, Some(&queue.epoch), 3);
+    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 3);
+    assert_eq!(page.settled.len(), 2);
+    // Hooks fill the queue while the store write is in flight.
+    for index in 0..MAX_QUEUED_RECORDS {
+        assert!(queue.offer(json!({ "index": index })));
+    }
+    assert!(!queue.offer(json!({ "index": "over" })));
+    queue.unwritten().requeue(page.settled);
+    let mut handed_back = 0;
+    let mut through = None;
+    loop {
+        let page = queue.acknowledge_and_peek(through, Some(&queue.epoch), 256);
+        assert!(page.settled.is_empty());
+        handed_back += page
+            .records
+            .iter()
+            .filter(|record| **record == plain)
+            .count();
+        if page.records.is_empty() {
+            break;
+        }
+        through = page.through;
+    }
+    assert_eq!(handed_back, 2);
+}
+
+#[test]
 fn a_drain_with_no_store_hands_the_receipt_back_to_the_daemon() {
     let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
     let queue = DirectEvidenceQueue::default();

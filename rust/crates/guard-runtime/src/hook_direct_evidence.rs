@@ -85,6 +85,12 @@ impl QueueState {
         if self.records.len() >= MAX_QUEUED_RECORDS || self.bytes + bytes > MAX_QUEUED_BYTES {
             return Err(record);
         }
+        self.append(record, bytes, native);
+        Ok(())
+    }
+
+    /// Queue one encoded record past the queue's limits.
+    fn append(&mut self, record: Value, bytes: usize, native: bool) {
         let seq = self.next_seq;
         self.next_seq = self.next_seq.saturating_add(1);
         self.bytes += bytes;
@@ -94,7 +100,6 @@ impl QueueState {
             record,
             native,
         });
-        Ok(())
     }
 }
 
@@ -128,14 +133,16 @@ impl Unwritten {
         let Ok(mut state) = self.0.lock() else {
             return;
         };
+        // These records left the queue with the ack that settled them, so
+        // nothing else holds them: they go back even past the queue's limits,
+        // which they already counted against. They return as daemon records
+        // and are never settled again, so the queue holds at most its limits
+        // plus one acknowledged run.
         for record in records {
             let Ok(encoded) = serde_json::to_vec(&record) else {
                 continue;
             };
-            if state.push(record, encoded.len(), false).is_err() {
-                // A full queue refuses them, as it refuses a new record.
-                break;
-            }
+            state.append(record, encoded.len(), false);
         }
     }
 }
