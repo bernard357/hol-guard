@@ -323,6 +323,15 @@ pub(crate) fn jest_reads_its_own_workspace(arguments: &[String]) -> bool {
 /// Which letter takes the value is yargs-parser's to decide, so every tail of
 /// the group is screened rather than only the one after the first letter.
 fn leaves_the_workspace(argument: &str) -> bool {
+    // Jest reads an inline `--config` value with `JSON.parse`, which turns a
+    // `\uXXXX` escape into its character after this screen has looked at the
+    // raw text: `a/\u002e\u002e/etc/x.js` is `a/../etc/x.js` by the time Jest
+    // resolves it. Screening the decoded form would mean parsing the argument
+    // as Jest will, so a quoted argument carrying such an escape goes to
+    // review instead. Review is where an ordinary call ends up anyway.
+    if argument.contains('"') && argument.contains("\\u") {
+        return true;
+    }
     let group = argument
         .strip_prefix('-')
         .filter(|rest| !rest.starts_with('-'))

@@ -47,7 +47,13 @@ def _leaves_the_workspace(argument: str) -> bool:
     character follows, so ``-ic/etc/jest.config.js`` is ``--runInBand --config
     /etc/jest.config.js``. Every tail of the group is screened, since which
     letter takes the value is yargs-parser's to decide.
+
+    Jest reads inline JSON with ``JSON.parse``, which turns a ``\\uXXXX``
+    escape into its character after this screen has looked at the raw text, so
+    a quoted argument carrying such an escape goes to review instead.
     """
+    if '"' in argument and "\\u" in argument:
+        return True
     group = argument[1:] if argument.startswith("-") and not argument.startswith("--") else ""
     pieces = [argument, *(group[index:] for index in range(1, len(group)))]
     piece = ""

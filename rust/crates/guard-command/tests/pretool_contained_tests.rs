@@ -470,6 +470,9 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             "npx jest -ic../outside/jest.config.js",
             "npx jest -ic~/elsewhere/jest.config.js",
             "npx jest --config '{\"setupFiles\":[\"/tmp/outside-setup.js\"]}'",
+            // Jest parses inline JSON, so a `\uXXXX` escape names a path
+            // character the raw text never shows.
+            "npx jest --config '{\"setupFiles\":[\"a/\\u002e\\u002e/etc/x.js\"]}'",
             "npx jest --moduleNameMapper '{\"app\":\"../outside/app.js\"}'",
             "jest --watchAll",
             // yargs takes a kebab spelling of every camelCase option name.

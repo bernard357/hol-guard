@@ -569,6 +569,15 @@
       "reason": "native_package_test_readonly_containment_required"
     },
     {
+      "name": "jest-json-escape-config",
+      "scripts": {
+        "test": "jest --config '{\"setupFiles\":[\"a/\\u002e\\u002e/etc/x.js\"]}'"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": null
+    },
+    {
       "name": "pretest",
       "scripts": {
         "test": "node --test",
