@@ -457,7 +457,7 @@ fn inside_workspace(path: &Path, workspace: &Path) -> bool {
     for component in path.components() {
         match component {
             Component::ParentDir => {
-                if !walked.pop() {
+                if walks_past_a_link(&walked) || !walked.pop() {
                     return false;
                 }
             }
@@ -466,6 +466,14 @@ fn inside_workspace(path: &Path, workspace: &Path) -> bool {
         }
     }
     walked.starts_with(workspace)
+}
+
+/// Whether the directory a `..` step leaves is a link. The step lands in the
+/// link's target, so the walk below it describes another place on the file
+/// system and the path keeps its review. A directory that is absent is not a
+/// link: a path the command would itself create still walks by its spelling.
+fn walks_past_a_link(walked: &Path) -> bool {
+    std::fs::symlink_metadata(walked).is_ok_and(|entry| entry.file_type().is_symlink())
 }
 
 /// On macOS `/tmp` and `/var` are fixed root links into `/private`, so
@@ -483,48 +491,8 @@ pub(super) fn through_root_link(path: &Path, workspace: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod workspace_prefix_tests {
-    use super::inside_workspace;
-    use std::path::Path;
-
-    #[test]
-    fn a_parent_step_leaves_the_workspace_the_path_is_spelled_from() {
-        let workspace = Path::new("/projects/app");
-        assert!(inside_workspace(
-            Path::new("/projects/app/src/main.rs"),
-            workspace
-        ));
-        assert!(inside_workspace(
-            Path::new("/projects/app/build/../src"),
-            workspace
-        ));
-        assert!(inside_workspace(
-            Path::new("/projects/app/./src"),
-            workspace
-        ));
-        assert!(!inside_workspace(
-            Path::new("/projects/app/../other"),
-            workspace
-        ));
-        assert!(!inside_workspace(
-            Path::new("/projects/app/../../../etc/hosts"),
-            workspace
-        ));
-        assert!(!inside_workspace(
-            Path::new("/projects/app-sibling"),
-            workspace
-        ));
-        assert!(!inside_workspace(Path::new("/etc/hosts"), workspace));
-    }
-
-    #[test]
-    fn a_walk_past_the_file_system_root_names_nothing_inside() {
-        assert!(!inside_workspace(
-            Path::new("/../../../etc/hosts"),
-            Path::new("/projects/app")
-        ));
-    }
-}
+#[path = "workspace_contained_reach_prefix_tests.rs"]
+mod workspace_prefix_tests;
 
 #[cfg(test)]
 #[path = "workspace_contained_identity_tests.rs"]
