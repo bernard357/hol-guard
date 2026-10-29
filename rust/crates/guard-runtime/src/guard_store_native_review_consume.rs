@@ -130,12 +130,14 @@ pub(crate) fn matching_block(connection: &Connection, args: &Args) -> StoreResul
 /// `guard_store` op holds: `"blocked"`, `"allowed"` or `null`.
 ///
 /// A matching block always wins, so a refusal keeps answering the retry
-/// window before any allow is considered.
+/// window before any allow is considered. Without `spend` it only reads, and
+/// the op runs it without the write lock.
 pub(crate) fn settle(connection: &Connection, args: &Args) -> StoreResult<Value> {
+    let spend = args.flag("spend")?;
     if matching_block(connection, args)? == Value::Bool(true) {
         return Ok(json!("blocked"));
     }
-    if args.flag("spend")? && consume(connection, args)? == Value::Bool(true) {
+    if spend && consume(connection, args)? == Value::Bool(true) {
         return Ok(json!("allowed"));
     }
     Ok(Value::Null)

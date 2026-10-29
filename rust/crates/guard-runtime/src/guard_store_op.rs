@@ -191,7 +191,11 @@ fn evaluate_tracked(
     // A total read only writes for the one-time rebuild a migration requests;
     // every other call stays lock-free.
     let args = Args(&request.args);
-    let kind = if (request.method == "count_receipts"
+    // A retry's block check alone writes nothing: it keeps the lock-free read
+    // the separate block lookup had.
+    let kind = if request.method == "settle_native_review_reuse" && !args.flag("spend")? {
+        Kind::Read
+    } else if (request.method == "count_receipts"
         && kind == Kind::Read
         && receipt_rollups::rebuild_pending(&connection)?)
         || (connect::is_state_read(&request.method)

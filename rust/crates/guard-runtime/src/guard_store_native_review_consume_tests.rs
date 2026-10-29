@@ -242,29 +242,62 @@ fn settling_matches_the_separate_block_check_and_spend() {
     );
 }
 
-/// A spend flag that is not a boolean refuses the call rather than guessing.
-#[test]
-fn a_malformed_spend_flag_is_refused() {
+/// The first recorded scenario's rows, with its matching allow turned into a
+/// matching block when `block` is set.
+fn settle_home(label: &str, block: bool) -> (std::path::PathBuf, Value) {
     let vectors: Value = serde_json::from_str(VECTORS).unwrap();
     let scenario = &vectors["scenarios"][0];
-    let home = temp_home("settle-malformed-spend");
+    let mut rows = scenario["rows"].clone();
+    if block {
+        for row in rows.as_array_mut().unwrap() {
+            if row["resolution_action"] == "allow" {
+                row["resolution_action"] = Value::from("block");
+            }
+        }
+    }
+    let home = temp_home(label);
     seed(&home.join("guard.db"), &vectors);
     insert_rows(
         &Connection::open(home.join("guard.db")).unwrap(),
         "approval_requests",
-        &scenario["rows"],
+        &rows,
     );
-    let mut args = scenario["calls"][0]["args"].clone();
-    args["spend"] = Value::from("yes");
+    (home, scenario["calls"][0]["args"].clone())
+}
+
+/// A spend flag that is not a boolean refuses the call rather than guessing,
+/// whether the retry would match an allow or a block.
+#[test]
+fn a_malformed_spend_flag_is_refused() {
+    for block in [false, true] {
+        let (home, mut args) = settle_home(&format!("settle-malformed-spend-{block}"), block);
+        args["spend"] = Value::from("yes");
+        let reply = call(&home, &args, "settle_native_review_reuse");
+        assert_ne!(reply["status"], "ok", "block={block}: {reply}");
+        assert_eq!(
+            dump(
+                &Connection::open(home.join("guard.db")).unwrap(),
+                "guard_continuation_effects",
+                "effect_key"
+            ),
+            serde_json::json!([])
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
+/// Without a spend the settle only checks for a block, so a writer holding
+/// the store does not hold it up.
+#[test]
+fn a_block_check_without_a_spend_takes_no_write_lock() {
+    let (home, mut args) = settle_home("settle-block-check-lock-free", true);
+    args["spend"] = Value::Bool(false);
+    let writer = Connection::open(home.join("guard.db")).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
     let reply = call(&home, &args, "settle_native_review_reuse");
-    assert_ne!(reply["status"], "ok", "{reply}");
-    assert_eq!(
-        dump(
-            &Connection::open(home.join("guard.db")).unwrap(),
-            "guard_continuation_effects",
-            "effect_key"
-        ),
-        serde_json::json!([])
-    );
+    writer.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert_eq!(reply["payload"], "blocked", "{reply}");
+    drop(writer);
     std::fs::remove_dir_all(home).unwrap();
 }
