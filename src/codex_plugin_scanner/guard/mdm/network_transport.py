@@ -375,7 +375,8 @@ def refuse_encoded_response(response: requests.Response, *args: object, **kwargs
 
 def refuse_encoded_responses(session: requests.Session) -> requests.Session:
     session.headers["Accept-Encoding"] = "identity"
-    session.hooks["response"].append(refuse_encoded_response)
+    # First, so a hook registered earlier never reads an encoded body before the refusal.
+    session.hooks["response"].insert(0, refuse_encoded_response)
     return session
 
 

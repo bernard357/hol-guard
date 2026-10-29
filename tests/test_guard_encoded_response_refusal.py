@@ -137,3 +137,17 @@ def test_refusal_is_reusable_on_any_session(origin: str, decoder_calls: list[str
     with pytest.raises(EncodedResponseRefusedError):
         session.get(origin + "/br", timeout=5)
     assert decoder_calls == []
+
+
+def _read_body(response: requests.Response, *args: object, **kwargs: object) -> None:
+    _ = response.content
+
+
+def test_refusal_runs_before_hooks_registered_earlier(origin: str, decoder_calls: list[str]) -> None:
+    session = requests.Session()
+    session.trust_env = False
+    session.hooks["response"].append(_read_body)
+    refuse_encoded_responses(session)
+    with pytest.raises(EncodedResponseRefusedError):
+        session.get(origin + "/gzip", timeout=5)
+    assert decoder_calls == []
