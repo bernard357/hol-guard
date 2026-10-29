@@ -169,6 +169,9 @@ mod evidence_drain;
 #[path = "hook_direct_prompt_tests.rs"]
 mod prompts;
 
+#[path = "hook_direct_emergency_lane_tests.rs"]
+mod emergency_lane;
+
 #[path = "hook_direct_lifecycle_tests.rs"]
 mod lifecycle;
 

@@ -35,7 +35,8 @@
 //! unavailable (`bounded_hook_bridge_render::failure_payload`), so the
 //! harness proceeds without Guard having reviewed anything. The call is
 //! still recorded: the evidence is queued for the daemon to drain, and a
-//! queue that cannot take it pauses the hook.
+//! hook whose record would not be kept pauses instead, whether because the
+//! queue cannot take it or because the bound daemon does not drain it.
 
 use serde_json::{json, Map, Value};
 
@@ -101,6 +102,13 @@ pub(super) fn answer(
     policy_store
         .current_snapshot()
         .map_err(|_| HookDirectDefer::EmergencySafeProfile)?;
+    // The ordinary direct lane answers nothing the bound daemon will not
+    // collect, and a continue here is recorded the same way. A daemon that
+    // does not drain the direct queue, an older one for instance, would
+    // leave this call in it unrecorded, so the hook pauses as the lane does.
+    if !policy_store.direct_lane_evidence_drain() {
+        return Err(HookDirectDefer::EvidenceUndrained);
+    }
     let operation = command_text(payload)
         .and_then(matching_operation)
         .ok_or(HookDirectDefer::EmergencySafeProfile)?;
