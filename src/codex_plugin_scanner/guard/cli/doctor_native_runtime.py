@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal
+
+from typing_extensions import NotRequired, TypedDict
 
 from ..adapters.diagnostic_probes import skipped_command_probe
 from ..native_policy_snapshot_constants import NATIVE_RUNTIME_STATE_DIRECTORY

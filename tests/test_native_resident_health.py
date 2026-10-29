@@ -100,9 +100,7 @@ def test_forwards_the_operation_on_the_control_lane_and_returns_the_resident_ans
     assert set(envelope["request"]) == {"schema", "request_id"}
 
 
-def test_an_older_runtime_without_the_feature_is_never_asked(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_an_older_runtime_without_the_feature_is_never_asked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resident = _Resident(json.dumps(_reply(request_id="rh-1")).encode("utf-8"))
     resident.install(monkeypatch, features=["resident-protocol-v2"])
 
@@ -110,9 +108,7 @@ def test_an_older_runtime_without_the_feature_is_never_asked(
     assert resident.envelopes == []
 
 
-def test_a_resident_that_does_not_answer_reads_as_unanswered(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_a_resident_that_does_not_answer_reads_as_unanswered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resident = _Resident(None)
     resident.install(monkeypatch)
 
@@ -139,26 +135,20 @@ def test_a_reply_that_is_not_the_contract_is_refused(
     assert transport.native_resident_health(guard_home=tmp_path) is None
 
 
-def test_a_reply_for_someone_elses_request_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_a_reply_for_someone_elses_request_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _answering(monkeypatch, _reply(request_id="rh-somebody-else"))
 
     assert transport.native_resident_health(guard_home=tmp_path) is None
 
 
-def test_a_refusal_frame_is_not_mistaken_for_an_answer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_a_refusal_frame_is_not_mistaken_for_an_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resident = _Resident(json.dumps({"error": "native_overloaded", "retryable": True}).encode("utf-8"))
     resident.install(monkeypatch)
 
     assert transport.native_resident_health(guard_home=tmp_path) is None
 
 
-def test_doctor_asks_a_live_resident_and_reports_the_answer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_doctor_asks_a_live_resident_and_reports_the_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     asked: list[Path] = []
 
     def health(*, guard_home: Path, timeout_seconds: float = 2.0) -> dict[str, Any]:

@@ -111,7 +111,12 @@ fn says_nothing_about_the_work_the_resident_is_doing() {
 
     // `serde_json` is built without `preserve_order`, so an object's keys read
     // back sorted whatever order the struct declares them in.
-    let mut fields: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+    let mut fields: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     fields.sort_unstable();
     assert_eq!(
         fields,
@@ -144,9 +149,6 @@ fn says_nothing_about_the_work_the_resident_is_doing() {
 
 #[test]
 fn advertises_the_operation_so_a_caller_can_tell_an_older_resident_apart() {
-    assert!(
-        crate::resident_op_features::RESIDENT_OP_FEATURES
-            .contains(&guard_contracts::RESIDENT_HEALTH_FEATURE)
-    );
+    assert!(crate::resident_op_features::RESIDENT_OP_FEATURES
+        .contains(&guard_contracts::RESIDENT_HEALTH_FEATURE));
 }
-

@@ -19,7 +19,8 @@ use std::time::Instant;
 
 use guard_contracts::{
     ResidentHealthRequestV1, ResidentHealthResultV1, ResidentLaneV1,
-    RESIDENT_HEALTH_MAX_REQUEST_BYTES, RESIDENT_HEALTH_REQUEST_SCHEMA, RESIDENT_HEALTH_RESULT_SCHEMA,
+    RESIDENT_HEALTH_MAX_REQUEST_BYTES, RESIDENT_HEALTH_REQUEST_SCHEMA,
+    RESIDENT_HEALTH_RESULT_SCHEMA,
 };
 
 use crate::package_authority_op::request_digest_with_limit;
@@ -41,9 +42,9 @@ pub(crate) fn record_overload() {
 /// Milliseconds since the worker pools started, saturating rather than
 /// wrapping. Zero before they start, which no served request can observe.
 fn uptime_ms() -> u64 {
-    SERVING_SINCE
-        .get()
-        .map_or(0, |since| u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX))
+    SERVING_SINCE.get().map_or(0, |since| {
+        u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
+    })
 }
 
 fn lane(workers: usize, queue_capacity: usize) -> ResidentLaneV1 {
