@@ -128,7 +128,7 @@ pub(in crate::pretool) fn private_temporary_base(
         .then_some(root)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub(in crate::pretool) fn private_temporary_base(
     _path: &std::path::Path,
     _owner: u32,

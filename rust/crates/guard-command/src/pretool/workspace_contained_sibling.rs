@@ -143,7 +143,11 @@ fn sibling_anchor(model: &CanonicalCommandV1, context: PathContext<'_>) -> Optio
         || executable == "cd"
         || model
             .normalized_text
-            .contains(['<', '>', '|', '&', ';', '$', '`'])
+            .contains(['<', '>', '|', '&', ';', '`'])
+        || super::reach::expands_variable(
+            &model.normalized_text,
+            super::super::executable_basename(executable),
+        )
     {
         return None;
     }

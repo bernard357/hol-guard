@@ -342,7 +342,7 @@ const PATTERN_TOOLS: &[&str] = &[
 /// A `$` the shell expands. Inside single quotes it is literal, and a pattern
 /// tool reads it as program text (`awk '/x$/{f=1}'`). Any other tool may hand
 /// its arguments to a shell or expand them itself, so every `$` counts there.
-fn expands_variable(text: &str, name: &str) -> bool {
+pub(super) fn expands_variable(text: &str, name: &str) -> bool {
     if !PATTERN_TOOLS.contains(&name) {
         return text.contains('$');
     }
