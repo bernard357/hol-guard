@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from codex_plugin_scanner.guard.live_process_identity import (
     CODEX_BROWSER_WAIT_PROCESS_KEY,
     CODEX_BROWSER_WAIT_TIMEOUT_SECONDS_KEY,
     current_process_identity,
+    process_start_token,
 )
 from codex_plugin_scanner.guard.store import GuardStore
 from codex_plugin_scanner.guard.store_local_once_authority import (
@@ -397,3 +399,50 @@ def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
     snapshot = _snapshot(row)
     assert snapshot is not None
     assert snapshot["capability"] == "retry-only"
+
+
+def test_a_retry_folded_into_the_pending_row_releases_the_retrying_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+    earlier_bridge = subprocess.Popen(["sleep", "60"])
+    try:
+        start_token = process_start_token(earlier_bridge.pid)
+        assert start_token is not None
+        first = _review(
+            worker,
+            tmp_path,
+            workspace,
+            {
+                CODEX_BROWSER_WAIT_PROCESS_KEY: {"pid": earlier_bridge.pid, "startToken": start_token},
+                CODEX_BROWSER_WAIT_TIMEOUT_SECONDS_KEY: 120,
+            },
+        )
+    finally:
+        earlier_bridge.kill()
+        earlier_bridge.wait()
+
+    retry = _review(worker, tmp_path, workspace, _live_wait())
+    request_id = retry["approval_request_id"]
+    assert request_id == first["approval_request_id"]
+    operation = store.get_guard_operation_for_approval_request(request_id)
+    assert operation is not None
+    metadata = operation["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["codex_browser_wait_process"] == current_process_identity()
+
+    _allow_once(store, request_id, workspace)
+    resolved = store.get_approval_request(request_id)
+    assert resolved is not None
+    completed = complete_codex_live_decision(
+        store,
+        request_id=request_id,
+        now=str(resolved["resolved_at"]),
+        fresh_allow_authorized=True,
+    )
+
+    assert completed["completed"] is True, completed
+    continuation = completed["continuation"]
+    assert isinstance(continuation, dict)
+    assert continuation["continuationStatus"] == "resumed"

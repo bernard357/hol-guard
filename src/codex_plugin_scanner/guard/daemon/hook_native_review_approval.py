@@ -381,9 +381,7 @@ def queue_native_pre_tool_review(
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
     if live_wait is not None and isinstance(stored, dict):
-        from .hook_native_review_codex_live_wait import seed_codex_live_wait
-
-        seed_codex_live_wait(store, request_id=request_id, now=datetime.now(tz=timezone.utc))
+        _seed_folded_live_wait(store, stored, request_id, live_wait[0], workspace)
     if connector is not None and isinstance(stored, dict):
         record_native_review_connector_context(
             store,
@@ -437,6 +435,31 @@ def _codex_live_wait(
         return None
     linked = link_codex_live_wait(store, request_id=request_id, metadata=metadata, workspace=workspace, now=now)
     return (metadata, snapshot) if linked else None
+
+
+def _seed_folded_live_wait(
+    store: object,
+    stored: Mapping[str, object],
+    request_id: str,
+    metadata: Mapping[str, object],
+    workspace: Path | None,
+) -> None:
+    """Seed the resume record on the row the request was stored as.
+
+    A retry of an action that is still pending folds into the existing row and
+    keeps its id. The bridge now waiting is the retry's, so the row's operation
+    is pointed at it; otherwise an approval would look up the earlier attempt's
+    wait and could only ask the agent to retry.
+    """
+    from .hook_native_review_codex_live_wait import link_codex_live_wait, seed_codex_live_wait
+
+    now = datetime.now(tz=timezone.utc)
+    stored_id = stored.get("request_id")
+    if isinstance(stored_id, str) and stored_id and stored_id != request_id:
+        if not link_codex_live_wait(store, request_id=stored_id, metadata=metadata, workspace=workspace, now=now):
+            return
+        request_id = stored_id
+    seed_codex_live_wait(store, request_id=request_id, now=now)
 
 
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:
