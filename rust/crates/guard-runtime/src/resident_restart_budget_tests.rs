@@ -544,3 +544,45 @@ fn a_spawn_refused_for_its_policy_key_never_reaches_the_budget_or_the_journal() 
 
     fs::remove_dir_all(state_base).unwrap();
 }
+
+#[test]
+fn a_refused_start_is_recorded_even_while_the_journal_is_busy() {
+    let state_base = spawn_state_base("busy");
+    let scope = state_base.join("scope");
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    for _ in 0..MAX_RESTARTS_PER_WINDOW {
+        consume_for_spawn(&state_base, &scope, deadline).unwrap();
+    }
+
+    // The contended case this refusal path actually meets: a supervisor is
+    // recording an exit while the circuit that exit opened refuses a client.
+    // The refusal is the only event that makes the journal read `critical`, so
+    // losing it here would report a crash loop as merely degraded.
+    let (held, release) = std::sync::mpsc::channel();
+    let holder = {
+        let scope = scope.clone();
+        std::thread::spawn(move || {
+            let lock = super::super::lifecycle_journal::lock_for_test(&scope);
+            held.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(60));
+            drop(lock);
+        })
+    };
+    release.recv().unwrap();
+
+    assert_eq!(
+        consume_for_spawn(&state_base, &scope, deadline).unwrap_err(),
+        "native_resident_restart_circuit_open"
+    );
+    holder.join().unwrap();
+
+    let health = super::super::lifecycle_journal::health(&scope)
+        .unwrap()
+        .unwrap();
+    assert_eq!(health.state, "critical");
+    assert_eq!(health.refused_starts, 1);
+    assert_eq!(health.last_event, "start_refused");
+
+    fs::remove_dir_all(state_base).unwrap();
+}

@@ -369,6 +369,16 @@ pub(super) fn record_without_waiting(scope: &Path, event: Event) {
     let _ = record_at(scope, event, None, false);
 }
 
+/// Hold this install's journal lock, so a test can play out a caller that
+/// arrives while a supervisor is already recording. The lock is released when
+/// the returned value is dropped.
+#[cfg(test)]
+pub(super) fn lock_for_test(scope: &Path) -> impl Drop {
+    let private_root =
+        crate::resident_state::private_root_for_scope(scope).expect("a private root for the scope");
+    acquire_journal_lock(scope, &private_root).expect("an uncontended journal lock")
+}
+
 fn record_at(
     scope: &Path,
     event: Event,

@@ -166,10 +166,14 @@ pub(super) fn consume_for_spawn(
     }
     let charged = consume_before(scope, Some(deadline));
     // Recorded after the charge, so the journal's lock is never held inside
-    // this module's own, and without waiting for it, so a contended journal
-    // cannot spend a deadline this caller still needs. A start the budget
-    // refused is the one event a one-shot client would otherwise leave no
-    // trace of at all.
+    // this module's own. A start the budget refused is the one event a
+    // one-shot client would otherwise leave no trace of at all, and the only
+    // one that makes the journal read `critical`, so this waits briefly for a
+    // contended lock rather than dropping it. The wait costs this caller
+    // nothing a spawn needs: it has already been refused and returns an error
+    // the moment this returns. The contended case is exactly the one worth
+    // waiting through, because a supervisor recording an exit holds the lock
+    // while the circuit it just opened is refusing clients.
     //
     // A charge is not a start: the caller still has to mint a generation, a
     // token and a process, and any of those can fail. The started event is
@@ -177,10 +181,7 @@ pub(super) fn consume_for_spawn(
     // spawn never reads back as a healthy one.
     if let Err(reason) = &charged {
         if reason.as_str() == "native_resident_restart_circuit_open" {
-            super::lifecycle_journal::record_without_waiting(
-                scope,
-                super::lifecycle_journal::Event::StartRefused,
-            );
+            super::lifecycle_journal::record(scope, super::lifecycle_journal::Event::StartRefused);
         }
     }
     charged
