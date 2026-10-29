@@ -151,8 +151,21 @@ fn sibling_anchor(model: &CanonicalCommandV1, context: PathContext<'_>) -> Optio
     let workspace = super::super::contained_wrapper::sibling_project_root(&cwd, home)
         .unwrap_or_else(|| cwd.clone());
     let words = || std::iter::once(executable).chain(segment.arguments.iter().map(String::as_str));
-    let anchor = std::fs::canonicalize(executed_path(executable, &segment.arguments)?).ok()?;
+    let edited = edited_paths(executable, &segment.arguments);
+    let anchor = match executed_path(executable, &segment.arguments) {
+        Some(path) => std::fs::canonicalize(path).ok()?,
+        None => edited.as_ref()?.first()?.clone(),
+    };
     let root = super::super::contained_wrapper::sibling_project_root(&anchor, home)?;
+    // The sandbox rooted there writes only the root itself, so every file an
+    // in-place edit rewrites must lie in it, not in the main checkout the
+    // sandbox can merely read.
+    if edited
+        .as_ref()
+        .is_some_and(|files| files.iter().any(|file| !file.starts_with(&root)))
+    {
+        return None;
+    }
     if anchor.starts_with(&workspace)
         || root.starts_with(&workspace)
         || workspace.starts_with(&root)
@@ -206,6 +219,76 @@ fn executed_path<'a>(executable: &'a str, arguments: &'a [String]) -> Option<&'a
         }
         _ => None,
     }
+}
+
+/// The existing files an in-place stream edit rewrites, resolved, in order:
+/// `sed -i '' 's/a/b/g' <root>/f …` or `perl -pi -e 's/a/b/g' <root>/f …`.
+/// Such an edit runs nothing from the sibling, but it writes only the files it
+/// names, so the same edit issued from their root confines it as tightly as a
+/// `cd <root> &&` prefix would. `None` for any other command and for a
+/// `perl` edit outside the shape `perl_edited_operands` reads. A relative
+/// word that names a path from the session directory keeps the review in
+/// `sibling_anchor`, and an absolute word that names nothing, such as a
+/// `/^$/d` sed script, is no file.
+fn edited_paths(executable: &str, arguments: &[String]) -> Option<Vec<PathBuf>> {
+    let operands: Vec<&str> = match super::super::executable_basename(executable) {
+        "sed" => {
+            let in_place = |word: &String| {
+                word == "--in-place"
+                    || word.starts_with("--in-place=")
+                    || word
+                        .strip_prefix('-')
+                        .filter(|flags| !flags.starts_with('-'))
+                        .and_then(|flags| {
+                            flags
+                                .trim_start_matches(['E', 'n', 'r', 's'])
+                                .strip_prefix('i')
+                        })
+                        .is_some()
+            };
+            if !arguments.iter().any(in_place) {
+                return None;
+            }
+            arguments.iter().map(String::as_str).collect()
+        }
+        "perl" => perl_edited_operands(arguments)?,
+        _ => return None,
+    };
+    let files: Vec<PathBuf> = operands
+        .iter()
+        .filter(|word| Path::new(word).is_absolute())
+        .filter_map(|word| std::fs::canonicalize(word).ok())
+        .collect();
+    (!files.is_empty()).then_some(files)
+}
+
+/// The file operands of `perl -pi -e <expression> <file>…`, with only the
+/// line-loop flags `-p`, `-n`, `-l`, `-a` and `-w` beside the in-place `-i`.
+/// An `-i` cluster ends at the `i`, since anything after it is a backup
+/// suffix; an expression cluster ends at its `e`.
+fn perl_edited_operands(arguments: &[String]) -> Option<Vec<&str>> {
+    let loop_flags = |flags: &str| flags.bytes().all(|byte| b"pnlaw".contains(&byte));
+    let (mut in_place, mut expression, mut index) = (false, false, 0);
+    while let Some(flags) = arguments.get(index).and_then(|word| word.strip_prefix('-')) {
+        if flags.strip_suffix('i').is_some_and(loop_flags) {
+            in_place = true;
+            index += 1;
+        } else if flags.strip_suffix('e').is_some_and(loop_flags) {
+            arguments.get(index + 1)?;
+            expression = true;
+            index += 2;
+        } else if !flags.is_empty() && loop_flags(flags) {
+            index += 1;
+        } else {
+            return None;
+        }
+    }
+    let files: Vec<&str> = arguments[index..].iter().map(String::as_str).collect();
+    (in_place
+        && expression
+        && !files.is_empty()
+        && files.iter().all(|file| Path::new(file).is_absolute()))
+    .then_some(files)
 }
 
 /// Whether `word` is `--max-old-space-size=<megabytes>` with a size Node

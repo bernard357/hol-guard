@@ -123,6 +123,71 @@ fn the_temporary_directory_and_plain_folders_in_it_get_no_run() {
     }
 }
 
+/// Plugin manifests in hidden folders of a checkout, as a brand or version
+/// sweep rewrites them.
+fn manifests(checkout: &Path) -> [PathBuf; 2] {
+    let files = [
+        checkout.join("plugins/good/.codex-plugin/plugin.json"),
+        checkout.join("integrations/app/.claude-plugin/plugin.json"),
+    ];
+    for file in &files {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, r#"{"author":"Example"}"#).unwrap();
+    }
+    files
+}
+
+/// An in-place `sed` or `perl` edit that names files in a sibling checkout by
+/// absolute path writes only there, so it runs contained in that checkout as
+/// the same edit issued from inside it would. That holds for a worktree in
+/// the temporary directory and for one beside the checkout in home.
+#[test]
+fn in_place_edits_by_path_in_a_sibling_worktree_run_contained() {
+    let (session, _scratch, checkout, _cleanup) = temporary_worktree("temp-run-edit");
+    for root in [checkout.clone(), alias(&checkout), session.worktree.clone()] {
+        let [codex, claude] = manifests(&root).map(|file| file.display().to_string());
+        for command in [
+            format!("sed -i '' 's/Example/Sample/g' {codex}"),
+            format!("sed -i '' 's/Example/Sample/g' {codex} {claude}"),
+            format!("sed -i '' '/^$/d' {claude}"),
+            format!("perl -pi -e 's/Example/Sample/g' {claude}"),
+            format!("perl -i -pe 's/Example/Sample/g' {codex} {claude}"),
+        ] {
+            let (action, reason) = outcome(&session, &command);
+            assert_eq!(
+                (action.as_str(), reason.as_str()),
+                ("sandbox-required", "native_workspace_containment_required"),
+                "{command}"
+            );
+        }
+    }
+}
+
+/// The edit keeps its review when one file lies outside the worktree, when
+/// the folder is no checkout, or when `perl` takes options beyond the plain
+/// line loop.
+#[test]
+fn in_place_edits_reaching_past_the_worktree_are_not_contained() {
+    let (session, scratch, checkout, _cleanup) = temporary_worktree("temp-run-edit-out");
+    let [codex, _] = manifests(&checkout).map(|file| file.display().to_string());
+    let plain = scratch.join("plain");
+    let [stray, _] = manifests(&plain).map(|file| file.display().to_string());
+    let primary = session.primary.join("tracked.txt");
+    let primary = primary.display();
+    for command in [
+        format!("sed -i '' 's/Example/Sample/g' {codex} {primary}"),
+        format!("sed -i '' 's/Example/Sample/g' {stray}"),
+        format!("perl -MExample -pi -e 's/Example/Sample/g' {codex}"),
+        format!("perl -pi -e 's/Example/Sample/g' {codex} tracked.txt"),
+    ] {
+        let (action, reason) = outcome(&session, &command);
+        assert!(
+            !matches!(action.as_str(), "allow" | "sandbox-required"),
+            "{command}: {action} {reason}"
+        );
+    }
+}
+
 struct Cleanup(PathBuf);
 
 impl Drop for Cleanup {
