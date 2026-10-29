@@ -358,6 +358,27 @@ class _ManagedHTTPAdapter(HTTPAdapter):
         return headers
 
 
+class EncodedResponseRefusedError(ManagedNetworkError):
+    """A response arrived content-encoded and was closed before any decoder ran."""
+
+
+def refuse_encoded_response(response: requests.Response, *args: object, **kwargs: object) -> requests.Response:
+    # requests decodes gzip, deflate and, when their packages are present, br and
+    # zstd while reading the body. This hook runs before the body is read, so an
+    # encoded response never reaches a decoder, whatever the server ignored.
+    declared = response.headers.get("Content-Encoding")
+    if declared is not None and any(coding.strip().lower() not in {"", "identity"} for coding in declared.split(",")):
+        response.close()
+        raise EncodedResponseRefusedError("managed_response_content_encoding_refused")
+    return response
+
+
+def refuse_encoded_responses(session: requests.Session) -> requests.Session:
+    session.headers["Accept-Encoding"] = "identity"
+    session.hooks["response"].append(refuse_encoded_response)
+    return session
+
+
 def managed_requests_session(policy: ManagedNetworkPolicy | None = None) -> requests.Session:
     resolved, managed = resolved_network_policy(policy)
     proxies = proxy_map(resolved) if managed or resolved.proxy_mode != "system" else {}
@@ -378,10 +399,11 @@ def managed_requests_session(policy: ManagedNetworkPolicy | None = None) -> requ
     session.mount("http://", _ManagedHTTPAdapter(context, proxy_authorization, resolved))
     session.mount("https://", _ManagedHTTPAdapter(context, proxy_authorization, resolved))
     session.verify = True
-    return session
+    return refuse_encoded_responses(session)
 
 
 __all__ = [
+    "EncodedResponseRefusedError",
     "ManagedNetworkError",
     "ProxyCredentials",
     "active_network_policy",
@@ -394,6 +416,7 @@ __all__ = [
     "platform_system_proxies",
     "proxy_endpoint_hash",
     "proxy_map",
+    "refuse_encoded_responses",
     "resolved_network_policy",
     "selected_proxy_url",
     "validate_destination",
