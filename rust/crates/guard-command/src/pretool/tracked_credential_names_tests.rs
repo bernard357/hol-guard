@@ -349,6 +349,12 @@ fn manifests_untracked_copies_and_credential_words_keep_the_signal() {
             "file_path": project.join(CATALOG),
             "old_string": r#""id""#, "new_string": r#""\u006bind": "\u0053ecret", "id""#
         }}),
+        // Old text holding the same words does not offset the new ones.
+        serde_json::json!({"tool_name": "Edit", "tool_input": {
+            "file_path": project.join(CATALOG),
+            "old_string": r#""id": "command.kubernetes-secrets\u0021""#,
+            "new_string": r#""\u006bind": "Secret""#
+        }}),
         serde_json::json!({"tool_name": "Write", "tool_input": {
             "file_path": project.join(CATALOG),
             "content": "\"\\u006bind\": \"\\u0053ecret\"\nmetadata:\n  name: app\n"

@@ -60,13 +60,8 @@ impl GenericSignals {
     }
 }
 
-/// The old and new text keys of the substring edits hosts send.
-const EDIT_PAIRS: [(&str, &str); 4] = [
-    ("old_string", "new_string"),
-    ("oldString", "newString"),
-    ("oldText", "newText"),
-    ("old_str", "new_str"),
-];
+/// The new-text keys of the substring edits hosts send.
+const EDIT_TEXT_KEYS: [&str; 4] = ["new_string", "newString", "newText", "new_str"];
 
 /// Escapes that spell a letter in JSON, YAML or TOML strings, and the YAML
 /// line continuation that joins two halves of a word.
@@ -81,7 +76,7 @@ pub(super) fn declares_secret_object(payload: &Value) -> bool {
         Value::String(text) => names::declares_secret_object(text),
         Value::Array(items) => items.iter().any(declares_secret_object),
         Value::Object(map) => {
-            adds_secret_word(map)
+            edit_names_secret(map)
                 || writes_unproven_body(map)
                 || map.values().any(declares_secret_object)
         }
@@ -89,32 +84,21 @@ pub(super) fn declares_secret_object(payload: &Value) -> bool {
     }
 }
 
-/// Whether an edit's new text holds the word `secret`, or an escape that can
-/// spell it or `kind`, more often than its old text. `old_string: ConfigMap`
-/// with `new_string: Secret` names no `kind` in either string, and
-/// `"\u006bind": "\u0053ecret"` names neither word plainly. A unified diff
-/// needs no such count: it replaces whole lines, so the `kind` key travels
-/// with its value.
-fn adds_secret_word(map: &serde_json::Map<String, Value>) -> bool {
-    let text = |key: &str| map.get(key).and_then(Value::as_str);
-    EDIT_PAIRS.iter().any(|(old, new)| {
-        text(new).is_some_and(|added| {
-            let removed = text(old).unwrap_or("");
-            secret_words(added) > secret_words(removed)
-                || letter_escapes(added) > letter_escapes(removed)
+/// Whether an edit's new text names `secret` or holds an escape that can
+/// spell it or `kind`, as a command naming a credential word beside a
+/// tracked path keeps its review. `old_string: ConfigMap` with
+/// `new_string: Secret` names no `kind` in either string, and
+/// `"\u006bind": "\u0053ecret"` names neither word plainly. The old text is
+/// not consulted: it can hold the same words, so a count would let the
+/// replacement through. A unified diff needs no such check: it replaces
+/// whole lines, so the `kind` key travels with its value.
+fn edit_names_secret(map: &serde_json::Map<String, Value>) -> bool {
+    EDIT_TEXT_KEYS.iter().any(|key| {
+        map.get(*key).and_then(Value::as_str).is_some_and(|text| {
+            text.to_ascii_lowercase().contains("secret")
+                || LETTER_ESCAPES.iter().any(|escape| text.contains(escape))
         })
     })
-}
-
-fn secret_words(text: &str) -> usize {
-    text.to_ascii_lowercase().matches("secret").count()
-}
-
-fn letter_escapes(text: &str) -> usize {
-    LETTER_ESCAPES
-        .iter()
-        .map(|escape| text.matches(escape).count())
-        .sum()
 }
 
 /// Whether a whole-file body would fail the proof the file on disk is held
