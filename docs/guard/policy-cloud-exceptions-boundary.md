@@ -68,6 +68,16 @@ top-level `policy`, `teamPolicyPack`, and `exceptions` response fields are not
 covered by the bundle signature and are ignored as enforcement authority even
 when co-delivered with a valid bundle.
 
+An active Cloud exception from the current verified bundle lifts only the
+decisions materialized from that bundle (`source: policy-bundle`). When an
+artifact or MCP tool lookup selects such a decision, the exception lifts it if
+its harness is unset, `*` or the evaluating harness, and every target it names
+(`artifactId`, `publisher`, `workingDirectory`) equals the evaluated one. An
+artifact or publisher exception that names no artifact or publisher lifts
+nothing. Local remembered rules, scanner verdicts and the first-seen default
+still apply, so a lifted package can still warn. Revoked or expired exceptions
+leave the next signed bundle, or fail the expiry check at evaluation time.
+
 The monotonic acceptance checkpoint records both `bundleHash` and the broader
 signed `payloadHash`. Cached current/LKG consumers re-check that checkpoint, and
 an alternate payload at the same issue time/version is rejected as unordered.

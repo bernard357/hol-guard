@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import TypeGuard
@@ -206,7 +207,91 @@ def list_active_cloud_exceptions(
     active = [item for item in items if _cloud_exception_is_active(item, now=now)]
     if harness is None:
         return active
-    return [item for item in active if item.harness in {harness, "*"}]
+    # An exception that names no harness applies to every harness.
+    return [item for item in active if item.harness in {None, harness, "*"}]
+
+
+_POLICY_BUNDLE_DECISION_SOURCE = "policy-bundle"
+_SCOPE_TARGET_KEYS: dict[str, tuple[str, ...]] = {
+    "artifact": ("artifactId",),
+    "publisher": ("publisher",),
+    "workspace": ("workingDirectory", "workspaceId"),
+}
+
+
+def _cloud_exception_matches(
+    item: CloudException,
+    raw_item: Mapping[str, object],
+    *,
+    harness: str,
+    artifact_id: str | None,
+    publisher: str | None,
+    workspace: str | None,
+) -> bool:
+    if item.harness not in {None, "*", harness}:
+        return False
+    legacy = _cloud_exception_legacy_scope_field(item)
+    targets = {
+        "artifactId": _non_empty_string(raw_item.get("artifactId")),
+        "publisher": _non_empty_string(raw_item.get("publisher")),
+        "workingDirectory": _non_empty_string(raw_item.get("workingDirectory")),
+        "workspaceId": _non_empty_string(raw_item.get("workspaceId")),
+    }
+    if legacy is not None:
+        legacy_key = "artifactId" if legacy[0] == "artifact_id" else "publisher"
+        targets[legacy_key] = targets[legacy_key] or legacy[1]
+    # The scope's own target must be named; an exception that names no
+    # artifact cannot stand in for an artifact exception.
+    required = _SCOPE_TARGET_KEYS.get(item.scope, ())
+    if required and all(targets[key] is None for key in required):
+        return False
+    # Every target the exception names narrows it. The Cloud workspace id is
+    # the bundle's own workspace, so it never narrows further on the device.
+    observed = {"artifactId": artifact_id, "publisher": publisher, "workingDirectory": workspace}
+    return all(targets[key] is None or targets[key] == value for key, value in observed.items())
+
+
+def cloud_exception_lifting_policy_bundle_decision(
+    policy_bundle: Mapping[str, object],
+    decision: Mapping[str, object] | None,
+    *,
+    harness: str,
+    artifact_id: str | None,
+    publisher: str | None,
+    workspace: str | None,
+    now: str | None,
+) -> str | None:
+    """Return the approved Cloud exception that lifts this Cloud policy decision.
+
+    An exception approved in Guard Cloud is an allow for the policy that Cloud
+    published, so it lifts only decisions materialized from that same verified
+    bundle. Local decisions and the scanner's own action are untouched, so the
+    artifact still evaluates as the device would without the Cloud rule.
+    """
+
+    if decision is None or decision.get("source") != _POLICY_BUNDLE_DECISION_SOURCE:
+        return None
+    if decision.get("action") == "allow":
+        return None
+    raw_items = policy_bundle.get("cloudExceptions")
+    if not isinstance(raw_items, list):
+        return None
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        item = cloud_exception_from_mapping(raw_item, provenance="policy-bundle")
+        if item is None or item.effect != "allow" or not _cloud_exception_is_active(item, now=now):
+            continue
+        if _cloud_exception_matches(
+            item,
+            raw_item,
+            harness=harness,
+            artifact_id=artifact_id,
+            publisher=publisher,
+            workspace=workspace,
+        ):
+            return item.id
+    return None
 
 
 def _cloud_exception_legacy_scope_field(item: CloudException) -> tuple[str, str] | None:

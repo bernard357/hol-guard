@@ -74,6 +74,10 @@ class _ReplayStore:
         result = self._serve({"kind": "grant_lookup", "harness": harness, "selector": selector})
         return {"decision": result["decision"], "ignored_local_integrity": None}  # type: ignore[index]
 
+    def lift_cloud_excepted_policy_decision(self, lookup, **_kwargs):
+        # The recorded lookups already reflect the store; none holds a Cloud exception.
+        return lookup
+
     def resolve_policy_decision_lookup_with_memory_pattern(
         self,
         harness,
