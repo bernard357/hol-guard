@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 
 # ruff: noqa: F403,F405
 from .native_approval_queue_identity import UNAVAILABLE as APPROVAL_QUEUE_IDENTITY_UNAVAILABLE
@@ -100,15 +101,23 @@ class StoreApprovalsMixin:
             cwd = None
         queued = self._native_queue_call(method, {**args, "return_row": True, "cwd": cwd})
         if isinstance(queued, str) and queued:
-            return self.get_approval_request(queued)
+            return self._read_back_queued_request(queued)
         if not isinstance(queued, dict) or not isinstance(queued.get("request_id"), str) or not queued["request_id"]:
             raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
         if queued.get("event_error") is not None:
             _LOGGER.warning("Silent review inbox row saved without approval.created (%s)", queued["event_error"])
         if "row" not in queued:
-            return self.get_approval_request(queued["request_id"])
+            return self._read_back_queued_request(queued["request_id"])
         row = queued["row"]
         return _with_approval_hints(row) if isinstance(row, dict) else None
+
+    def _read_back_queued_request(self, request_id: str) -> dict[str, object] | None:
+        # The write has committed. A failed read answers no row rather than
+        # an error a caller could take for a failed write and queue again.
+        try:
+            return self.get_approval_request(request_id)
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+            return None
 
     def _queue_approval_request(self, method: str, args: dict[str, object]) -> str:
         request_id = self._native_queue_call(method, args)

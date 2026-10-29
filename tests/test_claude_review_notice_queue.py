@@ -187,6 +187,23 @@ def test_a_row_the_write_did_not_read_back_is_read_separately() -> None:
         assert store.reads == ["req-1"]
 
 
+class _UnreadableRowStore(_RowStore):
+    def get_approval_request(self, request_id: str, *, derive_scope: bool = True) -> dict[str, object]:
+        self.reads.append(request_id)
+        raise ValueError("approval scope unavailable")
+
+
+def test_a_failed_read_back_never_queues_the_review_again() -> None:
+    # The Claude write committed; the hook's retry without the notice is for
+    # a failed write only, so a failed separate read must not trigger it.
+    store = _UnreadableRowStore({"request_id": "req-1", "row_error": "native_guard_store_invalid"})
+    notice = {"review": {"harness": "claude-code"}, "integrity_key_b64": "a2V5", "integrity_key_id": "kid"}
+    persist = store.queue_review_approval_request
+    assert hook_native_review_approval._persist_review(persist, _Request(), "now", notice) is None  # type: ignore[arg-type]
+    assert [method for method, _ in store.calls] == ["add_claude_approval_request"]
+    assert store.reads == ["req-1"]
+
+
 def test_a_queue_write_without_a_request_id_is_refused() -> None:
     from codex_plugin_scanner.guard.native_signal_projection import NativeSignalProjectionUnavailableError
 
