@@ -149,7 +149,7 @@ fn in_place_edits_by_path_in_a_sibling_worktree_run_contained() {
         for command in [
             format!("sed -i '' 's/Example/Sample/g' {codex}"),
             format!("sed -i '' 's/Example/Sample/g' {codex} {claude}"),
-            format!("sed -i '' '/^$/d' {claude}"),
+            format!("sed -i '' 's/Example Author/Sample Author/g' {claude}"),
             format!("perl -pi -e 's/Example/Sample/g' {claude}"),
             format!("perl -i -pe 's/Example/Sample/g' {codex} {claude}"),
         ] {

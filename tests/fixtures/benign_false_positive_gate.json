@@ -19034,7 +19034,7 @@
       "expect": "allow"
     },
     {
-      "id": "user-tmp-sibling-manifest-sed-blank-lines",
+      "id": "user-tmp-sibling-manifest-sed-spaced-pattern",
       "fix_area": "git-sibling-worktree",
       "harnesses": [
         "codex",
@@ -19044,7 +19044,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "sed -i '' '/^$/d' ${USER_TMP_SIBLING}/plugins/app/.codex-plugin/plugin.json"
+        "command": "sed -i '' 's/Example Author/Sample Author/g' ${USER_TMP_SIBLING}/plugins/app/.codex-plugin/plugin.json"
       },
       "cwd": "parent",
       "expect": "allow"
