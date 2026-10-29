@@ -121,6 +121,11 @@ def expand() -> list[ReplayCase]:
         # a case that depends on an inherited variable.
         if entry.get("environment"):
             continue
+        # The workspace sandbox exists on macOS and on Linux only where the
+        # host offers it. A case it is the only allow route for would measure
+        # the host rather than Guard where there is none.
+        if entry.get("requires_sandbox") and sys.platform != "darwin":
+            continue
         # Pi's read tool takes files; an entry that reads a folder says so and is not mirrored.
         mirror_pi = "omp" in entry["harnesses"] and entry["tool"] in PI_TOOLS and entry.get("mirror_pi", True)
         harnesses = list(entry["harnesses"]) + (["pi"] if mirror_pi else [])

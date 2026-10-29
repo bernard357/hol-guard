@@ -10296,7 +10296,8 @@
         "command": "bunx vitest run app.test.tsx 2>&1 | grep -o \"CITE_HTML.*\" | head -c 1500"
       },
       "cwd": "home_project",
-      "expect": "allow"
+      "expect": "allow",
+      "requires_sandbox": true
     },
     {
       "id": "session-runner-tail-bytes",
@@ -10312,7 +10313,8 @@
         "command": "npx vitest run 2>&1 | tail -c 2000"
       },
       "cwd": "home_project",
-      "expect": "allow"
+      "expect": "allow",
+      "requires_sandbox": true
     },
     {
       "id": "session-runner-head-bytes-attached",
@@ -10328,7 +10330,8 @@
         "command": "npx vitest run 2>&1 | head -c2000"
       },
       "cwd": "home_project",
-      "expect": "allow"
+      "expect": "allow",
+      "requires_sandbox": true
     },
     {
       "id": "session-npm-test-tail",
