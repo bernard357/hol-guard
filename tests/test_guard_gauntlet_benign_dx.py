@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -137,6 +139,7 @@ REALISM_IDS = {
     "omp-native-read-credential-placeholder-docs",
     "omp-native-shell-read-credential-placeholder-docs",
     "omp-native-shell-linked-modules-build",
+    "omp-native-shell-linked-modules-bun-entry",
     "omp-native-shell-doctl-reads",
     "omp-native-shell-docker-imagetools-inspect",
     "omp-native-read-token-handling-sources",
@@ -195,6 +198,25 @@ def test_linked_modules_build_and_doctl_reads_run_on_the_host(tmp_path: Path) ->
         result = _shell(fixture, command)
         assert result.returncode == 0 and result.stdout.strip(), (command, result.stderr)
     assert _shell(fixture, "doctl auth token").returncode != 0
+
+
+def test_the_linked_install_carries_the_node_entry_bun_is_handed(tmp_path: Path) -> None:
+    """`bun node_modules/vite/bin/vite.js build` names the package's own Node entry.
+
+    Guard runs that spelling on the project's Node image, so the installed
+    fixture has to carry the entry on every platform rather than only where
+    Windows needs it.
+    """
+    fixture = create_fixture(tmp_path / "fx", realistic=True)
+    entry = fixture.workspace / DASHBOARD / "node_modules/vite/bin/vite.js"
+    assert entry.is_file()
+    command = commands_for("omp-native-shell-linked-modules-bun-entry")[0]
+    assert "node_modules/vite/bin/vite.js" in command
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is not installed on this host")
+    build = _shell(fixture, command.replace("bun ", f"{shlex.quote(node)} ", 1))
+    assert build.returncode == 0 and "built in" in build.stdout, build.stderr
 
 
 def test_docker_stand_in_answers_only_the_registry_manifest_query(tmp_path: Path) -> None:

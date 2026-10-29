@@ -81,7 +81,8 @@ VITE_STUB = (
     "printf 'dist/index.html  0.40 kB\\n'\n"
     "printf 'built in 12ms\\n'\n"
 )
-# Windows runs the package entry with Node, as Guard's contained build does.
+# The package's own Node entry point, which Guard's contained build runs and which
+# `bun node_modules/vite/bin/vite.js` names directly. Windows has no other spelling.
 VITE_STUB_NODE = (
     "// Synthetic stand-in for the installed vite CLI: no network, no writes.\n"
     "process.stdout.write(\n"
@@ -459,8 +460,7 @@ def add_main_shapes(main: Path) -> tuple[str, ...]:
     package = {"name": "vite", "version": VITE_VERSION, "bin": {"vite": "bin/vite"}}
     _write(modules / "vite/package.json", json.dumps(package) + "\n")
     _write(modules / "vite/bin/vite", VITE_STUB, 0o755)
-    if os.name == "nt":
-        _write(modules / "vite/bin/vite.js", VITE_STUB_NODE)
+    _write(modules / "vite/bin/vite.js", VITE_STUB_NODE)
     (modules / ".bin").mkdir()
     # npm links each bin relative to node_modules/.bin.
     (modules / ".bin/vite").symlink_to(Path("../vite/bin/vite"))
