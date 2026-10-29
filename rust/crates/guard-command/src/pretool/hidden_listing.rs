@@ -106,17 +106,41 @@ pub(in crate::pretool) fn repository_plugin_manifest(
 ) -> bool {
     repository_hidden_source_document(canonical, home_dir, cwd)
         && enclosing_work_tree(canonical, home_dir)
-            .and_then(|repository| canonical.strip_prefix(repository).ok())
-            .is_some_and(|below| {
-                below.components().all(|component| match component {
-                    Component::Normal(name) => {
-                        let name = name.to_string_lossy().to_ascii_lowercase();
-                        !name.starts_with('.')
-                            || PLUGIN_MANIFEST_DIRECTORIES.contains(&name.as_str())
-                    }
-                    _ => false,
-                })
+            .and_then(|repository| names_below(repository, canonical))
+            .and_then(|names| {
+                let (leaf, parents) = names.split_last()?;
+                Some(plugin_manifest_names(leaf, parents))
             })
+            .unwrap_or(false)
+}
+
+/// The files a plugin directory holds as its manifest: the plugin's own and
+/// the marketplace listing that names it.
+const PLUGIN_MANIFEST_NAMES: [&str; 2] = ["plugin.json", "marketplace.json"];
+
+/// Whether the names below a repository spell a plugin manifest, directly
+/// inside a plugin directory with no other hidden component above it. A
+/// script or another JSON file beside the manifest is not one.
+fn plugin_manifest_names(leaf: &str, parents: &[String]) -> bool {
+    PLUGIN_MANIFEST_NAMES.contains(&leaf)
+        && parents.split_last().is_some_and(|(directory, above)| {
+            PLUGIN_MANIFEST_DIRECTORIES.contains(&directory.as_str())
+                && !above.iter().any(|name| name.starts_with('.'))
+        })
+}
+
+/// The lowercased names of `canonical` below `repository`, when every one is
+/// a plain component.
+fn names_below(repository: &Path, canonical: &Path) -> Option<Vec<String>> {
+    canonical
+        .strip_prefix(repository)
+        .ok()?
+        .components()
+        .map(|component| match component {
+            Component::Normal(name) => Some(name.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The screens shared by the hidden listing and the hidden content read: the
@@ -151,9 +175,6 @@ fn repository_hidden_below(
     if home.starts_with(repository) {
         return false;
     }
-    if content_read && !working_in(repository, &home, home_dir, cwd) {
-        return false;
-    }
     // A work tree keeps its administrative directory in `.git`, but a `.git`
     // file names that directory somewhere else, and `--separate-git-dir` is
     // free to put it inside the work tree under a name of its own. The hook
@@ -163,19 +184,16 @@ fn repository_hidden_below(
     if content_read && administrative_tree_holds(repository, canonical) {
         return false;
     }
-    let Ok(below) = canonical.strip_prefix(repository) else {
+    let Some(names) = names_below(repository, canonical) else {
         return false;
     };
-    let mut names = Vec::new();
-    for component in below.components() {
-        let Component::Normal(name) = component else {
-            return false;
-        };
-        names.push(name.to_string_lossy().to_ascii_lowercase());
-    }
     let Some((leaf, parents)) = names.split_last() else {
         return false;
     };
+    let manifest = plugin_manifest_names(leaf, parents);
+    if content_read && !working_in(repository, &home, home_dir, cwd, manifest) {
+        return false;
+    }
     if names
         .iter()
         .any(|name| guarded_hidden_name(name) || (content_read && name.as_str() == ".git"))
@@ -222,11 +240,19 @@ fn repository_hidden_below(
 /// work tree nearest the working directory has to be the file's repository, or
 /// an ancestor of it.
 ///
-/// A linked worktree of that same repository, which `git worktree add` often
-/// puts in a temporary directory, is the repository checked out elsewhere
-/// rather than a sibling. Git's common directory and the worktree's registered
-/// backlink have to agree, so a stray `.git` file cannot nominate a directory.
-fn working_in(repository: &Path, home: &Path, home_dir: Option<&str>, cwd: Option<&str>) -> bool {
+/// A plugin manifest in a linked worktree of that same repository, which
+/// `git worktree add` often puts in a temporary directory, belongs to the
+/// repository checked out elsewhere rather than a sibling. Other hidden
+/// documents there, such as `.private/notes.md`, keep the sibling review.
+/// Git's common directory and the worktree's registered backlink have to
+/// agree, so a stray `.git` file cannot nominate a directory.
+fn working_in(
+    repository: &Path,
+    home: &Path,
+    home_dir: Option<&str>,
+    cwd: Option<&str>,
+    manifest: bool,
+) -> bool {
     let Some(cwd) = cwd.and_then(|value| std::fs::canonicalize(value).ok()) else {
         return false;
     };
@@ -240,7 +266,7 @@ fn working_in(repository: &Path, home: &Path, home_dir: Option<&str>, cwd: Optio
         return false;
     }
     repository.starts_with(tree)
-        || crate::pretool::worktree_writes::same_repository_worktree(tree, repository)
+        || (manifest && crate::pretool::worktree_writes::same_repository_worktree(tree, repository))
 }
 
 /// What the repository's own path has to clear.
@@ -401,6 +427,7 @@ fn administrative_tree_holds(repository: &Path, canonical: &Path) -> bool {
     resolved.is_ok_and(|resolved| canonical.starts_with(resolved))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 #[path = "hidden_listing_temp_tests.rs"]
 mod temp_tests;

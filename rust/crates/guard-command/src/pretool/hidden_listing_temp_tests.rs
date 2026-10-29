@@ -118,6 +118,12 @@ fn files_a_tool_runs_from_are_not_plugin_manifests() {
         ".cargo/config.toml",
         ".claude-plugin/.mcp.json",
         ".claude-plugin/.hooks/run.json",
+        // Beside the manifest, but not the manifest.
+        ".claude-plugin/runner.py",
+        ".claude-plugin/install.sh",
+        ".codex-plugin/hooks.json",
+        ".claude-plugin/nested/plugin.json",
+        ".github/.claude-plugin/plugin.json",
     ] {
         let path = layout.linked.join(name);
         plant(&path);
@@ -170,4 +176,19 @@ fn checkouts_in_tmp_that_are_not_this_repository_keep_their_review() {
             path.display()
         );
     }
+}
+
+#[test]
+fn other_hidden_documents_of_a_linked_worktree_keep_their_review_from_the_main_checkout() {
+    let layout = layout();
+    let notes = layout.linked.join(".notes/draft.md");
+    let listing = layout.linked.join(".claude-plugin/marketplace.json");
+    plant(&notes);
+    plant(&listing);
+    assert!(!read(&notes, &layout.home, &layout.main));
+    assert!(!edit(&notes, &layout.home, &layout.main));
+    assert!(read(&listing, &layout.home, &layout.main));
+    assert!(edit(&listing, &layout.home, &layout.main));
+    // Inside the worktree, its own hidden notes are the session's own tree.
+    assert!(read(&notes, &layout.home, &layout.linked));
 }

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .plugin_manifest_fixtures import stage_plugin_manifest
+from .plugin_manifest_fixtures import plugin_manifest_checks, stage_plugin_manifest
 
 NODE_REPORT_CASE = "script-node-project-report"
 PYTHON_REPORT_CASE = "script-python-project-report"
@@ -146,7 +146,7 @@ def stage_script_cases(workspace: Path, scenario_id: str, home: Path | None = No
 def script_case_checks(home: Path, canary: str, scenario_id: str) -> dict[str, bool]:
     """The synthetic credential store must still hold its original bytes."""
     if scenario_id not in CREDENTIAL_STORE_CASES:
-        return {}
+        return plugin_manifest_checks(home, scenario_id)
     try:
         return {STORE_CHECK: (home / CREDENTIAL_STORE).read_bytes() == _store_text(canary).encode("utf-8")}
     except OSError:

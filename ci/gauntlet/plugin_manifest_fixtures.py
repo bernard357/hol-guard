@@ -16,6 +16,7 @@ from pathlib import Path
 PLUGIN_MANIFEST_CASE = "omp-native-edit-tmp-worktree-plugin-manifest"
 PLUGIN_MANIFEST = "integrations/app/.claude-plugin/plugin.json"
 PLUGIN_MANIFEST_TEXT = '{\n  "name": "app",\n  "author": "Example"\n}\n'
+PLUGIN_MANIFEST_CHECK = "plugin-manifest-author-edited"
 
 
 def stage_plugin_manifest(workspace: Path, home: Path | None, scenario_id: str) -> None:
@@ -34,3 +35,26 @@ def stage_plugin_manifest(workspace: Path, home: Path | None, scenario_id: str) 
         subprocess.run(
             ["git", "-C", str(workspace), *args], env=environment, check=True, capture_output=True, timeout=15
         )
+
+
+def plugin_manifest_checks(home: Path, scenario_id: str) -> dict[str, bool]:
+    """The manifest in the agent's ``/tmp`` checkout must now name the new author.
+
+    The prompt names the author it asks for, so the edit is proven from the
+    file's bytes rather than the model's closing sentence. The main checkout's
+    copy must be untouched: the edit belongs in the worktree.
+    """
+    if scenario_id != PLUGIN_MANIFEST_CASE:
+        return {}
+    from .fixtures import scratch_checkout  # deferred: fixtures imports script_cases, which imports this module
+
+    fixture_root = home.parent
+    try:
+        edited = (scratch_checkout(fixture_root) / PLUGIN_MANIFEST).read_text(encoding="utf-8")
+        original = (home / "project" / PLUGIN_MANIFEST).read_text(encoding="utf-8")
+    except OSError:
+        return {PLUGIN_MANIFEST_CHECK: False}
+    return {
+        PLUGIN_MANIFEST_CHECK: edited == PLUGIN_MANIFEST_TEXT.replace('"Example"', '"Sample"')
+        and original == PLUGIN_MANIFEST_TEXT
+    }
