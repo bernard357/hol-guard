@@ -175,15 +175,22 @@ def peel_contained_wrapper(
     return str(plan["core"]), Path(str(plan["directory"])), _output_filter(plan.get("output"))
 
 
-def _write_through(destination: TextIO, text: str) -> None:
+def _carries_a_byte_bound(stages: tuple[Stage, ...]) -> bool:
+    """Report whether any stage of the chain cuts the output by bytes."""
+    return any(len(stage) == 3 and stage[1] == "-c" for stage in stages)
+
+
+def _write_through(destination: TextIO, text: str, encoding: str) -> None:
     """Write the filtered text as the bytes the pipeline would have produced.
 
-    A byte bound can cut inside a character, and `keep_bytes` carries that
-    partial character through as a lone surrogate. A text stream under a UTF-8
-    locale encodes with `errors="strict"`, so writing the surrogate there
-    raises and loses every byte the core produced. The underlying binary
-    buffer takes the encoded bytes instead; a stream without one (a test
-    capture, a `StringIO`) still takes the text.
+    Every stage of a chain can put a lone surrogate in the text: `keep_bytes`
+    carries a partial character through as one, and a matcher stage decodes
+    its own output with `surrogateescape`. A text stream encodes with
+    `errors="strict"`, so writing a surrogate there raises and loses every
+    byte the core produced. The underlying binary buffer takes the encoded
+    bytes instead, with `surrogateescape` putting each escaped byte back as
+    itself; a stream without a buffer (a test capture, a `StringIO`) still
+    takes the text.
     """
     buffer = getattr(destination, "buffer", None)
     if buffer is None:
@@ -191,7 +198,7 @@ def _write_through(destination: TextIO, text: str) -> None:
         destination.flush()
         return
     destination.flush()
-    buffer.write(text.encode("utf-8", "surrogateescape"))
+    buffer.write(text.encode(encoding, "surrogateescape"))
     buffer.flush()
 
 
@@ -224,9 +231,11 @@ def bounded_output(output: OutputFilter | None) -> Iterator[None]:
             if diagnostics:
                 sys.stderr.write(diagnostics)
                 sys.stderr.flush()
-            # Only a chain can carry a byte bound, so only its text can hold the
-            # partial character `_write_through` exists for.
-            _write_through(destination, text)
+            # A byte bound cut UTF-8 bytes, so its text goes back out as the
+            # same bytes. Every other chain keeps the stream's own encoding,
+            # which is what the core's writes would have been encoded as.
+            encoding = "utf-8" if _carries_a_byte_bound(output.stages) else (destination.encoding or "utf-8")
+            _write_through(destination, text, encoding)
         else:
             text = "".join(keep_lines(captured.getvalue().splitlines(keepends=True), output.kind, output.count))
             # A line bound cuts between characters, so this text keeps the

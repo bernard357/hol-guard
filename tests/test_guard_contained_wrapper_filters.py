@@ -203,6 +203,18 @@ def test_a_line_bound_keeps_the_streams_own_encoding(monkeypatch: pytest.MonkeyP
     assert stream.buffer.getvalue() == "héllo\n".encode("latin-1")
 
 
+def test_a_line_only_chain_keeps_the_streams_own_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chain that cuts only by lines emits the bytes the stream encodes, not UTF-8."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="latin-1", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", stream)
+    chain = OutputFilter("pipe", 0, True, stages=(("tail", "2"), ("head", "1")))
+    with bounded_output(chain):
+        print("first")
+        print("héllo")
+        print("last")
+    assert stream.buffer.getvalue() == "héllo\n".encode("latin-1")
+
+
 def test_a_matcher_prints_back_the_pipeline_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A matcher fed a partial character returns its bytes, not a replacement one."""
 
