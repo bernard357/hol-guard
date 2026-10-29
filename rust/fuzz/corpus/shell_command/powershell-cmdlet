@@ -1,0 +1,1 @@
+Get-Content .\notes.txt | Select-String todo

@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["crates/guard-command-build"]
+exclude = ["crates/guard-command-build", "fuzz"]
 members = [
     "crates/guard-alloc-probe",
     "crates/guard-adapter-detection",
