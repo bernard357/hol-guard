@@ -50,6 +50,9 @@ pub(super) struct GenericSignals {
     pub(super) independent_sensitive_target: bool,
     /// Bypass intent or a credential word outside the path values.
     pub(super) non_path_sensitive_target: bool,
+    /// A string in the call, such as an edit's new text, declares a
+    /// Kubernetes `Secret`.
+    pub(super) declares_secret_object: bool,
     pub(super) event_hint: Option<String>,
 }
 

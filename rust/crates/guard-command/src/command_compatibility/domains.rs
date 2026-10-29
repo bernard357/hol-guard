@@ -443,7 +443,7 @@ pub(super) fn observe(
         // such as `src/tokenizer.ts` or a tracked catalog, is the edit the
         // agent was asked to make, also beside a stderr redirect: `vitest run
         // src/token.test.ts 2>&1` reads the test file it was asked to run.
-        let text = crate::pretool::search_scope_tracked::screen_text(segment, context.cwd);
+        let text = crate::pretool::search_scope_tracked::screen(command, segment, context.cwd);
         let stderr_names_credential = redirect == Redirect::Stderr
             && segment.tokens.iter().any(|token| {
                 if token.contains(char::is_whitespace) {

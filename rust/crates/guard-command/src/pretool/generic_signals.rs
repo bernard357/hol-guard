@@ -261,6 +261,7 @@ pub(crate) fn extract_generic_signals(
         sensitive_target,
         independent_sensitive_target: guard_bypass_intent || independent_sensitive_target,
         non_path_sensitive_target: guard_bypass_intent || non_path_sensitive_target,
+        declares_secret_object: super::tracked_names::declares_secret_object(payload),
         event_hint,
     })
 }

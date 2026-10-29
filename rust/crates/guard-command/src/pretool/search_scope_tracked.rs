@@ -22,8 +22,12 @@ pub(super) mod names;
 /// The text a credential-word write screen outside this module reads for
 /// `segment`: its own text, without the words that name tracked documents
 /// when every credential-named word does.
-pub(crate) fn screen_text(segment: &crate::CommandSegmentV1, cwd: Option<&str>) -> String {
-    names::segment_screen_text(segment, None, cwd)
+pub(crate) fn screen(
+    model: &crate::CanonicalCommandV1,
+    segment: &crate::CommandSegmentV1,
+    cwd: Option<&str>,
+) -> String {
+    names::segment_screen_text(model, segment, None, cwd)
 }
 
 #[derive(Default)]

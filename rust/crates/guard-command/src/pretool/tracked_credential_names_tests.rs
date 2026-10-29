@@ -96,6 +96,73 @@ fn kubernetes_secret_manifests_keep_review() {
 }
 
 #[test]
+fn escaped_or_hidden_secret_kinds_keep_review() {
+    for text in [
+        "{\"\\u006bind\": \"Secret\"}",
+        "{\"kind\": \"\\u0053ecret\"}",
+        "{\"items\": [{\"kind\": {\"name\": \"Secret\"}}]}",
+        "kind: \"\\x53ecret\"\n",
+        "\"\\x6bind\": Secret\n",
+        "kind: &kind Secret\n",
+        "kind: !!str Secret\n",
+        "kind: >-\n  Secret\n",
+    ] {
+        assert!(secret_object(text), "{text}");
+    }
+    let (_, project) = fixture();
+    let name = "deploy/app-secrets.json";
+    write(
+        &project.join(name),
+        "{\"kind\": \"\\u0053ecret\", \"data\": {}}\n",
+    );
+    write_index(&project.join(".git"), &[name]);
+    assert!(unproven(&project.join(name), cwd(&project)));
+}
+
+#[test]
+fn scripts_named_for_secrets_are_not_documents() {
+    let (_, project) = fixture();
+    let name = "scripts/rotate-secrets.sh";
+    write(&project.join(name), "echo rotating\n");
+    write_index(&project.join(".git"), &[name]);
+    assert!(unproven(&project.join(name), cwd(&project)));
+}
+
+#[test]
+fn a_walk_shares_one_proof_until_it_ends() {
+    let (_, project) = fixture();
+    let file = project.join(CATALOG);
+    write(&file, CATALOG_TEXT);
+    write_index(&project.join(".git"), &[CATALOG]);
+    let shared = || WALK.with(|walk| walk.borrow().is_some());
+    {
+        let _outer = document_walk();
+        {
+            let _inner = document_walk();
+            assert!(committed_document(&file));
+        }
+        assert!(shared());
+        assert!(committed_document(&file));
+    }
+    assert!(!shared());
+}
+
+#[test]
+fn only_the_operand_occurrence_of_a_tracked_word_is_removed() {
+    let (_, project) = fixture();
+    write(&project.join(CATALOG), CATALOG_TEXT);
+    write_index(&project.join(".git"), &[CATALOG]);
+    let word = CATALOG.to_owned();
+    let text = format!("cat {CATALOG} > ../copy/{CATALOG}");
+    let rest = without_tracked_words(&text, [&word], cwd(&project), false).unwrap();
+    assert!(rest.contains(&format!("../copy/{CATALOG}")), "{rest}");
+    let quoted = format!("cat '{CATALOG}'");
+    let rest = without_tracked_words(&quoted, [&word], cwd(&project), false).unwrap();
+    assert!(!rest.contains(CATALOG), "{rest}");
+    assert!(without_tracked_words(&quoted, [&word], cwd(&project), true).is_none());
+}
+
+#[test]
 fn a_tracked_file_holding_a_credential_keeps_review() {
     let (_, project) = fixture();
     let name = "config/service-secrets.yaml";
@@ -217,7 +284,7 @@ fn bash(command: &str) -> serde_json::Value {
 #[test]
 fn a_tracked_catalog_is_read_and_edited_like_any_document() {
     let (home, project) = hook_fixture();
-    let calls: [(serde_json::Value, serde_json::Value); 4] = [
+    let calls: [(serde_json::Value, serde_json::Value); 5] = [
         (read(&project.join(CATALOG)), read(&project.join(ORDINARY))),
         (edit(&project.join(CATALOG)), edit(&project.join(ORDINARY))),
         (
@@ -227,6 +294,10 @@ fn a_tracked_catalog_is_read_and_edited_like_any_document() {
         (
             bash(&format!("perl -pi -e 's/List/Show/' {CATALOG}")),
             bash(&format!("perl -pi -e 's/List/Show/' {ORDINARY}")),
+        ),
+        (
+            bash(&format!("git grep -n List -- {CATALOG}")),
+            bash(&format!("git grep -n List -- {ORDINARY}")),
         ),
     ];
     for (named, ordinary) in calls {
@@ -254,6 +325,16 @@ fn manifests_untracked_copies_and_credential_words_keep_the_signal() {
         // The edit itself names a credential word beside the tracked path.
         bash(&format!("sed -i 's/password/pass/' {CATALOG}")),
         bash(&format!("cat {CATALOG} > drafts/secrets-copy.json")),
+        // A redirect target that repeats the tracked path is another file.
+        bash(&format!("cat {CATALOG} > ../elsewhere/{CATALOG}")),
+        // After a directory change the relative path names another file.
+        bash(&format!("cd ../elsewhere && cat {CATALOG}")),
+        bash(&format!("git -C ../elsewhere grep -n List -- {CATALOG}")),
+        // An edit that turns the catalog into a `Secret` manifest.
+        serde_json::json!({"tool_name": "Edit", "tool_input": {
+            "file_path": project.join(CATALOG),
+            "old_string": ""id"", "new_string": ""kind": "Secret", "id""
+        }}),
     ] {
         assert!(
             hook(call.clone(), &home, &project).action.sensitive_target,

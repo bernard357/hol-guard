@@ -527,6 +527,7 @@ pub(super) fn walk_uncached(
     // directory listing already reported for the entry.
     let mut pending = vec![(root.clone(), 0_usize, false, None::<std::fs::FileType>)];
     let mut inspected = 0_usize;
+    let _documents = crate::pretool::search_scope_tracked::names::document_walk();
     // Inspect metadata only. Never follow links or read a secret to classify it.
     while let Some((path, depth, admitted_below, listed)) = pending.pop() {
         let mut below = admitted_below;

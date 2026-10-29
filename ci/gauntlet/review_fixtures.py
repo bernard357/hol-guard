@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .extension_catalog_fixtures import CATALOG_CASE, catalog_checks
 from .realism_fixtures import write_windows_launcher
 
 GITHUB_REVIEW_CASE = "github-review-work-enabled-permissions"
@@ -201,7 +202,9 @@ def add_linked_worktree(main: Path, home: Path, environment: dict[str, str]) -> 
 
 
 def worktree_checks(fixture_home: Path, workspace: Path, scenario_id: str, before: str, after: str) -> dict[str, bool]:
-    """Bind the edit to the linked worktree and prove the main checkout stayed unchanged."""
+    """Bind each edit to the linked worktree and prove the main checkout stayed unchanged."""
+    if scenario_id == CATALOG_CASE:
+        return catalog_checks(workspace)
     if scenario_id not in WORKTREE_CASES:
         return {}
 
@@ -212,11 +215,14 @@ def worktree_checks(fixture_home: Path, workspace: Path, scenario_id: str, befor
             return None
 
     linked = fixture_home / WORKTREE_NAME
-    return {
+    checks = {
         "linked-worktree-settings-exact": text(linked / "src/settings.ts") == after,
-        "linked-worktree-note-exact": text(linked / "docs/change.md") == "Retry limit increased from 3 to 5.\n",
         "main-checkout-settings-unchanged": text(workspace / "src/settings.ts") == before,
     }
+    # Only the main case asks for a note; the delimiter case edits settings alone.
+    if scenario_id == WORKTREE_CASE:
+        checks["linked-worktree-note-exact"] = text(linked / "docs/change.md") == "Retry limit increased from 3 to 5.\n"
+    return checks
 
 
 def configure_github_review_controls(daemon: Any, guard_home: Path) -> dict[str, Any]:

@@ -8,9 +8,12 @@
 //! text must then hold no credential word of its own.
 
 use super::GenericSignals;
-use crate::pretool::search_scope_tracked::names::{resolves_to_tracked, without_tracked_words};
+use crate::pretool::search_scope_tracked::names::{
+    self, command_words, moves_directory, resolves_to_tracked, without_tracked_words,
+};
 use crate::pretool::secret_aliases::decision_names_secret_alias;
 use crate::pretool::{sensitive_command, sensitive_command_input, PathContext, PreToolDecisionV1};
+use serde_json::Value;
 
 impl GenericSignals {
     /// Clears the credential-word signal for a call that names only tracked
@@ -22,6 +25,7 @@ impl GenericSignals {
     ) {
         if self.sensitive_target
             && !self.non_path_sensitive_target
+            && !self.declares_secret_object
             && self.names_only_tracked_documents(decision, context.cwd)
         {
             self.sensitive_target = false;
@@ -47,15 +51,23 @@ impl GenericSignals {
         let Some(Ok(decision)) = decision else {
             return false;
         };
-        let words = decision
-            .command_model
-            .segments
-            .iter()
-            .flat_map(|segment| segment.executable.iter().chain(&segment.arguments));
+        let model = &decision.command_model;
         // Redirect targets, assignments and any text the model did not split
         // into words stay in the rest and keep the signal.
         paths_proven
-            && without_tracked_words(command, words, cwd)
+            && without_tracked_words(command, command_words(model), cwd, moves_directory(model))
                 .is_some_and(|rest| !sensitive_command_input(&rest))
+    }
+}
+
+/// Whether a string anywhere in `payload` declares a Kubernetes `Secret`. An
+/// edit that turns a tracked document into a `Secret` manifest keeps the
+/// signal, though the file on disk still proves clean.
+pub(super) fn declares_secret_object(payload: &Value) -> bool {
+    match payload {
+        Value::String(text) => names::declares_secret_object(text),
+        Value::Array(items) => items.iter().any(declares_secret_object),
+        Value::Object(map) => map.values().any(declares_secret_object),
+        _ => false,
     }
 }
