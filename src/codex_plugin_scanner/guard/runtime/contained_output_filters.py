@@ -44,7 +44,10 @@ Stage = tuple[str, ...]
 def keep_lines(lines: list[str], kind: str, count: int) -> list[str]:
     if kind == "head":
         return lines[:count]
-    return lines[len(lines) - count :] if count else []
+    # `max(0, ...)` rather than a bare negative start: a count larger than the
+    # text keeps all of it, the way `tail -n` does, instead of counting back
+    # from the end and dropping the first lines.
+    return lines[max(0, len(lines) - count) :] if count else []
 
 
 def keep_bytes(text: str, kind: str, count: int) -> str:
@@ -56,9 +59,10 @@ def keep_bytes(text: str, kind: str, count: int) -> str:
     the pipeline would have produced.
     """
     data = text.encode("utf-8", "surrogateescape")
-    # `len(data) - count` rather than `-count`, so a zero count keeps nothing
-    # instead of keeping everything.
-    cut = data[:count] if kind == "head" else data[len(data) - count :]
+    # `max(0, len(data) - count)` rather than `-count`: a zero count keeps
+    # nothing instead of keeping everything, and a count larger than the text
+    # keeps all of it instead of counting back from the end.
+    cut = data[:count] if kind == "head" else data[max(0, len(data) - count) :]
     return cut.decode("utf-8", "surrogateescape")
 
 
@@ -140,7 +144,10 @@ def _match_lines(text: str, stage: Stage) -> tuple[str, str, int]:
         check=False,
     )
     return (
-        completed.stdout.decode("utf-8", "replace"),
+        # `surrogateescape` on the matcher's own output as well as its input: a
+        # byte bound earlier in the chain can hand the matcher a partial
+        # character, and the bytes it prints back are the pipeline's bytes.
+        completed.stdout.decode("utf-8", "surrogateescape"),
         completed.stderr.decode("utf-8", "replace"),
         completed.returncode,
     )

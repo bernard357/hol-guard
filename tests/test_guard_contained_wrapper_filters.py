@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -172,6 +174,36 @@ def test_a_byte_bound_cuts_where_the_program_would() -> None:
     assert filters.keep_bytes("héllo", "head", 3) == "hé"
     assert filters.keep_bytes("héllo", "tail", 3) == "llo"
     assert filters.keep_bytes("héllo", "tail", 0) == ""
+
+
+def test_a_bound_larger_than_the_output_keeps_all_of_it() -> None:
+    """`head`/`tail` asked for more than there is print everything, as the programs do."""
+    assert filters.keep_bytes("abc", "tail", 5) == "abc"
+    assert filters.keep_bytes("abc", "head", 5) == "abc"
+    assert filters.keep_lines(["one\n", "two\n"], "tail", 3) == ["one\n", "two\n"]
+
+
+def test_a_partial_character_reaches_a_strict_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cut inside a character writes its bytes rather than raising on the sink."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict", write_through=True)
+    monkeypatch.setattr(sys, "stdout", stream)
+    head = OutputFilter("pipe", 0, True, stages=(("head", "-c", "2"),))
+    with bounded_output(head):
+        print("héllo", end="")
+    assert stream.buffer.getvalue() == b"h\xc3"
+
+
+def test_a_matcher_prints_back_the_pipeline_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matcher fed a partial character returns its bytes, not a replacement one."""
+
+    def _run(*_arguments: object, **_keywords: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=b"h\xc3\n", stderr=b"")
+
+    monkeypatch.setattr(filters.subprocess, "run", _run)
+    monkeypatch.setattr(filters, "_trusted_grep", lambda: "/usr/bin/grep")
+    text, _diagnostics, status = filters.apply_filters("héllo\n", (("head", "-c", "2"), ("grep", "h")))
+    assert text == "h\udcc3\n"
+    assert status == 0
 
 
 def _ripgrep_installed() -> bool:

@@ -17,7 +17,7 @@ import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 from ..native_contained_wrapper_plan import (
     ContainedWrapperPlanUnavailableError,
@@ -175,6 +175,26 @@ def peel_contained_wrapper(
     return str(plan["core"]), Path(str(plan["directory"])), _output_filter(plan.get("output"))
 
 
+def _write_through(destination: TextIO, text: str) -> None:
+    """Write the filtered text as the bytes the pipeline would have produced.
+
+    A byte bound can cut inside a character, and `keep_bytes` carries that
+    partial character through as a lone surrogate. A text stream under a UTF-8
+    locale encodes with `errors="strict"`, so writing the surrogate there
+    raises and loses every byte the core produced. The underlying binary
+    buffer takes the encoded bytes instead; a stream without one (a test
+    capture, a `StringIO`) still takes the text.
+    """
+    buffer = getattr(destination, "buffer", None)
+    if buffer is None:
+        destination.write(text)
+        destination.flush()
+        return
+    destination.flush()
+    buffer.write(text.encode("utf-8", "surrogateescape"))
+    buffer.flush()
+
+
 @contextlib.contextmanager
 def bounded_output(output: OutputFilter | None) -> Iterator[None]:
     """Apply the output filters to the contained core's captured output.
@@ -206,5 +226,4 @@ def bounded_output(output: OutputFilter | None) -> Iterator[None]:
                 sys.stderr.flush()
         else:
             text = "".join(keep_lines(captured.getvalue().splitlines(keepends=True), output.kind, output.count))
-        destination.write(text)
-        destination.flush()
+        _write_through(destination, text)
