@@ -55,8 +55,24 @@ pub(super) fn dash_c_target(
     } else {
         std::fs::canonicalize(context.cwd?).ok()?.join(supplied)
     };
+    checkout_path(&target)
+}
+
+/// The physical path of the checkout an add is creating. Git creates the
+/// directories leading to it, so a parent that does not exist yet keeps its
+/// missing names below the nearest existing ancestor, exactly as the add's
+/// own destination proof spells them.
+fn checkout_path(target: &Path) -> Option<PathBuf> {
     let leaf = target.file_name()?;
-    Some(std::fs::canonicalize(target.parent()?).ok()?.join(leaf))
+    let parent = target.parent()?;
+    let parent = match std::fs::symlink_metadata(parent) {
+        Ok(_) => std::fs::canonicalize(parent).ok()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            super::super::worktree_writes::canonical_write_target(parent)?
+        }
+        Err(_) => return None,
+    };
+    Some(parent.join(leaf))
 }
 
 /// A Git read with no leading option that could route it to another
@@ -148,6 +164,21 @@ pub(super) fn cd_target(
     let [value] = segment.arguments.as_slice() else {
         return None;
     };
+    // An unquoted `~/` expands from the shell's HOME, as the add's
+    // destination does, and the absolute result skips the CDPATH search.
+    let expanded;
+    let value = if value.starts_with("~/") {
+        if cfg!(windows)
+            || !context.shell_home_matches
+            || !super::super::directory_targets::home_targets_unquoted(segment)
+        {
+            return None;
+        }
+        expanded = super::super::read_paths::expand_home_read_path(value, context.home_dir)?;
+        expanded.as_str()
+    } else {
+        value.as_str()
+    };
     if !segment.environment_names.is_empty()
         || !segment.wrapper_chain.is_empty()
         || segment.path_overridden
@@ -204,11 +235,15 @@ fn entered_directory(value: &str, context: super::super::PathContext<'_>) -> Opt
     // The shell then enters the lexical target physically, through any
     // symlinked parent such as `/tmp` on macOS, just as `-C` does. A link
     // someone else could swap before the `cd` runs is never followed.
-    let leaf = target.file_name()?;
-    let parent = target.parent()?;
+    // Links are checked through the nearest existing ancestor, since Git
+    // creates any missing parent along with the checkout.
+    let existing = target
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| std::fs::symlink_metadata(ancestor).is_ok())?;
     let home = std::fs::canonicalize(context.home_dir?).ok()?;
-    if !super::destination::fixed_symlinks(parent, &home) {
+    if !super::destination::fixed_symlinks(existing, &home) {
         return None;
     }
-    Some(std::fs::canonicalize(parent).ok()?.join(leaf))
+    checkout_path(&target)
 }

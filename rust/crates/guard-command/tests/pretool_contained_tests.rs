@@ -414,6 +414,90 @@ fn vitest_wrapper_and_resolved_script_require_the_same_protected_profile() {
 }
 
 #[test]
+fn jest_runs_share_the_read_only_node_test_profile() {
+    for harness in ["omp", "zcode", "claude-code"] {
+        for command in [
+            "npx jest --runInBand __tests__/registry.test.ts",
+            "npx --no-install jest",
+            "bunx jest tests/example.test.ts",
+            "bun x jest tests/example.test.ts",
+            "bun --cwd /project x jest tests/example.test.ts",
+            "bun --cwd=/project x --no-install jest tests/example.test.ts",
+            "pnpm exec jest __tests__/one.test.ts",
+            "jest -t \"keeps the index\"",
+            "node /home/tester/project/node_modules/jest/bin/jest.js --ci",
+            "node /home/tester/project/node_modules/jest/bin/jest.js",
+            // `-w` is Jest's `--maxWorkers` and `--watchman` picks the file
+            // crawler; neither asks the run to keep watching.
+            "npx jest -w 2 __tests__/one.test.ts",
+            "npx jest --watchman",
+            // A short alias carrying a value inside the workspace still runs,
+            // grouped with another short flag as well as on its own.
+            "npx jest -cjest.config.ci.js",
+            "npx jest -icjest.config.ci.js",
+            "npx jest -w2 __tests__/one.test.ts",
+        ] {
+            let result = classify(harness, command);
+            assert_eq!(result.decision, "deny", "{harness} {command}");
+            let expected = if cfg!(target_os = "macos") {
+                "native_vitest_readonly_containment_required"
+            } else if command.starts_with("bun ") || command.starts_with("pnpm ") {
+                "native_package_review"
+            } else {
+                "native_command_review_required"
+            };
+            assert_eq!(result.reason_code, expected, "{harness} {command}");
+        }
+        // Watch mode never finishes inside the sink, an argument that names a
+        // path outside the workspace would load code the read-only admission
+        // never covered, and the wrappers that fetch a package or add shell
+        // effects are still someone else's call.
+        for command in [
+            "jest --watch",
+            "npx jest --testRunner /tmp/outside-runner.js __tests__/one.test.ts",
+            "npx jest --config=/tmp/jest.outside.config.js",
+            "npx jest --setupFiles ../outside/setup.js",
+            "npx jest ~/elsewhere/suite.test.ts",
+            // yargs-parser also reads a value attached straight to a short
+            // alias, and `--config` takes inline JSON as well as a path.
+            "npx jest -c/tmp/jest.outside.config.js",
+            "npx jest -c../outside/jest.config.js",
+            "npx jest -c~/elsewhere/jest.config.js",
+            // yargs-parser walks a short group a letter at a time and gives
+            // the rest of it to the letter a non-word character follows, so
+            // `-ic/tmp/...` is `--runInBand --config /tmp/...`.
+            "npx jest -ic/tmp/jest.outside.config.js",
+            "npx jest -ic../outside/jest.config.js",
+            "npx jest -ic~/elsewhere/jest.config.js",
+            "npx jest --config '{\"setupFiles\":[\"/tmp/outside-setup.js\"]}'",
+            // Jest parses inline JSON, so a `\uXXXX` escape names a path
+            // character the raw text never shows.
+            "npx jest --config '{\"setupFiles\":[\"a/\\u002e\\u002e/etc/x.js\"]}'",
+            "npx jest --moduleNameMapper '{\"app\":\"../outside/app.js\"}'",
+            "jest --watchAll",
+            // yargs takes a kebab spelling of every camelCase option name.
+            "npx jest --watch-all",
+            "npx jest --watch=true",
+            "bunx jest@evil",
+            "bunx other",
+            "bunx jest && rm -rf /",
+            "bunx jest $(cat .env)",
+            "bunx jest > .env",
+            "pnpm exec -c jest",
+            "pnpm exec --filter app jest",
+            "pnpm -r exec jest",
+        ] {
+            let result = classify(harness, command);
+            assert_ne!(
+                result.reason_code, "native_vitest_readonly_containment_required",
+                "{harness} {command}"
+            );
+            assert_ne!(result.decision, "allow", "{harness} {command}");
+        }
+    }
+}
+
+#[test]
 fn git_inspections_require_protected_execution_not_helper_consent() {
     for command in [
         "git diff --stat",

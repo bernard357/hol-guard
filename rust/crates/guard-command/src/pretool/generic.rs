@@ -1235,7 +1235,12 @@ fn git_read_order_settled_by_allow(
             deadline,
             execution_environment,
         )
-    }) && controls.explicit_allow_covers_command(model, observations, context)
+    }) && controls.explicit_allow_covers_command(
+        model,
+        observations,
+        context,
+        execution_environment,
+    )
 }
 
 /// The Git floor's reason when every Git read was proven helper-free on its

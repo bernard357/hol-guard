@@ -143,9 +143,28 @@ pub(crate) fn evaluate(request: &GuardStoreRequestV1) -> StoreResult<(Value, Opt
     evaluate_with_owner(request, None)
 }
 
+/// Run one call and say whether its write committed, even when it fails.
+///
+/// The outbox generation is read after the commit, so a call can fail with its
+/// write already durable; a caller that retries failed writes elsewhere must
+/// not retry that one.
+pub(crate) fn evaluate_committing(request: &GuardStoreRequestV1) -> (StoreResult<Value>, bool) {
+    let mut committed = false;
+    let outcome = evaluate_tracked(request, None, &mut committed);
+    (outcome.map(|(payload, _)| payload), committed)
+}
+
 fn evaluate_with_owner(
     request: &GuardStoreRequestV1,
     owner: Option<&crate::policy_store::PolicySnapshotStore>,
+) -> StoreResult<(Value, Option<i64>)> {
+    evaluate_tracked(request, owner, &mut false)
+}
+
+fn evaluate_tracked(
+    request: &GuardStoreRequestV1,
+    owner: Option<&crate::policy_store::PolicySnapshotStore>,
+    committed_write: &mut bool,
 ) -> StoreResult<(Value, Option<i64>)> {
     let invalid = |code| Err(StoreError::Invalid(code));
     if request.schema != GUARD_STORE_REQUEST_SCHEMA {
@@ -213,6 +232,7 @@ fn evaluate_with_owner(
         let committed = finalize_and_commit(&connection, writes);
         guard_store_approval_backfill::settle(committed.is_ok());
         committed?;
+        *committed_write = writes;
     }
     let generation = (connection.total_changes() > initial_changes)
         .then(|| outbox_generation(&connection))

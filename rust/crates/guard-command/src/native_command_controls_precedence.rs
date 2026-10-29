@@ -89,6 +89,7 @@ impl CompiledNativeCommandControls {
         batch: &NativeCommandObservationBatchV1,
         command: Option<&CanonicalCommandV1>,
         context: crate::pretool::PathContext<'_>,
+        environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
         enabled_uncertainty: bool,
     ) -> bool {
         batch.evaluation_error.is_none()
@@ -109,6 +110,7 @@ impl CompiledNativeCommandControls {
                         &batch.observations,
                         &batch.permission_observations,
                         context,
+                        environment,
                     )
             })
     }

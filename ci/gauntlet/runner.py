@@ -71,6 +71,7 @@ from .session_folder import seed_session_folder, session_cwd
 from .source_identity import source_identity
 from .summary import inference_usage, render_summary_markdown
 from .supply_chain import stage_supply_chain
+from .workspace_runner_fixtures import WORKSPACE_JEST_CASE, workspace_node_bin
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -306,6 +307,10 @@ def run_case(
                 environment["GAUNTLET_WATCH_WORKSPACE"] = str(fixture.workspace)
             if scenario.oracle == "blocked-extension" or scenario.id in BUSINESS_CLI_CASES | GITHUB_STUB_CASES:
                 environment["PATH"] = str(fixture.root / "bin") + os.pathsep + environment["PATH"]
+            # The contained runner resolves Node from the request's own PATH, and
+            # trusts the one this fixture's home owns rather than the host's.
+            if node_bin := workspace_node_bin(fixture.home):
+                environment["PATH"] = str(node_bin) + os.pathsep + environment["PATH"]
             environment.update(
                 GUARD_GAUNTLET_OBSERVER_LOG=str(guard_log),
                 GUARD_GAUNTLET_DAEMON_PORT=str(daemon._server.server_address[1]),
@@ -513,6 +518,10 @@ def run_suite(
     if selected_ids and (set(selected_ids) - {scenario.id for scenario in catalog}):
         raise ValueError("unknown scenario selection")
     selected = tuple(s for s in catalog if not selected_ids or s.id in selected_ids)
+    # Only the workspace runner case needs Node, so a selection without it runs
+    # on a host that has none.
+    if any(scenario.id == WORKSPACE_JEST_CASE for scenario in selected) and shutil.which("node") is None:
+        raise RuntimeError("Gauntlet prerequisite is missing: node")
     parent = (work_root or output.parent).resolve()
     parent.mkdir(parents=True, exist_ok=True)
     root = create_run_root(parent)

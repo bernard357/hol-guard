@@ -155,3 +155,142 @@ fn the_resident_advertises_that_its_edge_records_receipts() {
         crate::resident_op_features::RESIDENT_OP_FEATURES.contains(&EDGE_RECEIPT_RECORD_FEATURE)
     );
 }
+
+/// The evidence record a direct answer queues, carrying `edge`'s receipt.
+fn direct_evidence(edge: &GuardHookEdgeResultV2) -> Value {
+    json!({
+        "harness": "claude-code",
+        "event": "PreToolUse",
+        "receipt": serde_json::to_value(&edge.receipt).unwrap(),
+    })
+}
+
+fn queued(queue: &DirectEvidenceQueue) -> Vec<Value> {
+    let request = crate::hook_direct_evidence::HookDirectEvidenceDrainRequestV1 {
+        guard_home: String::new(),
+        max_records: None,
+        ack_through: None,
+        ack_epoch: None,
+    };
+    let page: Value =
+        serde_json::from_slice(&crate::hook_direct_evidence::drain(&request, queue).unwrap())
+            .unwrap();
+    page["records"].as_array().unwrap().clone()
+}
+
+#[test]
+fn a_direct_answer_queues_its_receipt_with_the_running_writer_and_says_so() {
+    let home = store_home("direct-receipt-recorded");
+    start_writer(&home);
+    let (_, edge) = answered(&home, true);
+    let queue = DirectEvidenceQueue::default();
+    assert!(offer_direct(&queue, &home, direct_evidence(&edge)));
+    let records = queued(&queue);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0][DIRECT_RECEIPT_RECORDED], json!(true));
+    assert_eq!(receipts_accepted(&home), json!(1));
+    writer(&home, json!({"action": "stop", "timeout_seconds": 10.0}));
+}
+
+#[test]
+fn a_direct_answer_without_a_running_writer_leaves_the_receipt_to_the_drain() {
+    let home = store_home("direct-receipt-idle");
+    let (_, edge) = answered(&home, true);
+    let queue = DirectEvidenceQueue::default();
+    assert!(offer_direct(&queue, &home, direct_evidence(&edge)));
+    let records = queued(&queue);
+    assert_eq!(records.len(), 1);
+    assert!(records[0].get(DIRECT_RECEIPT_RECORDED).is_none());
+    assert_eq!(
+        writer(&home, json!({"action": "stats"}))["payload"]["running"],
+        json!(false),
+        "starting a writer replays the journal, which the hook must not do"
+    );
+}
+
+#[test]
+fn a_direct_answer_with_the_writer_slot_busy_leaves_the_receipt_to_the_drain() {
+    let home = store_home("direct-receipt-busy");
+    start_writer(&home);
+    let (_, edge) = answered(&home, true);
+    let queue = DirectEvidenceQueue::default();
+    let offered = crate::hook_evidence_writer_op::while_slot_busy(&home, || {
+        offer_direct(&queue, &home, direct_evidence(&edge))
+    });
+    assert!(offered);
+    let records = queued(&queue);
+    assert_eq!(records.len(), 1);
+    assert!(records[0].get(DIRECT_RECEIPT_RECORDED).is_none());
+    assert_eq!(receipts_accepted(&home), json!(0));
+    writer(&home, json!({"action": "stop", "timeout_seconds": 10.0}));
+}
+
+#[test]
+fn a_direct_answer_the_queue_refuses_records_no_receipt() {
+    let home = store_home("direct-receipt-full");
+    start_writer(&home);
+    let (_, edge) = answered(&home, true);
+    let queue = DirectEvidenceQueue::default();
+    let mut evidence = direct_evidence(&edge);
+    evidence["padding"] = json!("x".repeat(crate::hook_direct_evidence::MAX_RECORD_BYTES));
+    assert!(!offer_direct(&queue, &home, evidence));
+    assert!(queued(&queue).is_empty());
+    assert_eq!(receipts_accepted(&home), json!(0));
+    writer(&home, json!({"action": "stop", "timeout_seconds": 10.0}));
+}
+
+#[test]
+fn direct_evidence_without_a_receipt_is_queued_as_is() {
+    let home = store_home("direct-receipt-none");
+    let queue = DirectEvidenceQueue::default();
+    assert!(offer_direct(
+        &queue,
+        &home,
+        json!({"harness": "claude-code"})
+    ));
+    assert_eq!(queued(&queue), vec![json!({"harness": "claude-code"})]);
+}
+
+#[test]
+fn a_direct_answer_whose_marker_would_not_fit_queues_unmarked() {
+    let home = store_home("direct-receipt-near-limit");
+    start_writer(&home);
+    let (_, edge) = answered(&home, true);
+    let queue = DirectEvidenceQueue::default();
+    let mut evidence = direct_evidence(&edge);
+    evidence["padding"] = json!("");
+    let room = crate::hook_direct_evidence::MAX_RECORD_BYTES
+        - serde_json::to_vec(&evidence).unwrap().len();
+    evidence["padding"] = json!("x".repeat(room));
+    assert!(offer_direct(&queue, &home, evidence));
+    let records = queued(&queue);
+    assert_eq!(records.len(), 1);
+    assert!(records[0].get(DIRECT_RECEIPT_RECORDED).is_none());
+    assert_eq!(receipts_accepted(&home), json!(0));
+    writer(&home, json!({"action": "stop", "timeout_seconds": 10.0}));
+}
+
+#[test]
+fn a_receipt_the_writer_refuses_leaves_the_record_unmarked() {
+    let queue = DirectEvidenceQueue::default();
+    let record = json!({"harness": "claude-code", "receipt": {}});
+    assert!(queue
+        .try_offer_recorded(record.clone(), DIRECT_RECEIPT_RECORDED, || false)
+        .is_ok());
+    assert_eq!(queued(&queue), [record]);
+}
+
+#[test]
+fn a_receipt_is_not_recorded_for_a_record_the_queue_refuses() {
+    let queue = DirectEvidenceQueue::default();
+    let mut record = json!({"receipt": {}});
+    record["padding"] = json!("x".repeat(crate::hook_direct_evidence::MAX_RECORD_BYTES));
+    let recorded = std::cell::Cell::new(false);
+    assert!(queue
+        .try_offer_recorded(record, DIRECT_RECEIPT_RECORDED, || {
+            recorded.set(true);
+            true
+        })
+        .is_err());
+    assert!(!recorded.get());
+}

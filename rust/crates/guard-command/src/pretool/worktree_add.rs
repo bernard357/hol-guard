@@ -6,6 +6,7 @@ use std::time::Instant;
 pub(super) mod chain;
 #[path = "worktree_add_chain_route.rs"]
 mod chain_route;
+pub(crate) use chain::entered_checkouts;
 pub(crate) use chain::new_checkout_route;
 #[path = "worktree_add_destination.rs"]
 mod destination;

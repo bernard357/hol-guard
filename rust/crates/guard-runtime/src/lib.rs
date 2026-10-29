@@ -609,6 +609,7 @@ mod mcp_relay_order;
 mod mcp_relay_package_eval;
 mod mcp_relay_pending;
 mod mcp_relay_ready;
+mod mcp_relay_receipt;
 mod mcp_relay_resident;
 mod mcp_relay_servers;
 mod mcp_runtime_evidence_op;

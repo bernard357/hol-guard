@@ -3845,6 +3845,23 @@
       "expect": "allow"
     },
     {
+      "id": "gauntlet-npx-jest-ci",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx jest --ci"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "npx-jest-outside-config-reviews",
       "fix_area": "shell",
       "harnesses": [
