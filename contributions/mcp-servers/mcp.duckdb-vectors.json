@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "guard.mcp-server-contribution.v1",
+  "id": "mcp.duckdb-vectors",
+  "version": "1.0.0",
+  "name": "DuckDB Vectors MCP server",
+  "description": "Serves hybrid semantic + exact-token search over a local DuckDB index as two read-only tools: search returns ranked chunks, report introspects the index. No external vector service, no network at query time. Off until you turn it on.",
+  "trustClass": "external",
+  "activation": "opt-in",
+  "publisher": {
+    "id": "community.bernardpaques",
+    "displayName": "Bernard Paques",
+    "url": "https://github.com/bernard357"
+  },
+  "icon": {
+    "kind": "none"
+  },
+  "homepage": "https://github.com/bernard357/duckdb-vectors",
+  "license": "MIT",
+  "launch": {
+    "kind": "package-launcher",
+    "command": "uvx",
+    "package": "duckdb-vectors"
+  },
+  "riskClasses": [
+    "local-file-read"
+  ],
+  "tools": [
+    {
+      "name": "search",
+      "state": "allow"
+    },
+    {
+      "name": "report",
+      "state": "allow"
+    }
+  ],
+  "referenceUrls": [
+    "https://github.com/bernard357/duckdb-vectors",
+    "https://github.com/bernard357/duckdb-vectors/blob/main/src/duckdb_vectors/mcp_server.py",
+    "https://pypi.org/project/duckdb-vectors/"
+  ],
+  "saferAlternatives": [
+    "Both tools only read the local index; report exposes the indexed source paths (not contents), so point the server at a database whose file list is safe to disclose to the agent."
+  ]
+}
