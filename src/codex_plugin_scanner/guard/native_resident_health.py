@@ -13,6 +13,7 @@ which leaves a caller unable to tell a loaded resident from a dead one.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -24,6 +25,8 @@ from .strict_json_pairs import unique_json_object
 
 RESIDENT_HEALTH_FEATURE = "resident-health-v1"
 _RESIDENT_PROTOCOL_FEATURE = "resident-protocol-v2"
+# The framing version a resident advertising the feature above must report.
+_RESIDENT_PROTOCOL_VERSION = 2
 _REQUEST_SCHEMA = "guard-resident-health-request.v1"
 _RESULT_SCHEMA = "guard-resident-health-result.v1"
 _LANE_FIELDS = frozenset({"workers", "queue_capacity"})
@@ -64,20 +67,44 @@ def _validated_lane(value: Any) -> dict[str, int] | None:
     return {field: value[field] for field in _LANE_FIELDS}
 
 
-def _validated_result(decoded: Any, request_id: str) -> dict[str, Any] | None:
+def _request_digest(request: dict[str, str]) -> str:
+    """The digest Rust computes over this request.
+
+    Rust hashes the canonical JSON of the request it decoded: keys sorted,
+    no separator padding, non-ASCII escaped. That is CPython's own encoder
+    under ``sort_keys``, which is what the canonical writer was written to
+    match, so the two agree byte for byte.
+    """
+    material = json.dumps(
+        request,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(material).hexdigest()}"
+
+
+def _validated_result(decoded: Any, request: dict[str, str]) -> dict[str, Any] | None:
     if not isinstance(decoded, dict) or set(decoded) != _RESULT_FIELDS:
         return None
-    if decoded["schema"] != _RESULT_SCHEMA or decoded["request_id"] != request_id:
+    if decoded["schema"] != _RESULT_SCHEMA or decoded["request_id"] != request["request_id"]:
         return None
     if decoded["status"] != "serving":
         return None
     for field in ("request_sha256", "runtime_version", "build_sha", "target"):
         if not isinstance(decoded[field], str) or not decoded[field]:
             return None
+    # The identifier says the reply answers a request of ours; the digest says
+    # it answers this one. A reply carrying another request's digest is not an
+    # answer to the question that was asked.
+    if decoded["request_sha256"] != _request_digest(request):
+        return None
     for field in ("protocol_version", "uptime_ms", "overloaded_requests"):
         value = decoded[field]
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             return None
+    if decoded["protocol_version"] != _RESIDENT_PROTOCOL_VERSION:
+        return None
     lanes = {lane: _validated_lane(decoded[lane]) for lane in ("evaluation", "control")}
     if any(lane is None for lane in lanes.values()):
         return None
@@ -96,37 +123,43 @@ def native_resident_health(
     reply, or a resident that is gone. The caller reports an unanswered
     question as exactly that; it must not read a verdict into it.
 
-    This never starts a resident. Call it only where one is known to be
-    running, so a diagnostic stays a passive observation.
+    This never starts a resident: the runtime refuses the operation rather
+    than spawn one to answer it, and the request is sent as a diagnostic, so
+    it neither arms nor clears the restart hold that gates hook execution and
+    leaves no client stream parked behind it. Asking how loaded a resident is
+    cannot be what takes it out of service.
     """
     deadline = time.monotonic() + timeout_seconds
-    status = native_runtime_status(deadline_monotonic=deadline)
-    if not _supports_resident_health(status) or status.identity is None:
+    request = {"schema": _REQUEST_SCHEMA, "request_id": f"rh-{time.monotonic_ns():x}"}
+    try:
+        status = native_runtime_status(deadline_monotonic=deadline)
+        if not _supports_resident_health(status) or status.identity is None:
+            return None
+        envelope = {
+            "operation": "resident_health",
+            "request": request,
+            "deadline_budget_ms": max(1, int((deadline - time.monotonic()) * 1000)),
+        }
+        response = native_resident_client_request(
+            executable=status.identity.path,
+            guard_home=guard_home,
+            environment=_isolated_environment(),
+            payload=json.dumps(envelope, separators=(",", ":")).encode("utf-8"),
+            timeout_seconds=max(0.001, deadline - time.monotonic()),
+            deadline_monotonic=deadline,
+            diagnostic=True,
+        )
+    except (OSError, RuntimeError, ValueError):
+        # An optional diagnostic that cannot be taken must read as unanswered,
+        # not abort the report it is one line of.
         return None
-    request_id = f"rh-{time.monotonic_ns():x}"
-    envelope = {
-        "operation": "resident_health",
-        "request": {"schema": _REQUEST_SCHEMA, "request_id": request_id},
-        "deadline_budget_ms": max(1, int((deadline - time.monotonic()) * 1000)),
-    }
-    response = native_resident_client_request(
-        executable=status.identity.path,
-        guard_home=guard_home,
-        environment=_isolated_environment(),
-        payload=json.dumps(envelope, separators=(",", ":")).encode("utf-8"),
-        timeout_seconds=max(0.001, deadline - time.monotonic()),
-        deadline_monotonic=deadline,
-    )
-    # A health question must never open or reset the circuit that gates hook
-    # execution: asking how loaded a resident is cannot be what takes it out of
-    # service.
     if response is None:
         return None
     try:
         decoded = json.loads(response.decode("utf-8"), object_pairs_hook=unique_json_object)
     except (UnicodeDecodeError, ValueError):
         return None
-    return _validated_result(decoded, request_id)
+    return _validated_result(decoded, request)
 
 
 __all__ = ["RESIDENT_HEALTH_FEATURE", "native_resident_health"]

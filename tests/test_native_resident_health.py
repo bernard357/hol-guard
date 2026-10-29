@@ -7,6 +7,7 @@ question went unanswered.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,12 +39,24 @@ def _reply(**overrides: Any) -> dict[str, Any]:
     return reply
 
 
+def _digest(request: dict[str, str]) -> str:
+    """The digest the Rust runtime returns for this request.
+
+    Spelled out here rather than imported, so a change to the canonical form
+    on either side of the boundary shows up as a failure instead of agreeing
+    with itself.
+    """
+    material = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return f"sha256:{hashlib.sha256(material.encode('utf-8')).hexdigest()}"
+
+
 class _Resident:
     """A stub resident that answers one request with the bytes it was given."""
 
     def __init__(self, response: bytes | None) -> None:
         self.response = response
         self.envelopes: list[dict[str, Any]] = []
+        self.diagnostic: bool | None = None
 
     def install(self, monkeypatch: pytest.MonkeyPatch, *, features: list[str] | None = None) -> None:
         if features is None:
@@ -61,20 +74,29 @@ class _Resident:
     def request(self, **kwargs: Any) -> bytes | None:
         envelope = json.loads(kwargs["payload"].decode("utf-8"))
         self.envelopes.append(envelope)
+        self.diagnostic = kwargs.get("diagnostic")
         return self.response
 
 
-def _answering(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> _Resident:
-    """A resident that echoes the caller's request id, as the real one does."""
+def _answering(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any], *, sign: bool = True) -> _Resident:
+    """A resident that echoes the caller's request id, as the real one does.
+
+    ``sign`` controls whether it also returns the digest the real runtime
+    computes over the request it decoded. Turning it off is how a reply that
+    answers a different question reaches the caller.
+    """
 
     resident = _Resident(None)
 
     def request(**kwargs: Any) -> bytes:
         envelope = json.loads(kwargs["payload"].decode("utf-8"))
         resident.envelopes.append(envelope)
+        resident.diagnostic = kwargs.get("diagnostic")
         answered = dict(reply)
         if answered["request_id"] == "":
             answered["request_id"] = envelope["request"]["request_id"]
+        if sign:
+            answered["request_sha256"] = _digest(envelope["request"])
         return json.dumps(answered).encode("utf-8")
 
     resident.install(monkeypatch)
@@ -122,6 +144,7 @@ def test_a_resident_that_does_not_answer_reads_as_unanswered(monkeypatch: pytest
         {"schema": "guard-resident-health-result.v2"},
         {"status": "ready"},
         {"protocol_version": -1},
+        {"protocol_version": 3},
         {"uptime_ms": True},
         {"evaluation": {"workers": 15}},
         {"control": {"workers": 1, "queue_capacity": -1, "extra": 0}},
@@ -138,6 +161,51 @@ def test_a_reply_that_is_not_the_contract_is_refused(
 
 def test_a_reply_for_someone_elses_request_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _answering(monkeypatch, _reply(request_id="rh-somebody-else"))
+
+    assert transport.native_resident_health(guard_home=tmp_path) is None
+
+
+def test_a_reply_carrying_another_requests_digest_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The identifier alone cannot establish which question was answered.
+
+    This reply quotes our request id back at us and is otherwise the contract
+    in full. Only the digest says it was computed over a different request.
+    """
+    other = _digest({"schema": "guard-resident-health-request.v1", "request_id": "rh-elsewhere"})
+    _answering(monkeypatch, _reply(request_sha256=other), sign=False)
+
+    assert transport.native_resident_health(guard_home=tmp_path) is None
+
+
+def test_the_question_is_asked_as_a_diagnostic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A health question must leave the hook path's restart hold alone."""
+    resident = _answering(monkeypatch, _reply())
+
+    assert transport.native_resident_health(guard_home=tmp_path) is not None
+    assert resident.diagnostic is True
+
+
+@pytest.mark.parametrize("failure", [OSError("no socket"), RuntimeError("no runtime"), ValueError("bad state")])
+def test_a_transport_failure_reads_as_unanswered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: Exception
+) -> None:
+    """One optional line of a report must not take the whole report down."""
+    resident = _Resident(None)
+    resident.install(monkeypatch)
+
+    def fail(**_: Any) -> bytes:
+        raise failure
+
+    monkeypatch.setattr(transport, "native_resident_client_request", fail)
+
+    assert transport.native_resident_health(guard_home=tmp_path) is None
+
+
+def test_an_unreadable_runtime_status_reads_as_unanswered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def fail(**_: Any) -> Any:
+        raise OSError("the runtime could not be read")
+
+    monkeypatch.setattr(transport, "native_runtime_status", fail)
 
     assert transport.native_resident_health(guard_home=tmp_path) is None
 
