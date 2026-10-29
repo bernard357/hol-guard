@@ -418,3 +418,53 @@ fn a_home_relative_entry_runs_in_the_worktree_it_creates() {
         result.reason_code
     );
 }
+
+/// Git creates the directories leading to a new checkout, so an add into a
+/// folder that does not exist yet is entered like any other: by `cd`, under
+/// a home or absolute spelling, or by `git -C`. A `cd` to another missing
+/// folder still names a different directory and keeps its review.
+#[test]
+fn an_entry_below_new_parent_folders_runs_in_the_worktree_it_creates() {
+    let (_cleanup, home, repository) = repository("new-parent");
+    let controls = git_github("enabled", &[]);
+    let absolute = home.join("work/review/app-review");
+    let absolute = absolute.display();
+    let add = "git worktree add -b review ~/work/review/app-review origin/main";
+    let mut failures = Vec::new();
+    for harness in ["omp", "zcode", "claude-code", "codex"] {
+        for command in [
+            format!("{add} && cd ~/work/review/app-review && git status --short"),
+            format!(
+                "{add} && cd ~/work/review/app-review && git commit --allow-empty -m 'Start review'"
+            ),
+            format!("{add} && git -C ~/work/review/app-review status --short"),
+            format!(
+                "git worktree add -b review {absolute} origin/main && cd {absolute} \
+                 && git commit --allow-empty -m 'Start review'"
+            ),
+            format!(
+                "git worktree add -b review {absolute} origin/main && git -C {absolute} log -1"
+            ),
+        ] {
+            let result = evaluate(&home, &repository, harness, &command, &controls);
+            if result.minimum_action != "allow" {
+                failures.push(format!(
+                    "{harness}: {command}: {} {}",
+                    result.minimum_action, result.reason_code
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    for command in [
+        format!("{add} && cd ~/work/other/app-review && git status --short"),
+        format!("{add} && cd ~/work/review && git status --short"),
+    ] {
+        let result = evaluate(&home, &repository, "omp", &command, &controls);
+        assert_ne!(
+            result.minimum_action, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
+    }
+}
