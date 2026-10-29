@@ -327,7 +327,10 @@ fn leaves_the_workspace(argument: &str) -> bool {
         .strip_prefix('-')
         .filter(|rest| !rest.starts_with('-'))
         .unwrap_or_default();
-    let tails = group.char_indices().skip(1).map(|(index, _)| &group[index..]);
+    let tails = group
+        .char_indices()
+        .skip(1)
+        .map(|(index, _)| &group[index..]);
     std::iter::once(argument)
         .chain(tails)
         .chain(argument.split(|character: char| {
