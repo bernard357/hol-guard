@@ -311,10 +311,8 @@ fn option_value(argument: &str) -> &str {
 fn leaves_the_workspace(value: &str) -> bool {
     let value = value.replace('\\', "/");
     let bytes = value.as_bytes();
-    let windows_root = bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/';
+    let windows_root =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
     value.starts_with('/')
         || value.starts_with("~/")
         || value == "~"
