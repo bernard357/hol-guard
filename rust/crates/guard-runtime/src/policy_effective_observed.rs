@@ -83,9 +83,10 @@ fn tool_actions(policy: &mut EffectiveNativePolicyV3, observed: StringMap) -> Re
         .collect();
     let mut merged = policy.mcp_tool_actions.clone();
     for (key, action) in observed {
-        // An exact local allow cannot create an exception to a configured
-        // namespace block. Existing configured restrictions remain floors.
-        if action == "allow" && namespaces.iter().any(|prefix| key.starts_with(*prefix)) {
+        // An exact local choice is read before a configured namespace block,
+        // so anything short of block would carve an exception out of it.
+        // Existing configured restrictions remain floors.
+        if action != "block" && namespaces.iter().any(|prefix| key.starts_with(*prefix)) {
             continue;
         }
         let next = stricter(merged.get(&key).map_or("allow", String::as_str), &action);

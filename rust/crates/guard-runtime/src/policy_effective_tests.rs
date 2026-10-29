@@ -123,6 +123,17 @@ fn raw_observed_choices_have_their_own_budget() {
         run_command(alone.as_bytes()).unwrap_err(),
         "policy_effective_request_too_large"
     );
+    // With one, the configuration still cannot take the overlay's room.
+    let mut config = base();
+    config["padding"] = json!("x".repeat(CONFIG_BUDGET_BYTES as usize));
+    let crowded = json!({"schema": SCHEMA, "op": "compose", "configs": [config],
+        "observed": {"mcp_tool_actions": {}}})
+    .to_string();
+    assert!(crowded.len() as u64 <= MAX_REQUEST_BYTES);
+    assert_eq!(
+        run_command(crowded.as_bytes()).unwrap_err(),
+        "policy_effective_request_too_large"
+    );
 }
 
 fn compose_with(configured: Value, observed: Value) -> Value {
@@ -138,24 +149,34 @@ fn compose_with(configured: Value, observed: Value) -> Value {
 
 #[test]
 fn observed_choices_keep_configured_restrictions() {
-    for configured in [
-        json!({"codex:mcp__server__read": "block", "codex:mcp__other__write": "block"}),
-        json!({"codex:mcp__server__*": "block"}),
-    ] {
-        let response = compose_with(
-            configured.clone(),
-            json!({"mcp_tool_actions": {
-                "codex:mcp__server__read": "allow",
-                "codex:mcp__unrelated__search": "allow",
-            }}),
-        );
-        assert_eq!(response["ok"], json!(true), "{response}");
-        let actions = &response["policy"]["mcp_tool_actions"];
-        for (key, action) in configured.as_object().unwrap() {
-            assert_eq!(&actions[key], action);
+    // An exact choice is read before a namespace, so a stored review under a
+    // configured namespace block would lower that tool to review.
+    for choice in ["allow", "review"] {
+        for configured in [
+            json!({"codex:mcp__server__read": "block", "codex:mcp__other__write": "block"}),
+            json!({"codex:mcp__server__*": "block"}),
+        ] {
+            let response = compose_with(
+                configured.clone(),
+                json!({"mcp_tool_actions": {
+                    "codex:mcp__server__read": choice,
+                    "codex:mcp__unrelated__search": "allow",
+                }}),
+            );
+            assert_eq!(response["ok"], json!(true), "{response}");
+            let actions = &response["policy"]["mcp_tool_actions"];
+            for (key, action) in configured.as_object().unwrap() {
+                assert_eq!(&actions[key], action);
+            }
+            assert_eq!(actions["codex:mcp__unrelated__search"], json!("allow"));
+            for looser in ["allow", "review"] {
+                assert_ne!(
+                    actions["codex:mcp__server__read"],
+                    json!(looser),
+                    "{choice}"
+                );
+            }
         }
-        assert_eq!(actions["codex:mcp__unrelated__search"], json!("allow"));
-        assert_ne!(actions["codex:mcp__server__read"], json!("allow"));
     }
 }
 

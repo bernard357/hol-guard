@@ -448,8 +448,13 @@ pub(crate) fn run_command(reader: impl Read) -> Result<Vec<u8>, String> {
 fn evaluate(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let request: Request =
         serde_json::from_slice(bytes).map_err(|_| "policy_effective_request_invalid".to_owned())?;
-    // Only an observed overlay may use the extra room.
-    if request.observed.is_none() && bytes.len() as u64 > CONFIG_BUDGET_BYTES {
+    // Only an observed overlay may use the extra room: the configuration
+    // keeps its own limit whether or not one is present.
+    let configs = serde_json::to_vec(&request.configs)
+        .map_err(|_| "policy_effective_request_invalid".to_owned())?;
+    if configs.len() as u64 > CONFIG_BUDGET_BYTES
+        || (request.observed.is_none() && bytes.len() as u64 > CONFIG_BUDGET_BYTES)
+    {
         return Err("policy_effective_request_too_large".to_owned());
     }
     // A rejected policy is data, not a crash: the caller maps the reason.
