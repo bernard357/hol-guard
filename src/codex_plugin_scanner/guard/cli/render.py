@@ -1105,14 +1105,18 @@ _LIFECYCLE_TITLE = {
     "degraded": "Native runtime unhealthy today",
 }
 _LIFECYCLE_BORDER = {"critical": "red", "degraded": "yellow"}
+# What the day's journal establishes, which is not what is running now: the
+# runtime derives these states from the events it recorded over the window,
+# so the panel speaks about the day and sends the reader to `runtime status`
+# for the live answer.
 _LIFECYCLE_LEAD = {
     "critical": (
-        "Guard's runtime is not being restarted: the last thing that happened was its restart "
-        "budget refusing a start, so nothing of this runtime is serving hooks right now."
+        "Guard's runtime stopped being restarted today: the last thing its journal recorded was "
+        "the restart budget refusing a start, so nothing of this runtime came back up after it."
     ),
     "degraded": (
-        "Guard's runtime is serving hooks, but it has not been healthy today. Runs have been "
-        "ending badly and starting again, which a report taken at any one moment does not show."
+        "Guard's runtime has not been healthy today: runs have been ending badly and starting "
+        "again, which a report taken at any one moment does not show."
     ),
 }
 
@@ -1159,7 +1163,10 @@ def _print_resident_lifecycle_note(console: Console, payload: dict[str, object])
     last_event = lifecycle.get("last_event")
     if isinstance(last_event, str) and last_event:
         lines.append(f"Last event: {last_event}, {_lifecycle_age(lifecycle.get('last_event_age_seconds'))}.")
-    lines.append("Run `hol-guard runtime status` for what is serving now, or `hol-guard doctor --repair`.")
+    lines.append(
+        "This is the day behind the install, not what is up now: run `hol-guard runtime status` "
+        "for that, or `hol-guard doctor --repair`."
+    )
     console.print(Panel(Text("\n".join(lines)), title=_LIFECYCLE_TITLE[state], border_style=_LIFECYCLE_BORDER[state]))
 
 

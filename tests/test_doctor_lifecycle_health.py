@@ -139,10 +139,14 @@ def test_a_failed_read_leaves_the_report_without_a_journal(
         json.dumps({}),
         json.dumps({"health": None}),
         json.dumps({"health": "degraded"}),
-        # A state the renderer has no copy for, and a code with room for a path in it.
+        # A state the renderer has no copy for, and codes outside the runtime's
+        # vocabulary: a path, an overlong one, and an invented code that would
+        # otherwise read as a sentence of its own in the panel.
         json.dumps({"health": _snapshot(state="failing")}),
         json.dumps({"health": _snapshot(last_event="/private/user/run.log")}),
         json.dumps({"health": _snapshot(last_event="x" * 65)}),
+        json.dumps({"health": _snapshot(last_event="your_runtime_is_infected")}),
+        json.dumps({"health": _snapshot(last_event="EXITED_FAILED")}),
         # Counts and ages outside what the runtime can produce.
         json.dumps({"health": _snapshot(starts=-1)}),
         json.dumps({"health": _snapshot(starts=2**32)}),

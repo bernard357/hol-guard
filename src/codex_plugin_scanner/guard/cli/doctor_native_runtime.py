@@ -337,8 +337,20 @@ _LIFECYCLE_FIELDS = frozenset({"state", "last_event", *_LIFECYCLE_COUNTS, *_LIFE
 # day plus that hour is the most either age can honestly be. Anything past it
 # did not come from a journal this runtime wrote.
 _MAX_LIFECYCLE_AGE_SECONDS = 25 * 60 * 60
-# Fixed event codes, never text a file carried.
-_LIFECYCLE_EVENT = re.compile(r"[a-z0-9_]{0,64}")
+# The runtime's whole event vocabulary, as `resident_lifecycle_journal`
+# spells it, plus the empty string for a window with no event left in it. A
+# code outside this set is not one the runtime can have written, so it is a
+# damaged or forged answer and not a new event this build has not heard of.
+_LIFECYCLE_EVENTS = frozenset(
+    {
+        "",
+        "started",
+        "exited_orderly",
+        "exited_failed",
+        "exited_premature",
+        "start_refused",
+    }
+)
 _LIFECYCLE_TIMEOUT_SECONDS = 5.0
 _LIFECYCLE_OUTPUT_LIMIT = 8 * 1024
 
@@ -356,8 +368,7 @@ def _validated_lifecycle(value: object) -> NativeResidentLifecycle | None:
         return None
     if value["state"] not in _LIFECYCLE_STATES:
         return None
-    last_event = value["last_event"]
-    if not isinstance(last_event, str) or not _LIFECYCLE_EVENT.fullmatch(last_event):
+    if value["last_event"] not in _LIFECYCLE_EVENTS:
         return None
     bounds: dict[str, int] = dict.fromkeys(_LIFECYCLE_COUNTS, _MAX_U32)
     bounds.update(dict.fromkeys(_LIFECYCLE_AGES, _MAX_LIFECYCLE_AGE_SECONDS))
