@@ -1299,6 +1299,18 @@
       ]
     },
     {
+      "id": "omp-native-quoted-loop-words-quiet",
+      "expectation": "allow",
+      "oracle": "native-tools",
+      "required_tools": [
+        "bash"
+      ],
+      "prompt": "Print each of my two labelled specs on its own line: run the listed command once, exactly as written, and tell me what it prints. Do not change the command or add any other call.",
+      "commands": [
+        "for spec in \"1 aaaa\" \"2 bbbb\"; do echo \"$spec\"; done"
+      ]
+    },
+    {
       "id": "omp-native-sibling-bun-jest-entry",
       "expectation": "allow",
       "oracle": "native-tools",

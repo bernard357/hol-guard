@@ -21259,6 +21259,70 @@
       "expect": "allow"
     },
     {
+      "id": "session-quoted-loop-word-holds-spaces",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "for spec in \"1 aaaa\" \"2 bbbb\"; do echo \"$spec\"; done"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "session-quoted-loop-word-holds-a-flag",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "for flag in \"-l one\" \"-l two\"; do echo \"$flag\"; done"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-quoted-loop-word-holds-an-operator",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "for s in \"a; rm -rf b\"; do echo $s; done"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-quoted-loop-word-beside-a-pattern",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "for x in \"a b\" src/*.ts; do echo \"$x\"; done"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-for-loop-bare-glob-head",
       "fix_area": "shell",
       "harnesses": [
