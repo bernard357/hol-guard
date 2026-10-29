@@ -4,8 +4,8 @@
 //! Each screen decides whether the command stays inside an already-admitted
 //! containment boundary, so the file is runtime policy, not a test module.
 
-use crate::CanonicalCommandV1;
 use crate::contained_argv::{contained_runner_call, jest_runs_once};
+use crate::CanonicalCommandV1;
 
 #[path = "bun_eval_screen.rs"]
 mod bun_eval_screen;

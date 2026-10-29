@@ -222,7 +222,9 @@ pub fn bun_vitest_invocation(command: &[String]) -> Option<(Option<String>, Vec<
     bun_runner_invocation(command).map(|(directory, _, tail)| (directory, tail))
 }
 
-fn bun_runner_invocation(command: &[String]) -> Option<(Option<String>, &'static str, Vec<String>)> {
+fn bun_runner_invocation(
+    command: &[String],
+) -> Option<(Option<String>, &'static str, Vec<String>)> {
     let name = basename(command);
     if !matches!(name, "bun" | "bunx") {
         return None;
@@ -282,8 +284,12 @@ fn runner_tail(arguments: &[String]) -> Option<(&'static str, Vec<String>)> {
     let [tool, rest @ ..] = arguments else {
         return None;
     };
-    contained_runner_call(arguments)
-        .then(|| (if tool == "jest" { "jest" } else { "vitest" }, rest.to_vec()))
+    contained_runner_call(arguments).then(|| {
+        (
+            if tool == "jest" { "jest" } else { "vitest" },
+            rest.to_vec(),
+        )
+    })
 }
 
 /// The same, as the error the sink reports. A call that names a contained
@@ -495,7 +501,8 @@ fn contained_kind(command: &[String]) -> Result<Value, RestrictedPytestError> {
             || (matches!(name, "node" | "nodejs")
                 && entries.clone().any(|v| {
                     v.ends_with("/node_modules/vitest/vitest.mjs")
-                        || v.replace('\\', "/").ends_with("/node_modules/jest/bin/jest.js")
+                        || v.replace('\\', "/")
+                            .ends_with("/node_modules/jest/bin/jest.js")
                 })));
     let node_tool = bun.is_none()
         && manager_exec_runner(command).is_none()
