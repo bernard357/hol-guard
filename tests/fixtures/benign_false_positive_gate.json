@@ -10283,6 +10283,54 @@
       "expect": "allow"
     },
     {
+      "id": "session-runner-head-bytes-after-grep",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bunx vitest run app.test.tsx 2>&1 | grep -o \"CITE_HTML.*\" | head -c 1500"
+      },
+      "cwd": "home_project",
+      "expect": "allow"
+    },
+    {
+      "id": "session-runner-tail-bytes",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run 2>&1 | tail -c 2000"
+      },
+      "cwd": "home_project",
+      "expect": "allow"
+    },
+    {
+      "id": "session-runner-head-bytes-attached",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run 2>&1 | head -c2000"
+      },
+      "cwd": "home_project",
+      "expect": "allow"
+    },
+    {
       "id": "session-npm-test-tail",
       "fix_area": "shell",
       "harnesses": [

@@ -48,6 +48,12 @@ def _peel_from_the_resident(native_contained_wrapper_runtime: Path) -> None:
         (f"{_RUNNER} 2>&1 | rg -B2 -A6 -i error", (("rg", "-B2", "-A6", "-i", "error"),)),
         (f"{_RUNNER} 2>&1 | rg -NU -e FAIL -e Error", (("rg", "-NU", "-e", "FAIL", "-e", "Error"),)),
         (f"{_RUNNER} 2>&1 | rg -v ok | tail -3", (("rg", "-v", "ok"), ("tail", "3"))),
+        (f"{_RUNNER} 2>&1 | head -c 1500", (("head", "-c", "1500"),)),
+        (f"{_RUNNER} 2>&1 | tail -c 2000", (("tail", "-c", "2000"),)),
+        (
+            f'{_RUNNER} 2>&1 | grep -o "CITE_HTML.*" | head -c 1500',
+            (("grep", "-o", "CITE_HTML.*"), ("head", "-c", "1500")),
+        ),
     ],
 )
 def test_stdin_filter_chains_are_peeled(tmp_path: Path, command: str, stages: tuple[tuple[str, ...], ...]) -> None:
@@ -146,6 +152,26 @@ def test_filter_chain_applies_to_captured_output(capsys: pytest.CaptureFixture[s
         print("axb")
     assert capsys.readouterr().out == ""
     assert missing.status_line(0) == "exit=1\n"
+
+
+def test_byte_bounds_cut_the_captured_output(capsys: pytest.CaptureFixture[str]) -> None:
+    head = OutputFilter("pipe", 0, True, stages=(("head", "-c", "6"),))
+    with bounded_output(head):
+        print("one\ntwo\nthree")
+    assert capsys.readouterr().out == "one\ntw"
+
+    tail = OutputFilter("pipe", 0, True, stages=(("tail", "-c", "6"),))
+    with bounded_output(tail):
+        print("one\ntwo\nthree")
+    assert capsys.readouterr().out == "three\n"
+
+
+def test_a_byte_bound_cuts_where_the_program_would() -> None:
+    """A cut inside a character keeps the bytes `head -c` would have printed."""
+    assert filters.keep_bytes("héllo", "head", 2) == "h\udcc3"
+    assert filters.keep_bytes("héllo", "head", 3) == "hé"
+    assert filters.keep_bytes("héllo", "tail", 3) == "llo"
+    assert filters.keep_bytes("héllo", "tail", 0) == ""
 
 
 def _ripgrep_installed() -> bool:
