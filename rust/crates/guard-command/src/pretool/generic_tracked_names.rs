@@ -8,10 +8,9 @@
 //! text must then hold no credential word of its own.
 
 use super::GenericSignals;
-use crate::pretool::search_scope_tracked::names::tracked_document;
-use crate::pretool::secret_aliases::{decision_names_secret_alias, operand};
+use crate::pretool::search_scope_tracked::names::{resolves_to_tracked, without_tracked_words};
+use crate::pretool::secret_aliases::decision_names_secret_alias;
 use crate::pretool::{sensitive_command, sensitive_command_input, PathContext, PreToolDecisionV1};
-use std::path::Path;
 
 impl GenericSignals {
     /// Clears the credential-word signal for a call that names only tracked
@@ -37,40 +36,26 @@ impl GenericSignals {
         decision: Option<&Result<PreToolDecisionV1, String>>,
         cwd: Option<&str>,
     ) -> bool {
-        let proven = |value: &str| {
-            let supplied = Path::new(value);
-            let target = match cwd {
-                _ if supplied.is_absolute() => supplied.to_path_buf(),
-                Some(cwd) => Path::new(cwd).join(supplied),
-                None => return false,
-            };
-            std::fs::canonicalize(target).is_ok_and(|canonical| tracked_document(&canonical, cwd))
-        };
         let paths_proven = self
             .path_values
             .iter()
             .filter(|value| sensitive_command(value))
-            .all(|value| proven(value.as_str()));
+            .all(|value| resolves_to_tracked(value, cwd));
         let Some(command) = self.command.as_deref() else {
             return paths_proven;
         };
         let Some(Ok(decision)) = decision else {
             return false;
         };
-        let mut rest = command.to_owned();
         let words = decision
             .command_model
             .segments
             .iter()
             .flat_map(|segment| segment.executable.iter().chain(&segment.arguments));
-        for word in words.filter(|word| sensitive_command(word)) {
-            match operand(word) {
-                Some(value) if proven(value) => rest = rest.replace(value, " "),
-                _ => return false,
-            }
-        }
         // Redirect targets, assignments and any text the model did not split
-        // into words stay in `rest` and keep the signal.
-        paths_proven && !sensitive_command_input(&rest)
+        // into words stay in the rest and keep the signal.
+        paths_proven
+            && without_tracked_words(command, words, cwd)
+                .is_some_and(|rest| !sensitive_command_input(&rest))
     }
 }

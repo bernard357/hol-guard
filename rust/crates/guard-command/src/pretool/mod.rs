@@ -1246,7 +1246,7 @@ fn evaluate_single_command(
         ));
     }
     if git_search_text::sensitive_beyond_patterns(
-        &data_heredocs::without_data_bodies(normalized),
+        &search_scope_tracked::names::command_screen_text(&model, normalized, context.cwd),
         git_search_text::command_without_patterns(&model),
     ) || secret_aliases::names_secret_alias(&model, context)
         || glob_words::names_hidden_glob(&model, context)

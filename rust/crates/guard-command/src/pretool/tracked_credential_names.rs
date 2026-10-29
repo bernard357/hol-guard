@@ -10,6 +10,9 @@
 //! else keeps the review its name earns.
 
 use super::TrackedFiles;
+use crate::pretool::secret_aliases::operand;
+use crate::pretool::sensitive_command;
+use crate::{CanonicalCommandV1, CommandSegmentV1};
 use std::path::Path;
 
 /// Whether `canonical`, a resolved path, is a credential-named document that
@@ -36,6 +39,64 @@ pub(in crate::pretool) fn tracked_document(canonical: &Path, cwd: Option<&str>) 
         && TrackedFiles::default().non_secret(canonical)
         && std::fs::read(canonical)
             .is_ok_and(|bytes| !secret_object(&String::from_utf8_lossy(&bytes)))
+}
+
+/// Whether `value`, a path as a command or tool spelled it, resolves to a
+/// document [`tracked_document`] proves.
+pub(in crate::pretool) fn resolves_to_tracked(value: &str, cwd: Option<&str>) -> bool {
+    let supplied = Path::new(value);
+    let target = match cwd {
+        _ if supplied.is_absolute() => supplied.to_path_buf(),
+        Some(cwd) => Path::new(cwd).join(supplied),
+        None => return false,
+    };
+    std::fs::canonicalize(target).is_ok_and(|canonical| tracked_document(&canonical, cwd))
+}
+
+/// `text` with each credential-named word of `words` left out, or `None` when
+/// one of those words is anything but a path to a proven tracked document.
+/// Text the words do not cover (redirect targets, assignments, a script's own
+/// words) stays in place for the caller's screen.
+pub(in crate::pretool) fn without_tracked_words<'a>(
+    text: &str,
+    words: impl IntoIterator<Item = &'a String>,
+    cwd: Option<&str>,
+) -> Option<String> {
+    let mut rest = text.to_owned();
+    for word in words.into_iter().filter(|word| sensitive_command(word)) {
+        let value = operand(word).filter(|value| resolves_to_tracked(value, cwd))?;
+        rest = rest.replace(value, " ");
+    }
+    Some(rest)
+}
+
+/// The text a credential-word screen reads for `segment`: `text`, or the
+/// segment's own text, without the words that name tracked documents when
+/// every credential-named word does.
+pub(in crate::pretool) fn segment_screen_text(
+    segment: &CommandSegmentV1,
+    text: Option<String>,
+    cwd: Option<&str>,
+) -> String {
+    let text = text.unwrap_or_else(|| segment.text.clone());
+    let words = segment.executable.iter().chain(&segment.arguments);
+    without_tracked_words(&text, words, cwd).unwrap_or(text)
+}
+
+/// The text the command authority's credential-word screen reads: the
+/// command without heredoc data bodies, and without the words that name
+/// tracked documents when every credential-named word in it does.
+pub(in crate::pretool) fn command_screen_text(
+    model: &CanonicalCommandV1,
+    text: &str,
+    cwd: Option<&str>,
+) -> String {
+    let text = super::super::data_heredocs::without_data_bodies(text);
+    let words = model
+        .segments
+        .iter()
+        .flat_map(|segment| segment.executable.iter().chain(&segment.arguments));
+    without_tracked_words(&text, words, cwd).unwrap_or(text)
 }
 
 /// The nearest directory at or above `path` that holds a `.git` entry.

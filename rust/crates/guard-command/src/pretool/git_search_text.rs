@@ -37,6 +37,17 @@ pub(super) fn sensitive_beyond_patterns(text: &str, without_patterns: Option<Str
     }
 }
 
+/// [`sensitive_beyond_patterns`] for one segment, reading `text` (or the
+/// segment's own) without the words that name tracked documents.
+pub(super) fn segment_sensitive(
+    segment: &CommandSegmentV1,
+    text: Option<String>,
+    cwd: Option<&str>,
+) -> bool {
+    let text = super::search_scope_tracked::names::segment_screen_text(segment, text, cwd);
+    sensitive_beyond_patterns(&text, segment_without_patterns(segment))
+}
+
 /// The command's text with each Git search pattern left out, or `None` when
 /// no segment holds one.
 pub(super) fn command_without_patterns(model: &CanonicalCommandV1) -> Option<String> {
