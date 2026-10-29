@@ -309,3 +309,29 @@ fn a_relative_search_path_keeps_the_entry_reviewed() {
         result.reason_code
     );
 }
+
+/// A path-qualified relative program after the `cd` resolves inside the new
+/// checkout, so the ref it checked out decides what actually runs.
+#[test]
+fn a_relative_program_after_the_entry_keeps_its_review() {
+    let (_cleanup, home, repository) = repository("relative-program");
+    let controls = git_github("enabled", &[]);
+    let allowed =
+        format!("{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review'");
+    assert_eq!(
+        evaluate(&home, &repository, "omp", &allowed, &controls).minimum_action,
+        "allow",
+        "{allowed}"
+    );
+    for command in [
+        format!("{ADD} && cd ../app-review && ./git commit --allow-empty -m 'Start review'"),
+        format!("{ADD} && cd ../app-review && tools/gh pr create --fill"),
+    ] {
+        let result = evaluate(&home, &repository, "omp", &command, &controls);
+        assert_ne!(
+            result.minimum_action, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
+    }
+}

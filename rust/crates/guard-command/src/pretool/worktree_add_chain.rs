@@ -356,15 +356,28 @@ pub(crate) fn new_checkout_route(
 /// shares it. Any other command after the `cd` would have its paths judged
 /// against the shell's directory instead of the checkout, so it leaves the
 /// `cd` uncovered and the command keeps its review.
+///
+/// The bounded `head`, `tail` or `wc` stages of the add's pipeline and of
+/// the steps after the `cd` are named too. They read only what the stage
+/// before them prints and name no path, so the directory they run in does
+/// not matter; the general proof, which follows no `cd` after the first
+/// step, would leave them uncovered where their `git -C` twins are not.
 pub(crate) fn entered_checkouts(
     model: &CanonicalCommandV1,
     context: super::super::PathContext<'_>,
     execution_environment: Option<&guard_contracts::GuardExecutionEnvironmentV1>,
 ) -> Vec<usize> {
-    entered_checkout(model, context, execution_environment)
-        .map(|(_, cd)| cd)
-        .into_iter()
-        .collect()
+    let Some((add, cd)) = entered_checkout(model, context, execution_environment) else {
+        return Vec::new();
+    };
+    let stages = (add + 1..cd).filter(|index| {
+        super::chain_route::stdin_stage(&model.segments[*index], context, execution_environment)
+    });
+    let after =
+        (cd + 1..model.segments.len()).filter(|index| model.segments[*index].pipeline_index > 0);
+    let mut covered: Vec<usize> = stages.chain(std::iter::once(cd)).chain(after).collect();
+    covered.sort_unstable();
+    covered
 }
 
 /// Whether the command's Git after the `cd` that [`entered_checkouts`] names
@@ -442,12 +455,24 @@ fn entered_checkout(
             .as_deref()
             .map(str::trim)
             .is_some_and(|separator| matches!(separator, "&&" | ";"));
+        // After the `cd` the shell resolves a path-qualified relative name
+        // against the new checkout, whose contents come from the ref it
+        // checks out. Only a bare name, looked up on the absolute search
+        // path checked above, or an absolute path names a program the
+        // checked-out tree cannot supply.
+        let resolved_outside = |later: &CommandSegmentV1| {
+            later
+                .executable
+                .as_deref()
+                .is_some_and(|value| !value.contains(['/', '\\']) || Path::new(value).is_absolute())
+        };
         // A later pipeline stage reads only what the step before it prints:
         // a bounded `head`, `tail` or `wc` with no path of its own.
         let rest_is_git = model.segments[after + 1..].iter().all(|later| {
-            is(later, &["git", "gh"])
-                || (later.pipeline_index > 0
-                    && super::chain_route::stdin_stage(later, context, execution_environment))
+            resolved_outside(later)
+                && (is(later, &["git", "gh"])
+                    || (later.pipeline_index > 0
+                        && super::chain_route::stdin_stage(later, context, execution_environment)))
         });
         // A failed add leaves no checkout to enter, so the `cd` fails too.
         // Only `&&` (and a pipe inside one step) stops what follows from
