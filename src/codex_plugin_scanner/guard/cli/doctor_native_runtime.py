@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -30,6 +32,38 @@ class NativeAvailabilityResult(_NativeAvailabilityFields, total=False):
 
 
 _MAX_STATE_BYTES = 64 * 1024
+# ``O_BINARY`` exists only on Windows and ``O_NOFOLLOW`` only where the platform
+# has it; a missing flag is simply not requested.
+_STATE_OPEN_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+)
+
+
+def _read_state_json(path: Path) -> object | None:
+    """Read a bounded JSON object out of resident state, or ``None``.
+
+    Resident state lives under the Guard home, which is not a trust boundary a
+    report may block on: a FIFO, a device or a symlink left at one of these
+    paths would otherwise park this read forever or send it somewhere else.
+    The open refuses to follow a link and never blocks, the descriptor is
+    checked to be a regular file before a byte is read, and every refusal --
+    a missing file, a wrong kind of file, damaged JSON -- reads the same as
+    absence, because that is what a report can honestly say about it.
+    """
+
+    try:
+        descriptor = os.open(path, _STATE_OPEN_FLAGS)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            return json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
+    except (OSError, ValueError):
+        return None
+    finally:
+        os.close(descriptor)
 
 
 def _published_generations(state_base: Path, runtime_sha256: str) -> tuple[int, bool]:
@@ -45,11 +79,7 @@ def _published_generations(state_base: Path, runtime_sha256: str) -> tuple[int, 
     generations = 0
     live = False
     for state_path in state_base.glob("resident-v3-*/generation-*.json"):
-        try:
-            with state_path.open("rb") as handle:
-                state = json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
-        except (OSError, ValueError):
-            continue
+        state = _read_state_json(state_path)
         if not isinstance(state, dict) or state.get("runtime_sha256") != runtime_sha256:
             continue
         generations += 1
@@ -210,6 +240,29 @@ _RESTART_BUDGET_SCHEMA = "hol-guard-resident-restart-budget.v1"
 # longer than its own maximum is not a wait this runtime wrote. Reporting the
 # bound beats printing a year from a file that was damaged or forged.
 _MAX_RETRY_SECONDS = 30.0
+# The runtime counts restarts inside a rolling window and resets the counter
+# once it closes (``resident_restart_budget.rs``), so attempts from a window
+# that has already expired are not attempts "in this window".
+_RESTART_WINDOW_MS = 60_000
+# The runtime writes ``attempts`` as a u32 and the millisecond stamps as u64.
+# JSON has no such bound, and a value past it reaches this file only from a
+# damaged or forged budget; arithmetic on one raises instead of reporting.
+_MAX_U32 = 2**32 - 1
+_MAX_U64 = 2**64 - 1
+
+
+def _budget_counter(value: object, bound: int) -> int | None:
+    """A non-negative integer the runtime could have written, or ``None``.
+
+    ``bool`` is an ``int`` in Python and none of these fields is ever written
+    as one, so a boolean is as wrong here as a string.
+    """
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    if value < 0 or value > bound:
+        return None
+    return value
 
 
 def native_resident_restart(guard_home: Path | None, runtime_sha256: str | None) -> NativeResidentRestart | None:
@@ -237,21 +290,21 @@ def native_resident_restart(guard_home: Path | None, runtime_sha256: str | None)
     if guard_home is None or runtime_sha256 is None:
         return None
     scope = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY / f"resident-v3-{runtime_sha256[:16]}"
-    try:
-        with (scope / "restart-budget.json").open("rb") as handle:
-            budget = json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
-    except (OSError, ValueError):
-        return None
+    budget = _read_state_json(scope / "restart-budget.json")
     if not isinstance(budget, dict) or budget.get("schema") != _RESTART_BUDGET_SCHEMA:
         return None
-    attempts = budget.get("attempts")
-    circuit_until_ms = budget.get("circuit_until_ms")
-    # ``bool`` is an ``int`` in Python and neither field is ever written as one.
-    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+    attempts = _budget_counter(budget.get("attempts"), _MAX_U32)
+    circuit_until_ms = _budget_counter(budget.get("circuit_until_ms"), _MAX_U64)
+    window_start_ms = _budget_counter(budget.get("window_start_ms"), _MAX_U64)
+    if attempts is None or circuit_until_ms is None or window_start_ms is None:
         return None
-    if not isinstance(circuit_until_ms, int) or isinstance(circuit_until_ms, bool) or circuit_until_ms < 0:
-        return None
-    remaining = circuit_until_ms / 1000 - time.time()
+    now = time.time()
+    # The runtime clears the counter on the next spawn after the window closes,
+    # so reporting the stale number would name attempts that no longer count
+    # against the next restart.
+    if now * 1000 - window_start_ms >= _RESTART_WINDOW_MS:
+        attempts = 0
+    remaining = circuit_until_ms / 1000 - now
     if remaining <= 0:
         return {"paced": False, "attempts": attempts, "retry_in_seconds": 0.0}
     return {
@@ -305,10 +358,14 @@ def native_runtime_section(
     # A reason code is the runtime layer's word for its own decision. When that
     # decision leaves protection off, the report also has to say what is wrong
     # and what fixes it, which the code itself never does.
+    # A pause and a live resident coexist: the runtime arms the next pause on
+    # the same spawn it allows, so for as long as that deadline runs there can
+    # be a resident serving every hook. Only a pause with nothing serving
+    # leaves the host enforcing nothing, and only that is worth diagnosing.
     diagnosis = native_runtime_diagnosis(
         availability["reason_code"],
         available=availability["available"],
-        restart_paced=restart is not None and restart["paced"],
+        restart_paced=restart is not None and restart["paced"] and resident["live"] is not True,
     )
     if diagnosis is not None:
         section["diagnosis"] = diagnosis
