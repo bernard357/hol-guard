@@ -1,9 +1,10 @@
-import { j as jsxRuntimeExports, S as SectionLabel, H as HiMiniChevronRight, f as formatRelativeTime, h as harnessDisplayName, a as formatNumber, n as normalizeHarnessSlug, r as reactExports, b as HiMiniChevronUp, c as HiMiniChevronDown, A as ActionButton, d as HiMiniArrowPath, e as HiMiniCheck, g as HiMiniNoSymbol, i as HiMiniHandRaised, k as HiMiniArrowUpTray, l as HiMiniCube, m as HiMiniPencilSquare, o as HiMiniCommandLine, p as HiMiniMagnifyingGlass, q as HiMiniDocumentText, s as HiMiniCheckCircle, T as Tag, t as HiMiniArrowRight, u as isConnectableAppHarness, v as HiMiniLockClosed, w as getHeatmapLevel, E as EvidenceInsightsShareButton, G as GuardStatMetric, x as HomeInsightsMetrics, y as EvidenceActivityHeatmapMini, z as homeCommandActivityModel, B as createCommandActivityClient, C as fetchCommandActivityApi, D as queueErrorIsUnauthorizedSession, F as useReceiptAnalytics, I as updateSettings, J as turnProtectionOnUpdate, K as useProtectionPresentationState, L as protectionHealthFor, M as unavailableProtectionHealth, N as EmptyState, O as watchBannerModel, W as WatchProtectionBanner, P as EvidenceInsightsShareModal, Q as OperatorHealthCard, R as HiMiniShieldCheck, U as DeviceProofCard, V as guardActionDisposition, X as approvalLeftActionStopped, Y as guardActionActivityCopy, Z as HiMiniSparkles, _ as HiMiniXMark, $ as resolveCloudIntelCopy, a0 as HiMiniCloud, a1 as HiMiniQuestionMarkCircle, a2 as useFocusTrap, a3 as approvalProofRequiresPassword, a4 as HiMiniExclamationTriangle, a5 as HiMiniBolt, a6 as Badge, a7 as HiMiniMinusCircle } from "../guard-dashboard.js";
-import { H as HomeProtectionModule } from "./home-protection-module-D9o37jVp.js";
+import { j as jsxRuntimeExports, S as SectionLabel, H as HiMiniChevronRight, f as formatRelativeTime, h as harnessDisplayName, a as formatNumber, n as normalizeHarnessSlug, r as reactExports, b as HiMiniChevronUp, c as HiMiniChevronDown, A as ActionButton, d as HiMiniArrowPath, e as HiMiniCheck, g as HiMiniNoSymbol, i as HiMiniHandRaised, k as HiMiniArrowUpTray, l as HiMiniCube, m as HiMiniPencilSquare, o as HiMiniCommandLine, p as HiMiniMagnifyingGlass, q as HiMiniDocumentText, s as HiMiniCheckCircle, T as Tag, t as HiMiniArrowRight, u as isConnectableAppHarness, v as HiMiniLockClosed, w as getHeatmapLevel, E as EvidenceInsightsShareButton, G as GuardStatMetric, x as HomeInsightsMetrics, y as EvidenceActivityHeatmapMini, z as homeCommandActivityModel, B as createCommandActivityClient, C as fetchCommandActivityApi, D as useReceiptAnalytics, F as updateSettings, I as turnProtectionOnUpdate, J as useProtectionPresentationState, K as protectionHealthFor, L as unavailableProtectionHealth, R as RuntimeErrorState, M as watchBannerModel, W as WatchProtectionBanner, N as EvidenceInsightsShareModal, O as OperatorHealthCard, P as HiMiniShieldCheck, Q as DeviceProofCard, U as guardActionDisposition, V as approvalLeftActionStopped, X as guardActionActivityCopy, Y as HiMiniSparkles, Z as HiMiniXMark, _ as EmptyState, $ as resolveCloudIntelCopy, a0 as HiMiniCloud, a1 as HiMiniQuestionMarkCircle, a2 as useFocusTrap, a3 as approvalProofRequiresPassword, a4 as HiMiniExclamationTriangle, a5 as HiMiniBolt, a6 as Badge, a7 as HiMiniMinusCircle } from "../guard-dashboard.js";
+import { a8, a9 } from "../guard-dashboard.js";
+import { H as HomeProtectionModule } from "./home-protection-module-Gmcu_gwW.js";
 import { B as BrandHero, a as BrandHeroFacts, b as BrandHeroBadge, u as useReducedMotion, c as brandMarkSvg } from "./brand-hero-COty1p6U.js";
 import { A as ABOUT_LOCAL_SECTION_TITLE, a as ABOUT_LOCAL_SECTION_BODY } from "./about-content-Dr9zFg1V.js";
 import { S as SUPPORTED_APPS_FULL } from "./app-catalog-By01oDVd.js";
-import "./supply-chain-protection-stats-CpRYM989.js";
+import "./supply-chain-protection-stats-BM1-krLn.js";
 function redactQueueArtifactName(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -824,26 +825,6 @@ function HomeCommandActivityCard(props) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `mt-3 text-xs ${model.health ? "text-amber-700" : "text-slate-500"}`, children: model.health ?? "Evidence store reporting normally." })
   ] });
 }
-function buildDaemonErrorCopy() {
-  return {
-    title: "Guard is not responding",
-    body: "The local Guard service is not reachable. Retry the connection, or open Settings if you need to repair protection.",
-    primaryCta: "Retry",
-    secondaryCta: "Go to Settings"
-  };
-}
-function buildHomeRuntimeErrorCopy(message) {
-  if (queueErrorIsUnauthorizedSession(message)) {
-    return {
-      kind: "session",
-      title: "This window needs a signed session",
-      body: "Guard is still running on this device. Reconnect this window so the dashboard and local protection stay in sync.",
-      primaryCta: "Reconnect",
-      secondaryCta: "Open review queue"
-    };
-  }
-  return { kind: "daemon", ...buildDaemonErrorCopy() };
-}
 const safeLocalStorage = {
   getItem(key) {
     try {
@@ -1028,25 +1009,14 @@ function HomeWorkspace(props) {
     ] });
   }
   if (props.runtime.kind === "error") {
-    const errorCopy = buildHomeRuntimeErrorCopy(props.runtime.message);
-    const handlePrimary = () => {
-      if (errorCopy.kind === "session") {
-        void props.onReconnectSession?.();
-        return;
-      }
-      void props.onRefreshRuntime?.();
-    };
-    const handleSecondary = errorCopy.kind === "session" ? props.onOpenInbox : props.onOpenSettings;
     return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      EmptyState,
+      RuntimeErrorState,
       {
-        title: errorCopy.title,
-        body: errorCopy.body,
-        action: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-2 sm:flex-row", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { onClick: handlePrimary, children: errorCopy.primaryCta }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(ActionButton, { variant: "outline", onClick: handleSecondary, children: errorCopy.secondaryCta })
-        ] }),
-        tone: "teach"
+        message: props.runtime.message,
+        onReconnectSession: props.onReconnectSession,
+        onRefreshRuntime: props.onRefreshRuntime,
+        onOpenInbox: props.onOpenInbox,
+        onOpenSettings: props.onOpenSettings
       }
     );
   }
@@ -1724,10 +1694,10 @@ function CollapsibleCard(props) {
 export {
   HomeWorkspace,
   STREAK_MILESTONE_MESSAGES,
-  buildDaemonErrorCopy,
+  a8 as buildDaemonErrorCopy,
   buildDailyStory,
   buildEmptyStateCopy,
-  buildHomeRuntimeErrorCopy,
+  a9 as buildHomeRuntimeErrorCopy,
   buildRecentProtectionCopy,
   computeStreak,
   deriveHomeState,

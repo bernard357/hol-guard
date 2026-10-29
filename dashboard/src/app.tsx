@@ -36,6 +36,7 @@ import { selectNextAfterResolution, type QueueGroup } from "./queue-state";
 import { BulkBlockError, blockRequestsOnce, bulkBlockFailureMessage, bulkBlockSummary } from "./bulk-block-requests";
 import { useRouteFocus } from "./use-route-focus";
 import { commitDashboardLocation, useDashboardPathname } from "./dashboard-location";
+import { RuntimeGate } from "./runtime-error-state";
 
 const HOME_QUEUE_PREVIEW_LIMIT = 50;
 const HomeWorkspace = lazyWorkspace("home-dashboard", () => import("./home-dashboard").then((m) => ({ default: m.HomeWorkspace })));
@@ -1124,22 +1125,31 @@ export function App() {
         </Suspense>
       }
       supplyChainHubContent={
-        runtime.kind === "ready" ? (
-          <Suspense fallback={<LazyFallback />}>
-	            <SupplyChainHubWorkspace
-	              activeView={view}
-	              snapshot={runtime.snapshot}
-	              receipts={receipts.kind === "ready" ? receipts.items : []}
-	              policies={policies.kind === "ready" ? policies.items : []}
-	              approvalGate={approvalGate}
-	              onClearPolicy={handleClearPolicy}
-	              onOpenSettings={handleOpenSettings}
-	              onGoHome={handleGoHome}
-              onNavigate={navigate}
-              onRuntimeRefresh={refreshStateWithoutResult}
-            />
-          </Suspense>
-        ) : null
+        <RuntimeGate
+          runtime={runtime}
+          loading={<LazyFallback />}
+          onReconnectSession={handleReconnectSession}
+          onRefreshRuntime={async () => { await refreshStateAfterAction(); }}
+          onOpenInbox={handleOpenInbox}
+          onOpenSettings={handleOpenSettings}
+        >
+          {(snapshot) => (
+            <Suspense fallback={<LazyFallback />}>
+              <SupplyChainHubWorkspace
+                activeView={view}
+                snapshot={snapshot}
+                receipts={receipts.kind === "ready" ? receipts.items : []}
+                policies={policies.kind === "ready" ? policies.items : []}
+                approvalGate={approvalGate}
+                onClearPolicy={handleClearPolicy}
+                onOpenSettings={handleOpenSettings}
+                onGoHome={handleGoHome}
+                onNavigate={navigate}
+                onRuntimeRefresh={refreshStateWithoutResult}
+              />
+            </Suspense>
+          )}
+        </RuntimeGate>
       }
       policyContent={policyContent}
       releasesContent={
