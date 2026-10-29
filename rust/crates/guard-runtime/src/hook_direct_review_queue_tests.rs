@@ -789,3 +789,67 @@ fn a_paused_cursor_review_queues_whenever_its_link_renders() {
         std::fs::remove_dir_all(home).unwrap();
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_queued_cursor_review_reaches_the_agent_with_one_signed_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let tag = "cursor-one-signed-link";
+    let home = store_home(tag, SILENT_VECTORS);
+    // The bridge reads the same private token file the resident signed with.
+    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let token = home.join("daemon-auth-token");
+    std::fs::write(&token, "3f".repeat(32)).unwrap();
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let guard_home = home.to_string_lossy().into_owned();
+    let mut binding = ask_binding();
+    binding.review.approval_center_origin = Some("http://127.0.0.1:4781".to_owned());
+    let workspace = super::super::tests::workspace(tag);
+    let (_, _, _, exact) = super::super::tests::bound_query(&binding, &workspace);
+    let payload = json!({"tool_name": "Read", "tool_input": {"file_path": "/work/.npmrc"}});
+    let payload = payload.as_object().unwrap();
+    let fixture = super::super::tests::vectors();
+    let context = Context {
+        harness: "cursor",
+        payload,
+        recorded_payload: payload,
+        workspace: &workspace,
+        home_dir: fixture["home_dir"].as_str().unwrap(),
+        guard_home: &guard_home,
+        binding: &binding,
+        hint: None,
+    };
+    let result = json!({"decision": "deny", "policy_action": "review", "minimum_action": "review",
+                       "reason": "Review this read.", "reason_code": "native_review"});
+    let (response, _) = answer(
+        &context,
+        result.as_object().unwrap(),
+        None,
+        &exact,
+        &Ok("exact-token".to_owned()),
+    )
+    .expect("the resident pauses the review");
+    let raw_url = response["approval_url"].as_str().unwrap().to_owned();
+    assert!(response["reason"]
+        .as_str()
+        .unwrap()
+        .contains(&format!("{raw_url}#guard-token=")));
+    // The Cursor bridge renders the resident's answer for the agent.
+    let text = serde_json::to_string(&response).unwrap();
+    let (document, unmap) = crate::cursor_hook_bridge_response::python_document(&text).unwrap();
+    let (stdout, code) = crate::cursor_hook_bridge_response::rendered(
+        "beforeShellExecution",
+        document.as_map().unwrap(),
+        &home,
+        unmap,
+    )
+    .expect("the bridge answers the paused review");
+    assert_eq!(code, 0);
+    let rendered: Value = serde_json::from_str(&stdout).unwrap();
+    for field in ["user_message", "agent_message"] {
+        let message = rendered[field].as_str().unwrap();
+        assert_eq!(message.matches("#guard-token=").count(), 1, "{message}");
+        assert_eq!(message, response["reason"].as_str().unwrap());
+    }
+    std::fs::remove_dir_all(home).unwrap();
+}
