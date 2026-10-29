@@ -159,6 +159,11 @@ fn entered(home: &Path) -> Vec<String> {
              && git push -u origin review"
         ),
         format!("{ADD}; cd ../app-review && git commit --allow-empty -m 'Start review'"),
+        format!("{ADD}; cd ../app-review; git commit --allow-empty -m 'Start review'"),
+        format!(
+            "{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review'; \
+             git push -u origin review"
+        ),
         "git worktree add ../app-review -b review origin/main && cd ../app-review \
          && git push -u origin review"
             .to_owned(),
@@ -222,11 +227,8 @@ fn other_entries_and_steps_keep_their_review() {
         format!("{ADD} && cd ../app-review && git commit -am 'Build' && cd .. && ls"),
         format!("{ADD} || cd ../app-review && git commit --allow-empty -m 'Start review'"),
         format!("{ADD} && cd ../app-review && git log -1 | cat README.md"),
-        format!("{ADD}; cd ../app-review; git commit --allow-empty -m 'Start review'"),
-        format!(
-            "{ADD} && cd ../app-review && git commit --allow-empty -m 'Start review'; \
-             git push -u origin review"
-        ),
+        format!("{ADD} && cd ../app-review || git commit --allow-empty -m 'Start review'"),
+        format!("{ADD} && cd ../app-review && git commit -am 'Build'; ls"),
         "git worktree add -b review ../app-taken origin/main && cd ../app-taken \
          && git commit --allow-empty -m 'Start review'"
             .to_owned(),

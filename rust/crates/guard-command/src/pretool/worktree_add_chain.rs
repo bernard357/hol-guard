@@ -347,7 +347,7 @@ pub(crate) fn new_checkout_route(
 
 /// The `cd` segments that enter exactly the checkout an earlier
 /// `git worktree add` of the same command creates, when every command after
-/// them is `git` or `gh` and runs only if the one before it succeeded.
+/// them is `git` or `gh`.
 ///
 /// Entering the new checkout is what `git -C <path>` does for one step, so an
 /// extension Allow that covers the add and each Git or GitHub step after it
@@ -479,18 +479,19 @@ fn entered_checkout(
                     || (later.pipeline_index > 0
                         && super::chain_route::stdin_stage(later, context, execution_environment)))
         });
-        // A failed add leaves no checkout to enter, so the `cd` fails too.
-        // Only `&&` (and a pipe inside one step) stops what follows from
-        // running in the original checkout instead.
-        let stops_on_failure = (after + 1..model.segments.len()).all(|index| {
+        // After a failed add the `cd` fails too, and a step after `;` runs in
+        // the original checkout. That step is `git` or `gh` judged by its own
+        // permission there, with its reads probed there, so either directory
+        // runs only what the Allow covers. No proof here follows `||`.
+        let sequenced = (after + 1..model.segments.len()).all(|index| {
             super::separator_between(model, index - 1, index)
                 .as_deref()
                 .map(str::trim)
-                .is_some_and(|separator| matches!(separator, "&&" | "|"))
+                .is_some_and(|separator| matches!(separator, "&&" | "|" | ";"))
         });
         return (joined
             && rest_is_git
-            && stops_on_failure
+            && sequenced
             && super::chain_route::cd_target(next, context).as_ref() == Some(&destination))
         .then_some((add, after));
     }
