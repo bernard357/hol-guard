@@ -457,15 +457,6 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
     return "\n".join(lines)
 
 
-def run_safe_self_check(guard_home: Path) -> dict[str, object]:
-    """The non-destructive subset the daemon runs by itself: no hooks, no restarts."""
-
-    return {
-        "native_runtime": repair_native_runtime(guard_home, dry_run=False),
-        "onefile_leaks": repair_onefile_leaks(dry_run=False, guard_home=guard_home),
-    }
-
-
 __all__ = [
     "STEP_TITLES",
     "broken_hook_harnesses",
@@ -480,5 +471,4 @@ __all__ = [
     "repair_onefile_leaks",
     "repair_package_shims",
     "run_repair",
-    "run_safe_self_check",
 ]

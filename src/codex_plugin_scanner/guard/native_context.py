@@ -656,25 +656,6 @@ def native_context_digest(
 _UNBOUND_PREFIX = "guard-context-unbound:"
 
 
-def is_unbound_context_digest(value: object) -> bool:
-    """``True`` for a digest that names material nothing has bound.
-
-    The runtime emits these for a component it could not digest, and a few
-    Python paths emit one deliberately for material there is no resident
-    question for: the unbound approval-context sentinel, a configured
-    environment with nothing configured, and a shell context the caller
-    could not observe. A sentinel never parses as a token and never
-    authorizes reuse, so recognizing one is how a caller tells an unbound
-    component from a bound digest.
-
-    What no Python path does is hand back a *bound*-looking digest when the
-    resident is unreachable: `native_context_digest` either answers from the
-    resident or raises.
-    """
-
-    return isinstance(value, str) and value.startswith(_UNBOUND_PREFIX)
-
-
 def context_mcp_launch_environment(
     inherited: Mapping[str, str],
     configured: Mapping[str, str],
@@ -1050,7 +1031,6 @@ __all__ = [
     "context_runtime_launch_identity",
     "context_runtime_launch_identity_matches",
     "context_runtime_launch_identity_projection",
-    "is_unbound_context_digest",
     "native_context_digest",
     "reset_context_digest_budget",
     "reset_context_digest_home",

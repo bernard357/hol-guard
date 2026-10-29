@@ -31,9 +31,8 @@ def _unbound_context_digest(label: str, *, material: object) -> str:
 
     Builders degrade to this when the native digest authority is unreachable
     (``HOL_GUARD_NATIVE=off``, missing runtime, unprovisioned home).  The
-    ``guard-context-unbound:`` prefix is rejected by token parsing and by
-    ``is_unbound_context_digest`` call sites, so equality between two degraded
-    values can never mint approval reuse or an unchanged-context claim.
+    ``guard-context-unbound:`` prefix is rejected by token parsing, so
+    equality between two degraded values can never mint approval reuse or an unchanged-context claim.
     Determinism over the caller's canonical ``material`` maps identical
     degraded inputs to one sentinel, so restrictive stored rows (saved
     blocks) keyed by artifact hash stay reachable, while validation still
