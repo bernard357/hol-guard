@@ -358,3 +358,63 @@ fn a_relative_program_after_the_entry_keeps_its_review() {
         );
     }
 }
+
+/// `cd ~/<path>` enters the checkout a `~/<path>` add creates when the
+/// shell's HOME is the declared one. Quoted, or under another HOME, the `cd`
+/// names a different directory and keeps its review.
+#[test]
+fn a_home_relative_entry_runs_in_the_worktree_it_creates() {
+    let (_cleanup, home, repository) = repository("home-entry");
+    let controls = git_github("enabled", &[]);
+    let add = "git worktree add -b review ~/org/app-review origin/main";
+    let mut failures = Vec::new();
+    for harness in ["omp", "zcode", "claude-code", "codex"] {
+        for command in [
+            format!("{add} && cd ~/org/app-review && git commit --allow-empty -m 'Start review'"),
+            format!("{add} && cd ~/org/app-review && git status --short"),
+            format!(
+                "{add} && cd ~/org/app-review && git add -A && git commit -m 'Update copy' \
+                 && git push -u origin review"
+            ),
+            format!("{ADD} && cd ~/org/app-review && git status --short"),
+        ] {
+            let result = evaluate(&home, &repository, harness, &command, &controls);
+            if result.minimum_action != "allow" {
+                failures.push(format!(
+                    "{harness}: {command}: {} {}",
+                    result.minimum_action, result.reason_code
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    for command in [
+        format!("{add} && cd '~/org/app-review' && git status --short"),
+        format!("{add} && cd \"~/org/app-review\" && git status --short"),
+        format!("{add} && cd ~/org/app-other && git status --short"),
+        format!("{add} && cd ~ && git -C org/app-review status --short"),
+    ] {
+        let result = evaluate(&home, &repository, "omp", &command, &controls);
+        assert_ne!(
+            result.minimum_action, "allow",
+            "{command}: {}",
+            result.reason_code
+        );
+    }
+    let command = format!("{add} && cd ~/org/app-review && git status --short");
+    let result = fixture::evaluate_with_shell_home(
+        "omp",
+        "PreToolUse",
+        &json!({"tool_name":"bash", "tool_input":{"command":command}}),
+        Some(&controls),
+        None,
+        home.to_str(),
+        repository.to_str(),
+        false,
+    );
+    assert_ne!(
+        result.minimum_action, "allow",
+        "{command}: {}",
+        result.reason_code
+    );
+}
