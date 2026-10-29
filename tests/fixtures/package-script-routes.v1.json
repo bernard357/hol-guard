@@ -422,7 +422,7 @@
       },
       "command": "npm test",
       "entries": [],
-      "reason": null
+      "reason": "native_package_test_readonly_containment_required"
     },
     {
       "name": "watch",
