@@ -91,6 +91,18 @@ pub(super) fn proven_link(
     .map(|_| (written.join(name), target))
 }
 
+/// Records a proven link and its target. A second `ln` to the same path
+/// would follow the first link and write into the directory it points at, so
+/// it fails the proof.
+pub(super) fn record_link(links: &mut Vec<(PathBuf, PathBuf)>, link: (PathBuf, PathBuf)) -> bool {
+    let key = link.0.to_string_lossy().to_ascii_lowercase();
+    let fresh = !links
+        .iter()
+        .any(|(path, _)| path.to_string_lossy().to_ascii_lowercase() == key);
+    links.push(link);
+    fresh
+}
+
 /// `ls` whose operands below the new checkout all lie through a link an
 /// earlier `ln` of the chain proved, each rewritten to the same path below
 /// the link's target and screened as a listing there. Operands outside the
