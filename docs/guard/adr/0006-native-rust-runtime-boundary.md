@@ -14,7 +14,7 @@ The first authoritative migration surface is PostToolUse. PreToolUse, approvals,
 
 - Native failure, timeout, panic, version skew, malformed input, and missing runtime never weaken the Python decision.
 - No runtime binary is downloaded on install or first run.
-- Runtime discovery uses authenticated package metadata or an explicit test/shadow override, never PATH lookup.
+- Runtime discovery uses authenticated package metadata or an explicit developer/test override, never PATH lookup.
 - Raw hook output and secret samples are forbidden from native logs and scanner result objects.
 - Secure source reads are bounded, reject symlinked targets, validate file identity, and never mmap mutable user-controlled content.
 - Existing containment claims remain owned by Seatbelt, Bubblewrap, gVisor, OCI, Kubernetes RuntimeClass, Windows Job objects, and other already-reviewed providers. The Rust hook runtime does not create a new containment guarantee.

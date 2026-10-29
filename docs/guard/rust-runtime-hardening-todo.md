@@ -151,7 +151,7 @@ measured parity gate, not the detection itself.
 - [ ] NRH-T125 measure installed adapter-to-decision p50/p95/p99/max, throughput, CPU, RSS, threads, handles, FDs, sockets, processes, queue, and fallback — `warm-path-latency.yml` and `rust-runtime-performance.yml` measure part of this;
 - [ ] NRH-T126 enforce PR no-regression and documented-hardware absolute SLOs without weakening security;
 - [ ] NRH-T127 complete independent security review and resolve all unsafe/unexplained mismatches;
-- [x] NRH-T128 enable eligible PostToolUse `auto` by default only for verified bundled wheels, retaining explicit `off` and Python fallback;
+- [x] NRH-T128 enable eligible PostToolUse `auto` by default only for verified bundled wheels; `off` no longer disables anything and there is no Python semantic fallback, so a supported hook with no usable native runtime fails closed, as T129 records;
 - [x] NRH-T129 retired. It asked to keep PreToolUse allow authority disabled and retain the pure-Python rollback. PreToolUse is native-authoritative now. The pure-Python wheel stays installable on unsupported platforms, but it is a distribution fallback and not a semantic one: a supported hook entrypoint with no usable native runtime fails closed rather than reviewing in Python. And `off` is no longer a rollback of any kind: `native_runtime_values._resolve_native_mode` accepts it for an existing install, warns once and resolves to the product default, which is what T119, T128 and `tests/test_native_legacy_modes.py` pin.
 
 ## Final release gate
