@@ -32,6 +32,23 @@ pub(crate) const REASON_TEXT: &str = concat!(
     "private scratch $HOME.",
 );
 
+/// Containment the checks may need from the repository root. The sink's
+/// contained route peels `cd <checkout> &&` and asks again for the checks in
+/// the real checkout, so each of these profiles is chosen afresh there. Git
+/// never reaches them: `runs_git` keeps any Git step on review.
+const CONTAINED: [&str; 10] = [
+    crate::pretool::workspace_contained::REASON,
+    "native_bun_eval_readonly_containment_required",
+    "native_node_build_output_containment_required",
+    "native_node_eval_readonly_containment_required",
+    "native_node_test_readonly_containment_required",
+    "native_node_tool_readonly_containment_required",
+    "native_package_test_readonly_containment_required",
+    "native_pytest_readonly_containment_required",
+    "native_python_eval_readonly_containment_required",
+    "native_vitest_readonly_containment_required",
+];
+
 /// The parts of a split chain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Parts {
@@ -141,13 +158,9 @@ pub(crate) fn rejudge(
     else {
         return raw;
     };
-    let Some((checkout, chdir)) = planned(&parts.add, context) else {
+    let Some(checkout) = checkout(&parts.add, &workspace, context) else {
         return raw;
     };
-    // A `-C` that names another repository copies that one instead.
-    if chdir.is_some_and(|directory| Path::new(&directory) != workspace.as_path()) {
-        return raw;
-    }
     let judged = |part: &str| {
         let projected = super::super::payload_with_command(payload, &command, part);
         (projected != *payload).then(|| evaluate(&projected))
@@ -161,17 +174,20 @@ pub(crate) fn rejudge(
         return raw;
     }
     // Checks that pass on their own run directly once judged again; the rest
-    // must run contained as they would from the repository root.
+    // must run contained, in any profile, as they would from the repository
+    // root.
     let admitted = judged(&parts.checks).is_some_and(|checks| {
         allowed(&checks)
             || (checks.minimum_action == "sandbox-required"
-                && checks.reason_code == crate::pretool::workspace_contained::REASON
+                && CONTAINED.contains(&checks.reason_code.as_str())
                 && checks.reason != super::REASON_TEXT
                 && checks.reason != REASON_TEXT
                 // The sandbox serves a checkout only inside home or a
                 // temporary directory; elsewhere the add would run and the
                 // checks would then be refused.
-                && inside_home_or_temporary(&checkout, context))
+                && checkout
+                    .as_deref()
+                    .is_some_and(|checkout| inside_home_or_temporary(checkout, context)))
     });
     if !admitted {
         return raw;
@@ -191,14 +207,21 @@ fn request(text: &str) -> CommandModelRequestV1 {
     }
 }
 
-/// The canonical checkout the add creates and the canonical directory its
-/// `-C` enters.
-fn planned(add: &str, context: PathContext<'_>) -> Option<(PathBuf, Option<String>)> {
+/// The canonical checkout the add creates, `Some(None)` when the proof cannot
+/// plan it, or `None` when the add may copy another repository: a `-C` that
+/// names another directory, or one the proof cannot resolve.
+fn checkout(add: &str, workspace: &Path, context: PathContext<'_>) -> Option<Option<PathBuf>> {
     let model = parse_command(&request(add)).ok()?;
     let [segment] = model.segments.as_slice() else {
         return None;
     };
-    crate::pretool::worktree_add::planned(segment, context)
+    let (_, moved) = crate::pretool::worktree_add::destination(segment)?;
+    match crate::pretool::worktree_add::planned(segment, context) {
+        Some((checkout, chdir)) => chdir
+            .is_none_or(|directory| Path::new(&directory) == workspace)
+            .then_some(Some(checkout)),
+        None => (!moved).then_some(None),
+    }
 }
 
 /// Whether the checkout's parent lies inside home or a temporary directory.

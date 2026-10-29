@@ -111,6 +111,10 @@ fn checks_in_a_proven_new_worktree_run_contained() {
         format!("git worktree add -b build ../../app-build main && cd ../../app-build && {CHECKS}"),
         // Checks that pass on their own run directly once judged again.
         format!("git worktree add --detach {checkout} HEAD && cd {checkout} && ls src"),
+        // Checks that read the checkout run in a read-only sandbox profile.
+        format!(
+            "git worktree add --detach {checkout} HEAD && cd {checkout} && node -e \"console.log(require('./src/index.js'))\""
+        ),
     ] {
         let result = evaluate(&home, &primary, &command, &defaults);
         assert_eq!(
