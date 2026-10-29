@@ -57,7 +57,13 @@ pub fn shell_command(data: &[u8]) {
         _ => "cmd",
     };
     let _ = guard_command::command_model::parse_shell_command(
-        text, None, None, dialect, "shell_string", "fuzz", true,
+        text,
+        None,
+        None,
+        dialect,
+        "shell_string",
+        "fuzz",
+        true,
     );
 }
 

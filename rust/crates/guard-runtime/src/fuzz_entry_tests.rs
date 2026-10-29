@@ -15,7 +15,10 @@ fn fuzz_root() -> PathBuf {
 fn seeds(target: &str) -> Vec<(PathBuf, Vec<u8>)> {
     let directory = fuzz_root().join("corpus").join(target);
     let entries = std::fs::read_dir(&directory).unwrap_or_else(|error| {
-        panic!("corpus directory {} is unreadable: {error}", directory.display())
+        panic!(
+            "corpus directory {} is unreadable: {error}",
+            directory.display()
+        )
     });
     let mut seeds = Vec::new();
     for entry in entries {
@@ -33,7 +36,11 @@ fn seeds(target: &str) -> Vec<(PathBuf, Vec<u8>)> {
 fn every_entry_point_has_a_fuzz_target_and_a_corpus() {
     for (name, _) in super::FUZZ_ENTRY_POINTS {
         let target = fuzz_root().join("fuzz_targets").join(format!("{name}.rs"));
-        assert!(target.is_file(), "{name} has no fuzz target at {}", target.display());
+        assert!(
+            target.is_file(),
+            "{name} has no fuzz target at {}",
+            target.display()
+        );
         assert!(!seeds(name).is_empty(), "{name} has no committed seeds");
     }
 }
@@ -44,7 +51,11 @@ fn committed_seeds_do_not_crash_their_entry_point() {
         let entry = *entry;
         for (path, bytes) in seeds(name) {
             let outcome = std::panic::catch_unwind(|| entry(&bytes));
-            assert!(outcome.is_ok(), "{name} panicked on seed {}", path.display());
+            assert!(
+                outcome.is_ok(),
+                "{name} panicked on seed {}",
+                path.display()
+            );
         }
     }
 }
