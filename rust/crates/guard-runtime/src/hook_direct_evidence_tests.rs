@@ -159,15 +159,32 @@ fn a_page_passes_over_plain_relay_records_and_the_ack_settles_them() {
         peeked.records,
         [json!({ "index": 0 }), json!({ "index": 2 })]
     );
-    assert_eq!(peeked.remaining, 1);
+    assert_eq!(peeked.remaining, 0);
     assert!(peeked.settled.is_empty());
     let page = queue.acknowledge_and_peek(peeked.through, Some(&queue.epoch), 3);
-    assert_eq!(page.settled, [plain.clone()]);
+    assert_eq!(page.settled, [plain.clone(), plain]);
     assert!(page.records.is_empty());
     assert_eq!(page.remaining, 0);
-    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 3);
-    assert_eq!(page.settled, [plain]);
     assert_eq!(page.through, None);
+}
+
+#[test]
+fn plain_relay_records_never_leave_an_empty_page_with_more_queued() {
+    let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    for _ in 0..3 {
+        assert!(queue.offer(plain.clone()));
+    }
+    for index in 0..3 {
+        assert!(queue.offer(json!({ "index": index })));
+    }
+    let page = queue.acknowledge_and_peek(None, Some(&queue.epoch), 2);
+    assert_eq!(page.records, [json!({ "index": 0 }), json!({ "index": 1 })]);
+    assert_eq!(page.remaining, 1);
+    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 2);
+    assert_eq!(page.settled, [plain.clone(), plain.clone(), plain]);
+    assert_eq!(page.records, [json!({ "index": 2 })]);
+    assert_eq!(page.remaining, 0);
 }
 
 #[test]

@@ -206,12 +206,15 @@ impl DirectEvidenceQueue {
                 }
             }
         }
+        // Only records the daemon receives count toward its page, so a run of
+        // the resident's own records never yields an empty page with more
+        // queued behind it: the queue's own bound limits the scan.
         let mut taken = Vec::new();
         let mut scanned = 0;
         let mut page_bytes = 0;
         let mut through = None;
         for next in &state.records {
-            if scanned >= max_records {
+            if taken.len() >= max_records {
                 break;
             }
             if !next.native {
