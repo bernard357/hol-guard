@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -34,6 +35,17 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """`tmp_path/org/app` on `main`, one commit deep, under a private HOME."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in (
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_WORK_TREE",
+        "XDG_CONFIG_HOME",
+    ):
+        monkeypatch.delenv(name, raising=False)
     primary = tmp_path / "org" / "app"
     primary.mkdir(parents=True)
     (primary / "index.js").write_text("console.log('app')\n", encoding="utf-8")
@@ -168,3 +180,37 @@ def test_a_rest_that_is_refused_says_the_worktree_exists(monkeypatch: pytest.Mon
     assert caught.value.reason_code == "contained_run_authorization_failed"
     assert "worktree was created" in str(caught.value)
     assert ENTERED in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("entered", "expected"),
+    [
+        ("cd ../app-fix && npm test", "org/app-fix"),
+        ("cd ~/app-fix && npm test", "app-fix"),
+        ("cd '../app fix' && npm test", "org/app fix"),
+        ("cd ../app-fix; npm test", None),
+        ("cd ~other/app-fix && npm test", None),
+        ("cd '~/app-fix' && npm test", None),
+        ("npm test && cd ../app-fix && ls", None),
+        ("cd '../app-fix && npm test", None),
+    ],
+)
+def test_the_checkout_is_read_from_the_cd(tmp_path: Path, entered: str, expected: str | None) -> None:
+    workspace = tmp_path / "org" / "app"
+    checkout = contained_worktree_add.checkout_of(entered, workspace=workspace, home=tmp_path)
+    assert checkout == (None if expected is None else tmp_path / expected)
+
+
+def test_host_steps_skip_the_new_checkout_on_path_and_find_git_from_the_checkout(
+    monkeypatch: pytest.MonkeyPatch, repository: Path
+) -> None:
+    checkout = repository.parent / "app-fix"
+    planted = checkout / "bin"
+    monkeypatch.setenv("PATH", f"{planted}{os.pathsep}{os.environ['PATH']}")
+    # A repository location the agent inherited must not redirect Git.
+    monkeypatch.setenv("GIT_DIR", str(repository.parent / "elsewhere.git"))
+    allowed = {"decision": "allow", "policy_action": "allow"}
+    check = 'git rev-parse --is-inside-work-tree >/dev/null && case ":$PATH:" in *app-fix*) exit 3;; esac'
+    exit_code, _, rested = run_chain(monkeypatch, repository, entered=f"cd ../app-fix && {check}", rest_verdict=allowed)
+    assert exit_code == 0
+    assert rested == []

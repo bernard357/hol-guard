@@ -13,6 +13,8 @@ in the checkout runs unless that judgement holds.
 
 from __future__ import annotations
 
+import os
+import shlex
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -48,6 +50,29 @@ def worktree_add_parts(command: str, *, workspace: Path, home: Path | None) -> t
     if not isinstance(add, str) or not isinstance(entered, str) or not add or not entered:
         return None
     return add, entered
+
+
+def checkout_of(entered: str, *, workspace: Path, home: Path | None) -> Path | None:
+    """The directory `cd <checkout> && <checks>` enters, resolved from `workspace`."""
+    lexer = shlex.shlex(entered, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    if len(tokens) < 4 or tokens[0] != "cd" or tokens[2] != "&&" or not tokens[1]:
+        return None
+    target = tokens[1]
+    # The shell expands only an unquoted `~`.
+    if target.startswith("~") and not entered[2:].lstrip().startswith("~"):
+        return None
+    if target == "~" or target.startswith("~/"):
+        if home is None:
+            return None
+        target = str(home) + target[1:]
+    elif target.startswith("~"):
+        return None
+    return Path(os.path.normpath(workspace / target))
 
 
 def _same_chain(receipt: object, first: Mapping[str, object]) -> bool:
@@ -94,6 +119,9 @@ def run_worktree_add(
     if parts is None:
         raise _reject("Guard could not split this command again; nothing ran.")
     add, entered = parts
+    checkout = checkout_of(entered, workspace=workspace, home=home_dir)
+    if checkout is None:
+        raise _reject("Guard could not read the new checkout from this command; nothing ran.")
     # The chain must still carry the receipt it was routed here with.
     if not _same_chain(settled_authority(authorize, payload), first_receipt):
         raise _reject("The command evidence changed before launch.")
@@ -106,6 +134,7 @@ def run_worktree_add(
         timeout_seconds=timeout_seconds,
         merge_stderr=merge_stderr,
         label="The `git worktree add`",
+        excluded=(checkout,),
     )
     if exit_code != 0:
         return exit_code
@@ -118,6 +147,7 @@ def run_worktree_add(
             timeout_seconds=timeout_seconds,
             merge_stderr=merge_stderr,
             label="The rest of the command",
+            excluded=(checkout,),
         )
     # Imported here: the contained route imports the sink that calls this.
     from .contained_test_hook import run_authorized_contained_test

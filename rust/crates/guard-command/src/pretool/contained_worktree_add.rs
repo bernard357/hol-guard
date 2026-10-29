@@ -18,6 +18,7 @@ use crate::pretool::PathContext;
 use crate::{parse_command, CommandModelRequestV1};
 use guard_contracts::PreToolResultV1;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 /// The reason this split carries. The sink reads it from the receipt to plan
 /// the same split, so it must stay an exact constant.
@@ -48,13 +49,7 @@ pub(crate) struct Parts {
 /// same directory from the same shell. Classification and the sink both split
 /// with this.
 pub(crate) fn split(text: &str) -> Option<Parts> {
-    let model = parse_command(&CommandModelRequestV1 {
-        command: text.to_owned(),
-        dialect: "posix".into(),
-        transport: "shell_string".into(),
-        extraction_provenance: "pre-tool-generic".into(),
-    })
-    .ok()?;
+    let model = parse_command(&request(text)).ok()?;
     if model.confidence != "exact"
         || model.path_overridden
         || !model.wrapper_chain.is_empty()
@@ -142,7 +137,15 @@ pub(crate) fn rejudge(
     };
     // The checks are judged where the command was issued, which stands in for
     // the new checkout only at the root of the repository it copies.
-    if !admitted_workspace(context).is_some_and(|workspace| workspace.join(".git").exists()) {
+    let Some(workspace) = admitted_workspace(context).filter(|root| root.join(".git").exists())
+    else {
+        return raw;
+    };
+    let Some((checkout, chdir)) = planned(&parts.add, context) else {
+        return raw;
+    };
+    // A `-C` that names another repository copies that one instead.
+    if chdir.is_some_and(|directory| Path::new(&directory) != workspace.as_path()) {
         return raw;
     }
     let judged = |part: &str| {
@@ -164,7 +167,11 @@ pub(crate) fn rejudge(
             || (checks.minimum_action == "sandbox-required"
                 && checks.reason_code == crate::pretool::workspace_contained::REASON
                 && checks.reason != super::REASON_TEXT
-                && checks.reason != REASON_TEXT)
+                && checks.reason != REASON_TEXT
+                // The sandbox serves a checkout only inside home or a
+                // temporary directory; elsewhere the add would run and the
+                // checks would then be refused.
+                && inside_home_or_temporary(&checkout, context))
     });
     if !admitted {
         return raw;
@@ -175,16 +182,40 @@ pub(crate) fn rejudge(
     result
 }
 
-/// Whether any step of `checks` runs Git, or the checks do not parse exactly.
-fn runs_git(checks: &str) -> bool {
-    parse_command(&CommandModelRequestV1 {
-        command: checks.to_owned(),
+fn request(text: &str) -> CommandModelRequestV1 {
+    CommandModelRequestV1 {
+        command: text.to_owned(),
         dialect: "posix".into(),
         transport: "shell_string".into(),
         extraction_provenance: "pre-tool-generic".into(),
-    })
-    .ok()
-    .is_none_or(|model| {
+    }
+}
+
+/// The canonical checkout the add creates and the canonical directory its
+/// `-C` enters.
+fn planned(add: &str, context: PathContext<'_>) -> Option<(PathBuf, Option<String>)> {
+    let model = parse_command(&request(add)).ok()?;
+    let [segment] = model.segments.as_slice() else {
+        return None;
+    };
+    crate::pretool::worktree_add::planned(segment, context)
+}
+
+/// Whether the checkout's parent lies inside home or a temporary directory.
+fn inside_home_or_temporary(checkout: &Path, context: PathContext<'_>) -> bool {
+    let Some(parent) = checkout.parent() else {
+        return false;
+    };
+    context
+        .home_dir
+        .and_then(|home| std::fs::canonicalize(home).ok())
+        .is_some_and(|home| parent.starts_with(home))
+        || crate::pretool::worktree_add::fresh_temporary_parent(parent, context)
+}
+
+/// Whether any step of `checks` runs Git, or the checks do not parse exactly.
+fn runs_git(checks: &str) -> bool {
+    parse_command(&request(checks)).ok().is_none_or(|model| {
         model.confidence != "exact"
             || model.segments.iter().any(|segment| {
                 segment

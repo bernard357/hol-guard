@@ -369,6 +369,15 @@ fn implied_branch(destination: &str) -> bool {
         .is_some_and(valid_branch_name)
 }
 
+/// The canonical checkout a `git worktree add` segment creates and the
+/// canonical directory its `-C` enters, as the proof plans them.
+pub(in crate::pretool) fn planned(
+    segment: &CommandSegmentV1,
+    context: super::PathContext<'_>,
+) -> Option<(PathBuf, Option<String>)> {
+    planned_checkout(segment, context).map(|(_, checkout, chdir)| (checkout, chdir))
+}
+
 /// The checkout a `git worktree add` segment creates, as the proof reads it,
 /// and whether a `-C` moves where a relative checkout lands.
 pub(in crate::pretool) fn destination(segment: &CommandSegmentV1) -> Option<(&str, bool)> {

@@ -1,4 +1,6 @@
-use super::{runs_git, split};
+use super::{inside_home_or_temporary, runs_git, split};
+use crate::pretool::PathContext;
+use std::path::Path;
 
 fn parts(text: &str) -> Option<(String, String, String)> {
     split(text).map(|parts| (parts.add, parts.entered, parts.checks))
@@ -102,4 +104,20 @@ fn git_steps_or_unparsed_checks_count_as_git() {
     for checks in ["bun run build", "cargo test && uv run pytest -q", "ls src"] {
         assert!(!runs_git(checks), "{checks}");
     }
+}
+
+#[test]
+fn only_checkouts_in_home_or_a_temporary_directory_are_served() {
+    let home = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let home_text = home.to_str().unwrap();
+    let context = PathContext {
+        home_dir: Some(home_text),
+        ..PathContext::default()
+    };
+    assert!(inside_home_or_temporary(&home.join("app-build"), context));
+    assert!(!inside_home_or_temporary(
+        Path::new("/opt/app-build"),
+        context
+    ));
+    assert!(!inside_home_or_temporary(Path::new("/"), context));
 }

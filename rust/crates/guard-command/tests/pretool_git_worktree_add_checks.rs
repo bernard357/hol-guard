@@ -136,26 +136,37 @@ fn checks_in_a_new_worktree_follow_the_git_worktree_control() {
     let worktree = "command.git.permission.worktree";
     let result = evaluate(&home, &primary, &command, &controls(&[]));
     assert!(!result.reason.contains(SPLIT), "{}", result.reason);
-    let allowed = evaluate(
-        &home,
-        &primary,
-        &command,
-        &controls(&[(worktree, "enabled")]),
-    );
     let lone = evaluate(
         &home,
         &primary,
         "git worktree add --detach /opt/app-build HEAD",
         &controls(&[(worktree, "enabled")]),
     );
-    // The Allow reaches the chain exactly as far as it reaches the add alone.
+    // The Allow reaches the chain exactly as far as it reaches the add alone
+    // when the checks pass on their own and so run directly.
+    let direct = evaluate(
+        &home,
+        &primary,
+        "git worktree add --detach /opt/app-build HEAD && cd /opt/app-build && ls src",
+        &controls(&[(worktree, "enabled")]),
+    );
     assert_eq!(
-        allowed.reason.contains(SPLIT),
+        direct.reason.contains(SPLIT),
         lone.minimum_action == "allow",
         "{} / {}",
-        allowed.reason,
+        direct.reason,
         lone.reason
     );
+    // The sandbox serves no checkout outside home and the temporary
+    // directories, so checks that must run contained keep the chain waiting
+    // rather than leave a checkout behind that nothing then builds.
+    let contained = evaluate(
+        &home,
+        &primary,
+        &command,
+        &controls(&[(worktree, "enabled")]),
+    );
+    assert!(!contained.reason.contains(SPLIT), "{}", contained.reason);
     let checkout = home.join("app-build");
     let checkout = checkout.display();
     // The Allow is evidence about the add alone, so it never blocks the split.
@@ -178,6 +189,24 @@ fn a_part_that_would_wait_keeps_the_chain_waiting() {
     let (_cleanup, home, primary) = repository("waits");
     let checkout = home.join("app-build");
     let checkout = checkout.display();
+    let other = home.join("org/other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&home, &other, &["init", "--quiet", "-b", "main"]);
+    git(
+        &home,
+        &other,
+        &[
+            "-c",
+            "user.name=Guard Fixture",
+            "-c",
+            "user.email=guard-fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+    );
     let defaults = controls(&[]);
     for (command, cwd) in [
         // Checks that would not run contained on their own.
@@ -198,6 +227,11 @@ fn a_part_that_would_wait_keeps_the_chain_waiting() {
         (
             format!("git worktree add --detach {checkout} HEAD && cd {checkout} && {CHECKS}"),
             primary.join("src"),
+        ),
+        // A `-C` copies another repository, which the root does not stand in for.
+        (
+            format!("git -C {} worktree add --detach {checkout} HEAD && cd {checkout} && {CHECKS}", other.display()),
+            primary.clone(),
         ),
         // The `cd` goes somewhere other than the new checkout.
         (
