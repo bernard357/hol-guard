@@ -3,7 +3,7 @@
   "id": "mcp.duckdb-vectors",
   "version": "1.0.0",
   "name": "DuckDB Vectors MCP server",
-  "description": "Serves hybrid semantic + exact-token search over a local DuckDB index as two read-only tools: search returns ranked chunks, report introspects the index. No external vector service, no network at query time. Off until you turn it on.",
+  "description": "Serves hybrid semantic + exact-token search over a local DuckDB index as two tools: search returns ranked chunks (text and metadata), report introspects the index. Opening the store connects writable and ensures its schema, so a call can create the database file and its indexes. Embedding is local by default; a configured backend (for example Bedrock) sends the query text to that provider. External, opt-in, off until you turn it on.",
   "trustClass": "external",
   "activation": "opt-in",
   "publisher": {
@@ -22,24 +22,29 @@
     "package": "duckdb-vectors"
   },
   "riskClasses": [
-    "local-file-read"
+    "local-file-read",
+    "local-file-write",
+    "external-network-read"
   ],
   "tools": [
     {
       "name": "search",
-      "state": "allow"
+      "state": "review"
     },
     {
       "name": "report",
-      "state": "allow"
+      "state": "review"
     }
   ],
   "referenceUrls": [
     "https://github.com/bernard357/duckdb-vectors",
     "https://github.com/bernard357/duckdb-vectors/blob/main/src/duckdb_vectors/mcp_server.py",
+    "https://github.com/bernard357/duckdb-vectors/blob/main/src/duckdb_vectors/store.py",
     "https://pypi.org/project/duckdb-vectors/"
   ],
   "saferAlternatives": [
-    "Both tools only read the local index; report exposes the indexed source paths (not contents), so point the server at a database whose file list is safe to disclose to the agent."
+    "Both tools open the store writable and ensure its schema, so a call can create the database file (search and report are not guaranteed read-only); point the server at a pre-built index whose path is safe to create or touch.",
+    "search returns the indexed chunk text and metadata (not just match IDs) and report returns the database path and the indexed source paths, so enable only over a corpus whose contents and file layout are safe to disclose to the agent and model.",
+    "Embedding is local and offline with the default backend; keep the index on the default (or another local) embedder, because the opt-in Bedrock backend sends each search query's text to AWS."
   ]
 }
