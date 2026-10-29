@@ -4912,13 +4912,13 @@ function useLocalCliCatalog() {
     loadGeneration.current = generation;
     try {
       const next = await fetchLocalCliList();
-      if (loadGeneration.current !== generation) return false;
+      if (loadGeneration.current !== generation) return true;
       setData(next);
       setError(null);
       if (!preserveDiscoveryNotice) setDiscoveryNotice(null);
       return true;
     } catch (caught) {
-      if (loadGeneration.current !== generation) return false;
+      if (loadGeneration.current !== generation) return true;
       setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
       return false;
     }

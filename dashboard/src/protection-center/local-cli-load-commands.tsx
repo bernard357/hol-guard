@@ -62,7 +62,7 @@ export function enteredToolPath(raw: string): string {
 export function LocalCliLoadCommands(props: {
   item: LocalCliItem;
   disabled: boolean;
-  /** Reloads the listing; resolves true only when fresh data was applied. */
+  /** Reloads the listing; resolves false when the reload failed. */
   onLoaded: () => Promise<boolean>;
 }) {
   const { item, onLoaded } = props;

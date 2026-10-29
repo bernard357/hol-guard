@@ -48,20 +48,21 @@ export function useLocalCliCatalog() {
   const [catalogReady, setCatalogReady] = useState(false);
   const loadGeneration = useRef(0);
   const publicationPoll = useRef({ revision: -1, attempts: 0 });
-  // Resolves true only when this call applied a fresh listing, so a caller
-  // never describes the listing it had before a failed or superseded fetch.
+  // Resolves false only when this call's fetch failed, so a caller never
+  // describes the listing it had before. A newer load started after this one,
+  // so the listing it applies is at least as fresh and counts as success.
   const load = useCallback(async (preserveDiscoveryNotice = false): Promise<boolean> => {
     const generation = loadGeneration.current + 1;
     loadGeneration.current = generation;
     try {
       const next = await fetchLocalCliList();
-      if (loadGeneration.current !== generation) return false;
+      if (loadGeneration.current !== generation) return true;
       setData(next);
       setError(null);
       if (!preserveDiscoveryNotice) setDiscoveryNotice(null);
       return true;
     } catch (caught) {
-      if (loadGeneration.current !== generation) return false;
+      if (loadGeneration.current !== generation) return true;
       setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
       return false;
     }
