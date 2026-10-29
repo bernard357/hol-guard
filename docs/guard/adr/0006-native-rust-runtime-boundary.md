@@ -21,10 +21,16 @@ The first authoritative migration surface is PostToolUse. PreToolUse, approvals,
 
 ## Rollout
 
-`HOL_GUARD_NATIVE=off|shadow|auto|force` controls the backend. Eligible hooks
-default to `auto`, which accepts only the verified bundled runtime with
-protocol and exact package-version compatibility. Native unavailability and
-explicit `off` fail closed; `off` is not a Python rollback. `shadow` may
-compare against the Python reference only on an explicitly marked
-non-production diagnostic surface, and `force` remains a developer/test mode.
-See ADR 0010 for the release-gate decision.
+`HOL_GUARD_NATIVE=auto|force` controls the backend. Eligible hooks default to
+`auto`, which accepts only the verified bundled runtime with protocol and exact
+package-version compatibility. Native unavailability fails closed. `force`
+remains a developer/test mode.
+
+The `off` and `shadow` values this ADR first described are retired. They stay
+accepted so an existing install keeps starting, but they select nothing: each
+resolves to the product default and logs `native_mode_legacy_value_ignored`
+once. Neither a Python rollback nor a local disablement exists, because both
+would reinstate the Python authority this boundary removed. Diagnostic
+comparison against the Python reference is selected by
+`HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface. See ADR
+0010 for the release-gate decision.

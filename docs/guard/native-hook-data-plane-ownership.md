@@ -91,14 +91,20 @@ or encoding-invalid input is not eligible for an allow result.
 The resident worker has no production import or lazy construction path for the
 Python semantic evaluator, content scanner, or decision cache. Supported
 `PreToolUse` and `PostToolUse` requests enter the Rust edge in `auto` and
-`force`; native failure is fail-closed. `HOL_GUARD_NATIVE=off` is an explicit
-fail-safe disablement, not permission to restore Python authority. `shadow`
-comparison is permitted only when `HOL_GUARD_NATIVE_DIAGNOSTIC=1` is present
-on a declared non-production surface.
+`force`; native failure is fail-closed. `HOL_GUARD_NATIVE=off` and
+`HOL_GUARD_NATIVE=shadow` are retired values: both resolve to the product
+default and warn once, so neither disables native authority nor restores the
+Python one. Diagnostic comparison is permitted only when
+`HOL_GUARD_NATIVE_DIAGNOSTIC=1` is present on a declared non-production
+surface.
 
-`HOL_GUARD_PYTHON_ORACLE=1` plus the test marker `HOL_GUARD_TEST_MODE=1` is the
-only supported semantic oracle boundary. Absent, invalid, or inherited values
-never select it. The AST/call-graph gate
+`HOL_GUARD_PYTHON_ORACLE` is retired. It is listed under
+`dependency_delta.removed_runtime_flags` in
+`docs/guard/contracts/python-capability-ownership.v1.json`, whose
+`rollback_boundary` records `retained_source: false` and no packaged Python
+oracle fallback, and `scripts/ci/python_runtime_retirement.py` reddens CI if a
+source file reads it again. There is no in-process semantic oracle boundary
+left to select. The AST/call-graph gate
 `scripts/ci/python_hook_semantic_callgraph_gate.py` rejects semantic evaluator
 imports and calls reachable from production hook entrypoints; the
 always-selected ownership workflow runs this gate.

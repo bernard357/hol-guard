@@ -127,7 +127,7 @@ measured parity gate, not the detection itself.
 - [ ] NRH-T104 add support-bundle redaction and privacy tests;
 - [ ] NRH-T105 add plain-language pause copy and exact approve-once/target/pattern/contained/narrow/dry-run/edit/cancel options;
 - [ ] NRH-T106 keep healthy safe operations silent and approval scope consistent across surfaces;
-- [ ] NRH-T107 add local and managed native kill switches plus rollback playbook;
+- [ ] NRH-T107 add local and managed native kill switches plus rollback playbook — nothing of this exists today and the shape of it is a product decision, not an implementation detail: a kill switch that re-enables a Python evaluator is forbidden by this document's own invariant, so the only switch that could be built disables supported review altogether. The retired `off` value is not that switch;
 - [x] NRH-T108 generate static import/call graph and runtime import coverage for migration candidates;
 - [ ] NRH-T109 delete dead duplicate Python implementations plus their tests, imports, dependencies, package entries, flags, and shims — the selector T112 names is gone, and the wave continues on `main`: `python-capability-ownership.v1.json` now records 122 retired modules and 34 retired test paths with no deletion candidate left outstanding, the dead grant containment route took `daemon/hook_contained_grant.py` with it, and retiring the unused sensitive file read and write request clients removed most of `runtime/secret_file_request_services`. What remains is the replaced source T113 and T114 name;
 - [x] NRH-T110 move reusable cases to language-neutral fixtures and add package-content/import-removal tests;
@@ -138,7 +138,7 @@ measured parity gate, not the detection itself.
 - [ ] NRH-T115 remove dependencies and build/package metadata used only by deleted implementations;
 - [x] NRH-T116 add installed-wheel tests proving removed private modules are absent and intentionally non-importable;
 - [ ] NRH-T117 audit dynamic imports, entry points, plugin references, and string-based module loading before every deletion;
-- [ ] NRH-T118 treat every unreachable or untested fallback as dead code rather than dormant rollback;
+- [ ] NRH-T118 treat every unreachable or untested fallback as dead code rather than dormant rollback — the native-mode half is done: `HOL_GUARD_NATIVE=off` and `=shadow` are accepted, warned about once and ignored, `tests/test_native_legacy_modes.py` pins that, and the PRD, ADR 0006, ADR 0010 and `native-hook-data-plane-ownership.md` no longer describe either one as a disablement or a diagnostic mode. The vector recorders under `rust/crates/guard-runtime/testdata/` ask for `auto` and drop `HOL_GUARD_NATIVE_BINARY`, which is what actually kept native unavailable, instead of setting a value that does nothing. Fallbacks elsewhere in the tree are open;
 - [x] NRH-T119 prove dead-code package exclusion preserves the named pure-Python unsupported-platform and rollback configurations.
 
 ## PR 7: Supply chain, fuzz, chaos, soak, and opt-in gate
@@ -152,7 +152,7 @@ measured parity gate, not the detection itself.
 - [ ] NRH-T126 enforce PR no-regression and documented-hardware absolute SLOs without weakening security;
 - [ ] NRH-T127 complete independent security review and resolve all unsafe/unexplained mismatches;
 - [x] NRH-T128 enable eligible PostToolUse `auto` by default only for verified bundled wheels, retaining explicit `off` and Python fallback;
-- [x] NRH-T129 retired. It asked to keep PreToolUse allow authority disabled and retain the pure-Python rollback. PreToolUse is native-authoritative now; the pure-Python compatibility wheel stays for unsupported platforms and `off` remains the explicit rollback, which is what T119 and T128 pin.
+- [x] NRH-T129 retired. It asked to keep PreToolUse allow authority disabled and retain the pure-Python rollback. PreToolUse is native-authoritative now; the pure-Python compatibility wheel stays for unsupported platforms, and `off` is no longer a rollback of any kind: `native_runtime_values._resolve_native_mode` accepts it for an existing install, warns once and resolves to the product default, which is what T119, T128 and `tests/test_native_legacy_modes.py` pin.
 
 ## Final release gate
 
