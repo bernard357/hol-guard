@@ -21,7 +21,7 @@ pub(crate) const FACTS_KEY: &str = "codex_live_wait_facts";
 /// Set in place of the link when the facts name no live, bounded wait.
 pub(crate) const NOT_LIVE_KEY: &str = "codex_live_wait_not_live";
 
-/// The `add_approval_request` arguments with `codex_live_wait_facts` turned
+/// The queue write's arguments with `codex_live_wait_facts` turned
 /// into the `codex_live_wait` link and the request's `continuation_snapshot`.
 ///
 /// A bridge that is not a live process with a bounded budget is dropped, its
@@ -34,7 +34,10 @@ pub(crate) fn prepare(
     args: &Map<String, Value>,
     guard_home: &Path,
 ) -> Option<Map<String, Value>> {
-    if method != "add_approval_request" {
+    if !matches!(
+        method,
+        "add_approval_request" | "add_native_review_approval_request"
+    ) {
         return None;
     }
     let facts = args.get(FACTS_KEY)?;

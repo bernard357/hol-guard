@@ -135,9 +135,6 @@ pub(super) fn answer(
             lookup,
         );
     }
-    if daemon_links_hook_wait(context) {
-        return Err(HookDirectDefer::ReviewQueue);
-    }
     let approval_url = request
         .get("approval_url")
         .and_then(Value::as_str)
@@ -217,15 +214,26 @@ pub(super) fn answer(
     Ok((response, notice))
 }
 
-/// A Codex hook its native bridge holds open waits on the request it pauses
-/// for. Only the daemon links that wait to the request (`_codex_live_wait`
-/// in `hook_native_review_approval.py`), so an approval releases the original
-/// call; queued here, the approval could only ask the agent to retry.
-fn daemon_links_hook_wait(context: &Context<'_>) -> bool {
-    canonical_harness(context.harness) == CODEX
-        && context
-            .recorded_payload
-            .contains_key(crate::codex_hook_bridge::BROWSER_WAIT_PROCESS_KEY)
+/// The facts of the wait a Codex hook's native bridge holds open on the
+/// request it pauses for (`_codex_live_wait` in
+/// `hook_native_review_approval.py`). The queue write proves the bridge live
+/// and links its wait, so an approval releases the original call; a bridge
+/// that is gone leaves the request a manual retry.
+fn live_wait_facts(context: &Context<'_>) -> Option<Value> {
+    if canonical_harness(context.harness) != CODEX {
+        return None;
+    }
+    let payload = context.recorded_payload;
+    let process = payload.get(crate::codex_hook_bridge::BROWSER_WAIT_PROCESS_KEY);
+    let timeout_seconds = payload.get(crate::codex_hook_bridge::BROWSER_WAIT_TIMEOUT_KEY);
+    if process.is_none() && timeout_seconds.is_none() {
+        return None;
+    }
+    Some(json!({
+        "process": process,
+        "timeout_seconds": timeout_seconds,
+        "workspace": (!context.workspace.is_empty()).then_some(context.workspace),
+    }))
 }
 
 /// How a silent block may point at its row.
@@ -273,6 +281,7 @@ fn queued_request(
 /// The store operation that queues an `ask` review, with its other
 /// arguments. The daemon worker records a paused Claude Code review's
 /// permission notice once it is queued; both are written in one transaction.
+/// A waiting Codex hook's wait is linked in the same write.
 fn store_method(
     context: &Context<'_>,
     result: &Object,
@@ -289,6 +298,9 @@ fn store_method(
     } else {
         CLAUDE_WRITE_METHOD
     };
+    if let Some(facts) = live_wait_facts(context) {
+        extra.insert(crate::codex_live_wait_build::FACTS_KEY.to_owned(), facts);
+    }
     Ok((method, extra))
 }
 
@@ -326,7 +338,8 @@ fn facts<'a>(context: &Context<'a>, result: &Object) -> Option<Facts<'a>> {
 
 /// `add_approval_request` through the daemon's store operation: the stored
 /// request id, which is an earlier pending request's for the same action.
-/// `extra` holds the method's other arguments.
+/// `extra` holds the method's other arguments. A queue write that linked a
+/// Codex wait answers the id with the wait's `live_wait` status.
 fn write(
     context: &Context<'_>,
     method: &str,
@@ -360,10 +373,17 @@ fn write(
     let written = crate::guard_store_op::evaluate(&store_request).map(|(payload, _)| payload);
     forget_key(store_request.args);
     repair_store_permissions(guard_home);
-    match written {
-        Ok(Value::String(request_id)) if !request_id.is_empty() => Ok(request_id),
-        _ => Err(HookDirectDefer::ReviewQueue),
-    }
+    let stored_id = match written {
+        Ok(Value::String(request_id)) => Some(request_id),
+        Ok(Value::Object(mut reply)) => match reply.remove("request_id") {
+            Some(Value::String(request_id)) => Some(request_id),
+            _ => None,
+        },
+        _ => None,
+    };
+    stored_id
+        .filter(|request_id| !request_id.is_empty())
+        .ok_or(HookDirectDefer::ReviewQueue)
 }
 
 /// Wipe the bound key a Claude notice carried to the store operation.
