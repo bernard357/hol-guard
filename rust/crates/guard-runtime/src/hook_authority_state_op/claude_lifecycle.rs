@@ -96,3 +96,68 @@ impl Env<'_> {
             .map_err(|_| ERROR_STORE)
     }
 }
+
+/// The daemon's `claude_turn_stop` for a Claude `Stop` the direct lane
+/// answers: the session's unanswered prompts are dropped and the turn's end
+/// is recorded, in one transaction.
+///
+/// Only the bound key verifies the pending index, so without one a session
+/// that has an index defers and the daemon drops it. A row signed under
+/// another key id, or a busy store, rolls back and defers as well.
+pub(crate) fn claude_turn_stop_direct(
+    store_path: &std::path::Path,
+    key: Option<(&[u8], &str)>,
+    now: &str,
+    session_id: Option<&str>,
+    payload: &Object,
+) -> Result<(), DirectNoticeDefer> {
+    let connection = begin_direct(store_path)?;
+    let rollback = |defer| {
+        let _ = connection.execute_batch("ROLLBACK");
+        Err(defer)
+    };
+    if let (None, Some(session_id)) = (key, session_id) {
+        match unkeyed_index_present(&connection, session_id) {
+            Ok(false) => {}
+            Ok(true) => return rollback(DirectNoticeDefer::UnkeyedNotice),
+            Err(defer) => return rollback(defer),
+        }
+    }
+    let foreign_key = std::cell::Cell::new(false);
+    let env = Env {
+        connection: &connection,
+        key: key.map(|(bytes, _)| zeroize::Zeroizing::new(bytes.to_vec())),
+        key_id: key.map(|(_, id)| id),
+        now,
+        foreign_key: Some(&foreign_key),
+    };
+    let discard = if key.is_some() { session_id } else { None };
+    let recorded = env.claude_turn_stop(discard, payload);
+    if foreign_key.get() {
+        return rollback(DirectNoticeDefer::ForeignKey);
+    }
+    if recorded.is_err() || connection.execute_batch("COMMIT").is_err() {
+        return rollback(DirectNoticeDefer::StoreUnavailable);
+    }
+    Ok(())
+}
+
+/// The session's pending index row, read on the transaction's own
+/// connection.
+fn unkeyed_index_present(
+    connection: &Connection,
+    session_id: &str,
+) -> Result<bool, DirectNoticeDefer> {
+    if !crate::local_store_read::table_exists(connection, "sync_state")
+        .map_err(|_| DirectNoticeDefer::StoreUnavailable)?
+    {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            "select exists(select 1 from sync_state where state_key = ?1)",
+            params![format!("{}{session_id}", CLAUDE_FAMILY.index_prefix)],
+            |row| row.get(0),
+        )
+        .map_err(|_| DirectNoticeDefer::StoreUnavailable)
+}
