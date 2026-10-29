@@ -243,44 +243,6 @@ class StoreCloudEventsMixin:
         active_items = list_active_cloud_exceptions(dedupe_cloud_exceptions(parsed_items), harness=harness)
         return [cloud_exception_to_dict(item) for item in active_items]
 
-    def lift_cloud_excepted_policy_decision(
-        self,
-        lookup: PolicyDecisionLookupResult,
-        *,
-        harness: str,
-        artifact_id: str | None,
-        publisher: str | None,
-        workspace: str | None,
-        now: str | None,
-    ) -> PolicyDecisionLookupResult:
-        """Drop a Cloud policy decision that an approved Cloud exception lifts.
-
-        Only the active verified bundle counts, so a revoked, expired or
-        tampered exception never lifts anything.
-        """
-
-        from .cloud_exceptions import cloud_exception_lifting_policy_bundle_decision
-        from .synced_policy import SyncPayloadReader, validated_synced_policy_bundle
-
-        decision = lookup["decision"]
-        if decision is None or decision.get("source") != "policy-bundle":
-            return lookup
-        policy_bundle = validated_synced_policy_bundle(cast(SyncPayloadReader, cast(object, self)))
-        if policy_bundle is None:
-            return lookup
-        exception_id = cloud_exception_lifting_policy_bundle_decision(
-            policy_bundle,
-            decision,
-            harness=harness,
-            artifact_id=artifact_id,
-            publisher=publisher,
-            workspace=workspace,
-            now=now,
-        )
-        if exception_id is None:
-            return lookup
-        return {**lookup, "decision": None}
-
     def delete_sync_payload(self, state_key: str) -> None:
         if state_key == _OAUTH_LOCAL_CREDENTIALS_STATE_KEY:
             self._clear_oauth_secret_payload_cache()

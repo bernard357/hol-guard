@@ -136,14 +136,6 @@ def _native_runtime_decision(
         memory_artifact_name=memory_artifact_name,
         consume_one_shot=False,
     )
-    lookup = store.lift_cloud_excepted_policy_decision(
-        lookup,
-        harness=inputs.harness,
-        artifact_id=artifact_id,
-        publisher=publisher,
-        workspace=inputs.workspace,
-        now=inputs.now,
-    )
     saved_decision = lookup["decision"]
     ignored_integrity = lookup["ignored_local_integrity"] is not None
     diagnosed_reason = (

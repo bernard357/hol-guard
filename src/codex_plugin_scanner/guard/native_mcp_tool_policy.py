@@ -348,14 +348,6 @@ class _Effects:
             memory_artifact_name=need["memory_artifact_name"],
             consume_one_shot=False,
         )
-        lookup = self.store.lift_cloud_excepted_policy_decision(
-            lookup,
-            harness=need["harness"],
-            artifact_id=need["artifact_id"],
-            publisher=need["publisher"],
-            workspace=need["workspace"],
-            now=None,
-        )
         decision = lookup["decision"]
         ignored = lookup["ignored_local_integrity"] is not None
         observed: dict[str, object] = {

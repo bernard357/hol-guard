@@ -8,7 +8,8 @@ import pytest
 
 from codex_plugin_scanner.guard.cloud_exceptions import (
     cloud_exception_from_mapping,
-    cloud_exception_lifting_policy_bundle_decision,
+    cloud_exception_lifting_policy_bundle,
+    lift_cloud_excepted_policy_bundle_identities,
     list_active_cloud_exceptions,
 )
 from codex_plugin_scanner.guard.consumer.native_decision_projection import (
@@ -28,22 +29,46 @@ WORKSPACE_ID = "workspace-sync-proof"
 ARTIFACT_ID = "codex:project:sync-proof"
 NOW = "2026-10-29T12:00:00+00:00"
 PACKAGE_ARTIFACT_ID = "codex:project:package-request:left-pad"
-BUNDLE_BLOCK = {"action": "block", "source": "policy-bundle", "scope": "artifact", "artifact_id": ARTIFACT_ID}
+BLOCK_IDENTITY = [
+    "codex",
+    "harness",
+    "family:package-request",
+    None,
+    None,
+    None,
+    "block",
+    "r",
+    "pkg-block",
+    "policy-bundle",
+    None,
+]
+ALLOW_IDENTITY = [
+    "codex",
+    "harness",
+    "family:mcp-tool",
+    None,
+    None,
+    None,
+    "allow",
+    "r",
+    "mcp-allow",
+    "policy-bundle",
+    None,
+]
 
 
 def _lifting(
     exceptions: list[dict[str, object]],
-    decision: dict[str, object] | None = None,
     *,
+    bundle_workspace_id: str | None = None,
     harness: str = "codex",
     artifact_id: str | None = ARTIFACT_ID,
     publisher: str | None = None,
     workspace: str | None = None,
     now: str = NOW,
 ) -> str | None:
-    return cloud_exception_lifting_policy_bundle_decision(
-        {"cloudExceptions": exceptions},
-        BUNDLE_BLOCK if decision is None else decision,
+    return cloud_exception_lifting_policy_bundle(
+        {"cloudExceptions": exceptions, "workspaceId": bundle_workspace_id},
         harness=harness,
         artifact_id=artifact_id,
         publisher=publisher,
@@ -57,10 +82,33 @@ def test_active_artifact_exception_lifts_the_cloud_block() -> None:
     assert _lifting([entry]) == entry["exceptionId"]
 
 
-def test_exception_lifts_only_cloud_policy_decisions() -> None:
+def test_lift_drops_only_the_bundle_rules_that_restrict() -> None:
+    bundle = {"cloudExceptions": [build_cloud_exception_bundle_entry()]}
+    identities = [BLOCK_IDENTITY, ALLOW_IDENTITY]
+
+    def lift(artifact_id: str) -> list[list[object]] | None:
+        return lift_cloud_excepted_policy_bundle_identities(
+            identities, bundle, harness="codex", artifact_id=artifact_id, publisher=None, workspace=None, now=NOW
+        )
+
+    lifted = lift(ARTIFACT_ID)
+    kept = lift("codex:project:other")
+
+    assert lifted == [ALLOW_IDENTITY]
+    assert kept == identities
+
+
+def test_exception_for_another_cloud_workspace_lifts_nothing() -> None:
+    entry = {**build_cloud_exception_bundle_entry(), "workspaceId": "workspace-other"}
+    assert _lifting([entry], bundle_workspace_id=WORKSPACE_ID) is None
+    assert _lifting([{**entry, "workspaceId": WORKSPACE_ID}], bundle_workspace_id=WORKSPACE_ID) == entry["exceptionId"]
+
+
+def test_later_entry_for_the_same_exception_wins() -> None:
     entry = build_cloud_exception_bundle_entry()
-    assert _lifting([entry], {**BUNDLE_BLOCK, "source": "local"}) is None
-    assert _lifting([entry], {**BUNDLE_BLOCK, "action": "allow"}) is None
+    expired = build_cloud_exception_bundle_entry(expires_at="2026-10-29T11:59:59+00:00")
+    assert _lifting([entry, expired]) is None
+    assert _lifting([expired, entry]) == entry["exceptionId"]
 
 
 def test_expired_exception_lifts_nothing() -> None:
@@ -115,7 +163,11 @@ def test_publisher_exception_lifts_the_publisher_artifacts() -> None:
     assert _lifting([entry], publisher=None) is None
 
 
-def _store_with_bundle(tmp_path: Path, cloud_exceptions: list[dict[str, object]]) -> GuardStore:
+def _store_with_bundle(
+    tmp_path: Path,
+    cloud_exceptions: list[dict[str, object]],
+    local_rules: tuple[PolicyDecision, ...] = (),
+) -> GuardStore:
     store = GuardStore(tmp_path / "guard-home")
     store.set_sync_payload("oauth_local_credentials", {"workspace_id": WORKSPACE_ID}, NOW)
     store.set_sync_payload("policy_bundle_keyring", policy_bundle_test_keyring(workspace_id=WORKSPACE_ID), NOW)
@@ -140,6 +192,8 @@ def _store_with_bundle(tmp_path: Path, cloud_exceptions: list[dict[str, object]]
         NOW,
         remote_write_authorized=True,
     )
+    for rule in local_rules:
+        store.upsert_policy(rule, NOW)
     return store
 
 
@@ -208,3 +262,21 @@ def test_evaluation_keeps_the_cloud_block_once_the_exception_is_gone(tmp_path: P
     saved = _saved_decision_sent_to_composer(store)
     assert isinstance(saved, dict)
     assert saved["action"] == "block"
+
+
+def test_lifted_cloud_block_does_not_hide_a_local_block(tmp_path: Path) -> None:
+    exception = {**build_cloud_exception_bundle_entry(), "artifactId": PACKAGE_ARTIFACT_ID}
+    local_block = PolicyDecision(harness="codex", scope="harness", action="block", reason="Local rule.")
+
+    def lookup(store: GuardStore) -> dict[str, object]:
+        decision = store.resolve_policy_decision_lookup("codex", PACKAGE_ARTIFACT_ID, now=NOW, consume_one_shot=False)[
+            "decision"
+        ]
+        assert isinstance(decision, dict)
+        return decision
+
+    shadowed = lookup(_store_with_bundle(tmp_path / "without-exception", [], (local_block,)))
+    lifted = lookup(_store_with_bundle(tmp_path / "with-exception", [exception], (local_block,)))
+
+    assert shadowed["source"] == "policy-bundle"
+    assert (lifted["action"], lifted["source"]) == ("block", "local")

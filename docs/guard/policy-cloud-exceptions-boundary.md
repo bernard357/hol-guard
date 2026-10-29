@@ -69,14 +69,19 @@ covered by the bundle signature and are ignored as enforcement authority even
 when co-delivered with a valid bundle.
 
 An active Cloud exception from the current verified bundle lifts only the
-decisions materialized from that bundle (`source: policy-bundle`). When an
-artifact or MCP tool lookup selects such a decision, the exception lifts it if
-its harness is unset, `*` or the evaluating harness, and every target it names
+rules of that same bundle (`source: policy-bundle`). Each policy lookup ships
+the bundle's decision identities to the native lookup; when an exception covers
+the evaluated target, the bundle's non-allow identities are left out of that
+lookup, so its Cloud blocks and reviews no longer apply and the lookup ranks the
+remaining local rows as it would without them. An exception covers the target
+when its harness is unset, `*` or the evaluating harness, its `workspaceId` (if
+named) is the bundle's workspace, and every device target it names
 (`artifactId`, `publisher`, `workingDirectory`) equals the evaluated one. An
 artifact or publisher exception that names no artifact or publisher lifts
-nothing. Local remembered rules, scanner verdicts and the first-seen default
-still apply, so a lifted package can still warn. Revoked or expired exceptions
-leave the next signed bundle, or fail the expiry check at evaluation time.
+nothing, and when an exception id repeats the last entry wins. Expiry is checked
+at the lookup's evaluation time. Local remembered rules, scanner verdicts and
+the first-seen default still apply, so a lifted package can still warn.
+Revoked or expired exceptions leave the next signed bundle.
 
 The monotonic acceptance checkpoint records both `bundleHash` and the broader
 signed `payloadHash`. Cached current/LKG consumers re-check that checkpoint, and

@@ -253,8 +253,8 @@ fn a_local_store_with_the_decision_is_read() {
         Some(true)
     );
     assert_eq!(
-        shape(&connection).bundle_identities(SIGNED_AT),
-        Ok(Vec::new())
+        shape(&connection).bundle_authority(SIGNED_AT),
+        Ok((Vec::new(), None))
     );
     // An empty bundle authorizes none of the rows saved from it.
     connection
@@ -264,8 +264,8 @@ fn a_local_store_with_the_decision_is_read() {
         )
         .unwrap();
     assert_eq!(
-        shape(&connection).bundle_identities(SIGNED_AT),
-        Ok(Vec::new())
+        shape(&connection).bundle_authority(SIGNED_AT),
+        Ok((Vec::new(), None))
     );
 }
 
@@ -305,7 +305,7 @@ fn a_store_the_lookup_reads_differently_defers() {
             !(store.supported().unwrap()
                 && !store.grants().unwrap()
                 && store.readable(&published()).unwrap().is_some()
-                && store.bundle_identities(SIGNED_AT).is_ok()),
+                && store.bundle_authority(SIGNED_AT).is_ok()),
             "{tag}"
         );
     }
