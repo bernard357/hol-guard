@@ -77,7 +77,7 @@ that were never merged; it is historical, not a working branch.
 - [ ] NRH-T051 allow only authenticated current emergency-safe profile during daemon failure;
 - [ ] NRH-T052 add bounded daemon restart reservation and preserve approval/receipt/activity ordering;
 - [ ] NRH-T053 add panic/kill/hang/stale endpoint/port/socket/binary/manifest/policy/disk/permission/crash-loop tests — stale endpoint, owner lock, retry and live failure cases exist (`managed_resident_live_failure_tests.rs`, `managed_resident_owner_lock_tests.rs`, `resident_state_discovery_tests.rs`), the crash-loop case landed with T049 in `resident_restart_budget_flood_tests.rs`, and the dead-port and silent-handshake cases are in `managed_resident_live_failure_tests.rs`; panic, kill, unix socket, binary, manifest, policy, disk and permission are open;
-- [ ] NRH-T054 add privacy-safe aggregate lifecycle journal and critical health state — `resident_failure_log.rs` records failures; an aggregate lifecycle journal does not exist.
+- [x] NRH-T054 add privacy-safe aggregate lifecycle journal and critical health state — `resident_lifecycle_journal.rs` keeps a rolling day of counts (starts, the three ways a run ends, starts the restart budget refused) under its own lock, with a derived `healthy`/`degraded`/`critical` state. Written best effort from the spawn charge and the supervised exit, read by `hol-guard-runtime resident-health --state-dir`. The file holds only counts, a fixed event code and relative ages, so it can be shown to a user or carried in a support bundle unredacted.
 
 ## PR 4: Cross-platform installed-wheel and resource gates
 

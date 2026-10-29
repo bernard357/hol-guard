@@ -38,12 +38,15 @@ mod owner_lock;
 pub(crate) use owner_lock::ManagedOwnerLock;
 #[path = "managed_resident_exit.rs"]
 mod exit_record;
+#[path = "resident_lifecycle_journal.rs"]
+mod lifecycle_journal;
 #[path = "resident_private_file.rs"]
 mod private_file;
 #[path = "resident_requested_stop.rs"]
 mod requested_stop;
 #[path = "resident_failure_log.rs"]
 mod resident_failure_log;
+pub(crate) use lifecycle_journal::LifecycleHealth;
 #[path = "resident_state_retirement.rs"]
 mod resident_state_retirement;
 #[path = "resident_restart_budget.rs"]
@@ -220,6 +223,16 @@ pub(crate) fn reset_restart_budget(state_base: &Path) -> Result<(), String> {
     let digest = runtime_digest()?;
     let scope = state_scope(state_base, &digest)?;
     restart_budget::clear(&scope)
+}
+
+/// How this install's managed resident has behaved over the last day, in the
+/// counts the journal keeps. `None` means this runtime has no history here
+/// yet, which is what a fresh install and an install that has not run for a
+/// day both look like.
+pub(crate) fn lifecycle_health(state_base: &Path) -> Result<Option<LifecycleHealth>, String> {
+    let digest = runtime_digest()?;
+    let scope = state_scope(state_base, &digest)?;
+    lifecycle_journal::health(&scope)
 }
 
 pub(crate) fn serve_managed(

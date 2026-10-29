@@ -130,7 +130,18 @@ pub(super) fn consume_for_spawn(
         }
         Err(_) => return Err("native_policy_verifier_key_stat_failed".to_owned()),
     }
-    consume_before(scope, Some(deadline))
+    let charged = consume_before(scope, Some(deadline));
+    // Recorded after the charge, so the journal's lock is never held inside
+    // this module's own. A start the budget refused is the one event a
+    // one-shot client would otherwise leave no trace of at all.
+    match &charged {
+        Ok(()) => super::lifecycle_journal::record(scope, super::lifecycle_journal::Event::Started),
+        Err(reason) if reason.as_str() == "native_resident_restart_circuit_open" => {
+            super::lifecycle_journal::record(scope, super::lifecycle_journal::Event::StartRefused);
+        }
+        Err(_) => {}
+    }
+    charged
 }
 
 #[cfg(test)]
