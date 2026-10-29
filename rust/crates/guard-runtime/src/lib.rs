@@ -282,6 +282,9 @@ mod extension_control_preview_op;
 mod extension_control_proof;
 mod extension_control_terminal_op;
 mod extension_coverage_hint;
+/// Parser entry points for `rust/fuzz`; see `fuzz_entry.rs`.
+#[cfg(any(test, feature = "fuzzing"))]
+pub mod fuzz_entry;
 #[path = "adapters/detection/gemini_detect.rs"]
 mod gemini_detect;
 mod git_execution_safety_binary;
@@ -732,6 +735,7 @@ mod request_context_shell;
 mod resident_client;
 mod resident_diagnostics;
 mod resident_endpoint;
+mod resident_health_op;
 mod resident_inspection_host;
 mod resident_inspection_services;
 mod resident_op_features;

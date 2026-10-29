@@ -202,29 +202,6 @@ _OBSERVER_EVENT_PAYLOAD_FIELDS = (
 )
 
 
-# The payload fields the after-shell rule reads to judge a Cursor report.
-_AFTER_SHELL_PAYLOAD_FIELDS = (
-    "duration",
-    "event",
-    "hook_event_name",
-    "hookEventName",
-    "hook_name",
-    "output",
-    "result_json",
-)
-
-
-# The payload fields the artifact-id rule reads to name an event.
-_ARTIFACT_ID_PAYLOAD_FIELDS = (
-    "source_scope",
-    "tool_name",
-    "event",
-    "hook_event_name",
-    "hookEventName",
-    "hook_name",
-)
-
-
 def native_render_pre_tool(
     harness: str, verdict: Mapping[str, object], *, guard_home: Path | None = None, deadline: float | None = None
 ) -> dict[str, object] | None:

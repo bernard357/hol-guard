@@ -226,7 +226,18 @@ class _PersistentNativeClientPool:
         _LAST_FAILURE_CODE.set("native_client_pool_exhausted")
         return None
 
-    def request(self, payload: bytes, *, deadline_monotonic: float) -> bytes | None:
+    def request(
+        self,
+        payload: bytes,
+        *,
+        deadline_monotonic: float,
+        diagnostic: bool = False,
+    ) -> bytes | None:
+        """Send one request. ``diagnostic`` asks a question about the resident
+        rather than giving it work: the answer must not arm or clear the hold
+        that gates hook execution, and the stream it borrows is retired rather
+        than parked, so the question leaves no lease of its own behind.
+        """
         if restart_hold_active(self._hold_key) and not self.has_idle_client():
             # The Rust client just refused to respawn a crash-looping resident.
             # Answer the same bounded refusal instead of spawning a client per call.
@@ -240,7 +251,7 @@ class _PersistentNativeClientPool:
         try:
             _record_resident_request(payload)
             response = client.request(payload, deadline_monotonic=deadline_monotonic)
-            if response is not None:
+            if response is not None and not diagnostic:
                 if is_restart_blocked_frame(response):
                     arm_restart_hold(self._hold_key)
                     _LAST_FAILURE_CODE.set(RESTART_BLOCKED_CODE)
@@ -253,7 +264,7 @@ class _PersistentNativeClientPool:
             with self._condition:
                 if client not in self._clients:
                     close_client = True
-                elif self._closed or response is None or _is_resident_startup_error(response):
+                elif self._closed or diagnostic or response is None or _is_resident_startup_error(response):
                     self._retiring.add(client)
                     close_client = True
                 else:
@@ -630,8 +641,47 @@ def native_resident_client_request(
     timeout_seconds: float | None = None,
     raw_hook_envelope: bool = False,
     deadline_monotonic: float | None = None,
+    diagnostic: bool = False,
 ) -> bytes | None:
-    """Send bounded bytes through a persistent Rust client stream."""
+    """Send bounded bytes through a persistent Rust client stream.
+
+    ``diagnostic`` marks a question about the resident rather than work for it.
+    A diagnostic leaves the hook path exactly as it found it: the restart hold
+    is neither armed nor cleared, and the failure code and hold key a hook
+    request left behind are restored before returning.
+    """
+    previous_failure = _LAST_FAILURE_CODE.get() if diagnostic else None
+    previous_hold_key = _LAST_HOLD_KEY.get() if diagnostic else None
+    try:
+        return _resident_client_request(
+            executable=executable,
+            guard_home=guard_home,
+            environment=environment,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            raw_hook_envelope=raw_hook_envelope,
+            deadline_monotonic=deadline_monotonic,
+            diagnostic=diagnostic,
+        )
+    finally:
+        if diagnostic:
+            # Every path above, the rejections included, writes these. Restore
+            # them whichever one ran, so a question answers only its caller.
+            _LAST_FAILURE_CODE.set(previous_failure)
+            _LAST_HOLD_KEY.set(previous_hold_key)
+
+
+def _resident_client_request(
+    *,
+    executable: Path,
+    guard_home: Path,
+    environment: Mapping[str, str],
+    payload: bytes,
+    timeout_seconds: float | None,
+    raw_hook_envelope: bool,
+    deadline_monotonic: float | None,
+    diagnostic: bool,
+) -> bytes | None:
     _LAST_FAILURE_CODE.set(None)
     _LAST_HOLD_KEY.set(None)
     if not payload or (deadline_monotonic is None and (timeout_seconds is None or timeout_seconds <= 0)):
@@ -653,6 +703,7 @@ def native_resident_client_request(
     return _client_pool_for(executable, guard_home / "native-runtime", environment).request(
         payload,
         deadline_monotonic=deadline,
+        diagnostic=diagnostic,
     )
 
 

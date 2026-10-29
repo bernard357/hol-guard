@@ -10,10 +10,9 @@ Steps, each isolated so one failure never skips the rest:
 5. ``hooks``: re-verify managed harness hooks and reinstall the broken ones.
 6. ``package_shims`` and ``command_queue``: the same repairs as ``doctor --repair``.
 
-Steps 2 and 4 are non-destructive to anything live and are also what the daemon
-runs on its own (``run_safe_self_check``). The rest need a user (and the same
-step-up as ``doctor --repair``), so only the CLI and the gated daemon endpoint
-run them.
+Steps 2 and 4 are non-destructive to anything live. The rest need a user (and
+the same step-up as ``doctor --repair``), so only the CLI and the gated daemon
+endpoint run them.
 """
 
 from __future__ import annotations
@@ -457,15 +456,6 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
     return "\n".join(lines)
 
 
-def run_safe_self_check(guard_home: Path) -> dict[str, object]:
-    """The non-destructive subset the daemon runs by itself: no hooks, no restarts."""
-
-    return {
-        "native_runtime": repair_native_runtime(guard_home, dry_run=False),
-        "onefile_leaks": repair_onefile_leaks(dry_run=False, guard_home=guard_home),
-    }
-
-
 __all__ = [
     "STEP_TITLES",
     "broken_hook_harnesses",
@@ -480,5 +470,4 @@ __all__ = [
     "repair_onefile_leaks",
     "repair_package_shims",
     "run_repair",
-    "run_safe_self_check",
 ]

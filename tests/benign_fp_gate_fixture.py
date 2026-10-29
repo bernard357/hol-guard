@@ -58,7 +58,7 @@ from tests.benign_fp_gate_cursor_project import cursor_project_path, write_curso
 from tests.benign_fp_gate_developer_checkout import head_commit, write_developer_checkout
 from tests.benign_fp_gate_feature_app import build_feature_app, feature_app_path
 from tests.benign_fp_gate_git import _git, _session_worktree, _signed_checkout, _stopped_rebase
-from tests.benign_fp_gate_hooked_clone import hooked_worktree_path, write_hooked_clone
+from tests.benign_fp_gate_hooked_clone import hooked_cwds, write_hooked_clone
 from tests.benign_fp_gate_long_lived_clone import write_long_lived_clones
 from tests.benign_fp_gate_paths import materialise
 from tests.benign_fp_gate_projects import (
@@ -173,7 +173,7 @@ class BenignFixture:
             "org_app": self.org / "app-portal",
             "org_wt": self.org.parent / "app-portal-fix",
             "org_clone": self.org.parent / "app-portal-clone",
-            "org_hooked": hooked_worktree_path(self.org),
+            **hooked_cwds(self.org),
             "tmp_org": self.tmp_org,
             "org_rebase": self.org.parent / "app-portal-rebase",
             "org_rebase_exec": self.org.parent / "app-portal-rebase-exec",
@@ -301,8 +301,8 @@ def build_fixture(root: Path) -> BenignFixture:
     # the whole file body with each read of it.
     _write(parent / "docs" / "large-guide.md", "# Guide\n" + "Plain guide paragraph text.\n" * 1600)
     _write(parent / ".agents" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\nSynthetic skill body.\n")
-    # Git treats a link as a file, so `node_modules/` alone leaves the borrowed
-    # `dashboard/node_modules` link below unignored.
+    _write(parent / "integrations" / "app" / ".claude-plugin" / "plugin.json", '{"author": "Example"}\n')
+    # Git treats a link as a file: `node_modules/` alone leaves the `dashboard/node_modules` link unignored.
     _write(parent / ".gitignore", "node_modules/\ndashboard/node_modules\n")
     _git(parent, "add", "-A", home=home)
     _git(parent, "commit", "--quiet", "-m", "fixture base", home=home)
@@ -392,15 +392,15 @@ def build_fixture(root: Path) -> BenignFixture:
     _git(parent, "worktree", "add", "--quiet", "-b", "user-tmp-feature", str(user_tmp_worktree), home=home)
     # A hidden tool directory inside it, which never takes a dependency link.
     (user_tmp_worktree / ".cache").mkdir()
-    # A linked worktree of the home sibling checkout beside it, freshly added:
-    # a package in a subfolder that builds with its own script and nothing
-    # installed, and a plugin manifest in a hidden folder.
+    # A linked worktree of the home sibling checkout beside it, freshly added: a package in a subfolder that
+    # builds with its own script and nothing installed, a crate, and a plugin manifest in a hidden folder.
     user_tmp_sibling = user_tmp_worktree.parent / "sibling"
     _git(home / "other-project", "worktree", "add", "--quiet", "-b", "user-tmp-sibling", str(user_tmp_sibling), home=home)
     scripts = {"build": "node scripts/build.mjs", "test": "node --test"}
     _write(user_tmp_sibling / "dashboard" / "package.json", json.dumps({"private": True, "scripts": scripts}) + "\n")
     _write(user_tmp_sibling / "dashboard" / "scripts" / "build.mjs", "console.log('built');\n")
     _write(user_tmp_sibling / "plugins" / "app" / ".codex-plugin" / "plugin.json", '{"author": "Example"}\n')
+    _write(user_tmp_sibling / "rust" / "Cargo.toml", '[package]\nname = "sibling"\nversion = "0.1.0"\nedition = "2021"\n')
 
     # Tracked gitlink plus a filter attribute: must remain reviewable.
     gitlink_repo.mkdir(parents=True)

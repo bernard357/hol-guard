@@ -1,22 +1,53 @@
 """Versioned per-event harness capability reports.
 
-The report is sourced only from :class:`HarnessProtectionContract` rows.  It
-does not probe a host, inspect a file, or convert a synthetic canary into a
-live enforcement claim.  Those observations can be supplied explicitly as
-separate evidence fields and are rejected when incomplete or stale.
+Documentation tooling for ``render_harness_capability_report.py``; Guard's
+runtime never builds this report.  The report is sourced only from
+:class:`HarnessProtectionContract` rows.  It does not probe a host, inspect a
+file, or convert a synthetic canary into a live enforcement claim.  Those
+observations can be supplied explicitly as separate evidence fields and are
+rejected when incomplete or stale.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from html import escape as html_escape
 
 from jsonschema import Draft202012Validator
 
-from .contract_models import CAPABILITY_DECLARED_ACTIONS, HarnessCapabilityReport, HarnessEventCapability
+from codex_plugin_scanner.guard.adapters.contract_models import CAPABILITY_DECLARED_ACTIONS, HarnessEventCapability
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessCapabilityReport:
+    """Machine-readable event capability report metadata and rows."""
+
+    schema_version: str = "harness-capability-report.v1"
+    build: str = "unknown"
+    commit: str = "unknown"
+    requested_host: str | None = None
+    capabilities: tuple[HarnessEventCapability, ...] = ()
+
+    @property
+    def build_id(self) -> str:
+        """Compatibility alias for callers that call the build input an ID."""
+
+        return self.build
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize the report without injecting wall-clock values."""
+
+        return {
+            "schema_version": self.schema_version,
+            "build": self.build,
+            "commit": self.commit,
+            "requested_host": self.requested_host,
+            "capabilities": [capability.to_dict() for capability in self.capabilities],
+        }
+
 
 CAPABILITY_REPORT_SCHEMA_VERSION = "harness-capability-report.v1"
 
@@ -331,7 +362,7 @@ def build_capability_report(
         raise ValueError("build_id must be a non-empty string")
     if not isinstance(commit, str) or not commit.strip():
         raise ValueError("commit must be a non-empty string")
-    from .contracts import HARNESS_CONTRACTS, contract_for
+    from codex_plugin_scanner.guard.adapters.contracts import HARNESS_CONTRACTS, contract_for
 
     requested_label = _bounded_host_label(requested_host) if requested_host is not None else None
     if requested_label is None or requested_label.lower() in {"", "all", "*"}:
@@ -435,20 +466,12 @@ def render_capability_report_markdown(report: HarnessCapabilityReport | Mapping[
     return "\n".join(lines) + "\n"
 
 
-# Naming aliases keep the report discoverable beside the legacy table helper.
-render_harness_capability_report_json = render_capability_report_json
-render_harness_capability_report_markdown = render_capability_report_markdown
-harness_capability_report = build_capability_report
-
-
 __all__ = [
     "CAPABILITY_REPORT_SCHEMA",
     "CAPABILITY_REPORT_SCHEMA_VERSION",
+    "HarnessCapabilityReport",
     "build_capability_report",
-    "harness_capability_report",
     "render_capability_report_json",
     "render_capability_report_markdown",
-    "render_harness_capability_report_json",
-    "render_harness_capability_report_markdown",
     "validate_capability_report",
 ]

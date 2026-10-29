@@ -229,14 +229,25 @@ fn sibling_anchor(model: &CanonicalCommandV1, context: PathContext<'_>) -> Optio
 /// The absolute path a command runs from a sibling: the executable itself
 /// (`<root>/node_modules/.bin/vite build`), the script an interpreter is given
 /// first (`bun <root>/scripts/x.ts`), or the file `python3 -m py_compile`
-/// checks. A path that is only an operand (`rm`, `jq`, `rg`, `cat <root>/f`)
-/// runs nothing from the sibling, so it keeps its own proof or review.
+/// checks, or the manifest `cargo --manifest-path` builds. A path that is
+/// only an operand (`rm`, `jq`, `rg`, `cat <root>/f`) runs nothing from the
+/// sibling, so it keeps its own proof or review.
 fn executed_path<'a>(executable: &'a str, arguments: &'a [String]) -> Option<&'a str> {
     let absolute = |word: &&str| Path::new(word).is_absolute();
     if absolute(&executable) {
         return Some(executable);
     }
     let name = super::super::executable_basename(executable);
+    if name == "cargo" {
+        let options: Vec<&str> = arguments
+            .iter()
+            .map(String::as_str)
+            .take_while(|argument| *argument != "--")
+            .collect();
+        return super::compiled::manifest_path(&options)
+            .flatten()
+            .filter(absolute);
+    }
     let python = name == "python"
         || name.strip_prefix("python3").is_some_and(|minor| {
             minor.is_empty()
@@ -413,6 +424,10 @@ fn names_readable(segment: &CommandSegmentV1, directory: &Path, trees: &[PathBuf
                     .is_ok_and(|resolved| trees.iter().any(|tree| resolved.starts_with(tree)))
         })
 }
+
+#[cfg(test)]
+#[path = "workspace_contained_sibling_cargo_tests.rs"]
+mod cargo_tests;
 
 #[cfg(test)]
 mod heap_size_tests {

@@ -602,7 +602,7 @@ fn ask_without_any_reusable_identity_records_without_starting_a_wait() {
 }
 
 #[test]
-fn only_a_codex_hook_its_bridge_holds_open_waits_for_the_daemon() {
+fn only_a_codex_hook_its_bridge_holds_open_names_its_wait() {
     let binding = ask_binding();
     let waiting = json!({
         "tool_name": "Read",
@@ -610,46 +610,159 @@ fn only_a_codex_hook_its_bridge_holds_open_waits_for_the_daemon() {
         "guard_codex_browser_wait_timeout_seconds": 600,
     });
     let plain = json!({"tool_name": "Read"});
-    let links = |harness: &str, payload: &Value| {
+    let facts = |harness: &str, payload: &Value, workspace: &str| {
         let payload = payload.as_object().unwrap();
-        daemon_links_hook_wait(&Context {
+        live_wait_facts(&Context {
             harness,
             payload,
             recorded_payload: payload,
-            workspace: "/work",
+            workspace,
             home_dir: "/home/user",
             guard_home: "/home/user/.hol-guard",
             binding: &binding,
             hint: None,
         })
     };
-    assert!(links("codex", &waiting));
-    assert!(!links("codex", &plain));
-    assert!(!links(CLAUDE_CODE, &waiting));
+    assert_eq!(
+        facts("codex", &waiting, "/work"),
+        Some(json!({
+            "process": {"pid": 7, "startToken": "linux:1"},
+            "timeout_seconds": 600,
+            "workspace": "/work",
+        }))
+    );
+    assert_eq!(
+        facts("codex", &waiting, "").unwrap()["workspace"],
+        Value::Null
+    );
+    assert_eq!(facts("codex", &plain, "/work"), None);
+    assert_eq!(facts(CLAUDE_CODE, &waiting, "/work"), None);
 }
 
 /// The approval a waiting Codex hook gets must release the original call, so
-/// the resident leaves its pause, and the request, to the daemon; without the
-/// bridge's wait the resident still queues the same review itself.
+/// the resident links the bridge's wait in the queue write it pauses with. A
+/// bridge that is gone, or no bridge, queues the same review with no wait.
 #[cfg(unix)]
 #[test]
-fn a_paused_codex_review_the_bridge_waits_on_is_queued_by_the_daemon() {
-    for (tag, waiting) in [("codex-bridge-wait", true), ("codex-no-bridge-wait", false)] {
+fn a_paused_codex_review_links_the_wait_its_bridge_holds_open() {
+    let (pid, token) = crate::codex_hook_identity::current_process_identity().unwrap();
+    for (tag, process, linked) in [
+        (
+            "codex-bridge-wait",
+            Some(json!({"pid": pid, "startToken": token})),
+            true,
+        ),
+        (
+            "codex-bridge-gone",
+            Some(json!({"pid": pid, "startToken": "not-the-start-token"})),
+            false,
+        ),
+        ("codex-no-bridge-wait", None, false),
+    ] {
         let home = store_home(tag, SILENT_VECTORS);
         let guard_home = home.to_string_lossy().into_owned();
         let binding = ask_binding();
         let workspace = super::super::tests::workspace(tag);
         let (_, _, _, exact) = super::super::tests::bound_query(&binding, &workspace);
         let mut payload = json!({"tool_name": "Read", "tool_input": {"file_path": "/work/.npmrc"}});
-        if waiting {
-            payload["guard_codex_browser_wait_process"] =
-                json!({"pid": 7, "startToken": "linux:1"});
-            payload["guard_codex_browser_wait_timeout_seconds"] = json!(600);
+        if let Some(process) = process {
+            payload["guard_codex_browser_wait_process"] = process;
+            payload["guard_codex_browser_wait_timeout_seconds"] = json!(90);
         }
         let payload = payload.as_object().unwrap();
         let fixture = super::super::tests::vectors();
         let context = Context {
             harness: "codex",
+            payload,
+            recorded_payload: payload,
+            workspace: &workspace,
+            home_dir: fixture["home_dir"].as_str().unwrap(),
+            guard_home: &guard_home,
+            binding: &binding,
+            hint: None,
+        };
+        let result = json!({"decision": "deny", "policy_action": "review", "minimum_action": "review",
+                           "reason": "Review this read.", "reason_code": "native_review"});
+        let (response, _) = answer(
+            &context,
+            result.as_object().unwrap(),
+            None,
+            &exact,
+            &Ok("exact-token".to_owned()),
+        )
+        .expect("the resident pauses the review");
+        assert_eq!(response["prompted"], true, "{tag}");
+        let connection = rusqlite::Connection::open(home.join(STORE_FILE_NAME)).unwrap();
+        let (request_id, snapshot): (String, Option<String>) = connection
+            .query_row(
+                "select request_id, continuation_snapshot_json from approval_requests \
+                 where status = 'pending'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let operation = format!("codex-hook-{request_id}");
+        let operations: i64 = connection
+            .query_row(
+                "select count(*) from guard_operations where operation_id = ?1",
+                [&operation],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let resumed: i64 = connection
+            .query_row(
+                "select count(*) from guard_request_resumes \
+                 where request_id = ?1 and operation_id = ?2",
+                [&request_id, &operation],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let suspended = snapshot
+            .as_deref()
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            .is_some_and(|snapshot| snapshot["capability"] == "suspended-response");
+        assert_eq!(
+            (operations, resumed, suspended),
+            if linked { (1, 1, true) } else { (0, 0, false) },
+            "{tag}"
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
+/// Cursor's bridge signs a loopback link the resident reproduces with the
+/// daemon auth token, so its paused review is queued whether or not the home
+/// holds one; a link the resident cannot reproduce stays with the daemon, as
+/// it does for every harness.
+#[cfg(unix)]
+#[test]
+fn a_paused_cursor_review_queues_whenever_its_link_renders() {
+    let unreproducible = "HTTP://127.0.0.1:4781";
+    for (tag, origin, token_file, queues) in [
+        ("cursor-signed-link", "http://127.0.0.1:4781", true, true),
+        ("cursor-no-token", "http://127.0.0.1:4781", false, true),
+        ("cursor-unreproducible-link", unreproducible, true, false),
+        (
+            "cursor-unreproducible-no-token",
+            unreproducible,
+            false,
+            false,
+        ),
+    ] {
+        let home = store_home(tag, SILENT_VECTORS);
+        if token_file {
+            std::fs::write(home.join("daemon-auth-token"), b"token").unwrap();
+        }
+        let guard_home = home.to_string_lossy().into_owned();
+        let mut binding = ask_binding();
+        binding.review.approval_center_origin = Some(origin.to_owned());
+        let workspace = super::super::tests::workspace(tag);
+        let (_, _, _, exact) = super::super::tests::bound_query(&binding, &workspace);
+        let payload = json!({"tool_name": "Read", "tool_input": {"file_path": "/work/.npmrc"}});
+        let payload = payload.as_object().unwrap();
+        let fixture = super::super::tests::vectors();
+        let context = Context {
+            harness: "cursor",
             payload,
             recorded_payload: payload,
             workspace: &workspace,
@@ -667,22 +780,76 @@ fn a_paused_codex_review_the_bridge_waits_on_is_queued_by_the_daemon() {
             &exact,
             &Ok("exact-token".to_owned()),
         );
-        let connection = rusqlite::Connection::open(home.join(STORE_FILE_NAME)).unwrap();
-        let pending: i64 = connection
-            .query_row(
-                "select count(*) from approval_requests where status = 'pending'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if waiting {
-            assert!(matches!(answered, Err(HookDirectDefer::ReviewQueue)));
-            assert_eq!(pending, 0);
+        if queues {
+            let (response, _) = answered.expect("the resident pauses the review");
+            assert_eq!(response["prompted"], true, "{tag}");
         } else {
-            let (response, _) = answered.expect("the resident pauses a review no hook waits on");
-            assert_eq!(response["prompted"], true);
-            assert_eq!(pending, 1);
+            assert_eq!(answered.err(), Some(HookDirectDefer::ReviewQueue), "{tag}");
         }
         std::fs::remove_dir_all(home).unwrap();
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_queued_cursor_review_reaches_the_agent_with_one_signed_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let tag = "cursor-one-signed-link";
+    let home = store_home(tag, SILENT_VECTORS);
+    // The bridge reads the same private token file the resident signed with.
+    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let token = home.join("daemon-auth-token");
+    std::fs::write(&token, "3f".repeat(32)).unwrap();
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let guard_home = home.to_string_lossy().into_owned();
+    let mut binding = ask_binding();
+    binding.review.approval_center_origin = Some("http://127.0.0.1:4781".to_owned());
+    let workspace = super::super::tests::workspace(tag);
+    let (_, _, _, exact) = super::super::tests::bound_query(&binding, &workspace);
+    let payload = json!({"tool_name": "Read", "tool_input": {"file_path": "/work/.npmrc"}});
+    let payload = payload.as_object().unwrap();
+    let fixture = super::super::tests::vectors();
+    let context = Context {
+        harness: "cursor",
+        payload,
+        recorded_payload: payload,
+        workspace: &workspace,
+        home_dir: fixture["home_dir"].as_str().unwrap(),
+        guard_home: &guard_home,
+        binding: &binding,
+        hint: None,
+    };
+    let result = json!({"decision": "deny", "policy_action": "review", "minimum_action": "review",
+                       "reason": "Review this read.", "reason_code": "native_review"});
+    let (response, _) = answer(
+        &context,
+        result.as_object().unwrap(),
+        None,
+        &exact,
+        &Ok("exact-token".to_owned()),
+    )
+    .expect("the resident pauses the review");
+    let raw_url = response["approval_url"].as_str().unwrap().to_owned();
+    assert!(response["reason"]
+        .as_str()
+        .unwrap()
+        .contains(&format!("{raw_url}#guard-token=")));
+    // The Cursor bridge renders the resident's answer for the agent.
+    let text = serde_json::to_string(&response).unwrap();
+    let (document, unmap) = crate::cursor_hook_bridge_response::python_document(&text).unwrap();
+    let (stdout, code) = crate::cursor_hook_bridge_response::rendered(
+        "beforeShellExecution",
+        document.as_map().unwrap(),
+        &home,
+        unmap,
+    )
+    .expect("the bridge answers the paused review");
+    assert_eq!(code, 0);
+    let rendered: Value = serde_json::from_str(&stdout).unwrap();
+    for field in ["user_message", "agent_message"] {
+        let message = rendered[field].as_str().unwrap();
+        assert_eq!(message.matches("#guard-token=").count(), 1, "{message}");
+        assert_eq!(message, response["reason"].as_str().unwrap());
+    }
+    std::fs::remove_dir_all(home).unwrap();
 }

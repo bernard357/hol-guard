@@ -267,12 +267,6 @@ def _append_guard_context_args(command: list[str], args: argparse.Namespace) -> 
             flag = f"--{option_name.replace('_', '-')}"
             command.extend([flag, value])
 
-def _write_json_line(payload: dict[str, object], *, output_stream: TextIO | None = None) -> None:
-    stream = output_stream or sys.stdout
-    # stdout is the harness delivery channel; approval payloads must reach the operator.
-    stream.write(f"{json.dumps(payload, separators=(',', ':'))}\n")  # codeql[py/clear-text-logging-sensitive-data]
-    stream.flush()
-
 __all__ = [
     "_append_guard_context_args",
     "_current_effective_risk_actions",
@@ -283,5 +277,4 @@ __all__ = [
     "_run_approval_totp_settings_command",
     "_shell_join",
     "_update_guard_cli_settings",
-    "_write_json_line",
 ]

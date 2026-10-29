@@ -12,7 +12,7 @@ pub(super) mod harness_notes;
 mod missing;
 use missing::missing_absolute_read_allowed;
 #[path = "hidden_listing.rs"]
-mod hidden_listing;
+pub(super) mod hidden_listing;
 #[path = "omp_json_query.rs"]
 mod omp_json_query;
 #[path = "omp_read_targets.rs"]

@@ -173,6 +173,7 @@ fn write_overload(pending: &mut PendingRequest) {
         Status::Error,
         pending.accepted_at,
     );
+    crate::resident_health_op::record_overload();
     let response = crate::resident_protocol::error_response("native_overloaded", true);
     let _ = write_bound_response(&mut *pending.stream, &pending.request_id, &response);
 }
@@ -419,10 +420,27 @@ fn dispatch_authenticated(
     }
 }
 
+/// The worker count and queue capacity of each dispatch lane, as
+/// [`start_resident_workers`] sizes them: evaluation first, then control.
+///
+/// A caller reading a queue depth or an overload count needs the lane it was
+/// measured against, and only this module knows how the two lanes divide the
+/// evaluation budget.
+pub(crate) fn lane_shape() -> ((usize, usize), (usize, usize)) {
+    (
+        (
+            crate::evaluation_workers() - control::WORKERS,
+            crate::evaluation_queue_capacity() - control::capacity(),
+        ),
+        (control::WORKERS, control::capacity()),
+    )
+}
+
 pub(crate) fn start_resident_workers(
     token: Arc<[u8; crate::AUTH_TOKEN_BYTES]>,
     policy_store: Option<Arc<crate::policy_store::PolicySnapshotStore>>,
 ) -> ResidentAdmission {
+    crate::resident_health_op::mark_serving();
     let (control_sender, mut workers) = control::start(policy_store.clone());
     let (evaluation_sender, evaluation_receiver) =
         sync_channel::<PendingRequest>(crate::evaluation_queue_capacity() - control::capacity());
