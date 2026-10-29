@@ -62,7 +62,7 @@ pub(in crate::pretool) fn matcher_stage(program: &str, arguments: &[String]) -> 
     }
 }
 
-pub(super) fn head_tail_arguments(arguments: &[String]) -> bool {
+pub(in crate::pretool) fn head_tail_arguments(arguments: &[String]) -> bool {
     match arguments {
         [count] => count.strip_prefix('-').is_some_and(bounded_count),
         [flag, count] => flag == "-n" && bounded_count(count),

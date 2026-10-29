@@ -87,7 +87,7 @@ fn joined_filters(model: &CanonicalCommandV1) -> bool {
                     && segment.environment_names.is_empty()
                     && segment.wrapper_chain.is_empty()
                     && !segment.path_overridden
-                    && super::super::contained_output_filters::head_tail_arguments(
+                    && super::super::contained_wrapper::output_filters::head_tail_arguments(
                         &segment.arguments,
                     )
             }
