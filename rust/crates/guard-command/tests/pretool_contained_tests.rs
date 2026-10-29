@@ -438,10 +438,16 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             };
             assert_eq!(result.reason_code, expected, "{harness} {command}");
         }
-        // Watch mode never finishes inside the sink, and the wrappers that
-        // fetch a package or add shell effects are still someone else's call.
+        // Watch mode never finishes inside the sink, an argument that names a
+        // path outside the workspace would load code the read-only admission
+        // never covered, and the wrappers that fetch a package or add shell
+        // effects are still someone else's call.
         for command in [
             "jest --watch",
+            "npx jest --testRunner /tmp/outside-runner.js __tests__/one.test.ts",
+            "npx jest --config=/tmp/jest.outside.config.js",
+            "npx jest --setupFiles ../outside/setup.js",
+            "npx jest ~/elsewhere/suite.test.ts",
             "jest --watchAll",
             "npx jest -w",
             "npx jest --watch=true",

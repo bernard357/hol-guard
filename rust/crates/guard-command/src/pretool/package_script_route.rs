@@ -385,7 +385,7 @@ fn test_script(scripts: &Map<String, Value>, arguments: &[String]) -> bool {
             (matches!(executable_basename(runner), "node" | "nodejs")
                 && flag.is_some_and(|flag| flag == "--test"))
                 || (runner == "vitest" && flag.is_some_and(|flag| flag == "run"))
-                || (runner == "jest" && crate::contained_argv::jest_runs_once(rest))
+                || (runner == "jest" && crate::contained_argv::jest_contained_call(rest))
         }
         _ => false,
     }

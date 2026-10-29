@@ -1656,6 +1656,66 @@
       }
     },
     {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "npx",
+          "jest",
+          "--testRunner",
+          "/tmp/outside-runner.js",
+          "suite.test.ts"
+        ]
+      },
+      "expected": {
+        "reason_code": "vitest_restricted_invalid_command",
+        "message": "Protected Jest reads its configuration and modules from this workspace."
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "npx",
+          "jest",
+          "--config=/tmp/jest.outside.config.js"
+        ]
+      },
+      "expected": {
+        "reason_code": "vitest_restricted_invalid_command",
+        "message": "Protected Jest reads its configuration and modules from this workspace."
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "jest",
+          "--setupFiles",
+          "../outside/setup.js"
+        ]
+      },
+      "expected": {
+        "reason_code": "vitest_restricted_invalid_command",
+        "message": "Protected Jest reads its configuration and modules from this workspace."
+      }
+    },
+    {
+      "operation": "vitest_arguments",
+      "input": {
+        "command": [
+          "jest",
+          "--maxWorkers=2",
+          "suite.test.ts"
+        ]
+      },
+      "expected": {
+        "value": [
+          "--maxWorkers=2",
+          "suite.test.ts"
+        ]
+      }
+    },
+    {
       "operation": "contained_kind",
       "input": {
         "command": [

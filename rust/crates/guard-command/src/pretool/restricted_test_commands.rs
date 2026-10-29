@@ -4,7 +4,7 @@
 //! Each screen decides whether the command stays inside an already-admitted
 //! containment boundary, so the file is runtime policy, not a test module.
 
-use crate::contained_argv::{contained_runner_call, jest_runs_once};
+use crate::contained_argv::{contained_runner_call, jest_contained_call};
 use crate::CanonicalCommandV1;
 
 #[path = "bun_eval_screen.rs"]
@@ -660,10 +660,10 @@ pub(super) fn readonly_test_reason(model: &CanonicalCommandV1) -> Option<&'stati
                 || matches!(arguments, [flag, rest @ ..] if flag == "--no-install" && contained_runner_call(rest))
         }
         "vitest" => arguments.first().is_some_and(|arg| arg == "run"),
-        "jest" => jest_runs_once(arguments),
+        "jest" => jest_contained_call(arguments),
         "node" | "nodejs" => {
             matches!(arguments, [entry, run, ..] if entry.replace('\\', "/").contains("/node_modules/vitest/") && entry.ends_with("/vitest.mjs") && run == "run")
-                || matches!(arguments, [entry, rest @ ..] if entry.replace('\\', "/").ends_with("/node_modules/jest/bin/jest.js") && jest_runs_once(rest))
+                || matches!(arguments, [entry, rest @ ..] if entry.replace('\\', "/").ends_with("/node_modules/jest/bin/jest.js") && jest_contained_call(rest))
         }
         _ => false,
     };

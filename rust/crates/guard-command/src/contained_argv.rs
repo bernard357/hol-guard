@@ -266,7 +266,13 @@ fn bun_runner_invocation(
 pub(crate) fn contained_runner_call(arguments: &[String]) -> bool {
     matches!(arguments, [tool, rest @ ..]
         if (tool == "vitest" && rest.first().is_some_and(|value| value == "run"))
-            || (tool == "jest" && jest_runs_once(rest)))
+            || (tool == "jest" && jest_contained_call(rest)))
+}
+
+/// True when a Jest call both finishes on its own and takes everything it
+/// loads from the workspace.
+pub(crate) fn jest_contained_call(arguments: &[String]) -> bool {
+    jest_runs_once(arguments) && jest_reads_its_own_workspace(arguments)
 }
 
 /// A watching Jest run never finishes inside the sink, so only a call that
@@ -277,6 +283,43 @@ pub(crate) fn jest_runs_once(arguments: &[String]) -> bool {
             || argument.starts_with("--watch=")
             || argument.starts_with("--watchAll=")
     })
+}
+
+/// Jest loads its config, transforms, reporters, environment and test runner
+/// from option values, so any of them can name a module. The workspace's own
+/// files are what the read-only sandbox was admitted for; a value that leaves
+/// it would run code the admission never covered. This screen reads every
+/// argument rather than a list of the options that take a module, because a
+/// Jest release adds options faster than the list would follow.
+pub(crate) fn jest_reads_its_own_workspace(arguments: &[String]) -> bool {
+    !arguments
+        .iter()
+        .any(|argument| leaves_the_workspace(option_value(argument)))
+}
+
+/// The value an argument carries: `--config=x` gives `x`, anything else gives
+/// itself, so a value joined to its option is read the same as a separate one.
+fn option_value(argument: &str) -> &str {
+    match argument.split_once('=') {
+        Some((name, value)) if name.starts_with('-') => value,
+        _ => argument,
+    }
+}
+
+/// True when a value names a path this workspace does not hold: an absolute
+/// path, a home-relative one, or a relative path that climbs out.
+fn leaves_the_workspace(value: &str) -> bool {
+    let value = value.replace('\\', "/");
+    let bytes = value.as_bytes();
+    let windows_root = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'/';
+    value.starts_with('/')
+        || value.starts_with("~/")
+        || value == "~"
+        || windows_root
+        || value.split('/').any(|segment| segment == "..")
 }
 
 /// The runner a contained call names, with the arguments the sink hands it.
@@ -305,9 +348,13 @@ fn runner_tail_or_error(
                 VITEST_INVALID,
                 "Protected Vitest requires direct run argv.",
             )),
-            Some("jest") => Err(RestrictedPytestError::new(
+            Some("jest") if !jest_runs_once(&arguments[1..]) => Err(RestrictedPytestError::new(
                 VITEST_INVALID,
                 "Protected Jest requires a run that does not watch.",
+            )),
+            Some("jest") => Err(RestrictedPytestError::new(
+                VITEST_INVALID,
+                "Protected Jest reads its configuration and modules from this workspace.",
             )),
             _ => invalid_vitest(),
         },

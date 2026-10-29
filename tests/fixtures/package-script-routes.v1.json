@@ -443,6 +443,15 @@
       "reason": null
     },
     {
+      "name": "jest-outside-config",
+      "scripts": {
+        "test": "jest --config /tmp/jest.outside.config.js"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": null
+    },
+    {
       "name": "pretest",
       "scripts": {
         "test": "node --test",
