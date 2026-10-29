@@ -14,6 +14,10 @@
 //! one again, and the daemon's cursor for the old resident must not drop them.
 //! Each page also carries the queue's diagnostic hook counts, which the
 //! daemon only logs.
+//!
+//! A plain relayed MCP call's record is never paged: the page's cursor passes
+//! over it, and once the daemon acknowledges that cursor the resident writes
+//! the call's receipt itself (see [`crate::mcp_relay_receipt`]).
 
 use crate::hook_direct_counters::DirectHookCounters;
 use serde::Deserialize;
@@ -53,6 +57,17 @@ struct QueuedRecord {
     seq: u64,
     bytes: usize,
     record: Value,
+    /// The resident writes this record's receipt itself, after the ack.
+    native: bool,
+}
+
+/// What one drain request takes from the queue.
+struct Peeked {
+    records: Vec<Value>,
+    remaining: usize,
+    through: Option<u64>,
+    /// Acknowledged records whose receipts the resident writes.
+    settled: Vec<Value>,
 }
 
 struct QueueState {
@@ -140,7 +155,13 @@ impl DirectEvidenceQueue {
         let seq = state.next_seq;
         state.next_seq = state.next_seq.saturating_add(1);
         state.bytes += bytes;
-        state.records.push_back(QueuedRecord { seq, bytes, record });
+        let native = crate::mcp_relay_receipt::is_plain(&record);
+        state.records.push_back(QueuedRecord {
+            seq,
+            bytes,
+            record,
+            native,
+        });
         Ok(())
     }
 
@@ -148,14 +169,22 @@ impl DirectEvidenceQueue {
     ///
     /// Unacknowledged records stay queued. A lost response is therefore sent
     /// again instead of dropping evidence for an allow that already returned.
+    /// The page's cursor passes over the resident's own records, which leave
+    /// the queue with the acknowledgement that covers them.
     fn acknowledge_and_peek(
         &self,
         ack_through: Option<u64>,
         ack_epoch: Option<&str>,
         max_records: usize,
-    ) -> (Vec<Value>, usize, Option<u64>) {
+    ) -> Peeked {
+        let mut settled = Vec::new();
         let Ok(mut state) = self.state.lock() else {
-            return (Vec::new(), 0, None);
+            return Peeked {
+                records: Vec::new(),
+                remaining: 0,
+                through: None,
+                settled,
+            };
         };
         let ack = ack_through.filter(|_| ack_epoch == Some(self.epoch.as_str()));
         if let Some(ack) = ack {
@@ -171,25 +200,36 @@ impl DirectEvidenceQueue {
                         break;
                     };
                     state.bytes -= next.bytes;
+                    if next.native {
+                        settled.push(next.record);
+                    }
                 }
             }
         }
         let mut taken = Vec::new();
+        let mut scanned = 0;
         let mut page_bytes = 0;
         let mut through = None;
         for next in &state.records {
-            if taken.len() >= max_records {
+            if scanned >= max_records {
                 break;
             }
-            if !taken.is_empty() && page_bytes + next.bytes > MAX_DRAIN_BYTES {
-                break;
+            if !next.native {
+                if !taken.is_empty() && page_bytes + next.bytes > MAX_DRAIN_BYTES {
+                    break;
+                }
+                page_bytes += next.bytes;
+                taken.push(next.record.clone());
             }
-            page_bytes += next.bytes;
+            scanned += 1;
             through = Some(next.seq);
-            taken.push(next.record.clone());
         }
-        let remaining = state.records.len().saturating_sub(taken.len());
-        (taken, remaining, through)
+        Peeked {
+            records: taken,
+            remaining: state.records.len().saturating_sub(scanned),
+            through,
+            settled,
+        }
     }
 }
 
@@ -201,17 +241,18 @@ pub(crate) fn drain(
         .max_records
         .unwrap_or(DEFAULT_DRAIN_RECORDS)
         .clamp(1, DEFAULT_DRAIN_RECORDS);
-    let (records, remaining, through) = queue.acknowledge_and_peek(
+    let peeked = queue.acknowledge_and_peek(
         request.ack_through,
         request.ack_epoch.as_deref(),
         max_records,
     );
+    crate::mcp_relay_receipt::write_detached(&request.guard_home, peeked.settled);
     serde_json::to_vec(&json!({
         "schema": DRAIN_RESULT_SCHEMA,
         "epoch": queue.epoch,
-        "records": records,
-        "remaining": remaining,
-        "through": through,
+        "records": peeked.records,
+        "remaining": peeked.remaining,
+        "through": peeked.through,
         "counters": queue.counters.snapshot(),
     }))
     .map_err(|_| "direct_hook_evidence_encoding_failed".to_owned())

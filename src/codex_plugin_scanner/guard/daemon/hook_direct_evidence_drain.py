@@ -9,7 +9,8 @@ review the resident queued; the resident records the command-line observation
 itself. After a reviewed ``PostToolUse`` it is the receipt, the binding
 capture, and the post-tool command activity; after a ``UserPromptSubmit`` it is the receipt and the
 binding capture alone. A tool call the native MCP relay decided is recorded
-by ``mcp_relay_evidence_drain`` as the proxy records it, and one its package
+by ``mcp_relay_evidence_drain`` as the proxy records it, unless the resident
+wrote its receipt itself, and one its package
 lane answered by ``mcp_relay_package_evidence_drain``. The publisher advertises the drain in the
 direct-lane binding only while it runs, so a resident never answers directly
 for a daemon that would leave the evidence behind. A page from a current

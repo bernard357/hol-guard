@@ -145,3 +145,36 @@ fn headroom_keeps_a_worst_case_record_and_spare_slots_free() {
     assert!(crowded.offer(json!({ "index": "one more" })));
     assert!(!crowded.has_headroom());
 }
+
+#[test]
+fn a_page_passes_over_plain_relay_records_and_the_ack_settles_them() {
+    let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    assert!(queue.offer(json!({ "index": 0 })));
+    assert!(queue.offer(plain.clone()));
+    assert!(queue.offer(json!({ "index": 2 })));
+    assert!(queue.offer(plain.clone()));
+    let peeked = queue.acknowledge_and_peek(None, Some(&queue.epoch), 3);
+    assert_eq!(
+        peeked.records,
+        [json!({ "index": 0 }), json!({ "index": 2 })]
+    );
+    assert_eq!(peeked.remaining, 1);
+    assert!(peeked.settled.is_empty());
+    let page = queue.acknowledge_and_peek(peeked.through, Some(&queue.epoch), 3);
+    assert_eq!(page.settled, [plain.clone()]);
+    assert!(page.records.is_empty());
+    assert_eq!(page.remaining, 0);
+    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 3);
+    assert_eq!(page.settled, [plain]);
+    assert_eq!(page.through, None);
+}
+
+#[test]
+fn a_record_the_resident_cannot_write_is_still_paged() {
+    let remembered = crate::mcp_relay_receipt::tests::record("remember", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    assert!(queue.offer(remembered.clone()));
+    let page = drained(&queue, None, None);
+    assert_eq!(page["records"], json!([remembered]));
+}
