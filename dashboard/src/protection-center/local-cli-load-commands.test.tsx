@@ -13,7 +13,7 @@ import {
   loadCommandsNeedsPath,
   recordedToolPath,
 } from "./local-cli-load-commands";
-import { discoveryPollDelay } from "../discovery-job-wait";
+import { DISCOVERY_WAIT_MS, discoveryPollDelay } from "../discovery-job-wait";
 
 const raw = {
   cli_id: "local-cli.lanectl-abcdef12",
@@ -33,7 +33,7 @@ const raw = {
   commands: [],
 };
 const render = (value: Record<string, unknown>, disabled = false) => renderToStaticMarkup(createElement(LocalCliLoadCommands, {
-  item: normalizeLocalCliItem(value), disabled, onLoaded: async () => undefined,
+  item: normalizeLocalCliItem(value), disabled, onLoaded: async () => true,
 }));
 
 // A program offers one action and says what Guard will run before it runs it.
@@ -102,6 +102,12 @@ assert.equal(discoveryPollDelay(0), 100);
 assert.ok(discoveryPollDelay(0) + discoveryPollDelay(1) < 500);
 assert.equal(discoveryPollDelay(3), 500);
 assert.equal(discoveryPollDelay(119), 500);
+// The quick first checks do not shorten the wait: a long scan still gets the
+// whole minute before the page gives up on it.
+let waited = 0;
+for (let poll = 0; waited < DISCOVERY_WAIT_MS; poll += 1) waited += discoveryPollDelay(poll);
+assert.equal(DISCOVERY_WAIT_MS, 60_000);
+assert.equal(waited, DISCOVERY_WAIT_MS);
 
 // Shared job failures that name connectors get tool wording; others pass through.
 assert.match(loadCommandsFailureMessage(new DiscoveryFailure("catalog_limit_reached", "connector text")), /lists more commands than Guard can keep/);

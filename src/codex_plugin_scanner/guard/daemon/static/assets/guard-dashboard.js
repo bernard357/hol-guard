@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CBmy6GFJ.js","assets/chunks/home-protection-module-D9o37jVp.js","assets/chunks/supply-chain-protection-stats-CpRYM989.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-B6UeMMtI.js","assets/chunks/harness-version-label-Jx1PY-Fz.js","assets/chunks/connect-guard-cloud-button-D5MpoY7O.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-BKNyIdKt.js","assets/chunks/confirm-dialog-DbPRaiDR.js","assets/chunks/extensions-workspace-D11-7xhb.js","assets/chunks/app-detail-workspace-Dwa_pfsI.js","assets/chunks/policy-workspace-page-BjQ4T-z0.js","assets/chunks/about-workspace-Bd0vRPi-.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/chunks/home-dashboard-CBmy6GFJ.js","assets/chunks/home-protection-module-D9o37jVp.js","assets/chunks/supply-chain-protection-stats-CpRYM989.js","assets/chunks/brand-hero-COty1p6U.js","assets/chunks/about-content-Dr9zFg1V.js","assets/chunks/app-catalog-By01oDVd.js","assets/chunks/fleet-workspace-B6UeMMtI.js","assets/chunks/harness-version-label-Jx1PY-Fz.js","assets/chunks/connect-guard-cloud-button-D5MpoY7O.js","assets/chunks/settings-save-proof-modal-CZZvxWFO.js","assets/chunks/settings-workspace-BKNyIdKt.js","assets/chunks/confirm-dialog-DbPRaiDR.js","assets/chunks/extensions-workspace-Bq7uWZq-.js","assets/chunks/app-detail-workspace-Dwa_pfsI.js","assets/chunks/policy-workspace-page-BjQ4T-z0.js","assets/chunks/about-workspace-Bd0vRPi-.js","assets/about-workspace.css"])))=>i.map(i=>d[i]);
 (function polyfill() {
   const relList = document.createElement("link").relList;
   if (relList && relList.supports && relList.supports("modulepreload")) return;
@@ -34676,6 +34676,7 @@ function stageFailure(code) {
   }
 }
 const EARLY_POLL_DELAYS_MS = [100, 150, 250];
+const DISCOVERY_WAIT_MS = 6e4;
 function discoveryPollDelay(poll) {
   return EARLY_POLL_DELAYS_MS[poll] ?? 500;
 }
@@ -34701,7 +34702,7 @@ async function waitForDiscoveryJob(cliId, initialJob, signal, readJson2) {
   let job = normalize(initialJob);
   let finished = false;
   try {
-    for (let poll = 0; poll < 120; poll += 1) {
+    for (let poll = 0, waited = 0; waited < DISCOVERY_WAIT_MS; poll += 1) {
       if (signal.aborted) return;
       if (job.state === "complete" || job.state === "cancelled") {
         finished = true;
@@ -34711,15 +34712,17 @@ async function waitForDiscoveryJob(cliId, initialJob, signal, readJson2) {
         finished = true;
         throw stageFailure(job.error);
       }
+      const delay = discoveryPollDelay(poll);
       await new Promise((resolve) => {
         const done = () => {
           window.clearTimeout(timer);
           signal.removeEventListener("abort", done);
           resolve();
         };
-        const timer = window.setTimeout(done, discoveryPollDelay(poll));
+        const timer = window.setTimeout(done, delay);
         signal.addEventListener("abort", done, { once: true });
       });
+      waited += delay;
       if (!signal.aborted) job = await request2({ job_id: job.job_id });
     }
     throw new DiscoveryFailure("discovery_timeout", "Discovery took too long. Known tools and choices were kept. Try again shortly.");
@@ -37284,7 +37287,7 @@ const FleetWorkspace = lazyWorkspace("fleet-workspace", () => __vitePreload(() =
 const SettingsWorkspace = lazyWorkspace("settings-workspace", () => __vitePreload(() => import("./chunks/settings-workspace-BKNyIdKt.js"), true ? __vite__mapDeps([10,9,5,11,8]) : void 0).then((m) => ({ default: m.SettingsWorkspace })));
 const ExtensionsWorkspace = lazyWorkspace(
   "extensions-workspace",
-  () => __vitePreload(() => import("./chunks/extensions-workspace-D11-7xhb.js"), true ? __vite__mapDeps([12,11]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
+  () => __vitePreload(() => import("./chunks/extensions-workspace-Bq7uWZq-.js"), true ? __vite__mapDeps([12,11]) : void 0).then((module) => ({ default: module.ExtensionsWorkspace }))
 );
 const AppDetailWorkspace = lazyWorkspace("app-detail-workspace", () => __vitePreload(() => import("./chunks/app-detail-workspace-Dwa_pfsI.js"), true ? __vite__mapDeps([13,7]) : void 0).then((m) => ({ default: m.AppDetailWorkspace })));
 const HelpModal = lazyWorkspace("help-modal", () => __vitePreload(() => import("./chunks/help-modal-B0TZsHE3.js"), true ? [] : void 0).then((m) => ({ default: m.HelpModal })));

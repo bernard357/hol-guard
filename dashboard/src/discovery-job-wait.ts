@@ -58,6 +58,9 @@ function stageFailure(code: unknown): DiscoveryFailure {
  */
 const EARLY_POLL_DELAYS_MS = [100, 150, 250];
 
+/** How long a job may run before the page stops waiting, however quickly it checks. */
+export const DISCOVERY_WAIT_MS = 60_000;
+
 export function discoveryPollDelay(poll: number): number {
   return EARLY_POLL_DELAYS_MS[poll] ?? 500;
 }
@@ -83,18 +86,20 @@ export async function waitForDiscoveryJob(cliId: string, initialJob: unknown, si
   let job = normalize(initialJob);
   let finished = false;
   try {
-    for (let poll = 0; poll < 120; poll += 1) {
+    for (let poll = 0, waited = 0; waited < DISCOVERY_WAIT_MS; poll += 1) {
       if (signal.aborted) return;
       if (job.state === "complete" || job.state === "cancelled") { finished = true; return; }
       if (job.state === "failed") {
         finished = true;
         throw stageFailure(job.error);
       }
+      const delay = discoveryPollDelay(poll);
       await new Promise<void>((resolve) => {
         const done = () => { window.clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
-        const timer = window.setTimeout(done, discoveryPollDelay(poll));
+        const timer = window.setTimeout(done, delay);
         signal.addEventListener("abort", done, { once: true });
       });
+      waited += delay;
       if (!signal.aborted) job = await request({ job_id: job.job_id });
     }
     throw new DiscoveryFailure("discovery_timeout", "Discovery took too long. Known tools and choices were kept. Try again shortly.");

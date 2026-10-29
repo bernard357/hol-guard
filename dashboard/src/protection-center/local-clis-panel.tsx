@@ -52,7 +52,7 @@ export function LocalCliDetail(props: {
   nativePublication?: LocalCliListResponse["native_publication"];
   setupLink?: ConnectorSetupLink | null;
   onBack: () => void;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<boolean>;
 }) {
   const { resolvedApprovalGate, resolveApprovalGate, refreshApprovalGate } = useResolvedApprovalGate(null);
   const [pending, setPending] = useState<LocalCliState | null>(null);

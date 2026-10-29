@@ -62,7 +62,8 @@ export function enteredToolPath(raw: string): string {
 export function LocalCliLoadCommands(props: {
   item: LocalCliItem;
   disabled: boolean;
-  onLoaded: () => Promise<void>;
+  /** Reloads the listing; resolves true only when fresh data was applied. */
+  onLoaded: () => Promise<boolean>;
 }) {
   const { item, onLoaded } = props;
   const pathId = useId();
@@ -99,8 +100,11 @@ export function LocalCliLoadCommands(props: {
     try {
       await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? entered : undefined);
       if (controller.signal.aborted) return;
-      await onLoaded();
-      setLoaded(true);
+      const refreshed = await onLoaded();
+      if (controller.signal.aborted) return;
+      // The commands were saved, but the listing on screen is the old one, so
+      // its count would be wrong. The catalog shows its own reload failure.
+      setLoaded(refreshed);
     } catch (caught) {
       if (controller.signal.aborted) return;
       // Guard's PATH can differ from the agent's, so the name it looks up can

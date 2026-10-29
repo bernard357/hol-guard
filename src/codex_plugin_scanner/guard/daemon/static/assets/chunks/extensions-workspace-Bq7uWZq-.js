@@ -3469,8 +3469,9 @@ function LocalCliLoadCommands(props) {
     try {
       await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? entered : void 0);
       if (controller.signal.aborted) return;
-      await onLoaded();
-      setLoaded(true);
+      const refreshed = await onLoaded();
+      if (controller.signal.aborted) return;
+      setLoaded(refreshed);
     } catch (caught) {
       if (controller.signal.aborted) return;
       if (caught instanceof LocalCliApiError && PATH_ENTRY_CODES.has(caught.code)) setAskPath(true);
@@ -4911,13 +4912,15 @@ function useLocalCliCatalog() {
     loadGeneration.current = generation;
     try {
       const next = await fetchLocalCliList();
-      if (loadGeneration.current !== generation) return;
+      if (loadGeneration.current !== generation) return false;
       setData(next);
       setError(null);
       if (!preserveDiscoveryNotice) setDiscoveryNotice(null);
+      return true;
     } catch (caught) {
-      if (loadGeneration.current !== generation) return;
+      if (loadGeneration.current !== generation) return false;
       setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
+      return false;
     }
   }, []);
   const discover = reactExports.useCallback(async () => {

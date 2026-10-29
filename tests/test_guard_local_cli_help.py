@@ -140,12 +140,12 @@ def _identity(name: str = "wrangler") -> UnlistedCliIdentity:
     )
 
 
-def _row(name: str) -> dict[str, object]:
+def _row(name: str, description: str = "") -> dict[str, object]:
     return {
         "command_id": name,
         "name": name,
         "usage": name,
-        "description": "",
+        "description": description,
         "parent_id": None,
     }
 
@@ -291,6 +291,29 @@ def test_a_command_help_that_lists_the_top_level_commands_again_adds_nothing(
     assert not {"sync.sync", "sync.push"} & ids
     # A command whose help lists commands of its own still gets them.
     assert "push.all" in ids
+
+
+def test_subcommands_named_like_the_top_level_commands_are_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Matching names alone do not make a command's own list a repeat of the top level."""
+
+    def _answer(**kwargs: object) -> tuple[dict[str, object], ...]:
+        invocation = kwargs["invocation"]
+        if len(invocation) == 1:
+            return (_row("server", "Server commands"), _row("client", "Client commands"))
+        if invocation[1] == "server":
+            return (_row("server", "Start the server process"), _row("client", "List clients of this server"))
+        return ()
+
+    _stand_in_resident(monkeypatch, _answer)
+
+    def _probe(argv: Sequence[str]) -> str:
+        return f"Usage: svc {' '.join(argv[1:-1])} <command>".replace("  ", " ")
+
+    commands, _ = discover_local_cli_commands(_identity("svc.sh"), ("svc.sh", "--help"), runner=_probe)
+    ids = {command.command_id for command in commands}
+    assert {"server.server", "server.client"} <= ids
 
 
 def test_discover_yargs_help_has_no_program_named_commands(recorded_resident: None) -> None:
