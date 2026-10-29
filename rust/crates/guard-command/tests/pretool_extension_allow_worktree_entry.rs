@@ -325,9 +325,30 @@ fn a_relative_program_after_the_entry_keeps_its_review() {
         "allow",
         "{allowed}"
     );
+    // An absolute path that already resolves to an installed program names
+    // code the checkout cannot supply, so it keeps the Allow.
+    if let Some(installed) = ["/usr/bin/git", "/bin/git"]
+        .into_iter()
+        .find(|candidate| Path::new(candidate).is_file())
+    {
+        let command = format!(
+            "{ADD} && cd ../app-review && {installed} commit --allow-empty -m 'Start review'"
+        );
+        assert_eq!(
+            evaluate(&home, &repository, "omp", &command, &controls).minimum_action,
+            "allow",
+            "{command}"
+        );
+    }
+    let inside = home.join("org/app-review");
+    let inside = inside.display();
     for command in [
         format!("{ADD} && cd ../app-review && ./git commit --allow-empty -m 'Start review'"),
         format!("{ADD} && cd ../app-review && tools/gh pr create --fill"),
+        // An absolute path into the checkout the add creates names the same
+        // ref-supplied program as `tools/gh`.
+        format!("{ADD} && cd ../app-review && {inside}/tools/gh pr create --fill"),
+        format!("{ADD} && cd ../app-review && {inside}/../app-review/tools/gh pr create --fill"),
     ] {
         let result = evaluate(&home, &repository, "omp", &command, &controls);
         assert_ne!(

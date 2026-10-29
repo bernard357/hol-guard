@@ -462,14 +462,22 @@ fn entered_checkout(
             .is_some_and(|separator| matches!(separator, "&&" | ";"));
         // After the `cd` the shell resolves a path-qualified relative name
         // against the new checkout, whose contents come from the ref it
-        // checks out. Only a bare name, looked up on the absolute search
-        // path checked above, or an absolute path names a program the
-        // checked-out tree cannot supply.
+        // checks out. A bare name is looked up on the absolute search path
+        // checked above. An absolute path names code the checked-out tree
+        // cannot supply only when it already resolves to a program outside
+        // the destination: the add refuses a destination that exists, so a
+        // spelling that resolves now resolves somewhere else, and one that
+        // does not resolve now could only be supplied by the checkout.
         let resolved_outside = |later: &CommandSegmentV1| {
-            later
-                .executable
-                .as_deref()
-                .is_some_and(|value| !value.contains(['/', '\\']) || Path::new(value).is_absolute())
+            later.executable.as_deref().is_some_and(|value| {
+                if !value.contains(['/', '\\']) {
+                    return true;
+                }
+                let path = Path::new(value);
+                path.is_absolute()
+                    && std::fs::canonicalize(path)
+                        .is_ok_and(|resolved| !resolved.starts_with(&destination))
+            })
         };
         // A later pipeline stage reads only what the step before it prints:
         // a bounded `head`, `tail` or `wc` with no path of its own.
