@@ -348,6 +348,13 @@ fn only_plain_workspace_runs_take_the_native_sink() {
         &input("pytest && git push"),
         workspace
     ));
+    let mut worktree = denial.clone();
+    worktree["reason"] = json!(guard_command::pretool::CONTAINED_WORKTREE_ADD_REASON);
+    assert!(!native_shape(
+        &worktree,
+        &input("git worktree add ../app-fix HEAD && cd ../app-fix && pytest"),
+        workspace
+    ));
     let mut other = denial.clone();
     other["reason_code"] = json!("native_test_containment_required");
     assert!(!native_shape(&other, &input("pytest"), workspace));

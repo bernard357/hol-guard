@@ -369,6 +369,12 @@ fn implied_branch(destination: &str) -> bool {
         .is_some_and(valid_branch_name)
 }
 
+/// The checkout a `git worktree add` segment creates, as the proof reads it,
+/// and whether a `-C` moves where a relative checkout lands.
+pub(in crate::pretool) fn destination(segment: &CommandSegmentV1) -> Option<(&str, bool)> {
+    parse(segment).map(|spec| (spec.destination, spec.chdir.is_some()))
+}
+
 fn parse(segment: &CommandSegmentV1) -> Option<WorktreeAdd<'_>> {
     let arguments = if segment
         .arguments

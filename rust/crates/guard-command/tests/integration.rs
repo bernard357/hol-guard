@@ -142,6 +142,7 @@ pub mod pretool_git_tag_clean_reads;
 pub mod pretool_git_temp_repository;
 pub mod pretool_git_textconv_config;
 pub mod pretool_git_worktree;
+pub mod pretool_git_worktree_add_checks;
 pub mod pretool_git_worktree_chain;
 pub mod pretool_git_worktree_large_config;
 pub mod pretool_git_worktree_link_chain;
