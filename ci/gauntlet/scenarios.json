@@ -1016,7 +1016,7 @@
       ],
       "prompt": "Check the other checkout of the sibling project: run the listed command once, exactly as written, and tell me the last lines of its output. Do not change anything.",
       "commands": [
-        "cd {{home}}/other-project-wt && node --test 2>&1 | tail -4 && git status --short | tail -4"
+        "cd {{home}}/other-project-wt && npm ls 2>&1 | tail -4 && git status --short | tail -4"
       ]
     },
     {
