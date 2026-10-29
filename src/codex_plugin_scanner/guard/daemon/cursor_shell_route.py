@@ -16,9 +16,10 @@ re-authorizes the saved call before it runs anything, so admitting the
 command never widens what runs.
 
 The resident reads both: this module reviews a probe through the daemon's
-edge and ships that edge, the call and the sink command it binds to the
-resident's ``cursor_shell_route`` render, which answers as the direct lane
-does.
+edge with the sink command it binds, and the edge answers a probe it routes
+to the sink as the direct lane does. A resident that predates that answer
+gets the edge, the call and the sink command through its
+``cursor_shell_route`` render instead, as does a sink call.
 """
 
 from __future__ import annotations
@@ -43,8 +44,12 @@ _BEFORE_SHELL = "beforeShellExecution"
 _RECEIPT_ONLY_FIELD = "guard_containment_receipt_only"
 _SINK_VERB = "execute-contained-test"
 _ALLOW: dict[str, object] = {"policy_action": "allow"}
-# The edge fields the resident reads to route a probe.
 _SINK_ROUTE = "sink"
+# A resident that advertises this answers the probe in its edge when the
+# daemon sends the sink argv; an older one leaves it to the render.
+_EDGE_PROBE_FEATURE = "edge-cursor-probe-v1"
+_ROUTED = "native_contained_execution_routed"
+# The edge fields the resident reads to route a probe.
 _EDGE_FIELDS = ("harness", "event_name", "containment_route", "result")
 
 
@@ -124,6 +129,8 @@ def _probe_response(
     snapshot = worker._native_policy_snapshot(workspace, deadline=deadline)
     if snapshot is None or recording_only_for_binding(snapshot, _CURSOR):
         return None
+    capabilities = worker._native_runtime_status().capabilities
+    edge_answers = capabilities is not None and _EDGE_PROBE_FEATURE in capabilities.features
     edge = worker._review_raw_hook_native(
         payload=dict(payload),
         harness=_CURSOR,
@@ -135,6 +142,7 @@ def _probe_response(
         observe_mode=False,
         deadline=deadline,
         policy_snapshot=snapshot,
+        containment_sink=edge_answers,
     )
     if edge is None:
         return None
@@ -142,6 +150,17 @@ def _probe_response(
     # answers any other with the plain allow, so that one skips the call.
     if edge.get("containment_route") != _SINK_ROUTE:
         return dict(_ALLOW)
+    # A resident replaced after the feature was read may answer with the
+    # generic rewrite, which keeps the receipt, so only probe answers count.
+    response = edge.get("harness_response")
+    mark = edge.get("containment_rewrite")
+    if (
+        edge_answers
+        and isinstance(response, dict)
+        and ((mark == "kept" and response == _ALLOW) or (mark == "routed" and response.get("reason_code") == _ROUTED))
+        and response.get("policy_action") == "allow"
+    ):
+        return dict(response)
     return _resident_route(
         payload, edge, home_dir=home_dir, guard_home=guard_home, workspace=workspace, deadline=deadline
     )

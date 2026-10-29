@@ -9,7 +9,8 @@
 //! `map(.number)`), an object or array built from admitted filters, or a
 //! parenthesised group. Stages may compare two such operands against each
 //! other or against a plain literal, combine comparisons with `and`/`or`, and
-//! fall back to a second filter with `//`. A stage may also be a bare
+//! fall back to a second filter with `//`, emit several results with the
+//! comma operator, and drop an error with the optional `?`. A stage may also be a bare
 //! format such as `@tsv` or `@base64`, which only renders the value as text,
 //! or bind a term to a name (`(.state // "") as $state`) that later stages
 //! read back as `$state`.
@@ -21,8 +22,9 @@
 //! value stay out), `@` outside a bare rendering format (so `@sh` and a
 //! `@fmt "string"` template stay out), `;` (which every multi-argument and
 //! binding builtin needs: `def`, `reduce`, `foreach`, `limit`, `range`,
-//! `getpath`), string interpolation, a `,` or `:` outside a bracket, computed
-//! object keys, and every builtin outside the lists below are all rejected.
+//! `getpath`), string interpolation, a `:` outside an object or a subscript,
+//! computed object keys, and every builtin outside the lists below are all
+//! rejected.
 //! A shorthand object entry (`{number, title}`) names a field of the value
 //! read, so it is admitted under the same key rules as `{number: .number}`.
 
@@ -233,9 +235,9 @@ pub(crate) fn variables_bound(filter: &str) -> bool {
     !in_string && groups.is_empty()
 }
 
-/// `,` is admitted only inside a bracket, so a sequence of outputs is reached
-/// only from an object entry, an array or a call body — never as the whole
-/// filter, where a stray comma stays a parse the proof refuses to read.
+/// `.headBranch, .headSha`: the comma operator runs each side over the same
+/// value and emits both results. Each side is an admitted filter in its own
+/// right, so a sequence reaches no further than the widest of them.
 fn sequence(stage: &str) -> bool {
     let Some(parts) = split_marker(stage, b",") else {
         return false;
@@ -342,6 +344,9 @@ fn operand(part: &str) -> bool {
 }
 
 fn stage(part: &str) -> bool {
+    // `map(.a)?`, `(.a)?`: the optional operator drops the error a stage
+    // raises on a value of the wrong type, and reads nothing the stage did not.
+    let part = part.strip_suffix('?').map_or(part, str::trim_end);
     projection(part)
         || iterated_builtin(part)
         || literal_builtin(part)
@@ -382,10 +387,13 @@ pub(crate) fn rendering_format(name: &str) -> bool {
 
 /// Outside string literals only names, projections, spaces, call and group
 /// parentheses, comparison operators, the `+` and `-` a number literal
-/// uses, `//`, a `@` that opens a known rendering format, a `$` that opens a
+/// uses, `//`, the comma operator, the `?` of an optional projection, a `@`
+/// that opens a known rendering format, a `$` that opens a
 /// variable name, and bracket punctuation may appear; inside one only printable
 /// ASCII and the `\n`, `\t` and `\\`
 /// escapes, so neither `\(` interpolation nor an escaped quote can appear.
+/// A `:` is admitted inside an object, where it parts key from value, and
+/// inside a subscript, where it parts the two ends of a slice.
 /// Brackets must balance and close in the kind they opened.
 fn valid_characters(filter: &str) -> bool {
     let bytes = filter.as_bytes();
@@ -408,8 +416,7 @@ fn valid_characters(filter: &str) -> bool {
                     return false;
                 }
             }
-            b':' if open.last() == Some(&b'{') => {}
-            b',' if !open.is_empty() => {}
+            b':' if matches!(open.last(), Some(&b'{' | &b'[')) => {}
             b'@' => {
                 let name = filter[index + 1..]
                     .split(|value: char| !value.is_ascii_alphanumeric())
@@ -433,7 +440,18 @@ fn valid_characters(filter: &str) -> bool {
             byte if byte.is_ascii_alphanumeric()
                 || matches!(
                     byte,
-                    b'.' | b'_' | b' ' | b'|' | b'/' | b'=' | b'!' | b'<' | b'>' | b'+' | b'-'
+                    b'.' | b'_'
+                        | b' '
+                        | b'|'
+                        | b'/'
+                        | b'='
+                        | b'!'
+                        | b'<'
+                        | b'>'
+                        | b'+'
+                        | b'-'
+                        | b','
+                        | b'?'
                 ) => {}
             _ => return false,
         }
@@ -673,16 +691,10 @@ fn projection(filter: &str) -> bool {
     while index < bytes.len() {
         if bytes[index] == b'[' {
             index += 1;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
-                index += 1;
-            }
-            if bytes.get(index) != Some(&b']') {
+            if !subscript(bytes, &mut index) || bytes.get(index) != Some(&b']') {
                 return false;
             }
             index += 1;
-            if index < bytes.len() && !matches!(bytes[index], b'.' | b'[') {
-                return false;
-            }
         } else {
             if bytes[index] == b'.' {
                 if index == 1 {
@@ -700,10 +712,45 @@ fn projection(filter: &str) -> bool {
             {
                 index += 1;
             }
-            if index < bytes.len() && !matches!(bytes[index], b'.' | b'[') {
-                return false;
-            }
         }
+        // `.a?`, `.[]?`: the optional operator drops the error an absent field
+        // or a value of the wrong type raises, and selects nothing further.
+        if bytes.get(index) == Some(&b'?') {
+            index += 1;
+        }
+        if index < bytes.len() && !matches!(bytes[index], b'.' | b'[') {
+            return false;
+        }
+    }
+    true
+}
+
+/// The body of a `[...]` subscript: empty for the iterate `.[]`, one signed
+/// index, or a slice whose two ends are each optional, as in `.[1:]`,
+/// `.[:12]` and `.[-2:-1]`. Every spelling selects from the value already
+/// read, so none of them reaches past it.
+fn subscript(bytes: &[u8], index: &mut usize) -> bool {
+    if !signed_index(bytes, index) {
+        return false;
+    }
+    if bytes.get(*index) == Some(&b':') {
+        *index += 1;
+        return signed_index(bytes, index);
+    }
+    true
+}
+
+/// One end of a subscript: nothing, digits, or a minus and digits. A lone
+/// minus is refused rather than read as an end left out.
+fn signed_index(bytes: &[u8], index: &mut usize) -> bool {
+    if bytes.get(*index) == Some(&b'-') {
+        *index += 1;
+        if !bytes.get(*index).is_some_and(u8::is_ascii_digit) {
+            return false;
+        }
+    }
+    while bytes.get(*index).is_some_and(u8::is_ascii_digit) {
+        *index += 1;
     }
     true
 }

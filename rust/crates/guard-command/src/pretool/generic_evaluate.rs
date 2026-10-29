@@ -156,8 +156,8 @@ pub(super) fn evaluate_signals(
             "require-reapproval",
             "native_prompt_injection_review",
             reason(
-                "HOL Guard did not send this prompt because it asks to override trusted instructions. Nothing is waiting for approval; rephrase that part of the request.",
-                "HOL Guard held this tool call because its text asks to override trusted instructions.",
+                "HOL Guard did not send this prompt because it asks to override or reveal trusted instructions. Nothing is waiting for approval; rephrase that part of the request.",
+                "HOL Guard held this tool call because its text asks to override or reveal trusted instructions.",
             ),
         );
     }

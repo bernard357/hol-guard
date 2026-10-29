@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,11 @@ import pytest
 
 from codex_plugin_scanner.guard.approval_scope_support import request_scope_contract
 from codex_plugin_scanner.guard.approvals import apply_approval_resolution
-from codex_plugin_scanner.guard.codex_live_decision import complete_codex_live_decision
+from codex_plugin_scanner.guard.codex_live_decision import (
+    complete_codex_live_decision,
+    resolve_codex_live_allow_authority,
+)
+from codex_plugin_scanner.guard.codex_live_decision_revalidation import revalidate_codex_live_allow
 from codex_plugin_scanner.guard.continuation_snapshot import validated_continuation_snapshot
 from codex_plugin_scanner.guard.daemon.hook_worker import HookWorker
 from codex_plugin_scanner.guard.live_process_identity import (
@@ -21,11 +27,26 @@ from codex_plugin_scanner.guard.live_process_identity import (
     current_process_identity,
 )
 from codex_plugin_scanner.guard.store import GuardStore
+from codex_plugin_scanner.guard.store_local_once_authority import (
+    EXACT_CLOUD_AUTHORITY_KIND,
+    persist_local_once_approval,
+)
 from tests.native_pretool_edge_fixtures import canonical_receipt_bytes
 from tests.native_review_evidence_support import with_review_evidence
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
 _HARNESS = "codex"
+
+
+def _hook_payload(workspace: Path) -> dict[str, object]:
+    return {
+        "hook_event_name": "PreToolUse",
+        "session_id": "codex-session",
+        "tool_use_id": "tool-1",
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat package.json"},
+        "cwd": str(workspace),
+    }
 
 
 def _hook_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[HookWorker, GuardStore]:
@@ -71,14 +92,7 @@ def _hook_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[HookW
 
 
 def _review(worker: HookWorker, tmp_path: Path, workspace: Path, wait: dict[str, object] | None) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "hook_event_name": "PreToolUse",
-        "session_id": "codex-session",
-        "tool_use_id": "tool-1",
-        "tool_name": "Bash",
-        "tool_input": {"command": "cat package.json"},
-        "cwd": str(workspace),
-    }
+    payload = _hook_payload(workspace)
     if wait is not None:
         payload.update(wait)
     return worker.review_http_payload(
@@ -128,6 +142,139 @@ def _allow_once(store: GuardStore, request_id: str, workspace: Path) -> None:
         scope_contract_version=str(row["scope_contract_version"]),
         scope_contract_digest=str(row["scope_contract_digest"]),
     )
+
+
+def _allow_from_cloud(store: GuardStore, request_id: str, workspace: Path) -> None:
+    """Resolve the request the way an exact Cloud Review decision lands.
+
+    The Cloud allow is stored as exact-cloud one-shot authority, apart from
+    the local approvals an ordinary allow-once writes.
+    """
+
+    row = store.get_approval_request(request_id)
+    assert row is not None
+    apply_approval_resolution(
+        store=store,
+        request_id=request_id,
+        action="allow",
+        scope="artifact",
+        workspace=str(workspace),
+        reason="allow once from Cloud Review",
+        persist_policy=False,
+        scope_contract_version=str(row["scope_contract_version"]),
+        scope_contract_digest=str(row["scope_contract_digest"]),
+    )
+    resolved = store.get_approval_request(request_id)
+    assert resolved is not None
+    key, key_id = store._policy_integrity_secret_material(create=True)  # pyright: ignore[reportPrivateUsage]
+    assert key is not None and key_id is not None
+    created_at = str(resolved["resolved_at"])
+    expires_at = (datetime.fromisoformat(created_at) + timedelta(hours=1)).isoformat()
+    with store._connect() as connection:  # pyright: ignore[reportPrivateUsage]
+        approval_id = persist_local_once_approval(
+            connection,
+            request_id=request_id,
+            harness=_HARNESS,
+            artifact_id=str(resolved["artifact_id"]),
+            artifact_hash=str(resolved["artifact_hash"]),
+            workspace=str(resolved["workspace"]),
+            publisher=None,
+            action="allow",
+            created_at=created_at,
+            expires_at=expires_at,
+            integrity_key=key,
+            integrity_key_id=key_id,
+            authority_kind=EXACT_CLOUD_AUTHORITY_KIND,
+        )
+    assert approval_id is not None
+
+
+def _daemon_revalidates(worker: HookWorker, store: GuardStore, tmp_path: Path, request_id: str) -> bool:
+    """Run the fresh policy check the daemon makes before releasing the hook."""
+
+    request = store.get_approval_request(request_id)
+    assert request is not None
+    workspace = Path(str(request["workspace"]))
+    authority = resolve_codex_live_allow_authority(
+        store, request=request, request_id=request_id, now=str(request["resolved_at"])
+    )
+    return revalidate_codex_live_allow(
+        request,
+        {"hook_input": json.dumps(_hook_payload(workspace))},
+        home_dir=tmp_path / "home",
+        guard_home=store.guard_home,
+        previous=store.get_request_resume(request_id),
+        request_id=request_id,
+        authority_resolved=authority is not None,
+        reviewer=lambda hook_payload, review_workspace, claimed_hash, claimed_request_id: worker.review_http_payload(
+            payload=dict(hook_payload),
+            params={},
+            default_harness=_HARNESS,
+            home_dir=tmp_path / "home",
+            guard_home=store.guard_home,
+            workspace=review_workspace,
+            claim_saved_approval=False,
+            claimed_saved_allow_hash=claimed_hash,
+            claimed_approval_request_id=claimed_request_id,
+        ),
+    )
+
+
+@pytest.mark.parametrize("allow", [_allow_once, _allow_from_cloud], ids=["local", "cloud-review"])
+def test_an_allow_once_passes_the_daemon_revalidation_and_resumes_the_hook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path, allow: Any
+) -> None:
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+    review = _review(worker, tmp_path, workspace, _live_wait())
+    request_id = review["approval_request_id"]
+    assert isinstance(request_id, str)
+
+    allow(store, request_id, workspace)
+    fresh_allow_authorized = _daemon_revalidates(worker, store, tmp_path, request_id)
+    resolved = store.get_approval_request(request_id)
+    assert resolved is not None
+    completed = complete_codex_live_decision(
+        store,
+        request_id=request_id,
+        now=str(resolved["resolved_at"]),
+        fresh_allow_authorized=fresh_allow_authorized,
+    )
+
+    assert fresh_allow_authorized is True
+    assert completed["completed"] is True, completed
+    continuation = completed["continuation"]
+    assert isinstance(continuation, dict)
+    assert continuation["continuationStatus"] == "resumed"
+
+
+def test_a_cloud_review_allow_does_not_release_a_different_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+    review = _review(worker, tmp_path, workspace, _live_wait())
+    request_id = review["approval_request_id"]
+    assert isinstance(request_id, str)
+    _allow_from_cloud(store, request_id, workspace)
+    resolved = store.get_approval_request(request_id)
+    assert resolved is not None
+
+    replayed = worker.review_http_payload(
+        payload=_hook_payload(workspace),
+        params={},
+        default_harness=_HARNESS,
+        home_dir=tmp_path / "home",
+        guard_home=store.guard_home,
+        workspace=workspace,
+        claim_saved_approval=False,
+        claimed_saved_allow_hash=str(resolved["artifact_hash"]),
+        claimed_approval_request_id="another-request",
+    )
+
+    output = replayed["hookSpecificOutput"]
+    assert isinstance(output, dict)
+    assert output["permissionDecision"] == "deny"
 
 
 def test_allowing_a_waiting_codex_review_releases_the_hook(

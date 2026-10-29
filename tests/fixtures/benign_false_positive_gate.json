@@ -9996,6 +9996,57 @@
       "expect": "allow"
     },
     {
+      "id": "gh-pr-list-jq-top-level-comma",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr list --repo example/app --state open --json number,title --jq '.[] | .number, .title'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "gh-pr-view-jq-string-slice",
+      "fix_area": "gh-api",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "gh pr view 12 --repo example/app --json headRefOid --jq '.headRefOid[0:12]'"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "jq-optional-projection",
+      "fix_area": "read",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "jq -r '.scripts.build?' ${HOME}/other-project/package.json"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "pgrep-children-of-parent",
       "fix_area": "shell",
       "harnesses": [
@@ -12238,6 +12289,125 @@
       "expect": "allow"
     },
     {
+      "id": "session-git-worktree-add-then-link-node-modules",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main 2>&1 | tail -1 && ln -s ${ORG}/app-portal/node_modules ${ORG}/app-portal-linked/node_modules"
+      },
+      "cwd": "org_app",
+      "expect": "allow"
+    },
+    {
+      "id": "session-git-worktree-add-routed-then-link-package-node-modules",
+      "fix_area": "git",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git -C ${ORG}/service-api worktree add ${ORG}/service-api-linked -b linked-lane origin/main && ln -s ${ORG}/service-api/dashboard/node_modules ${ORG}/service-api-linked/dashboard/node_modules"
+      },
+      "cwd": "org",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-git-worktree-add-then-link-onto-tracked-file",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main && ln -s ${ORG}/app-portal/node_modules ${ORG}/app-portal-linked/src/index.ts"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-worktree-add-then-link-untracked-parent",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main && ln -s ${ORG}/app-portal/node_modules ${ORG}/app-portal-linked/missing/node_modules"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-worktree-add-then-link-to-other-repository",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main && ln -s ${ORG}/service-api/dashboard/node_modules ${ORG}/app-portal-linked/node_modules"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-worktree-add-then-link-to-home-ssh",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main && ln -s ${HOME}/.ssh ${ORG}/app-portal-linked/node_modules"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-git-worktree-add-weak-separator-then-link",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp",
+        "cursor"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git worktree add ../app-portal-linked -b linked-lane origin/main; ln -s ${ORG}/app-portal/node_modules ${ORG}/app-portal-linked/node_modules"
+      },
+      "cwd": "org_app",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-git-worktree-add-c-grandparent-sibling",
       "fix_area": "git-sibling-worktree",
       "harnesses": [
@@ -12504,6 +12674,23 @@
         "command": "git -C ${HOME}/project worktree add ${HOME}/project-report-fix fix/report-export"
       },
       "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "git-worktree-add-long-lived-clone-then-link-dashboard-modules",
+      "fix_area": "worktree-add",
+      "harnesses": [
+        "claude-code",
+        "codex",
+        "cursor",
+        "omp",
+        "zcode"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git -C ${HOME}/project worktree add ${HOME}/project-linked -b fix/linked-lane 2>&1 | tail -1 && ln -s ${HOME}/project/dashboard/node_modules ${HOME}/project-linked/dashboard/node_modules"
+      },
+      "cwd": "home_project",
       "expect": "allow"
     },
     {

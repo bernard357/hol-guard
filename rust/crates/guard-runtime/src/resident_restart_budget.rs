@@ -142,12 +142,28 @@ pub(super) fn consume(scope: &Path) -> Result<(), String> {
 /// lock charges nothing, so a resident is never started for an answer the
 /// client can no longer wait for.
 fn consume_before(scope: &Path, deadline: Option<Instant>) -> Result<(), String> {
+    consume_at(scope, deadline, None)
+}
+
+/// The same charge against a clock the caller names, so a test can play out a
+/// crash loop that takes minutes without waiting for them. `at_ms` is read
+/// where the real clock would be read, after the lock is held, so a simulated
+/// run goes through the same window rollovers and backoff steps a real one does.
+#[cfg(test)]
+fn consume_simulated(scope: &Path, at_ms: u64) -> Result<(), String> {
+    consume_at(scope, None, Some(at_ms))
+}
+
+fn consume_at(scope: &Path, deadline: Option<Instant>, at_ms: Option<u64>) -> Result<(), String> {
     let private_root = crate::resident_state::private_root_for_scope(scope)?;
     let _lock = acquire_budget_lock_waiting(scope, deadline)?;
     let path = scope.join("restart-budget.json");
     #[cfg(windows)]
     recover_interrupted_replace(&path, &private_root)?;
-    let now = now_ms()?;
+    let now = match at_ms {
+        Some(simulated) => simulated,
+        None => now_ms()?,
+    };
     let mut budget = read_existing_budget(&path, &private_root)?.unwrap_or_else(|| RestartBudget {
         schema: BUDGET_SCHEMA.to_owned(),
         window_start_ms: now,
@@ -300,3 +316,7 @@ pub(super) fn clear(scope: &Path) -> Result<(), String> {
 #[cfg(test)]
 #[path = "resident_restart_budget_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "resident_restart_budget_flood_tests.rs"]
+mod flood_tests;

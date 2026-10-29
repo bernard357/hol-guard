@@ -159,6 +159,7 @@ class BenignFixture:
             "gitlink_repo": self.gitlink_repo,
             "org": self.org,
             "edge_clone": self.home / "edge-clone",
+            "home_project": self.home / "project",
             "org_app": self.org / "app-portal",
             "org_wt": self.org.parent / "app-portal-fix",
             "org_clone": self.org.parent / "app-portal-clone",

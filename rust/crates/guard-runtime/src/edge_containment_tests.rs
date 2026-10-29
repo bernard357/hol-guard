@@ -8,7 +8,7 @@ use guard_contracts::{
 };
 use serde_json::{json, Value};
 
-use super::{rewrite, KEPT, ROUTED};
+use super::{cursor_probe, rewrite, KEPT, ROUTED};
 use crate::codex_hook_bridge::contain::discard;
 
 const SINK_COMMAND: [&str; 3] = [
@@ -190,5 +190,129 @@ fn only_a_sink_route_the_daemon_would_rewrite_is_answered() {
         );
         assert_eq!(answer, None, "{route}");
         assert_eq!(response, Some(receipt()), "{route}");
+    }
+}
+
+/// Cursor's route probe for `make build` in `workspace`, as Guard's hook
+/// names it.
+fn cursor_probe_envelope(workspace: &str, sink: bool) -> GuardHookEnvelopeV2 {
+    let mut request = envelope(Path::new(workspace), sink);
+    request.harness = "cursor".to_owned();
+    request.raw_payload = json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Shell",
+        "tool_input": {"command": "make build", "cwd": workspace},
+        "cwd": workspace,
+        "session_id": "sess-1",
+        "tool_use_id": "call-1",
+        "cursor_route_probe": true,
+    });
+    request
+}
+
+/// The workspace build the edge sends to the workspace sandbox.
+fn sandboxed_build() -> Value {
+    json!({
+        "schema": "guard-pre-tool-result.v1",
+        "authority": "rust",
+        "decision": "deny",
+        "minimum_action": "sandbox-required",
+        "policy_action": "sandbox-required",
+        "reason_code": "native_workspace_containment_required",
+        "reason": "protected",
+        "command_extensions": {
+            "binding": {"uncertainty_count": 0, "observations_digest": "0".repeat(64)},
+            "evaluation_error": null,
+            "observations": [],
+            "permission_observations": [{
+                "extension_id": "command.package.node",
+                "permission_id": "command.package.node.permission.package-protection",
+                "uncertainty_reasons": [],
+            }],
+        },
+    })
+}
+
+#[test]
+fn a_sink_routed_cursor_probe_comes_back_as_the_sink_command() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let resolved = std::fs::canonicalize(directory.path()).expect("resolved workspace");
+    let workspace = resolved.to_str().expect("utf-8 workspace");
+    let request = cursor_probe_envelope(workspace, true);
+    let mut response = Some(json!({}));
+
+    let answer = cursor_probe(
+        &request,
+        "cursor",
+        "PreToolUse",
+        "sink",
+        &sandboxed_build(),
+        &mut response,
+    );
+
+    assert_eq!(answer, Some(ROUTED));
+    let response = response.expect("a response");
+    assert_eq!(response["policy_action"], "allow");
+    assert_eq!(response["reason_code"], "native_contained_execution_routed");
+    let command = response["hookSpecificOutput"]["updatedInput"]["command"]
+        .as_str()
+        .expect("command is text");
+    let argv = crate::mcp_proxy_shlex::split_with(command, "", "").expect("quoted");
+    assert_eq!(argv[..3], SINK_COMMAND);
+    assert_eq!(argument_after(&argv, "--harness"), "cursor");
+    assert_eq!(argument_after(&argv, "--workspace"), workspace);
+    discard(Path::new(argument_after(&argv, "--request-file")));
+}
+
+#[test]
+fn a_cursor_probe_the_sink_cannot_take_is_the_plain_allow() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let resolved = std::fs::canonicalize(directory.path()).expect("resolved workspace");
+    let workspace = resolved.to_str().expect("utf-8 workspace");
+    let mut watched = cursor_probe_envelope(workspace, true);
+    watched.recording_only = true;
+    let mut elsewhere = cursor_probe_envelope(workspace, true);
+    elsewhere.raw_payload["cwd"] = json!("/somewhere/else");
+    for request in [&watched, &elsewhere] {
+        let mut response = Some(json!({}));
+        let answer = cursor_probe(
+            request,
+            "cursor",
+            "PreToolUse",
+            "sink",
+            &sandboxed_build(),
+            &mut response,
+        );
+        assert_eq!(answer, Some(KEPT));
+        assert_eq!(response, Some(json!({"policy_action": "allow"})));
+    }
+}
+
+#[test]
+fn only_a_sink_routed_cursor_probe_is_answered_as_one() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let workspace = directory.path().to_str().expect("utf-8 workspace");
+    let probe = cursor_probe_envelope(workspace, true);
+    let unbound = cursor_probe_envelope(workspace, false);
+    let mut shell = cursor_probe_envelope(workspace, true);
+    shell.raw_payload["cursor_source_hook_event"] = json!("beforeShellExecution");
+    for (request, harness, route) in [
+        (&probe, "cursor", "none"),
+        (&probe, "cursor", "grant"),
+        (&probe, "claude-code", "sink"),
+        (&unbound, "cursor", "sink"),
+        (&shell, "cursor", "sink"),
+    ] {
+        let mut response = Some(json!({}));
+        let answer = cursor_probe(
+            request,
+            harness,
+            "PreToolUse",
+            route,
+            &sandboxed_build(),
+            &mut response,
+        );
+        assert_eq!(answer, None, "{harness} {route}");
+        assert_eq!(response, Some(json!({})), "{harness} {route}");
     }
 }

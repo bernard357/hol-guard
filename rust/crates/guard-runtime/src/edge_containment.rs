@@ -7,6 +7,11 @@
 //! makes one resident call instead of two. The workspace, home and Guard
 //! home are the envelope's source.
 //!
+//! Cursor's route probe is answered the same way, with the response the
+//! daemon's `cursor_shell_route` render gives for the edge: the sink command
+//! for a call the sink takes, and the plain allow for any other, since
+//! `beforeShellExecution` still reviews the call that runs.
+//!
 //! The rewrite never changes the result or the receipt: a call the sink
 //! takes comes back as the routed allow (`routed`), and any other keeps its
 //! receipt (`kept`). A rewrite that fails is not answered, and the daemon
@@ -14,7 +19,7 @@
 //! response.
 
 use guard_contracts::{ContainmentRewriteInputsV1, GuardHookEdgeResultV2, GuardHookEnvelopeV2};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::hook_decision_containment_rewrite::containment_rewrite;
 use crate::hook_decision_containment_route::host_platform;
@@ -24,6 +29,8 @@ pub(super) const ROUTED: &str = "routed";
 /// `containment_rewrite` when the receipt stands.
 pub(super) const KEPT: &str = "kept";
 const SINK_ROUTE: &str = "sink";
+const CURSOR: &str = "cursor";
+const ROUTED_REASON: &str = "native_contained_execution_routed";
 const RECEIPT_ONLY_FIELD: &str = "guard_containment_receipt_only";
 /// A review pauses for approval before any containment step.
 const REVIEW_ACTIONS: [&str; 2] = ["review", "require-reapproval"];
@@ -31,11 +38,22 @@ const REVIEW_ACTIONS: [&str; 2] = ["review", "require-reapproval"];
 /// Answers `edge.containment_rewrite`, replacing its `harness_response` with
 /// the routed allow when the sink takes the call.
 pub(super) fn attach(envelope: &GuardHookEnvelopeV2, edge: &mut GuardHookEdgeResultV2) {
+    let route = edge.containment_route.as_deref().unwrap_or("none");
+    if let Some(answer) = cursor_probe(
+        envelope,
+        &edge.harness,
+        &edge.event_name,
+        route,
+        &edge.result,
+        &mut edge.harness_response,
+    ) {
+        edge.containment_rewrite = Some(answer.to_owned());
+        return;
+    }
     let custom_block = edge
         .local_cli_rule
         .as_ref()
         .is_some_and(|rule| rule.blocked);
-    let route = edge.containment_route.as_deref().unwrap_or("none");
     edge.containment_rewrite = rewrite(
         envelope,
         &edge.harness,
@@ -78,6 +96,40 @@ fn rewrite(
         }
         None => Some(KEPT),
     }
+}
+
+/// The edge's answer to Cursor's route probe for a call it routes to the
+/// sink: the sink command (`routed`) or the plain allow (`kept`) the daemon's
+/// `cursor_shell_route` render would give, in place of `harness_response`.
+/// `None` when the daemon sent no sink argv or the call is not the probe.
+fn cursor_probe(
+    envelope: &GuardHookEnvelopeV2,
+    harness: &str,
+    event_name: &str,
+    route: &str,
+    result: &Value,
+    harness_response: &mut Option<Value>,
+) -> Option<&'static str> {
+    let sink = envelope.containment_sink.as_ref()?;
+    if harness != CURSOR || route != SINK_ROUTE {
+        return None;
+    }
+    let reviewed = json!({
+        "harness": CURSOR,
+        "event_name": event_name,
+        "containment_route": route,
+        "result": result,
+    });
+    let response = crate::hook_direct::cursor::edge_probe_answer(
+        envelope.raw_payload.as_object()?,
+        &reviewed,
+        &envelope.source,
+        &sink.sink_command,
+        envelope.recording_only,
+    )?;
+    let routed = response.get("reason_code").and_then(Value::as_str) == Some(ROUTED_REASON);
+    *harness_response = Some(response);
+    Some(if routed { ROUTED } else { KEPT })
 }
 
 /// The facts the daemon sends `containment_rewrite`: the call from the
