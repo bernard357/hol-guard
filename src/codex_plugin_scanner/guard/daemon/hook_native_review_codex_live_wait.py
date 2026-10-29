@@ -108,39 +108,21 @@ def link_codex_live_wait(
 ) -> bool:
     """Record the operation for the waiting hook before its request is queued.
 
-    The operation is written first so the request is never approvable without
-    it: an approval that lands as soon as the request is stored still finds the
-    waiting hook. When this fails the caller queues the request retry-only.
+    The session and operation are written in one store transaction, before the
+    request, so the request is never approvable without them: an approval that
+    lands as soon as the request is stored still finds the waiting hook. When
+    this fails the caller queues the request retry-only.
     """
 
-    upsert_session = getattr(store, "upsert_guard_session", None)
-    upsert_operation = getattr(store, "upsert_guard_operation", None)
-    if not callable(upsert_session) or not callable(upsert_operation):
+    link = getattr(store, "link_codex_live_wait", None)
+    if not callable(link):
         return False
-    timestamp = now.astimezone(timezone.utc).isoformat()
     try:
-        session = upsert_session(
-            session_id=f"codex-hook-{request_id}",
-            harness="codex",
-            surface="harness-adapter",
-            status="waiting_on_approval",
-            client_name="codex-hook",
-            client_title="Codex hook",
-            client_version=None,
+        link(
+            request_id=request_id,
             workspace=None if workspace is None else str(workspace),
-            capabilities=["approval-resolution"],
-            now=timestamp,
-        )
-        upsert_operation(
-            operation_id=f"codex-hook-{request_id}",
-            session_id=str(cast("Mapping[str, object]", session)["session_id"]),
-            harness="codex",
-            operation_type="tool_call",
-            status="waiting_on_approval",
-            approval_request_ids=[request_id],
-            resume_token=None,
             metadata=dict(metadata),
-            now=timestamp,
+            now=now.astimezone(timezone.utc).isoformat(),
         )
     except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
         _LOGGER.warning("Codex live wait was not linked to %s (%s)", request_id, type(error).__name__)

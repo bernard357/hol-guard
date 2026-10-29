@@ -173,6 +173,14 @@ class StoreSessionsMixin:
         )
         return _guard_operation_row(row)
 
+    def link_codex_live_wait(
+        self, *, request_id: str, workspace: str | None, metadata: dict[str, object], now: str
+    ) -> None:
+        self._native_store_call(
+            "link_codex_live_wait",
+            {"request_id": request_id, "workspace": workspace, "metadata_json": json.dumps(metadata), "now": now},
+        )
+
     def get_guard_operation(self, operation_id: str) -> dict[str, object] | None:
         row = self._native_store_call("get_guard_operation", {"operation_id": operation_id})
         return None if row is None else _guard_operation_row(row)

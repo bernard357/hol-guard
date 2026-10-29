@@ -431,6 +431,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "clear_command_activity_evidence"
         | "upsert_guard_session"
         | "upsert_guard_operation"
+        | "link_codex_live_wait"
         | "add_guard_operation_item"
         | "attach_guard_client"
         | "renew_guard_client_attachment"
@@ -622,6 +623,7 @@ fn dispatch(
         "get_guard_session" => sessions::get_session(connection, args),
         "list_guard_sessions" => sessions::list_sessions(connection, args),
         "upsert_guard_operation" => sessions::upsert_operation(connection, args),
+        "link_codex_live_wait" => sessions::link_codex_live_wait(connection, args),
         "get_guard_operation" => sessions::get_operation(connection, args),
         "list_guard_operations" => sessions::list_operations(connection, args),
         "get_guard_operation_for_approval_request" => {
