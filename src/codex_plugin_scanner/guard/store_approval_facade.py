@@ -67,11 +67,22 @@ class StoreApprovalsMixin:
             args["claude_review"] = claude_review["review"]
             args["integrity_key_b64"] = claude_review["integrity_key_b64"]
             args["integrity_key_id"] = claude_review["integrity_key_id"]
+        return self._queue_approval_request(
+            "add_approval_request" if claude_review is None else "add_claude_approval_request", args
+        )
+
+    def add_silent_native_review_approval_request(self, request: GuardApprovalRequest, now: str) -> str:
+        # A review the agent never sees: the resident queues it and writes its
+        # ``approval.created`` event, without marking a prompt as shown, in the
+        # same transaction. The event stays best effort.
+        return self._queue_approval_request(
+            "add_silent_native_review_approval_request",
+            {"request": request.to_dict(), "now": now, "daemon": True},
+        )
+
+    def _queue_approval_request(self, method: str, args: dict[str, object]) -> str:
         try:
-            request_id = self._native_store_call(
-                "add_approval_request" if claude_review is None else "add_claude_approval_request",
-                args,
-            )
+            request_id = self._native_store_call(method, args)
         except NativeGuardStoreUnavailable as error:
             raise NativeSignalProjectionUnavailableError(error.reason) from error
         except ValueError as error:

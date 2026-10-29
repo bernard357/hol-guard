@@ -41,7 +41,7 @@ from .native_review_connector import (
     raise_connector_setup_notice,
     record_native_review_connector_context,
 )
-from .native_review_records import native_review_approval_center_url, record_silent_native_review_event
+from .native_review_records import native_review_approval_center_url
 
 if TYPE_CHECKING:
     from ..local_cli_hook import SetupConnector
@@ -215,11 +215,10 @@ def pause_native_pre_tool_for_approval(
             review_binding=identity,
             connector=connector,
             policy_binding_verified=True,
+            silent=True,
         )
         if queued is None:
             _LOGGER.warning("Silent review blocked without an inbox row for %s", harness)
-        else:
-            record_silent_native_review_event(store, queued)
         request_id, approval_url = (queued.get("request_id"), queued.get("approval_url")) if queued else (None, None)
         inputs = {
             "harness": harness,
@@ -299,13 +298,15 @@ def queue_native_pre_tool_review(
     claude_notice: bool = False,
     policy_binding_verified: bool = False,
     codex_live_wait: bool = False,
+    silent: bool = False,
 ) -> dict[str, object] | None:
     if not policy_binding_verified:
         try:
             native_review_policy_binding(harness=harness, native_result=native_result, verified_receipt=native_receipt)
         except ValueError:
             return None
-    persist = getattr(store, "add_approval_request", None)
+    # A silent review's ``approval.created`` event is written with it.
+    persist = getattr(store, "add_silent_native_review_approval_request" if silent else "add_approval_request", None)
     lookup = getattr(store, "get_approval_request", None)
     if not callable(persist) or not callable(lookup):
         return None

@@ -19,10 +19,13 @@ const TABLES: [(&str, &str); 3] = [
     ("guard_events", "event_id"),
 ];
 
-fn write(home: &std::path::Path, source: &str, scenario: &Value) -> Value {
+fn write(home: &std::path::Path, source: &str, scenario: &Value, daemon: bool) -> Value {
     let mut args = Map::new();
     args.insert("request".to_owned(), scenario["request"].clone());
     args.insert("now".to_owned(), scenario["now"].clone());
+    if daemon {
+        args.insert("daemon".to_owned(), Value::Bool(true));
+    }
     let request = GuardStoreRequestV1 {
         schema: GUARD_STORE_REQUEST_SCHEMA.to_owned(),
         request_id: "vector".to_owned(),
@@ -119,8 +122,7 @@ fn check_queued(connection: &Connection, scenario: &Value, name: &str) {
     assert_eq!(Value::Object(queued), expected, "{name}: queued");
 }
 
-#[test]
-fn replays_every_recorded_silent_review() {
+fn replay(daemon: bool) {
     let vectors: Value = serde_json::from_str(VECTORS).unwrap();
     assert_eq!(vectors["schema"], "guard-store-silent-review-vectors.v1");
     let source = vectors["source"].as_str().unwrap();
@@ -136,10 +138,10 @@ fn replays_every_recorded_silent_review() {
             before,
             "{name}: seed"
         );
-        let reply = write(&home, source, scenario);
+        let reply = write(&home, source, scenario, daemon);
         let connection = Connection::open(&db).unwrap();
         let after = tables(&connection, name);
-        if scenario["native_defers"] == true {
+        if scenario["native_defers"] == true && !daemon {
             // The daemon backfills legacy rows before queueing; the resident
             // defers to it without touching the store.
             assert_eq!(reply["status"], "ok", "{name}: {reply}");
@@ -164,7 +166,18 @@ fn replays_every_recorded_silent_review() {
 }
 
 #[test]
-fn an_unreadable_queued_row_rolls_back_the_review() {
+fn replays_every_recorded_silent_review() {
+    replay(false);
+}
+
+/// The daemon backfills legacy rows itself, so every scenario, including the
+/// ones the hook path defers, lands exactly the rows Python wrote.
+#[test]
+fn the_daemon_replays_every_recorded_silent_review() {
+    replay(true);
+}
+
+fn write_over_unreadable_row(label: &str, daemon: bool) -> (Value, Connection, std::path::PathBuf) {
     let vectors: Value = serde_json::from_str(VECTORS).unwrap();
     let source = vectors["source"].as_str().unwrap();
     let scenario = vectors["scenarios"]
@@ -173,18 +186,20 @@ fn an_unreadable_queued_row_rolls_back_the_review() {
         .iter()
         .find(|item| item["name"] == "dedupe_keeps_stored_fields")
         .unwrap();
-    let home = temp_home("silent-review-unreadable");
+    let home = temp_home(label);
     let db = home.join("guard.db");
     seed(&db, &vectors, scenario);
-    // The write keeps the stored `created_at`; one Python reads as `str(bytes)`
-    // is left to the daemon, and the queued update is rolled back with it.
+    // The write keeps the stored `created_at`, which Python reads as
+    // `str(bytes)`, so no event can reproduce it.
     Connection::open(&db)
         .unwrap()
         .execute("update approval_requests set created_at = x'00'", [])
         .unwrap();
-    let reply = write(&home, source, scenario);
-    assert_eq!(reply["status"], "error", "{reply}");
-    let connection = Connection::open(&db).unwrap();
+    let reply = write(&home, source, scenario, daemon);
+    (reply, Connection::open(&db).unwrap(), home)
+}
+
+fn queued_and_events(connection: &Connection) -> (String, i64, i64) {
     let (name, count): (String, i64) = connection
         .query_row(
             "select artifact_name, dedupe_count from approval_requests",
@@ -192,11 +207,40 @@ fn an_unreadable_queued_row_rolls_back_the_review() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!((name.as_str(), count), ("OldBash", 1), "rolled back");
     let events: i64 = connection
         .query_row("select count(*) from guard_events", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(events, 0, "no event");
+    (name, count, events)
+}
+
+#[test]
+fn an_unreadable_queued_row_rolls_back_the_review() {
+    // The hook path leaves this to the daemon and rolls the update back.
+    let (reply, connection, home) = write_over_unreadable_row("silent-review-unreadable", false);
+    assert_eq!(reply["status"], "error", "{reply}");
+    let (name, count, events) = queued_and_events(&connection);
+    assert_eq!(
+        (name.as_str(), count, events),
+        ("OldBash", 1, 0),
+        "rolled back"
+    );
+    drop(connection);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_daemon_keeps_a_review_whose_event_cannot_be_written() {
+    // The daemon's event was always best effort: the queued review stands.
+    let (reply, connection, home) =
+        write_over_unreadable_row("silent-review-unreadable-daemon", true);
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert_eq!(reply["payload"], "r-old", "{reply}");
+    let (name, count, events) = queued_and_events(&connection);
+    assert_eq!(
+        (name.as_str(), count, events),
+        ("NewBash", 2, 0),
+        "queued, no event"
+    );
     drop(connection);
     let _ = std::fs::remove_dir_all(&home);
 }

@@ -69,7 +69,6 @@ def _pause(
         "native_review_approval_center_url": lambda _store: "http://127.0.0.1:4781",
         "native_review_setup_connector": lambda *_a, **_k: connector,
         "queue_native_pre_tool_review": queue,
-        "record_silent_native_review_event": lambda *_a: None,
         # Rendering is native; the harness shape is tested with the renderers.
         "render_pre_tool": lambda _harness, verdict, **_k: dict(verdict),
         "render_pre_tool_review": lambda _harness, verdict, *, approval, **_k: {
