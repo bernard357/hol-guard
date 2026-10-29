@@ -206,6 +206,10 @@ def test_only_the_marked_cases_may_pass_on_containment() -> None:
         # these keep the in-worktree shape on record, where the write cannot leave the
         # workspace and the contained run is the designed outcome.
         "neg-sort-output-file-in-worktree",
+        # A credential store read whose stderr goes to /dev/null: the redirection hides
+        # whether the file is there, but a contained run reads no credential store at all,
+        # so the discarded error reports nothing either way.
+        "neg-stderr-credential-location-read",
         "neg-tr-file-operand",
         "neg-uniq-output-operand-in-worktree",
         # A removal git reads as the trailing part of a sibling checkout's registration: the
