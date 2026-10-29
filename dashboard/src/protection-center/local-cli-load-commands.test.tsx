@@ -8,9 +8,12 @@ import { LocalCliApiError, normalizeLocalCliItem } from "../local-cli-api";
 import {
   LocalCliLoadCommands,
   PATH_ENTRY_CODES,
+  enteredToolPath,
   loadCommandsFailureMessage,
   loadCommandsNeedsPath,
+  recordedToolPath,
 } from "./local-cli-load-commands";
+import { discoveryPollDelay } from "../discovery-job-wait";
 
 const raw = {
   cli_id: "local-cli.lanectl-abcdef12",
@@ -61,8 +64,11 @@ for (const scriptLike of [{ ...raw, kind: "script" }, { ...raw, name: "approve-m
   assert.match(script, /<input[^>]*placeholder="\/path\/to\//);
   assert.match(script, /only if it is the one Guard recorded/);
   assert.match(script, /load commands only for scripts you trust/);
-  // With no path entered yet there is nothing to run.
-  assert.match(script, /<button[^>]*disabled=""[^>]*>Load commands</);
+  // With no path entered yet the action stays available: a greyed-out button
+  // with a wait cursor read as Guard still loading. Choosing it asks for the path.
+  assert.doesNotMatch(script, /<button[^>]*disabled=""[^>]*>Load commands</);
+  assert.match(script, /<button[^>]*>Load commands</);
+  assert.doesNotMatch(script, /disabled:cursor-wait/);
   assert.doesNotMatch(script, /Add custom extension/);
 }
 assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "lanectl" }), false);
@@ -70,6 +76,32 @@ assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "pr-approve-merge
 assert.equal(loadCommandsNeedsPath({ kind: "executable", name: "-lanectl" }), true);
 assert.equal(loadCommandsNeedsPath({ kind: "script", name: "lanectl" }), true);
 assert.doesNotMatch(empty, /Full path to/);
+
+// A tool added from its file starts from that file's path; one first seen in
+// an agent's command records only a class such as "user-tool", which names no file.
+const added = render({ ...raw, name: "approve-merge.sh", source_path: "/opt/tools/approve-merge.sh" });
+assert.match(added, /<input[^>]*value="\/opt\/tools\/approve-merge.sh"/);
+assert.equal(recordedToolPath({ source_path: "/opt/tools/approve-merge.sh" }), "/opt/tools/approve-merge.sh");
+assert.equal(recordedToolPath({ source_path: "~/bin/approve-merge.sh" }), "~/bin/approve-merge.sh");
+assert.equal(recordedToolPath({ source_path: "C:\\tools\\approve-merge.ps1" }), "C:\\tools\\approve-merge.ps1");
+for (const recorded of ["user-tool", "approve-merge.sh", "", null]) {
+  assert.equal(recordedToolPath({ source_path: recorded }), "", String(recorded));
+}
+assert.match(render({ ...raw, name: "approve-merge.sh", source_path: "user-tool" }), /<input[^>]*value=""/);
+
+// A path copied from a shell keeps its quotes; Guard sends the path alone.
+assert.equal(enteredToolPath("  '/opt/my tools/approve-merge.sh' "), "/opt/my tools/approve-merge.sh");
+assert.equal(enteredToolPath('"/opt/tools/approve-merge.sh"'), "/opt/tools/approve-merge.sh");
+assert.equal(enteredToolPath("/opt/tools/it's.sh"), "/opt/tools/it's.sh");
+assert.equal(enteredToolPath("'/opt/tools/a.sh\""), "'/opt/tools/a.sh\"");
+assert.equal(enteredToolPath("   "), "");
+
+// A --help probe usually finishes in well under half a second, so the first
+// progress checks come quickly instead of after a fixed half-second wait.
+assert.equal(discoveryPollDelay(0), 100);
+assert.ok(discoveryPollDelay(0) + discoveryPollDelay(1) < 500);
+assert.equal(discoveryPollDelay(3), 500);
+assert.equal(discoveryPollDelay(119), 500);
 
 // Shared job failures that name connectors get tool wording; others pass through.
 assert.match(loadCommandsFailureMessage(new DiscoveryFailure("catalog_limit_reached", "connector text")), /lists more commands than Guard can keep/);

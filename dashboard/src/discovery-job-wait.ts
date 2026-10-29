@@ -51,6 +51,17 @@ function stageFailure(code: unknown): DiscoveryFailure {
   }
 }
 
+/**
+ * How long to wait before each progress check. Most jobs, such as reading a
+ * tool's --help, finish within a few hundred milliseconds, so the first
+ * checks come quickly; longer scans settle into a steady half-second.
+ */
+const EARLY_POLL_DELAYS_MS = [100, 150, 250];
+
+export function discoveryPollDelay(poll: number): number {
+  return EARLY_POLL_DELAYS_MS[poll] ?? 500;
+}
+
 export async function waitForDiscoveryJob(cliId: string, initialJob: unknown, signal: AbortSignal, readJson: (response: Response) => Promise<unknown>): Promise<void> {
   const normalize = (body: unknown): Record<string, unknown> => {
     if (!isRecord(body) || typeof body.job_id !== "string" || !/^[a-f0-9]{32}$/.test(body.job_id)
@@ -81,7 +92,7 @@ export async function waitForDiscoveryJob(cliId: string, initialJob: unknown, si
       }
       await new Promise<void>((resolve) => {
         const done = () => { window.clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
-        const timer = window.setTimeout(done, 500);
+        const timer = window.setTimeout(done, discoveryPollDelay(poll));
         signal.addEventListener("abort", done, { once: true });
       });
       if (!signal.aborted) job = await request({ job_id: job.job_id });

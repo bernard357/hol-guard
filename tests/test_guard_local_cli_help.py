@@ -229,11 +229,68 @@ def test_a_resident_that_goes_quiet_stops_the_nested_probes(
         return answers.pop(0) if answers else pytest.fail("probed past the silence")
 
     calls = _stand_in_resident(monkeypatch, _answer)
-    commands, status = discover_local_cli_commands(_identity(), ("wrangler", "--help"), runner=lambda _: WRANGLER_HELP)
+    commands, status = discover_local_cli_commands(
+        _identity(),
+        ("wrangler", "--help"),
+        runner=lambda argv: WRANGLER_HELP if len(argv) == 2 else "Commands:\n  list  List them\n",
+    )
     # The top-level parse stands; only the children are given up on.
     assert status == "ok"
     assert {"docs", "init", "deploy"} <= {command.command_id for command in commands}
     assert len(calls) == 2
+
+
+SCRIPT_HELP = """
+Usage: release.sh <command>
+
+Commands:
+  sync   Sync the release branch
+  push   Push the release tag
+"""
+
+
+def test_a_script_that_echoes_its_help_for_every_command_lists_no_subcommands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A script reading only --help would otherwise list "sync sync" and "sync push"."""
+
+    calls = _stand_in_resident(monkeypatch, lambda **_: (_row("sync"), _row("push")))
+    probed: list[tuple[str, ...]] = []
+
+    def _probe(argv: Sequence[str]) -> str:
+        probed.append(tuple(argv))
+        # The same text, laid out again, is still the same help.
+        return SCRIPT_HELP if len(argv) == 2 else "  " + SCRIPT_HELP.replace("\n\n", "\n")
+
+    commands, status = discover_local_cli_commands(_identity("release.sh"), ("release.sh", "--help"), runner=_probe)
+    ids = {command.command_id for command in commands}
+    assert status == "ok"
+    assert {"sync", "push"} <= ids
+    assert not any("." in command_id for command_id in ids), ids
+    # Each command was still asked for its own help; the echo never reached the parse.
+    assert ("release.sh", "sync", "--help") in probed
+    assert len(calls) == 1
+
+
+def test_a_command_help_that_lists_the_top_level_commands_again_adds_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A usage line naming the command does not make the same list its own."""
+
+    _stand_in_resident(
+        monkeypatch,
+        lambda **kwargs: (_row("sync"), _row("push")) if len(kwargs["invocation"]) == 1 or kwargs["invocation"][1] == "sync"
+        else (_row("all"),),
+    )
+
+    def _probe(argv: Sequence[str]) -> str:
+        return SCRIPT_HELP if len(argv) == 2 else SCRIPT_HELP.replace("<command>", f"{argv[1]} <command>")
+
+    commands, _ = discover_local_cli_commands(_identity("release.sh"), ("release.sh", "--help"), runner=_probe)
+    ids = {command.command_id for command in commands}
+    assert not {"sync.sync", "sync.push"} & ids
+    # A command whose help lists commands of its own still gets them.
+    assert "push.all" in ids
 
 
 def test_discover_yargs_help_has_no_program_named_commands(recorded_resident: None) -> None:

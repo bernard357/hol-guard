@@ -1849,6 +1849,10 @@
     cursor: pointer;
   }
 
+  .cursor-wait {
+    cursor: wait;
+  }
+
   .resize {
     resize: both;
   }
@@ -7212,6 +7216,10 @@
     .aria-\[current\]\:bg-brand-blue\/5[aria-current] {
       background-color: color-mix(in oklab, var(--brand-blue) 5%, transparent);
     }
+  }
+
+  .aria-\[invalid\=true\]\:border-red-600[aria-invalid="true"] {
+    border-color: var(--color-red-600);
   }
 
   @media (prefers-reduced-motion: no-preference) {

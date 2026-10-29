@@ -34,6 +34,25 @@ export function loadCommandsNeedsPath(item: Pick<LocalCliItem, "kind" | "name">)
   return item.kind !== "executable" || !BARE_PROGRAM_NAME.test(item.name) || SCRIPT_SUFFIXES.has(suffix);
 }
 
+const ABSOLUTE_PATH = /^(?:\/|~\/|[A-Za-z]:[\\/])/;
+
+/**
+ * The path to start from. A tool added from its file keeps that file's full
+ * path; one first seen in an agent's command keeps only a class such as
+ * "user-tool", which names no file, so the field starts empty.
+ */
+export function recordedToolPath(item: Pick<LocalCliItem, "source_path">): string {
+  const recorded = item.source_path ?? "";
+  return ABSOLUTE_PATH.test(recorded) ? recorded : "";
+}
+
+/** A path copied from a shell often keeps its quotes; Guard wants the path alone. */
+export function enteredToolPath(raw: string): string {
+  const trimmed = raw.trim();
+  const quoted = /^(['"])(.*)\1$/.exec(trimmed);
+  return (quoted ? quoted[2] : trimmed).trim();
+}
+
 /**
  * Reads a recorded tool's --help on request, so its commands can be set to
  * Allow or Block one by one. A program on PATH is found by name. A script is
@@ -47,24 +66,38 @@ export function LocalCliLoadCommands(props: {
 }) {
   const { item, onLoaded } = props;
   const pathId = useId();
+  const pathHintId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [askPath, setAskPath] = useState(() => loadCommandsNeedsPath(item));
-  const [path, setPath] = useState("");
+  const [path, setPath] = useState(() => recordedToolPath(item));
+  const [pathMissing, setPathMissing] = useState(false);
+  const pathRef = useRef<HTMLInputElement | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   // The panel remounts this control for another tool or a changed program,
   // so unmounting aborts a load that belongs to the previous one.
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const load = useCallback(async () => {
+    const entered = enteredToolPath(path);
+    // A disabled button reads as Guard still working, so the action stays
+    // available and says what it needs instead.
+    if (askPath && entered === "") {
+      setPathMissing(true);
+      setLoaded(false);
+      setError(`Enter the full path to ${item.name} first.`);
+      pathRef.current?.focus();
+      return;
+    }
     const controller = new AbortController();
     controllerRef.current = controller;
     setBusy(true);
     setError(null);
+    setPathMissing(false);
     setLoaded(false);
     try {
-      await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? path.trim() : undefined);
+      await loadLocalCliCommands(item.cli_id, controller.signal, askPath ? entered : undefined);
       if (controller.signal.aborted) return;
       await onLoaded();
       setLoaded(true);
@@ -79,24 +112,25 @@ export function LocalCliLoadCommands(props: {
       setBusy(false);
       if (controllerRef.current === controller) controllerRef.current = null;
     }
-  }, [askPath, item.cli_id, onLoaded, path]);
+  }, [askPath, item.cli_id, item.name, onLoaded, path]);
 
   // Root and other are Guard's own entries for every tool, not listed commands.
-  const hasCommands = item.commands.some((command) => command.command_id !== "root" && command.command_id !== "other");
+  const listedCount = item.commands.filter((command) => command.command_id !== "root" && command.command_id !== "other").length;
+  const hasCommands = listedCount > 0;
   return (
     <div className="mt-3 max-w-2xl" aria-busy={busy}>
       <p className="text-sm leading-6 text-brand-dark/75">
         {askPath ? (
           <>
             Guard does not record where {item.name} is saved. Enter its full path, and Guard runs it with{" "}
-            <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">--help</code>{" "}
+            <code className="whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">--help</code>{" "}
             from an empty temporary folder, then the same for each command it lists. It runs the file only if it is
             the one Guard recorded. A script that ignores --help may do its normal work instead, so load commands
             only for scripts you trust.
           </>
         ) : (
           <>
-            Guard runs <code className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">{item.name} --help</code> from an empty temporary
+            Guard runs <code className="whitespace-nowrap rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-brand-dark">{item.name} --help</code> from an empty temporary
             folder, then the same for each command it lists. A program that ignores --help may do its normal work
             instead, so load commands only for tools you trust.
           </>
@@ -110,17 +144,26 @@ export function LocalCliLoadCommands(props: {
           </label>
           <input
             id={pathId}
+            ref={pathRef}
             value={path}
-            onChange={(event) => setPath(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && path.trim() !== "" && !busy && !props.disabled) void load();
+            onChange={(event) => {
+              setPath(event.target.value);
+              if (pathMissing) {
+                setPathMissing(false);
+                setError(null);
+              }
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !busy && !props.disabled) void load();
+            }}
+            aria-invalid={pathMissing || undefined}
+            aria-describedby={pathMissing ? pathHintId : undefined}
             disabled={busy}
             spellCheck={false}
             autoComplete="off"
             maxLength={4096}
             placeholder={`/path/to/${item.name}`}
-            className="mt-2 min-h-11 w-full max-w-xl rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-brand-dark placeholder:text-brand-dark/70 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+            className="mt-2 min-h-11 w-full max-w-xl rounded-xl border border-slate-300 aria-[invalid=true]:border-red-600 bg-white px-3 font-mono text-sm text-brand-dark placeholder:text-brand-dark/70 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
         </>
       ) : null}
@@ -128,8 +171,8 @@ export function LocalCliLoadCommands(props: {
         <button
           type="button"
           onClick={() => void load()}
-          disabled={props.disabled || busy || (askPath && path.trim() === "")}
-          className="inline-flex min-h-11 items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark disabled:cursor-wait disabled:opacity-50"
+          disabled={props.disabled || busy}
+          className={`inline-flex min-h-11 items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold text-brand-dark disabled:opacity-50 ${busy ? "cursor-wait" : "disabled:cursor-not-allowed"}`}
         >
           {busy ? "Loading commands…" : hasCommands ? "Check for new commands" : "Load commands"}
         </button>
@@ -143,10 +186,12 @@ export function LocalCliLoadCommands(props: {
           </button>
         ) : null}
       </div>
-      {error ? <p role="alert" className="mt-3 text-sm leading-6 text-red-700">{error}</p> : null}
-      {loaded && !hasCommands ? (
+      {error ? <p id={pathMissing ? pathHintId : undefined} role="alert" className="mt-3 text-sm leading-6 text-red-700">{error}</p> : null}
+      {loaded ? (
         <p role="status" className="mt-3 text-sm leading-6 text-brand-dark/75">
-          {item.name} --help did not list any commands. Guard keeps reviewing it as one tool.
+          {hasCommands
+            ? `${item.name} lists ${listedCount} ${listedCount === 1 ? "command" : "commands"}. Choose Allow or Block for each below.`
+            : `${item.name} --help did not list any commands, so Guard treats it as one tool. Choose Allow or Block for it below.`}
         </p>
       ) : null}
     </div>

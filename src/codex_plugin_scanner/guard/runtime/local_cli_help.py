@@ -152,7 +152,9 @@ def discover_local_cli_commands(
     if not discovered:
         return merge_discovered_commands(identity.name, empty), "empty"
     if len(discovered) <= _MAX_NESTED_PROBES:
-        discovered = _with_nested_commands(tuple(argv), discovered, probe, program=identity.name, guard_home=guard_home)
+        discovered = _with_nested_commands(
+            tuple(argv), discovered, probe, program=identity.name, parent_help=output, guard_home=guard_home
+        )
     return merge_discovered_commands(identity.name, discovered), "ok"
 
 
@@ -248,16 +250,22 @@ def _with_nested_commands(
     probe: Callable[[Sequence[str]], str],
     *,
     program: str,
+    parent_help: str,
     guard_home: Path | None = None,
 ) -> tuple[LocalCliCommand, ...]:
     nested: list[LocalCliCommand] = list(discovered)
     seen = {command.command_id for command in nested}
     prefix = tuple(argv[:-1])
+    top_level_help = _help_words(parent_help)
+    top_level_ids = {command.command_id for command in discovered if command.parent_id is None}
     for command in discovered:
         if command.parent_id is not None:
             continue
         child_output = probe((*prefix, command.name, "--help"))
-        if child_output.strip() == "":
+        # A script that reads only --help prints its own help again for every
+        # command. That lists the top-level commands, not this command's, and
+        # would add each one again under every other, such as "push push".
+        if child_output.strip() == "" or _help_words(child_output) == top_level_help:
             continue
         children = parse_cli_help_text(child_output, invocation=(program, command.name), guard_home=guard_home)
         if children is None:
@@ -265,6 +273,8 @@ def _with_nested_commands(
             # out its own timeout for the same silence, so stop probing and
             # keep what the top-level parse already found.
             break
+        if {child.command_id for child in children} == top_level_ids:
+            continue
         for child in children:
             child_id = f"{command.command_id}.{child.command_id}"
             if child_id in seen or not _COMMAND_NAME.fullmatch(child.command_id):
@@ -280,6 +290,10 @@ def _with_nested_commands(
                 )
             )
     return tuple(nested)
+
+
+def _help_words(text: str) -> tuple[str, ...]:
+    return tuple(text.split())
 
 
 def _help_env(tmp: str) -> dict[str, str]:
