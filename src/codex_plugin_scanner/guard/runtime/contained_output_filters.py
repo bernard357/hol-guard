@@ -56,11 +56,10 @@ def keep_bytes(text: str, kind: str, count: int) -> str:
     the pipeline would have produced.
     """
     data = text.encode("utf-8", "surrogateescape")
-    if kind == "head":
-        data = data[:count]
-    else:
-        data = data[len(data) - count :] if count else b""
-    return data.decode("utf-8", "surrogateescape")
+    # `len(data) - count` rather than `-count`, so a zero count keeps nothing
+    # instead of keeping everything.
+    cut = data[:count] if kind == "head" else data[len(data) - count :]
+    return cut.decode("utf-8", "surrogateescape")
 
 
 def _owners() -> set[int]:

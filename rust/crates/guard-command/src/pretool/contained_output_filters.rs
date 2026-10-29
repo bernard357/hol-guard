@@ -318,7 +318,11 @@ mod tests {
             (&["-c", "1500"][..], (1500, true)),
             (&["-c1500"][..], (1500, true)),
         ] {
-            assert_eq!(head_tail_bound(&words(arguments)), Some(expected), "{arguments:?}");
+            assert_eq!(
+                head_tail_bound(&words(arguments)),
+                Some(expected),
+                "{arguments:?}"
+            );
         }
     }
 
