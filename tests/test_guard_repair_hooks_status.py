@@ -45,8 +45,11 @@ def test_hooks_that_stay_broken_after_reinstall_are_skipped_not_repaired(
     assert step["repaired"] == []
     assert step["needs_attention"] == ["codex", "claude-code"]
     assert report["status"] == "partial"
-    assert "still need attention" in str(report["summary"])
+    assert "These still need attention: Harness hooks." in str(report["summary"])
     assert "Guard was repaired" not in str(report["summary"])
+    # Nothing failed, so the run must not close by asking for another one.
+    assert "Some steps failed" not in str(report["summary"])
+    assert "No step failed, and another `hol-guard repair` run reaches the same answer." in str(report["summary"])
 
 
 def test_mixed_outcome_reports_changed_and_names_remaining_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +64,7 @@ def test_mixed_outcome_reports_changed_and_names_remaining_app(tmp_path: Path, m
     report = repair_engine.build_report([step], dry_run=False)
     assert report["status"] == "partial"
     assert "Guard was repaired" not in str(report["summary"])
+    assert "Some steps failed" not in str(report["summary"])
 
 
 def test_fully_repaired_hooks_still_report_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,3 +96,19 @@ def test_failed_post_reinstall_check_leaves_apps_unresolved(tmp_path: Path, monk
     assert step["repaired"] == []
     assert step["needs_attention"] == ["codex", "claude-code"]
     assert report["status"] == "partial"
+
+
+def test_a_failed_step_still_asks_for_another_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The advice that loops for an unsettled app is the right advice for a failure."""
+
+    context, store = _setup(tmp_path, monkeypatch, still_broken={"codex"})
+
+    def failing_install(_action: str, harness: str, *_args: object) -> None:
+        raise RuntimeError("install blew up")
+
+    monkeypatch.setattr(install_commands, "apply_managed_install", failing_install)
+    step = repair_engine.repair_hooks(context, store, dry_run=False)
+    report = repair_engine.build_report([step], dry_run=False)
+
+    assert step["status"] == "error"
+    assert "Some steps failed. Re-run `hol-guard repair`" in str(report["summary"])

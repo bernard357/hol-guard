@@ -33,14 +33,44 @@ assert.equal(report.steps[2].status, "error");
 assert.equal(report.steps[2].summary, "");
 assert.throws(() => normalizeRepairReport({ status: "x" }));
 
-assert.equal(repairStepTone("error"), "attention");
-assert.equal(repairStepLabel("changed"), "Fixed");
+assert.deepEqual(report.steps[0].needs_attention, []);
+assert.equal(repairStepTone(report.steps[1]), "attention");
+assert.equal(repairStepLabel({ ...report.steps[0], status: "changed" }), "Fixed");
 assert.match(repairHeadline(report), /hol-guard repair/);
 
 const listMarkup = renderToStaticMarkup(<GuardRepairStepList steps={report.steps} />);
 assert.match(listMarkup, /Guard daemon/);
 assert.match(listMarkup, /Failed/);
 assert.equal(renderToStaticMarkup(<GuardRepairStepList steps={[]} />), "");
+
+// A run where nothing failed but a step still needs the user is reported as
+// "partial" too. Advising another run there sends the user round a loop: the
+// next run reads the same broken app and says the same thing.
+const attentionReport = normalizeRepairReport({
+  schema: "guard.repair.v1",
+  dry_run: false,
+  status: "partial",
+  summary: "x",
+  steps: [
+    { step: "daemon", title: "Guard daemon", status: "ok", summary: "Healthy." },
+    {
+      step: "hooks",
+      title: "Harness hooks",
+      status: "changed",
+      summary: "Reinstalled hooks for: claude-code. Still needs attention: codex.",
+      needs_attention: ["codex", 7],
+    },
+  ],
+});
+assert.deepEqual(attentionReport.steps[1].needs_attention, ["codex"]);
+assert.doesNotMatch(repairHeadline(attentionReport), /Run Repair Guard again/);
+assert.match(repairHeadline(attentionReport), /reaches the same answer/);
+assert.match(repairHeadline(attentionReport), /Harness hooks/);
+assert.equal(repairStepTone(attentionReport.steps[1]), "attention");
+assert.equal(repairStepLabel(attentionReport.steps[1]), "Needs you");
+const attentionMarkup = renderToStaticMarkup(<GuardRepairStepList steps={attentionReport.steps} />);
+assert.match(attentionMarkup, /Needs you/);
+assert.doesNotMatch(attentionMarkup, /Fixed/);
 
 const idleRepair = renderToStaticMarkup(<GuardRepairControl description="Hooks timing out?" />);
 assert.match(idleRepair, /Repair Guard/);

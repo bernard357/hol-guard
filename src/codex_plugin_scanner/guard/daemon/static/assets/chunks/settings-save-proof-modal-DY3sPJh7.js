@@ -22,7 +22,8 @@ function normalizeRepairReport(payload) {
       step: item.step,
       title: typeof item.title === "string" ? item.title : item.step,
       status: STEP_STATUSES.has(String(item.status)) ? item.status : "error",
-      summary: typeof item.summary === "string" ? item.summary : ""
+      summary: typeof item.summary === "string" ? item.summary : "",
+      needs_attention: Array.isArray(item.needs_attention) ? item.needs_attention.filter((entry) => typeof entry === "string") : []
     });
   }
   return {
@@ -91,7 +92,15 @@ async function runGuardRepair(options = {}) {
       dry_run: options.dryRun === true,
       status: "healthy",
       summary: "Nothing needed repair.",
-      steps: [{ step: "hooks", title: "Harness hooks", status: "ok", summary: "All managed hooks verified." }]
+      steps: [
+        {
+          step: "hooks",
+          title: "Harness hooks",
+          status: "ok",
+          summary: "All managed hooks verified.",
+          needs_attention: []
+        }
+      ]
     };
   }
   return normalizeRepairReport(
@@ -131,21 +140,35 @@ async function removeAllGuardHooks(credentials) {
     })
   );
 }
-function repairStepTone(status) {
-  if (status === "error") return "attention";
-  if (status === "changed") return "green";
-  if (status === "planned") return "blue";
+function stepNeedsAttention(step) {
+  return step.needs_attention.length > 0;
+}
+function repairAttentionTitles(steps) {
+  return steps.filter(stepNeedsAttention).map((step) => step.title);
+}
+function repairStepTone(step) {
+  if (step.status === "error" || stepNeedsAttention(step)) return "attention";
+  if (step.status === "changed") return "green";
+  if (step.status === "planned") return "blue";
   return "slate";
 }
-function repairStepLabel(status) {
-  if (status === "error") return "Failed";
-  if (status === "changed") return "Fixed";
-  if (status === "planned") return "Needs repair";
-  if (status === "skipped") return "Skipped";
+function repairStepLabel(step) {
+  if (step.status === "error") return "Failed";
+  if (stepNeedsAttention(step)) return "Needs you";
+  if (step.status === "changed") return "Fixed";
+  if (step.status === "planned") return "Needs repair";
+  if (step.status === "skipped") return "Skipped";
   return "Healthy";
 }
 function repairHeadline(report) {
-  if (report.status === "partial") return "Some repair steps failed. Run Repair Guard again, or run `hol-guard repair` in a terminal.";
+  if (report.status === "partial") {
+    if (report.steps.some((step) => step.status === "error")) {
+      return "Some repair steps failed. Run Repair Guard again, or run `hol-guard repair` in a terminal.";
+    }
+    const waiting = repairAttentionTitles(report.steps);
+    const named = waiting.length > 0 ? ` Still waiting on you: ${waiting.join(", ")}.` : "";
+    return `No repair step failed, and running repair again reaches the same answer.${named}`;
+  }
   if (report.status === "repaired") return "Guard was repaired. Restart any coding-agent session that was blocked.";
   if (report.status === "needs_repair") return "Guard found problems to repair.";
   return "Nothing needed repair.";
@@ -157,7 +180,7 @@ function GuardRepairStepList({ steps }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-brand-dark", children: step.title }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "break-words text-xs text-slate-500", children: step.summary })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: repairStepTone(step.status), children: repairStepLabel(step.status) })
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Tag, { tone: repairStepTone(step), children: repairStepLabel(step) })
   ] }, step.step)) });
 }
 function GuardRepairControl({

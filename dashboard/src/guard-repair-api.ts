@@ -14,6 +14,8 @@ export type GuardRepairStep = {
   title: string;
   status: GuardRepairStepStatus;
   summary: string;
+  /** What this step found that only the user can settle, such as apps whose hooks stayed broken. */
+  needs_attention: string[];
 };
 
 export type GuardRepairReport = {
@@ -69,6 +71,9 @@ export function normalizeRepairReport(payload: unknown): GuardRepairReport {
       title: typeof item.title === "string" ? item.title : item.step,
       status: STEP_STATUSES.has(String(item.status)) ? (item.status as GuardRepairStepStatus) : "error",
       summary: typeof item.summary === "string" ? item.summary : "",
+      needs_attention: Array.isArray(item.needs_attention)
+        ? item.needs_attention.filter((entry): entry is string => typeof entry === "string")
+        : [],
     });
   }
   return {
@@ -153,7 +158,15 @@ export async function runGuardRepair(options: {
       dry_run: options.dryRun === true,
       status: "healthy",
       summary: "Nothing needed repair.",
-      steps: [{ step: "hooks", title: "Harness hooks", status: "ok", summary: "All managed hooks verified." }],
+      steps: [
+        {
+          step: "hooks",
+          title: "Harness hooks",
+          status: "ok",
+          summary: "All managed hooks verified.",
+          needs_attention: [],
+        },
+      ],
     };
   }
   return normalizeRepairReport(

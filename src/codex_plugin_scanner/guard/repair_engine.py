@@ -384,16 +384,25 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
     for item in steps:
         mark = _MARKS.get(str(item["status"]), str(item["status"]))
         lines.append(f"  [{mark}] {item['title']}: {item['summary']}")
-    if status == "partial":
+    attention = [item for item in steps if _step_needs_attention(item)]
+    if status == "partial" and any(str(item["status"]) == "error" for item in steps):
         lines.append("Some steps failed. Re-run `hol-guard repair`; if it persists, run `hol-guard doctor --json`.")
+    elif status == "partial":
+        # Nothing here failed: the steps ran and found something only the user
+        # can settle. Sending them back through repair would meet the same
+        # answer, so say so rather than asking for a run that cannot help.
+        lines.append("No step failed, and another `hol-guard repair` run reaches the same answer.")
     elif status == "needs_repair":
         lines.append("Run `hol-guard repair` to apply these fixes.")
     elif status == "repaired":
         lines.append("Guard was repaired. Restart any open coding-agent sessions that were blocked.")
     else:
         lines.append("Nothing needed repair.")
-    if any(_step_needs_attention(item) for item in steps):
-        lines.append("Some apps still need attention. See the hooks step above.")
+    if attention:
+        # Name the steps rather than one of them: hooks was the only step that
+        # reported this when the line was written, and it is no longer.
+        titles = ", ".join(str(item["title"]) for item in attention)
+        lines.append(f"These still need attention: {titles}. Each step above says what it is waiting on.")
     return "\n".join(lines)
 
 
