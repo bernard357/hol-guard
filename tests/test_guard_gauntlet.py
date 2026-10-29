@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from copy import deepcopy
 
@@ -246,8 +247,9 @@ def test_sibling_copy_requires_bash_then_native_read_and_exact_bytes(tmp_path):
     assert not task_tools_match(scenario, list(reversed(calls)))
 
 
-def test_workspace_jest_install_is_scoped_to_its_own_case(tmp_path):
-    """The npx case gets the project's own Jest; every other case keeps the shared fixture."""
+@pytest.mark.skipif(shutil.which("node") is None, reason="the workspace runner fixture copies the host's Node")
+def test_workspace_jest_install_holds_the_shape_npm_leaves(tmp_path):
+    """The npx case gets the project's own Jest and a Node the fixture home owns."""
     fixture = create_fixture(tmp_path / "jest", realistic=True, scenario_id=WORKSPACE_JEST_CASE)
     entry = fixture.workspace / "node_modules/jest/bin/jest.js"
     assert entry.is_file() and entry.resolve() == (fixture.workspace / "node_modules/.bin/jest").resolve()
@@ -261,6 +263,10 @@ def test_workspace_jest_install_is_scoped_to_its_own_case(tmp_path):
         node.parent.name
         == subprocess.run([str(node / "node"), "--version"], capture_output=True, text=True, check=True).stdout.strip()
     )
+
+
+def test_workspace_jest_install_is_scoped_to_its_own_case(tmp_path):
+    """Every other case keeps the shared fixture, so no other run carries a runner or a Node."""
     other = create_fixture(tmp_path / "plain", realistic=True, scenario_id="ordinary")
     assert not (other.workspace / "node_modules/jest").exists()
     assert workspace_node_bin(other.home) is None

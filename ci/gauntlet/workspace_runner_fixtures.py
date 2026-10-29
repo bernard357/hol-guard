@@ -21,6 +21,8 @@ WORKSPACE_JEST_CASE = "omp-native-workspace-npx-jest"
 _NODE_VERSIONS = ".nvm/versions/node"
 _NODE_VERSION = re.compile(r"v\d+\.\d+\.\d+")
 _VERSION = "30.0.5"
+# The one line the workspace's own runner prints, which only a real launch produces.
+RUNNER_MARKER = f"jest-cli {_VERSION}"
 _FILES = {
     "package.json": (
         '{\n  "name": "synthetic-app",\n  "private": true,\n  "version": "0.0.0",\n'
@@ -44,7 +46,7 @@ _FILES = {
         "if (!importLocal(__filename)) {\n  require('jest-cli/bin/jest');\n}\n"
     ),
     "node_modules/import-local/index.js": "module.exports = () => false;\n",
-    "node_modules/jest-cli/bin/jest.js": f"console.log('jest-cli {_VERSION}');\n",
+    "node_modules/jest-cli/bin/jest.js": f"console.log('{RUNNER_MARKER}');\n",
 }
 
 

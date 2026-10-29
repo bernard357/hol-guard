@@ -309,21 +309,31 @@ fn option_name(argument: &str) -> String {
 pub(crate) fn jest_reads_its_own_workspace(arguments: &[String]) -> bool {
     !arguments
         .iter()
-        .any(|argument| leaves_the_workspace(option_value(argument)))
+        .any(|argument| leaves_the_workspace(argument))
 }
 
-/// The value an argument carries: `--config=x` gives `x`, anything else gives
-/// itself, so a value joined to its option is read the same as a separate one.
-fn option_value(argument: &str) -> &str {
-    match argument.split_once('=') {
-        Some((name, value)) if name.starts_with('-') => value,
-        _ => argument,
-    }
+/// Whether any part of an argument names a path outside the workspace. Jest
+/// reads its options through yargs-parser, which takes a value joined with
+/// `=`, attached straight to a short alias (`-c/etc/jest.config.js`), or
+/// spelled as inline JSON (`--config '{"setupFiles":["/tmp/x.js"]}'`), so the
+/// argument is screened whole and in pieces rather than as one path.
+fn leaves_the_workspace(argument: &str) -> bool {
+    let attached = argument
+        .strip_prefix('-')
+        .filter(|rest| !rest.starts_with('-'))
+        .and_then(|rest| rest.get(1..))
+        .unwrap_or_default();
+    [argument, attached]
+        .into_iter()
+        .chain(argument.split(|character: char| {
+            character.is_whitespace() || "\"',:;=[]{}".contains(character)
+        }))
+        .any(path_leaves_the_workspace)
 }
 
 /// True when a value names a path this workspace does not hold: an absolute
 /// path, a home-relative one, or a relative path that climbs out.
-fn leaves_the_workspace(value: &str) -> bool {
+fn path_leaves_the_workspace(value: &str) -> bool {
     let value = value.replace('\\', "/");
     let bytes = value.as_bytes();
     let windows_root =

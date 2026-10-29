@@ -30,6 +30,7 @@ from .source_output_fixtures import (
     WORKER_MARKER,
     WORKER_PATH,
 )
+from .workspace_runner_fixtures import RUNNER_MARKER, WORKSPACE_JEST_CASE
 
 TOKEN_READ_CASE = "omp-native-read-token-handling-sources"
 TOKEN_SHELL_CASE = "omp-native-shell-cat-token-handling-sources"
@@ -236,6 +237,14 @@ def _workspace_find_match(calls: list[dict[str, Any]]) -> bool:
     return text is not None and text.replace("\\", "/").splitlines() == ["{{workspace}}/src/settings.ts"]
 
 
+def _workspace_runner_match(calls: list[dict[str, Any]]) -> bool:
+    """The workspace's own runner actually launched, printing the line only it prints."""
+    if len(calls) != 1:
+        return False
+    text = _text(calls[0])
+    return text is not None and RUNNER_MARKER in text
+
+
 def command_outputs_match(scenario: Scenario, calls: list[dict[str, Any]]) -> bool:
     """A successful host status cannot replace the required read, search or transformation."""
     if scenario.id == BUSINESS_ORDINARY_READ:
@@ -250,6 +259,8 @@ def command_outputs_match(scenario: Scenario, calls: list[dict[str, Any]]) -> bo
         return _clone_search_match(scenario, calls)
     if scenario.id == WORKSPACE_FIND_CASE:
         return _workspace_find_match(calls)
+    if scenario.id == WORKSPACE_JEST_CASE:
+        return _workspace_runner_match(calls)
     if scenario.id not in OUTPUT_SCENARIOS:
         return True
     if len(calls) != len(scenario.commands):

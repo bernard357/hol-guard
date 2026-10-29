@@ -33,7 +33,31 @@ def _watches(arguments: Sequence[str]) -> bool:
     return any(_option_name(argument) in {"watch", "watchall"} for argument in arguments)
 
 
-def _leaves_the_workspace(value: str) -> bool:
+_PIECE_DELIMITERS = "\"',:;=[]{}"
+
+
+def _leaves_the_workspace(argument: str) -> bool:
+    """Whether any part of an argument names a path outside the workspace.
+
+    yargs-parser takes a value joined with ``=``, attached straight to a short
+    alias (``-c/etc/jest.config.js``), or spelled as inline JSON
+    (``--config '{"setupFiles":["/tmp/x.js"]}'``), so the argument is screened
+    whole and in pieces rather than as one path.
+    """
+    attached = argument[2:] if argument.startswith("-") and not argument.startswith("--") else ""
+    pieces = [argument, attached]
+    piece = ""
+    for character in argument:
+        if character.isspace() or character in _PIECE_DELIMITERS:
+            pieces.append(piece)
+            piece = ""
+        else:
+            piece += character
+    pieces.append(piece)
+    return any(_path_leaves_the_workspace(piece) for piece in pieces)
+
+
+def _path_leaves_the_workspace(value: str) -> bool:
     """True when a value names a path this workspace does not hold."""
     value = value.replace("\\", "/")
     windows_root = len(value) >= 3 and value[0].isascii() and value[0].isalpha() and value[1:3] == ":/"
@@ -51,10 +75,7 @@ def _reads_its_own_workspace(arguments: Sequence[str]) -> bool:
     from option values, so any of them can name a module outside the read-only
     admission. Every argument is read, not a list of the options that take one.
     """
-    return not any(
-        _leaves_the_workspace(argument.partition("=")[2] if argument.startswith("-") and "=" in argument else argument)
-        for argument in arguments
-    )
+    return not any(_leaves_the_workspace(argument) for argument in arguments)
 
 
 def is_package_test(command: Sequence[str]) -> bool:
