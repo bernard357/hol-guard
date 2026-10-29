@@ -9,6 +9,7 @@
 //! permission repair, fatal-store recovery, wall-clock timestamps) stay with
 //! the caller, which passes every timestamp in the request.
 
+use std::path::Path;
 use std::time::Duration;
 
 use guard_contracts::{
@@ -185,6 +186,13 @@ fn evaluate_tracked(
         Some(kind) => kind,
         None => return invalid("native_guard_store_method_unknown"),
     };
+    // A waiting Codex hook's live wait is built before the store opens its
+    // write: proving the bridge process live can spawn `ps`.
+    let prepared = crate::codex_live_wait_build::prepare(
+        &request.method,
+        &request.args,
+        Path::new(&request.guard_home),
+    );
     // A warm call reuses a kept connection: reopening parsed the whole schema
     // on every call (see `guard_store_write_cache`).
     let connection = crate::guard_store_write_cache::open_read_write_cached(&path)?;
@@ -192,7 +200,7 @@ fn evaluate_tracked(
     apply_pragmas(&connection)?;
     // A total read only writes for the one-time rebuild a migration requests;
     // every other call stays lock-free.
-    let args = Args(&request.args);
+    let args = Args(prepared.as_ref().unwrap_or(&request.args));
     // A retry's block check alone writes nothing: it keeps the lock-free read
     // the separate block lookup had.
     let kind = if request.method == "settle_native_review_reuse" && !args.flag("spend")? {

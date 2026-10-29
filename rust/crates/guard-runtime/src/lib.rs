@@ -152,6 +152,7 @@ mod codex_hooks;
 #[cfg(test)]
 mod codex_hooks_parity_tests;
 mod codex_identity;
+mod codex_live_wait_build;
 mod codex_proxy;
 mod codex_request_resume_busy;
 mod codex_request_resume_op;

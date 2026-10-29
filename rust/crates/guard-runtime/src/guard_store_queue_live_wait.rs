@@ -11,6 +11,7 @@
 use rusqlite::Connection;
 use serde_json::{Map, Value};
 
+use crate::codex_live_wait_build::NOT_LIVE_KEY;
 use crate::codex_request_resume_op::{seed, Call};
 use crate::guard_store_args::Args;
 use crate::guard_store_db::{StoreError, StoreResult};
@@ -25,14 +26,30 @@ const UNSEEDED: StoreError = StoreError::Invalid("native_guard_store_live_wait_u
 /// A link that fails is rolled back and the request is queued without its
 /// `continuation_snapshot`, so it stays retry-only. A failure after the write
 /// only leaves that wait unresumable; the reply names it in `live_wait` and
-/// the queued review stays. Without `codex_live_wait` this is `write` alone.
+/// the queued review stays. Without `codex_live_wait` this is `write` alone,
+/// and a wait the resident would not build is reported as `not_live`.
 pub(crate) fn queue_with_live_wait(
     connection: &Connection,
     args: &Args<'_>,
     write: impl FnOnce(&Args<'_>) -> StoreResult<Value>,
 ) -> StoreResult<Value> {
     let Some(wait) = args.opt_object("codex_live_wait")? else {
-        return write(args);
+        let written = write(args)?;
+        if !args.flag(NOT_LIVE_KEY)? {
+            return Ok(written);
+        }
+        // The hook sent its wait, but its bridge is no live process with a
+        // wait budget: the request is a manual retry and the reply says so.
+        return Ok(match written {
+            Value::String(stored_id) => {
+                serde_json::json!({"request_id": stored_id, "live_wait": "not_live"})
+            }
+            Value::Object(mut reply) => {
+                reply.insert("live_wait".to_owned(), Value::from("not_live"));
+                Value::Object(reply)
+            }
+            other => other,
+        });
     };
     let request = args.object("request")?;
     let request_id = request

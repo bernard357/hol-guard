@@ -30,6 +30,20 @@ fn queue_as(
     live_wait: Option<Value>,
     harness: Option<&str>,
 ) -> (Value, Connection) {
+    queue_with(
+        tag,
+        name,
+        live_wait.map(|wait| ("codex_live_wait", wait)),
+        harness,
+    )
+}
+
+fn queue_with(
+    tag: &str,
+    name: &str,
+    live_wait: Option<(&str, Value)>,
+    harness: Option<&str>,
+) -> (Value, Connection) {
     let vectors: Value = serde_json::from_str(VECTORS).unwrap();
     let scenario = scenario(&vectors, name);
     let home = temp_home(tag);
@@ -48,8 +62,8 @@ fn queue_as(
     }
     args.insert("request".to_owned(), request);
     args.insert("now".to_owned(), scenario["now"].clone());
-    if let Some(live_wait) = live_wait {
-        args.insert("codex_live_wait".to_owned(), live_wait);
+    if let Some((key, live_wait)) = live_wait {
+        args.insert(key.to_owned(), live_wait);
     }
     let request = GuardStoreRequestV1 {
         schema: GUARD_STORE_REQUEST_SCHEMA.to_owned(),
@@ -125,6 +139,77 @@ fn the_request_its_operation_and_resume_record_are_written_together() {
             "pending".to_owned()
         ))
     );
+}
+
+#[test]
+fn the_resident_builds_a_live_bridges_wait_from_its_facts() {
+    let (pid, token) = crate::codex_hook_identity::current_process_identity().unwrap();
+    let facts = json!({
+        "process": {"pid": pid, "startToken": token},
+        "timeout_seconds": 90,
+        "workspace": null,
+    });
+    let (reply, connection) = queue_with(
+        "live-wait-facts",
+        "fresh_native_review",
+        Some(("codex_live_wait_facts", facts)),
+        None,
+    );
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert_eq!(
+        reply["payload"],
+        json!({"request_id": "r-new", "live_wait": "seeded"})
+    );
+    let metadata: String = connection
+        .query_row(
+            "select metadata_json from guard_operations where operation_id = 'codex-hook-r-new'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(metadata["codex_browser_wait_timeout_seconds"], 90);
+    assert_eq!(
+        metadata["codex_browser_wait_deadline_at"],
+        "2026-03-01T12:01:30+00:00"
+    );
+    let snapshot: String = connection
+        .query_row(
+            "select continuation_snapshot_json from approval_requests where request_id = 'r-new'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+    assert_eq!(snapshot["capability"], "suspended-response");
+    assert_eq!(snapshot["waitDeadline"], "2026-03-01T12:01:30+00:00");
+    assert_eq!(
+        resume(&connection, "r-new").map(|(operation, _, _)| operation),
+        Some("codex-hook-r-new".to_owned())
+    );
+}
+
+#[test]
+fn a_bridge_that_is_gone_is_queued_without_a_wait() {
+    let (pid, _) = crate::codex_hook_identity::current_process_identity().unwrap();
+    let facts = json!({
+        "process": {"pid": pid, "startToken": "not-the-start-token"},
+        "timeout_seconds": 90,
+        "workspace": null,
+    });
+    let (reply, connection) = queue_with(
+        "live-wait-gone",
+        "fresh_native_review",
+        Some(("codex_live_wait_facts", facts)),
+        None,
+    );
+    assert_eq!(reply["status"], "ok", "{reply}");
+    assert_eq!(
+        reply["payload"],
+        json!({"request_id": "r-new", "live_wait": "not_live"})
+    );
+    assert_eq!(operation_requests(&connection, "codex-hook-r-new"), None);
+    assert_eq!(resume(&connection, "r-new"), None);
 }
 
 #[test]

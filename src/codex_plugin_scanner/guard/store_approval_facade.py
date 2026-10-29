@@ -80,15 +80,17 @@ class StoreApprovalsMixin:
         resident that predates the read-back, or could not read the row,
         answers the request id alone and the row is read separately.
 
-        ``codex_live_wait`` (``metadata_json`` and ``workspace``) links the
-        waiting Codex hook's operation before the request and seeds its
-        resume record after it, in the same write. A wait the resident could
-        not link or seed leaves the request a manual retry.
+        ``codex_live_wait`` names the waiting Codex bridge (``process``,
+        ``timeout_seconds`` and ``workspace``). The resident proves it live,
+        builds its wait, links the operation before the request and seeds its
+        resume record after it, in the same write. A bridge that is not live
+        (``not_live``), or a wait the resident could not link or seed, leaves
+        the request a manual retry.
         """
         method = "add_approval_request"
         args: dict[str, object] = {"request": request.to_dict(), "now": now}
         if codex_live_wait is not None:
-            args["codex_live_wait"] = codex_live_wait
+            args["codex_live_wait_facts"] = codex_live_wait
         if silent:
             # A review the agent never sees: its ``approval.created`` event is
             # written in the same transaction, best effort, without marking a
@@ -115,7 +117,7 @@ class StoreApprovalsMixin:
             raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
         if queued.get("event_error") is not None:
             _LOGGER.warning("Silent review inbox row saved without approval.created (%s)", queued["event_error"])
-        if codex_live_wait is not None and queued.get("live_wait") != "seeded":
+        if codex_live_wait is not None and queued.get("live_wait") not in {"seeded", "not_live"}:
             _LOGGER.warning("Codex live wait not resumable for %s (%s)", queued["request_id"], queued.get("live_wait"))
         if "row" not in queued:
             return self._read_back_queued_request(queued["request_id"])

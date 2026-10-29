@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import sqlite3
 import time
@@ -13,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from ..live_process_identity import CODEX_BROWSER_WAIT_PROCESS_KEY, CODEX_BROWSER_WAIT_TIMEOUT_SECONDS_KEY
 from ..models import GuardApprovalRequest
 from ..native_hook_adapter import NativeHookAdapterError, native_review_request
 from ..native_hook_authority_state import hook_authority_integrity_key
@@ -332,7 +332,7 @@ def queue_native_pre_tool_review(
         ):
             return None
     request_id = uuid.uuid4().hex
-    live_wait = _codex_live_wait(store, payload, request_id, guard_home, workspace) if codex_live_wait else None
+    live_wait = _codex_live_wait(payload, workspace) if codex_live_wait else None
     review = {
         "result": dict(native_result),
         "native_receipt": dict(native_receipt) if native_receipt is not None else None,
@@ -361,8 +361,6 @@ def queue_native_pre_tool_review(
             guard_home=guard_home,
             deadline=deadline,
         )
-        if live_wait is not None:
-            fields = {**fields, "continuation_snapshot": live_wait[1]}
         request = GuardApprovalRequest(
             **cast("dict[str, Any]", {key: value for key, value in fields.items() if key != "changed_fields"}),
             changed_fields=tuple(cast("list[str]", fields["changed_fields"])),
@@ -388,7 +386,7 @@ def queue_native_pre_tool_review(
     )
     try:
         # A waiting Codex hook's operation and resume record are written in the same store call.
-        persist = functools.partial(queue, silent=silent, codex_live_wait=None if live_wait is None else live_wait[0])
+        persist = functools.partial(queue, silent=silent, codex_live_wait=live_wait)
         stored = _persist_review(persist, request, now, claude_review)
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
@@ -422,28 +420,17 @@ def _persist_review(
         return persist(request, now)
 
 
-def _codex_live_wait(
-    store: object,
-    payload: Mapping[str, object],
-    request_id: str,
-    guard_home: Path,
-    workspace: Path | None,
-) -> tuple[dict[str, object], dict[str, object]] | None:
-    """The waiting bridge's queue-write link arguments and the snapshot it earns, when it can be resumed."""
-    from .hook_native_review_codex_live_wait import codex_live_wait_metadata, codex_live_wait_snapshot
-
-    now = datetime.now(tz=timezone.utc)
-    metadata = codex_live_wait_metadata(payload=payload, guard_home=guard_home, workspace=workspace, now=now)
-    if metadata is None:
+def _codex_live_wait(payload: Mapping[str, object], workspace: Path | None) -> dict[str, object] | None:
+    """The waiting bridge's facts; the resident proves it live and builds the wait it links."""
+    process = payload.get(CODEX_BROWSER_WAIT_PROCESS_KEY)
+    timeout_seconds = payload.get(CODEX_BROWSER_WAIT_TIMEOUT_SECONDS_KEY)
+    if process is None and timeout_seconds is None:
         return None
-    snapshot = codex_live_wait_snapshot(store, request_id=request_id, metadata=metadata, now=now)
-    if snapshot is None:
-        return None
-    link: dict[str, object] = {
-        "metadata_json": json.dumps(metadata),
+    return {
+        "process": process,
+        "timeout_seconds": timeout_seconds,
         "workspace": None if workspace is None else str(workspace),
     }
-    return link, snapshot
 
 
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:

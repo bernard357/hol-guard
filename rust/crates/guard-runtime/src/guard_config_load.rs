@@ -15,6 +15,8 @@ use serde_json::{json, Map, Value};
 use crate::guard_config_coerce as coerce;
 use crate::guard_config_harness as harness;
 use crate::guard_config_managed::{apply_managed_policy, ManagedInput};
+use crate::managed_policy_floor::effective_managed_policy;
+use crate::managed_policy_load::{load_managed_policy, ManagedPolicySource};
 use crate::package_authority_config as base;
 
 const SCHEMA: &str = "guard-config-load.v1";
@@ -91,18 +93,24 @@ fn load(request: &LoadRequest) -> Result<Value, String> {
 }
 
 /// Effective `approval_wait_timeout_seconds` for an in-process caller (the
-/// native MCP relay) from the Guard home and workspace configuration only.
-#[cfg_attr(not(unix), allow(dead_code))]
+/// native MCP relay, a waiting Codex hook's live wait): the Guard home and
+/// workspace configuration under this machine's managed policy, as
+/// `load_guard_config` composes them.
 pub(crate) fn approval_wait_timeout_seconds(
     guard_home: &Path,
     workspace: Option<&Path>,
 ) -> Result<i64, String> {
+    let managed = effective_managed_policy(&load_managed_policy(&ManagedPolicySource::native()))
+        .map(|policy| ManagedInput {
+            settings: policy.settings.clone(),
+            locked_settings: policy.locked_settings.iter().cloned().collect(),
+        });
     let request = LoadRequest {
         schema: SCHEMA.to_owned(),
         guard_home: guard_home.to_path_buf(),
         workspace: workspace.map(Path::to_path_buf),
         require_canonical_workspace: false,
-        managed: None,
+        managed,
     };
     let config = load(&request)?;
     Ok(config

@@ -209,18 +209,20 @@ def test_a_failed_read_back_never_queues_the_review_again() -> None:
 
 def test_an_unseeded_codex_live_wait_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     # An older resident ignores the wait and answers the id alone.
-    wait = {"metadata_json": "{}", "workspace": None}
+    wait = {"process": {"pid": 1, "startToken": "t"}, "timeout_seconds": 120, "workspace": None}
     for reply in ("req-1", {"request_id": "req-1", "live_wait": "native_guard_store_invalid", "row": {}}):
         store = _RowStore(reply)
         caplog.clear()
         with caplog.at_level(logging.WARNING):
             store.queue_review_approval_request(_Request(), "now", codex_live_wait=wait)  # type: ignore[arg-type]
         assert "Codex live wait not resumable for req-1" in caplog.text, reply
-    store = _RowStore({"request_id": "req-1", "live_wait": "seeded", "row": {}})
-    caplog.clear()
-    with caplog.at_level(logging.WARNING):
-        store.queue_review_approval_request(_Request(), "now", codex_live_wait=wait)  # type: ignore[arg-type]
-    assert "Codex live wait" not in caplog.text
+    # A seeded wait, and a bridge that is no longer waiting, are expected.
+    for live_wait in ("seeded", "not_live"):
+        store = _RowStore({"request_id": "req-1", "live_wait": live_wait, "row": {}})
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            store.queue_review_approval_request(_Request(), "now", codex_live_wait=wait)  # type: ignore[arg-type]
+        assert "Codex live wait" not in caplog.text, live_wait
 
 
 def test_a_queue_write_without_a_request_id_is_refused() -> None:
