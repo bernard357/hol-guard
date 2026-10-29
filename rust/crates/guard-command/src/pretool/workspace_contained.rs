@@ -537,8 +537,8 @@ pub(super) fn convert(
     // workspace, so a manager running a local verb answers for the
     // observation too. A command with no manager in it proves nothing about
     // the permission, so it keeps the admission it has.
-    let local_work = package::local_package_work(model, runners.is_some(), &workspace);
-    let manager_work = local_work && package::names_a_manager(model);
+    let local_work = package::local_package_work(shaped, runners.is_some(), &workspace);
+    let manager_work = local_work && package::names_a_manager(shaped);
     if !extensions_contain(result, controls, issued, package || manager_work)
         || (package && !local_work)
     {

@@ -66,10 +66,20 @@ pub(super) fn verified_cwd_target(value: &str, context: super::PathContext<'_>) 
         joined.as_path()
     };
     let canonical = std::fs::canonicalize(supplied).ok()?;
+    // The user's private macOS temporary directory is as much theirs as
+    // home, and agents put worktrees there, so a directory below it is a
+    // target like one below home. Every other location check still applies.
+    let temporary =
+        super::read_paths::inside_private_temporary_directory(&canonical, context.home_dir);
     // Non-aliased targets avoid CDPATH and logical/physical cwd ambiguity.
     if !absolute_path_spelling_matches(supplied, &canonical, anchored)
         || !canonical.is_dir()
-        || !super::read_paths::resolved_path_allowed(&canonical, context.home_dir, context.cwd)
+        || !super::read_paths::resolved_path_allowed_in_scope(
+            &canonical,
+            context.home_dir,
+            context.cwd,
+            temporary,
+        )
     {
         return None;
     }

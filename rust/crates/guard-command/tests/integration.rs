@@ -216,6 +216,7 @@ pub mod pretool_plan_note_writes;
 pub mod pretool_private_temp_cd;
 pub mod pretool_private_temporary_scratch_reads;
 pub mod pretool_private_temporary_workspace;
+pub mod pretool_private_temporary_worktree_runs;
 pub mod pretool_process_probe_chains;
 pub mod pretool_process_stops;
 pub mod pretool_project_dotfile_reads;
