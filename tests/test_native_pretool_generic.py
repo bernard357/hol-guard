@@ -228,7 +228,6 @@ def test_supported_cli_pretool_unavailability_does_not_use_source_ref_fallback(
     guard_home = tmp_path / "guard-home"
     result = commands_hook_native_authority.route_native_hook(
         argparse.Namespace(harness="codex", json=True),
-        config=None,
         context=HarnessContext(tmp_path / "home", tmp_path / "workspace", guard_home),
         payload={"hook_event_name": "PreToolUse", "tool_input": {"url": "https://example.test"}},
         runtime_workspace=tmp_path / "workspace",

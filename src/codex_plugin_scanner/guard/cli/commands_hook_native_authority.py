@@ -14,7 +14,6 @@ from typing import Any, TextIO
 from ..adapters.base import HarnessContext
 from ..adapters.bounded_cli_hook_failure import failure_payload
 from ..adapters.hermes_runtime_hooks import hermes_bridge_response
-from ..config import GuardConfig
 from ..daemon.diagnostics import DaemonDiagnostics
 from ..daemon.hook_availability_policy import (
     availability_harness_response,
@@ -126,9 +125,6 @@ def try_native_hook_authority(
     workspace: Path | None,
     store: GuardStore,
     deadline: float | None = None,
-    claim_saved_approval: bool = True,
-    claimed_saved_allow_hash: str | None = None,
-    claimed_approval_request_id: str | None = None,
 ) -> dict[str, Any]:
     """Review one hook with the same fail-closed worker the daemon uses.
 
@@ -151,9 +147,6 @@ def try_native_hook_authority(
             guard_home=guard_home,
             workspace=workspace,
             deadline=deadline,
-            claim_saved_approval=claim_saved_approval,
-            claimed_saved_allow_hash=claimed_saved_allow_hash,
-            claimed_approval_request_id=claimed_approval_request_id,
         )
     except Exception as error:
         _record_native_hook_exception(
@@ -302,16 +295,11 @@ def emit_hook_review(
 def route_native_hook(
     args: argparse.Namespace,
     *,
-    config: GuardConfig | None,
     context: HarnessContext,
     payload: dict[str, object],
     runtime_workspace: Path | None,
     store: GuardStore,
     output_stream: TextIO | None = None,
-    _claim_saved_approval: bool = True,
-    _claimed_saved_allow_hash: str | None = None,
-    _claimed_trusted_request_override: bool = False,
-    _claimed_approval_request_id: str | None = None,
 ) -> int:
     """Review a hook through the daemon's review path and emit its result.
 
@@ -319,7 +307,6 @@ def route_native_hook(
     fallback, and the answer is the one the daemon gives the same request.
     """
 
-    del config, _claimed_trusted_request_override
     event_name = runtime_hook_event_name(payload)
     deadline: float | None = None
     try:
@@ -337,9 +324,6 @@ def route_native_hook(
             workspace=runtime_workspace or _payload_workspace(payload),
             store=store,
             deadline=deadline,
-            claim_saved_approval=_claim_saved_approval,
-            claimed_saved_allow_hash=_claimed_saved_allow_hash,
-            claimed_approval_request_id=_claimed_approval_request_id,
         )
         if not isinstance(response, dict):
             response = availability_harness_response(
