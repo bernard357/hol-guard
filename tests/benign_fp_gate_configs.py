@@ -49,3 +49,12 @@ def write_parent_documents(parent: Path) -> None:
         target = parent / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
+
+
+def write_sibling_documents(sibling: Path) -> None:
+    """Write the home sibling checkout's committed catalog entry and empty marker."""
+    (sibling / ".keep").parent.mkdir(parents=True, exist_ok=True)
+    (sibling / ".keep").write_text("", encoding="utf-8")
+    target = sibling / CATALOG_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(CATALOG_SOURCE, encoding="utf-8")

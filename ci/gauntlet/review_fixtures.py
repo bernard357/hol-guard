@@ -45,6 +45,9 @@ METADATA_CALLS = (
     ("config", "get", "editor"),
 )
 WORKTREE_CASE = "linked-worktree-edit-from-main-checkout"
+# A shell edit of the same worktree whose quoted perl pattern uses `|` delimiters.
+WORKTREE_DELIMITER_CASE = "linked-worktree-quoted-delimiter-edit"
+WORKTREE_CASES = frozenset({WORKTREE_CASE, WORKTREE_DELIMITER_CASE})
 # Writes into a harness plan folder pass; the hooks file beside it stays reviewed.
 PLAN_NOTE_PROTECTION_CASE = "plan-note-protection-codex-hooks"
 CODEX_HOOKS = "{}\n"
@@ -199,7 +202,7 @@ def add_linked_worktree(main: Path, home: Path, environment: dict[str, str]) -> 
 
 def worktree_checks(fixture_home: Path, workspace: Path, scenario_id: str, before: str, after: str) -> dict[str, bool]:
     """Bind the edit to the linked worktree and prove the main checkout stayed unchanged."""
-    if scenario_id != WORKTREE_CASE:
+    if scenario_id not in WORKTREE_CASES:
         return {}
 
     def text(path: Path) -> str | None:

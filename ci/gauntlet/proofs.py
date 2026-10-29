@@ -21,6 +21,7 @@ from .review_fixtures import (
     GITHUB_REVIEW_CASE,
     PLAN_NOTE_PROTECTION_CASE,
     WORKTREE_CASE,
+    WORKTREE_DELIMITER_CASE,
 )
 from .runtime_cases import RUNTIME_BLOCK_REASONS, runtime_required_checks
 from .script_cases import CREDENTIAL_STORE_CASES, SCRIPT_BLOCK_REASONS, STORE_CHECK
@@ -108,6 +109,8 @@ def required_checks(scenario: Scenario) -> set[str]:
         checks.update(
             {"linked-worktree-settings-exact", "linked-worktree-note-exact", "main-checkout-settings-unchanged"}
         )
+    if scenario.id == WORKTREE_DELIMITER_CASE:
+        checks.update({"linked-worktree-settings-exact", "main-checkout-settings-unchanged"})
     checks.update(supply_chain_required_checks(scenario.id))
     if scenario.id in CREDENTIAL_STORE_CASES:
         checks.add(STORE_CHECK)

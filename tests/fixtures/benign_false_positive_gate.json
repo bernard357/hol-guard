@@ -34852,10 +34852,42 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "perl -pi -e 's/1.0.0/1.1.0/' ${WORKTREE}/contributions/extensions/command.kubernetes-secrets.json"
+        "command": "perl -pi -e 's/1.0.0/1.1.0/' ${USER_TMP_SIBLING}/contributions/extensions/command.kubernetes-secrets.json"
       },
-      "cwd": "parent",
+      "cwd": "home_sibling",
       "expect": "allow"
+    },
+    {
+      "id": "tracked-credential-named-catalog-sed-pipe-from-main-checkout",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sed -i '' 's|1.0.0|1.1.0|' ${USER_TMP_SIBLING}/contributions/extensions/command.kubernetes-secrets.json"
+      },
+      "cwd": "home_sibling",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-sibling-sed-pipe-redirect-into-home",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sed -i '' 's|1.0.0|1.1.0|' ${USER_TMP_SIBLING}/contributions/extensions/command.kubernetes-secrets.json > ${HOME}/catalog-copy.json"
+      },
+      "cwd": "home_sibling",
+      "expect": "not_allow"
     },
     {
       "id": "neg-tracked-kubernetes-secret-manifest-read",
