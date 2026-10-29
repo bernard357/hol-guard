@@ -13,8 +13,10 @@ from typing import Any
 
 import pytest
 
+from codex_plugin_scanner.guard.approval_gate import ApprovalGateInput
+from codex_plugin_scanner.guard.approval_gate import update_settings as update_approval_gate_settings
 from codex_plugin_scanner.guard.approval_scope_support import request_scope_contract
-from codex_plugin_scanner.guard.approvals import apply_approval_resolution
+from codex_plugin_scanner.guard.approvals import apply_approval_resolution, bulk_allow_read_only_once
 from codex_plugin_scanner.guard.codex_live_decision import (
     complete_codex_live_decision,
     resolve_codex_live_allow_authority,
@@ -42,6 +44,7 @@ from tests.native_review_evidence_support import with_review_evidence
 from tests.test_native_command_observations import _edge, _observations, _receipt
 
 _HARNESS = "codex"
+_GATE_PASSWORD = "live-wait-bulk-password"
 
 
 def _hook_payload(workspace: Path) -> dict[str, object]:
@@ -195,6 +198,17 @@ def _allow_from_cloud(store: GuardStore, request_id: str, workspace: Path) -> No
     assert approval_id is not None
 
 
+def _bulk_allow_once(store: GuardStore, request_id: str, workspace: Path) -> None:
+    update_approval_gate_settings(
+        store.guard_home,
+        {"enabled": True, "new_password": _GATE_PASSWORD, "confirm_password": _GATE_PASSWORD, "cooldown_seconds": 0},
+    )
+    result = bulk_allow_read_only_once(
+        store=store, request_ids=[request_id], approval_gate_input=ApprovalGateInput(password=_GATE_PASSWORD)
+    )
+    assert result["resolved_count"] == 1, result
+
+
 def _daemon_revalidates(worker: HookWorker, store: GuardStore, tmp_path: Path, request_id: str) -> bool:
     """Run the fresh policy check the daemon makes before releasing the hook."""
 
@@ -226,7 +240,9 @@ def _daemon_revalidates(worker: HookWorker, store: GuardStore, tmp_path: Path, r
     )
 
 
-@pytest.mark.parametrize("allow", [_allow_once, _allow_from_cloud], ids=["local", "cloud-review"])
+@pytest.mark.parametrize(
+    "allow", [_allow_once, _allow_from_cloud, _bulk_allow_once], ids=["local", "cloud-review", "bulk"]
+)
 def test_an_allow_once_passes_the_daemon_revalidation_and_resumes_the_hook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path, allow: Any
 ) -> None:
