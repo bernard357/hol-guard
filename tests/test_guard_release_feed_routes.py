@@ -213,5 +213,6 @@ def test_every_dashboard_page_is_served_as_the_dashboard() -> None:
         "/workspaces",
         "/protection/repair",
         "/releases",
+        "/settings",
     ):
         assert daemon_server_module._GuardDaemonHandler._is_dashboard_route(route), route

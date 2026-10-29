@@ -10,10 +10,9 @@ Steps, each isolated so one failure never skips the rest:
 5. ``hooks``: re-verify managed harness hooks and reinstall the broken ones.
 6. ``package_shims`` and ``command_queue``: the same repairs as ``doctor --repair``.
 
-Steps 2 and 4 are non-destructive to anything live and are also what the daemon
-runs on its own (``run_safe_self_check``). The rest need a user (and the same
-step-up as ``doctor --repair``), so only the CLI and the gated daemon endpoint
-run them.
+Steps 2 and 4 are non-destructive to anything live. The rest need a user (and
+the same step-up as ``doctor --repair``), so only the CLI and the gated daemon
+endpoint run them.
 """
 
 from __future__ import annotations
