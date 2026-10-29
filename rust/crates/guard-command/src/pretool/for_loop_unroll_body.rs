@@ -451,6 +451,23 @@ pub(crate) fn references_stand_alone(item: &str) -> bool {
     })
 }
 
+/// Whether every reference in `item` sits inside quotes of the body's own.
+///
+/// A header word that holds field separators is one field only while those
+/// quotes stay on: written out bare it would split, and the shell's own split
+/// of a quoted word never happened. An unquoted reference therefore keeps the
+/// loop unmodeled rather than guessing which of the two the writer meant.
+pub(crate) fn references_are_quoted(item: &str) -> bool {
+    let chars: Vec<char> = item.chars().collect();
+    chars.iter().enumerate().all(|(index, &current)| {
+        current != MARKER
+            || (index
+                .checked_sub(1)
+                .is_some_and(|before| matches!(chars[before], '"' | '\''))
+                && matches!(chars.get(index + 1), Some('"' | '\'')))
+    })
+}
+
 /// Whether the character beside a reference ends the word, counting the ends
 /// of the item itself.
 fn word_boundary(character: Option<char>) -> bool {
