@@ -10658,6 +10658,22 @@
       "expect": "allow"
     },
     {
+      "id": "session-git-diff-cached-path-head",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "git diff --cached src/one.ts | head -20"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "session-git-diff-cached-directory",
       "fix_area": "git",
       "harnesses": [
