@@ -257,6 +257,7 @@ def render_runtime_status(section: dict[str, object]) -> str:
         lines.append(f"  {message}")
     lines.extend(_render_diagnosis(section.get("diagnosis"), reported=message if isinstance(message, str) else None))
     lines.extend(_render_resident(section.get("resident")))
+    lines.extend(_render_restart(section.get("restart")))
     bundled = section.get("bundled")
     if isinstance(bundled, dict):
         lines.append(f"  Bundled runtime: {bundled.get('status', 'unknown')}")
@@ -304,6 +305,26 @@ def _render_resident(resident: object) -> list[str]:
     lock = resident.get("owner_lock_held")
     owner = "owner lock unreadable" if lock is None else ("owner lock held" if lock else "owner lock free")
     return [f"  Resident on this account: {state} ({owner}, {resident.get('generations', 0)} recorded generations)"]
+
+
+def _render_restart(restart: object) -> list[str]:
+    """Say whether the shared restart budget is currently refusing a respawn.
+
+    Printed whichever way it answers. A clean budget is worth a line because
+    the absence of one is ambiguous -- a home where no resident ever restarted
+    and a home whose budget could not be read both print nothing -- while a
+    paused one is the reason an otherwise healthy install is enforcing nothing.
+    """
+
+    if not isinstance(restart, dict):
+        return []
+    attempts = restart.get("attempts", 0)
+    if not restart.get("paced"):
+        return [f"  Restarts on this account: not paused ({attempts} recorded in this window)"]
+    return [
+        f"  Restarts on this account: paused ({attempts} recorded in this window); "
+        f"the next one is allowed in {restart.get('retry_in_seconds', 0)}s"
+    ]
 
 
 def _render_counters(counters: object) -> str:

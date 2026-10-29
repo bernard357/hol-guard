@@ -59,6 +59,17 @@ _REINSTALL_MATCHED = (
     "version: `uv tool install --force hol-guard` (or `pipx install --force hol-guard`)."
 )
 
+# A resident that keeps dying is respawned under bounded backoff. The pause is
+# the designed answer to a crash loop, but while it runs nothing evaluates a
+# command, so it is a fault to report rather than a state to keep quiet about.
+_RESTART_CIRCUIT_OPEN = (
+    "Guard's native runtime kept failing to stay up, so restarts of it are paused. Until the "
+    "pause ends, a request that needs the runtime is refused instead of evaluated, and the "
+    "hooks that ask for one fail closed.",
+    "Run `hol-guard repair` in a terminal to clear the dead resident state behind the loop, "
+    "then retry. The pause itself lifts on its own once the retry time shown has passed.",
+)
+
 # Two Guard installs (for example a desktop app and a package-manager CLI) share
 # one home-wide resident. Only one owns it; the other is healthy, not broken.
 _RESIDENT_OWNER_BUSY = (
@@ -118,6 +129,7 @@ _DIAGNOSES: dict[str, tuple[str, str]] = {
         "the binary beside the manifest is not the one that manifest describes.",
         _REINSTALL,
     ),
+    "native_resident_restart_circuit_open": _RESTART_CIRCUIT_OPEN,
     "native_status_probe_failed": (
         "Guard could not finish reading the installed runtime: the check itself failed rather "
         "than returning an answer.",
@@ -352,6 +364,7 @@ def native_runtime_diagnosis(
     reason_code: str,
     *,
     available: bool | None,
+    restart_paced: bool = False,
 ) -> NativeRuntimeDiagnosis | None:
     """Explain a runtime that is not ready, or return None when nothing is wrong.
 
@@ -362,7 +375,9 @@ def native_runtime_diagnosis(
     passive callers report a code about the probe they skipped while the files
     say what is actually missing. The files also catch the one broken state no
     reason code describes: a runtime that validates, is reported available, and
-    still cannot be launched.
+    still cannot be launched. ``restart_paced`` carries the one fault no file
+    beside the binary can show: a runtime that is installed correctly, failed
+    repeatedly anyway, and is now refused a restart until its pause ends.
     """
 
     rows = _candidate_rows()
@@ -387,5 +402,12 @@ def native_runtime_diagnosis(
     # a healthy install as broken.
     if reason_code == _PROBE_SKIPPED and _measured_state(rows) == "not_executable":
         summary, action = _UNAVAILABLE["not_executable"]
+        return {"summary": summary, "action": action, "candidates": candidates}
+    # Last, because every answer above names the install fault a crash loop
+    # grew out of, and fixing that fault is what clears the pause. On its own
+    # it is still the whole story: a paused restart refuses every request for
+    # the runtime while the files it was launched from stay perfectly valid.
+    if restart_paced:
+        summary, action = _RESTART_CIRCUIT_OPEN
         return {"summary": summary, "action": action, "candidates": candidates}
     return None

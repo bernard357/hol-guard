@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -195,6 +196,71 @@ def native_resident_presence(guard_home: Path | None, runtime_sha256: str | None
     }
 
 
+class NativeResidentRestart(TypedDict):
+    """What the shared restart budget says about respawning this runtime."""
+
+    # True while the budget refuses the next spawn outright.
+    paced: bool
+    attempts: int
+    retry_in_seconds: float
+
+
+_RESTART_BUDGET_SCHEMA = "hol-guard-resident-restart-budget.v1"
+# The runtime paces a crash loop with bounded exponential backoff, so a pause
+# longer than its own maximum is not a wait this runtime wrote. Reporting the
+# bound beats printing a year from a file that was damaged or forged.
+_MAX_RETRY_SECONDS = 30.0
+
+
+def native_resident_restart(guard_home: Path | None, runtime_sha256: str | None) -> NativeResidentRestart | None:
+    """What the shared restart budget says, read without taking its lock.
+
+    The budget is the one piece of circuit state every Guard process on the
+    account shares. The runtime writes it when a resident dies, and while its
+    pause is still running every spawn is refused with
+    ``native_resident_restart_circuit_open`` -- which fails the hook closed on
+    a host whose install is perfect. A report built only from installed files
+    calls that host healthy, so this reads the budget too.
+
+    The lock is deliberately left alone. A reader that waits on it competes
+    with the spawn path it is describing, and a budget one write out of date
+    still names the right fault. ``None`` means there is nothing to say: no
+    resident of this runtime has ever been restarted in this home, or what is
+    in that place is not a budget this runtime wrote.
+
+    Reading it here rather than asking the runtime for it is the point: the
+    pause exists precisely because the runtime will not start, and both callers
+    promise never to launch it. Nothing is decided from what is read -- the
+    budget stays the runtime's to write and to spend.
+    """
+
+    if guard_home is None or runtime_sha256 is None:
+        return None
+    scope = guard_home / NATIVE_RUNTIME_STATE_DIRECTORY / f"resident-v3-{runtime_sha256[:16]}"
+    try:
+        with (scope / "restart-budget.json").open("rb") as handle:
+            budget = json.loads(handle.read(_MAX_STATE_BYTES + 1)[:_MAX_STATE_BYTES])
+    except (OSError, ValueError):
+        return None
+    if not isinstance(budget, dict) or budget.get("schema") != _RESTART_BUDGET_SCHEMA:
+        return None
+    attempts = budget.get("attempts")
+    circuit_until_ms = budget.get("circuit_until_ms")
+    # ``bool`` is an ``int`` in Python and neither field is ever written as one.
+    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
+        return None
+    if not isinstance(circuit_until_ms, int) or isinstance(circuit_until_ms, bool) or circuit_until_ms < 0:
+        return None
+    remaining = circuit_until_ms / 1000 - time.time()
+    if remaining <= 0:
+        return {"paced": False, "attempts": attempts, "retry_in_seconds": 0.0}
+    return {
+        "paced": True,
+        "attempts": attempts,
+        "retry_in_seconds": round(min(remaining, _MAX_RETRY_SECONDS), 1),
+    }
+
+
 def native_runtime_section(
     guard_home: Path | None,
     *,
@@ -203,7 +269,7 @@ def native_runtime_section(
     """Build the ``native_runtime`` payload doctor reports and ``runtime status`` prints.
 
     Every field here is read from a passive probe, the installed binary's
-    identity, or process-local counters. Nothing is evaluated and no verdict is
+    identity, shared resident state, or process-local counters. Nothing is evaluated and no verdict is
     produced: the native resident remains the only authority.
     """
 
@@ -211,7 +277,9 @@ def native_runtime_section(
     from .update_commands import bundled_native_runtime_report
 
     availability = doctor_native_availability(guard_home)
-    resident = native_resident_presence(guard_home, _passive_runtime_sha256())
+    runtime_sha256 = _passive_runtime_sha256()
+    resident = native_resident_presence(guard_home, runtime_sha256)
+    restart = native_resident_restart(guard_home, runtime_sha256)
     # Only ever asked of a resident that is already serving, and only where the
     # caller allows command probes: reading the runtime's feature list runs the
     # binary, which `guard runtime status` and the global doctor promise not to
@@ -230,10 +298,18 @@ def native_runtime_section(
         "daemon_http": daemon_admission_snapshot(),
         "resident": resident,
     }
+    # Shared, unlike the counters above: the pause the budget records refuses
+    # every process on the account, so this answer is the hook's answer too.
+    if restart is not None:
+        section["restart"] = restart
     # A reason code is the runtime layer's word for its own decision. When that
     # decision leaves protection off, the report also has to say what is wrong
     # and what fixes it, which the code itself never does.
-    diagnosis = native_runtime_diagnosis(availability["reason_code"], available=availability["available"])
+    diagnosis = native_runtime_diagnosis(
+        availability["reason_code"],
+        available=availability["available"],
+        restart_paced=restart is not None and restart["paced"],
+    )
     if diagnosis is not None:
         section["diagnosis"] = diagnosis
     bundled_runtime = bundled_native_runtime_report()
