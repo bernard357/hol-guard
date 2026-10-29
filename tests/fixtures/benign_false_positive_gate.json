@@ -20037,6 +20037,38 @@
       "expect": "allow"
     },
     {
+      "id": "cargo-manifest-path-temp-sibling-worktree",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cargo test --manifest-path ${USER_TMP_SIBLING}/rust/Cargo.toml -p sibling -- --exact"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-cargo-install-manifest-path-temp-sibling-worktree",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cargo install --manifest-path ${USER_TMP_SIBLING}/rust/Cargo.toml"
+      },
+      "cwd": "parent",
+      "expect": "not_allow"
+    },
+    {
       "id": "neg-toolchain-npm-exec-workspace-filter",
       "fix_area": "shell",
       "harnesses": [

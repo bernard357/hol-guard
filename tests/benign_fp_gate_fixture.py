@@ -392,15 +392,15 @@ def build_fixture(root: Path) -> BenignFixture:
     _git(parent, "worktree", "add", "--quiet", "-b", "user-tmp-feature", str(user_tmp_worktree), home=home)
     # A hidden tool directory inside it, which never takes a dependency link.
     (user_tmp_worktree / ".cache").mkdir()
-    # A linked worktree of the home sibling checkout beside it, freshly added:
-    # a package in a subfolder that builds with its own script and nothing
-    # installed, and a plugin manifest in a hidden folder.
+    # A linked worktree of the home sibling checkout beside it, freshly added: a package in a subfolder that
+    # builds with its own script and nothing installed, a crate, and a plugin manifest in a hidden folder.
     user_tmp_sibling = user_tmp_worktree.parent / "sibling"
     _git(home / "other-project", "worktree", "add", "--quiet", "-b", "user-tmp-sibling", str(user_tmp_sibling), home=home)
     scripts = {"build": "node scripts/build.mjs", "test": "node --test"}
     _write(user_tmp_sibling / "dashboard" / "package.json", json.dumps({"private": True, "scripts": scripts}) + "\n")
     _write(user_tmp_sibling / "dashboard" / "scripts" / "build.mjs", "console.log('built');\n")
     _write(user_tmp_sibling / "plugins" / "app" / ".codex-plugin" / "plugin.json", '{"author": "Example"}\n')
+    _write(user_tmp_sibling / "rust" / "Cargo.toml", '[package]\nname = "sibling"\nversion = "0.1.0"\nedition = "2021"\n')
 
     # Tracked gitlink plus a filter attribute: must remain reviewable.
     gitlink_repo.mkdir(parents=True)
