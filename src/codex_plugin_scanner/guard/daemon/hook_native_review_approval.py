@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import sqlite3
 import time
@@ -386,11 +387,11 @@ def queue_native_pre_tool_review(
         else None
     )
     try:
-        stored = _persist_review(functools.partial(queue, silent=silent), request, now, claude_review)
+        # A waiting Codex hook's operation and resume record are written in the same store call.
+        persist = functools.partial(queue, silent=silent, codex_live_wait=None if live_wait is None else live_wait[0])
+        stored = _persist_review(persist, request, now, claude_review)
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
-    if live_wait is not None and isinstance(stored, dict):
-        _seed_folded_live_wait(store, stored, request_id, live_wait[0], workspace)
     if connector is not None and isinstance(stored, dict):
         record_native_review_connector_context(
             store,
@@ -428,12 +429,8 @@ def _codex_live_wait(
     guard_home: Path,
     workspace: Path | None,
 ) -> tuple[dict[str, object], dict[str, object]] | None:
-    """The waiting bridge's metadata and the snapshot it earns, when it can be resumed."""
-    from .hook_native_review_codex_live_wait import (
-        codex_live_wait_metadata,
-        codex_live_wait_snapshot,
-        link_codex_live_wait,
-    )
+    """The waiting bridge's queue-write link arguments and the snapshot it earns, when it can be resumed."""
+    from .hook_native_review_codex_live_wait import codex_live_wait_metadata, codex_live_wait_snapshot
 
     now = datetime.now(tz=timezone.utc)
     metadata = codex_live_wait_metadata(payload=payload, guard_home=guard_home, workspace=workspace, now=now)
@@ -442,33 +439,11 @@ def _codex_live_wait(
     snapshot = codex_live_wait_snapshot(store, request_id=request_id, metadata=metadata, now=now)
     if snapshot is None:
         return None
-    linked = link_codex_live_wait(store, request_id=request_id, metadata=metadata, workspace=workspace, now=now)
-    return (metadata, snapshot) if linked else None
-
-
-def _seed_folded_live_wait(
-    store: object,
-    stored: Mapping[str, object],
-    request_id: str,
-    metadata: Mapping[str, object],
-    workspace: Path | None,
-) -> None:
-    """Seed the resume record on the row the request was stored as.
-
-    A retry of an action that is still pending folds into the existing row and
-    keeps its id. The bridge now waiting is the retry's, so the row's operation
-    is pointed at it; otherwise an approval would look up the earlier attempt's
-    wait and could only ask the agent to retry.
-    """
-    from .hook_native_review_codex_live_wait import link_codex_live_wait, seed_codex_live_wait
-
-    now = datetime.now(tz=timezone.utc)
-    stored_id = stored.get("request_id")
-    if isinstance(stored_id, str) and stored_id and stored_id != request_id:
-        if not link_codex_live_wait(store, request_id=stored_id, metadata=metadata, workspace=workspace, now=now):
-            return
-        request_id = stored_id
-    seed_codex_live_wait(store, request_id=request_id, now=now)
+    link: dict[str, object] = {
+        "metadata_json": json.dumps(metadata),
+        "workspace": None if workspace is None else str(workspace),
+    }
+    return link, snapshot
 
 
 def _native_review_artifact_id(harness: str, tool_name: str) -> str:

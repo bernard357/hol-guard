@@ -72,6 +72,7 @@ use crate::guard_store_outbox_recover::recover_sequences;
 use crate::guard_store_outbox_requeue::{repair_rejected_correlation, requeue_method};
 use crate::guard_store_policy_source_context::policy_source_contexts;
 use crate::guard_store_policy_upsert::upsert_policy;
+use crate::guard_store_queue_live_wait::queue_with_live_wait;
 use crate::guard_store_receipt_reads as receipt_reads;
 use crate::guard_store_receipt_rollups as receipt_rollups;
 use crate::guard_store_receipt_writes as receipt_writes;
@@ -593,8 +594,10 @@ fn dispatch(
         "consume_native_review_approval" => native_review_consume::consume(connection, args),
         "matching_native_review_block" => native_review_consume::matching_block(connection, args),
         "settle_native_review_reuse" => native_review_consume::settle(connection, args),
-        "add_approval_request" => add_approval_request(connection, source, args)
-            .and_then(|written| stored_row(connection, guard_home, args, owner, written)),
+        "add_approval_request" => queue_with_live_wait(connection, args, |args| {
+            add_approval_request(connection, source, args)
+        })
+        .and_then(|written| stored_row(connection, guard_home, args, owner, written)),
         "queue_blocked_approvals" => queue_blocked_approvals(connection, source, args),
         "add_native_review_approval_request" => {
             add_native_review_approval_request(connection, source, args)

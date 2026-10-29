@@ -11,15 +11,12 @@ retry and the waiting hook is denied.
 
 from __future__ import annotations
 
-import logging
-import sqlite3
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from ..approval_wait_limits import MAX_APPROVAL_WAIT_TIMEOUT_SECONDS
-from ..codex_resume import seed_request_resume_record
 from ..continuation_runtime import continuation_offer_payload
 from ..continuation_snapshot import validated_continuation_snapshot
 from ..live_process_identity import (
@@ -30,8 +27,6 @@ from ..live_process_identity import (
 
 if TYPE_CHECKING:
     from ..store import GuardStore
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def codex_live_wait_metadata(
@@ -98,49 +93,6 @@ def codex_live_wait_snapshot(
     return snapshot
 
 
-def link_codex_live_wait(
-    store: object,
-    *,
-    request_id: str,
-    metadata: Mapping[str, object],
-    workspace: Path | None,
-    now: datetime,
-) -> bool:
-    """Record the operation for the waiting hook before its request is queued.
-
-    The session and operation are written in one store transaction, before the
-    request, so the request is never approvable without them: an approval that
-    lands as soon as the request is stored still finds the waiting hook. When
-    this fails the caller queues the request retry-only.
-    """
-
-    link = getattr(store, "link_codex_live_wait", None)
-    if not callable(link):
-        return False
-    try:
-        link(
-            request_id=request_id,
-            workspace=None if workspace is None else str(workspace),
-            metadata=dict(metadata),
-            now=now.astimezone(timezone.utc).isoformat(),
-        )
-    except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
-        _LOGGER.warning("Codex live wait was not linked to %s (%s)", request_id, type(error).__name__)
-        return False
-    return True
-
-
-def seed_codex_live_wait(store: object, *, request_id: str, now: datetime) -> None:
-    """Seed the resume record once the waiting hook's request is stored."""
-
-    try:
-        seed_request_resume_record(
-            cast("GuardStore", store), request_id=request_id, now=now.astimezone(timezone.utc).isoformat()
-        )
-    except (KeyError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as error:
-        _LOGGER.warning("Codex live wait resume was not seeded for %s (%s)", request_id, type(error).__name__)
-
-
 def _waiting_operation(metadata: Mapping[str, object], timestamp: str) -> dict[str, object]:
     return {
         "created_at": timestamp,
@@ -151,4 +103,4 @@ def _waiting_operation(metadata: Mapping[str, object], timestamp: str) -> dict[s
     }
 
 
-__all__ = ["codex_live_wait_metadata", "codex_live_wait_snapshot", "link_codex_live_wait", "seed_codex_live_wait"]
+__all__ = ["codex_live_wait_metadata", "codex_live_wait_snapshot"]

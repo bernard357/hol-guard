@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -365,43 +365,27 @@ def test_a_review_without_a_live_waiting_bridge_stays_a_manual_retry(
     assert store.get_guard_operation_for_approval_request(request_id) is None
 
 
-def test_the_waiting_operation_exists_before_the_request_can_be_approved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
-) -> None:
-    from codex_plugin_scanner.guard.daemon import hook_native_review_approval
-
-    workspace = _workspace(tmp_path)
-    worker, store = _hook_worker(tmp_path, monkeypatch)
-    persist_review = hook_native_review_approval._persist_review
-    linked_at_persist: list[bool] = []
-
-    def persist(persist_fn: Any, request: Any, now: str, claude_review: Any) -> Any:
-        linked_at_persist.append(store.get_guard_operation_for_approval_request(request.request_id) is not None)
-        return persist_review(persist_fn, request, now, claude_review)
-
-    monkeypatch.setattr(hook_native_review_approval, "_persist_review", persist)
-    _review(worker, tmp_path, workspace, _live_wait())
-
-    assert linked_at_persist == [True]
-
-
-def test_the_waiting_session_and_operation_are_linked_in_one_store_call(
+def test_the_request_its_waiting_operation_and_resume_record_are_one_store_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     workspace = _workspace(tmp_path)
     worker, store = _hook_worker(tmp_path, monkeypatch)
     native_store_call = store._native_store_call
-    linking: list[str] = []
+    writes: list[str] = []
 
     def record(method: str, args: dict[str, object]) -> object:
-        if method in {"link_codex_live_wait", "upsert_guard_session", "upsert_guard_operation"}:
-            linking.append(method)
+        if method in {"add_approval_request", "link_codex_live_wait", "upsert_guard_session", "upsert_guard_operation"}:
+            writes.append(method)
+            if method == "add_approval_request":
+                assert set(cast("dict[str, object]", args["codex_live_wait"])) == {"metadata_json", "workspace"}
         return native_store_call(method, args)
 
     monkeypatch.setattr(store, "_native_store_call", record)
     request_id = _review(worker, tmp_path, workspace, _live_wait())["approval_request_id"]
     assert isinstance(request_id, str)
-    assert linking == ["link_codex_live_wait"]
+    # The operation is written before the request in the same transaction,
+    # so the request is never approvable without it.
+    assert writes == ["add_approval_request"]
     session = store.get_guard_session(f"codex-hook-{request_id}")
     assert session is not None
     assert (session["harness"], session["status"], session["capabilities"]) == (
@@ -413,6 +397,11 @@ def test_the_waiting_session_and_operation_are_linked_in_one_store_call(
     assert operation is not None
     assert operation["session_id"] == session["session_id"]
     assert operation["metadata"]["codex_hook_waits_for_browser_approval"] is True
+    with store._connect() as connection:
+        resume = connection.execute(
+            "select operation_id, status from guard_request_resumes where request_id = ?", (request_id,)
+        ).fetchone()
+    assert tuple(resume) == (operation["operation_id"], "pending")
 
 
 def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
@@ -420,11 +409,15 @@ def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
 ) -> None:
     workspace = _workspace(tmp_path)
     worker, store = _hook_worker(tmp_path, monkeypatch)
+    native_store_call = store._native_store_call
 
-    def fail(**_kwargs: object) -> None:
-        raise sqlite3.OperationalError("database is locked")
+    def unlinkable(method: str, args: dict[str, object]) -> object:
+        if method == "add_approval_request":
+            # The resident refuses the link; the queue write still runs.
+            args = {**args, "codex_live_wait": {"workspace": None}}
+        return native_store_call(method, args)
 
-    monkeypatch.setattr(store, "link_codex_live_wait", fail)
+    monkeypatch.setattr(store, "_native_store_call", unlinkable)
     review = _review(worker, tmp_path, workspace, _live_wait())
     request_id = review["approval_request_id"]
     assert isinstance(request_id, str)
@@ -433,6 +426,7 @@ def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
     snapshot = _snapshot(row)
     assert snapshot is not None
     assert snapshot["capability"] == "retry-only"
+    assert store.get_guard_operation_for_approval_request(request_id) is None
 
 
 def test_a_block_the_waiting_hook_already_completed_is_not_recorded_again_after_it_exits(
