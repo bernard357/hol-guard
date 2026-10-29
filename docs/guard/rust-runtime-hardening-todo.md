@@ -1,7 +1,8 @@
 # HOL Guard native runtime hardening TODO
 
-Status: canonical follow-up backlog, tracked on `main`. Reconciled 2026-10-28
-against `main` at `1aed1f43fb`, shipping as 3.58.0.
+Status: canonical follow-up backlog, tracked on `main`. Reconciled 2026-10-29
+against `main` at `6a319266c3`. 3.58.0 is the shipped release; 3.59.0 is open in
+its release PR.
 
 The program was originally planned on a `release/3.0` branch. It did not land
 that way: every item below that is marked done shipped through ordinary PRs on
@@ -75,7 +76,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T050 implement deterministic fail-safe behavior for every hook when daemon is unavailable — `hook_bridge_fallback.rs` settles the hook and records the hand-off with harness and fixed reason only;
 - [ ] NRH-T051 allow only authenticated current emergency-safe profile during daemon failure;
 - [ ] NRH-T052 add bounded daemon restart reservation and preserve approval/receipt/activity ordering;
-- [ ] NRH-T053 add panic/kill/hang/stale endpoint/port/socket/binary/manifest/policy/disk/permission/crash-loop tests — stale endpoint, owner lock, retry and live failure cases exist (`managed_resident_live_failure_tests.rs`, `managed_resident_owner_lock_tests.rs`, `resident_state_discovery_tests.rs`); the rest are open;
+- [ ] NRH-T053 add panic/kill/hang/stale endpoint/port/socket/binary/manifest/policy/disk/permission/crash-loop tests — stale endpoint, owner lock, retry and live failure cases exist (`managed_resident_live_failure_tests.rs`, `managed_resident_owner_lock_tests.rs`, `resident_state_discovery_tests.rs`), and the crash-loop case landed with T049 in `resident_restart_budget_flood_tests.rs`; panic, kill, hang, port, socket, binary, manifest, policy, disk and permission are open;
 - [ ] NRH-T054 add privacy-safe aggregate lifecycle journal and critical health state — `resident_failure_log.rs` records failures; an aggregate lifecycle journal does not exist.
 
 ## PR 4: Cross-platform installed-wheel and resource gates
@@ -128,7 +129,7 @@ measured parity gate, not the detection itself.
 - [ ] NRH-T106 keep healthy safe operations silent and approval scope consistent across surfaces;
 - [ ] NRH-T107 add local and managed native kill switches plus rollback playbook;
 - [x] NRH-T108 generate static import/call graph and runtime import coverage for migration candidates;
-- [ ] NRH-T109 delete dead duplicate Python implementations, including the unused `choose_post_tool_response` selector, plus its tests, imports, dependencies, package entries, flags, and shims;
+- [ ] NRH-T109 delete dead duplicate Python implementations plus their tests, imports, dependencies, package entries, flags, and shims — the selector T112 names is gone, and the wave continues on `main`: `python-capability-ownership.v1.json` now records 122 retired modules and 34 retired test paths with no deletion candidate left outstanding, the dead grant containment route took `daemon/hook_contained_grant.py` with it, and retiring the unused sensitive file read and write request clients removed most of `runtime/secret_file_request_services`. What remains is the replaced source T113 and T114 name;
 - [x] NRH-T110 move reusable cases to language-neutral fixtures and add package-content/import-removal tests;
 - [x] NRH-T111 publish Python LOC/dependency delta and require every retained reference backend to run in named CI.
 - [x] NRH-T112 delete `choose_post_tool_response` after repository-wide static and dynamic caller proof;
@@ -156,10 +157,13 @@ measured parity gate, not the detection itself.
 ## Final release gate
 
 NHD-091–095 completed the ownership/graph/package proof for the cleanup
-surface, and the resident Python runtime module it recorded as a deletion
-candidate is gone. T109, T113, T114, T115, T117, and T118 remain open until a
-separate authorized deletion wave removes the remaining replaced source and any
-newly proven-dead implementation dependencies.
+surface. Every module it recorded as a deletion candidate is gone:
+`python-capability-ownership.v1.json` carries an empty `deletion_candidates`
+list, an empty `package_excluded_candidates` list and `retained_source: false`,
+so no replaced Python implementation is held back as dormant rollback. T109,
+T113, T114, T115, T117, and T118 remain open until a separate authorized
+deletion wave removes the remaining replaced source and any newly proven-dead
+implementation dependencies.
 
 - [ ] all transport, overload, fallback, supervision, daemon-failure, privacy, cross-platform, catastrophic-risk, safe-autonomy, performance, fuzz, chaos, soak, artifact, review, and rollback gates pass;
 - [ ] dead replaced Python code is removed and retained Python ownership is explicit;

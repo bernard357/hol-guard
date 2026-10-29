@@ -1,6 +1,6 @@
 # HOL Guard native runtime hardening PRD
 
-Status: accepted follow-up, tracked on `main`. Reconciled 2026-10-28 against `main` at `1aed1f43fb`, shipping as 3.58.0. The program was planned on a `release/3.0` branch and did not land that way: the work merged to `main` through ordinary PRs, and `release/3.0` is now historical.
+Status: accepted follow-up, tracked on `main`. Reconciled 2026-10-29 against `main` at `6a319266c3`, with 3.58.0 shipped and 3.59.0 open in its release PR. The program was planned on a `release/3.0` branch and did not land that way: the work merged to `main` through ordinary PRs, and `release/3.0` is now historical.
 
 ## Objective
 
@@ -186,10 +186,15 @@ dormant rollback. NHD-091–095 makes the first package boundary explicit:
 `docs/guard/contracts/python-capability-ownership.v1.json` classifies the full
 hook/runtime scope, `scripts/ci/python_capability_cleanup_gate.py` proves
 source/runtime reachability and package content, and the six-case parity
-fixture is language-neutral. The superseded Python resident source is retained
-but excluded from wheels/sdists and recorded as the sole deletion candidate;
-source deletion, tests/imports/dependencies/flags/shims removal, and any other
-category-3 cleanup remain separate until their rollback boundary is reviewed.
+fixture is language-neutral. The superseded Python resident source is no
+longer retained: it went with the rest of the replaced hook and runtime
+surface, 122 modules and 34 test paths, which
+`python-capability-ownership.v1.json` records under `retired_modules` and
+`retired_test_paths` with an empty `deletion_candidates` list, an empty
+`package_excluded_candidates` list and `retained_source: false`. Nothing
+replaced is held back inside the package as dormant rollback; the reviewed
+release reverts as a unit instead. Remaining category-3 cleanup still lands in
+separately authorized deletion changes once each rollback boundary is reviewed.
 Record Python LOC/dependency deltas for each authorized removal.
 
 Do not remove the active Python differential-test oracle while this PRD requires it. A production semantic fallback is forbidden; an untested oracle is dead code and must be removed.
