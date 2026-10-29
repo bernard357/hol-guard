@@ -266,6 +266,8 @@ mod sfrs_gh_shell_vectors;
 mod sfrs_gh_static_body_safety;
 mod sfrs_git_audit;
 mod sfrs_git_cached_diff;
+#[cfg(test)]
+mod sfrs_git_cached_diff_tests;
 mod sfrs_git_fetch;
 mod sfrs_git_index;
 mod sfrs_git_routines;

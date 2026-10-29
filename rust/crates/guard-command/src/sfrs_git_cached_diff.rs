@@ -212,7 +212,25 @@ pub(crate) fn cached_diff_operands_are_safe(args: &[String], ctx: &Ctx) -> bool 
     let has_index_flag =
         |items: &[String]| items.iter().any(|item| listed(&INDEX_DIFF_FLAGS, item));
     let Some(separator) = args.iter().position(|arg| arg == "--") else {
-        return has_index_flag(args) && args.iter().all(|arg| listed(&SAFE_CACHED_DIFF_FLAGS, arg));
+        if !has_index_flag(args) {
+            return false;
+        }
+        // `git diff --cached src/app.ts` is the same staged read as the `--`
+        // form; git takes the trailing operands as pathspecs. Hold every
+        // option to the safe list so an output-writing flag such as
+        // `--output=<file>` can never reach the pathspec check.
+        let paths: Vec<String> = args
+            .iter()
+            .filter(|arg| !listed(&SAFE_CACHED_DIFF_FLAGS, arg))
+            .cloned()
+            .collect();
+        if paths.is_empty() {
+            return true;
+        }
+        if paths.len() > 16 || paths.iter().any(|path| path.starts_with('-')) {
+            return false;
+        }
+        return ctx.host.cached_diff_pathspecs(&paths);
     };
     let revisions = &args[..separator];
     if !has_index_flag(revisions) {
