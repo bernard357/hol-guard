@@ -142,8 +142,8 @@ _UNAVAILABLE: dict[CandidateState, tuple[str, str]] = {
         "be launched. Guard restores that bit on its own bundled copy the next time it runs "
         "the runtime, but it cannot do so on a filesystem mounted `noexec` or on a copy it "
         "does not own, and until the bit is back nothing evaluates a command.",
-        "Run `hol-guard guard doctor <harness>` once, which restores the bit on Guard's own "
-        "copy. If it stays missing, reinstall hol-guard outside any `noexec` mount: "
+        "Run `hol-guard repair`, which puts the bit back on Guard's own copy. If it stays "
+        "missing, reinstall hol-guard outside any `noexec` mount: "
         "`uv tool install --force hol-guard`.",
     ),
     "not_a_regular_file": (
@@ -282,6 +282,48 @@ def native_runtime_candidates() -> list[NativeRuntimeCandidate]:
     """
 
     return [row for _, row in _candidate_rows()]
+
+
+def bundled_runtime_without_execute_bit() -> Path | None:
+    """Guard's own runtime copy when the only thing wrong with it is the execute bit.
+
+    ``not_executable`` is reached only after the file passed every check
+    identity validation makes, so a path returned here is a regular file this
+    account owns, can read, and installed itself. That is the one runtime fault
+    Guard can repair, and ``runtime_install_repair`` is what repairs it. This
+    reads file metadata and changes nothing.
+    """
+
+    return next(
+        (path for path, row in _candidate_rows() if row["slot"] == "bundled" and row["state"] == "not_executable"),
+        None,
+    )
+
+
+def native_install_file_state() -> tuple[CandidateState, NativeRuntimeDiagnosis | None]:
+    """What the installed runtime files show on their own, without running them.
+
+    This is the half of ``native_runtime_diagnosis`` that needs no reason code:
+    the worst state any candidate is in, by the same order that answers an
+    unavailable runtime, paired with the explanation for it. ``present`` is
+    returned with no diagnosis, because whether a trusted binary then starts is
+    a question only launching it answers and nothing here launches anything.
+    ``absent`` is returned with its diagnosis so the caller can decide what an
+    install carrying no runtime at all means for it.
+    """
+
+    rows = _candidate_rows()
+    candidates = [row for _, row in rows]
+    states = {candidate["state"] for candidate in candidates}
+    state: CandidateState = "absent"
+    for candidate_state in _UNAVAILABLE_ORDER:
+        if candidate_state in states:
+            state = candidate_state
+            break
+    if state == "present":
+        return state, None
+    summary, action = _UNAVAILABLE[state]
+    return state, {"summary": summary, "action": action, "candidates": candidates}
 
 
 def _measured_state(rows: list[tuple[Path, NativeRuntimeCandidate]]) -> CandidateState | None:

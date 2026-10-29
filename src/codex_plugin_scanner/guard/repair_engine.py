@@ -4,11 +4,13 @@ Steps, each isolated so one failure never skips the rest:
 
 1. ``daemon``: restart the local daemon when it is not healthy.
 2. ``native_runtime``: prune dead ``resident-v3-*`` dirs and sockets (fail closed).
-3. ``onefile_leaks``: reclaim leaked ``_MEI*`` Guard extraction dirs (fail closed).
-4. ``hooks``: re-verify managed harness hooks and reinstall the broken ones.
-5. ``package_shims`` and ``command_queue``: the same repairs as ``doctor --repair``.
+3. ``native_install``: restore the execute bit Guard's own runtime copy lost;
+   report an install only a reinstall can fix.
+4. ``onefile_leaks``: reclaim leaked ``_MEI*`` Guard extraction dirs (fail closed).
+5. ``hooks``: re-verify managed harness hooks and reinstall the broken ones.
+6. ``package_shims`` and ``command_queue``: the same repairs as ``doctor --repair``.
 
-Steps 2 and 3 are non-destructive to anything live and are also what the daemon
+Steps 2 and 4 are non-destructive to anything live and are also what the daemon
 runs on its own (``run_safe_self_check``). The rest need a user (and the same
 step-up as ``doctor --repair``), so only the CLI and the gated daemon endpoint
 run them.
@@ -33,6 +35,7 @@ SCHEMA = "guard.repair.v1"
 STEP_TITLES = {
     "daemon": "Guard daemon",
     "native_runtime": "Stale native runtime state",
+    "native_install": "Native runtime install",
     "onefile_leaks": "Leaked extraction folders",
     "hooks": "Harness hooks",
     "package_shims": "Package-manager shims",
@@ -117,6 +120,40 @@ def repair_native_runtime(guard_home: Path, *, dry_run: bool) -> dict[str, objec
         f"{verb} {dirs} stale runtime folder(s) and {sockets} dead socket(s).",
         **detail,
     )
+
+
+def repair_native_install(*, dry_run: bool) -> dict[str, object]:
+    """Put back the execute bit Guard's own runtime copy lost; report what needs a reinstall.
+
+    A runtime missing that bit cannot be launched, so it cannot restore the bit
+    itself. Everything else wrong with an install -- a binary that disagrees
+    with its manifest or with the package calling it -- is reported with the
+    reinstall that clears it and left for the user, because replacing an
+    installed binary is not something a repair pass should do unasked.
+    """
+
+    try:
+        from .runtime_install_repair import repair_native_runtime_install
+
+        report = repair_native_runtime_install(dry_run=dry_run)
+    except Exception as error:
+        return _error_step("native_install", error)
+    outcome = report["outcome"]
+    detail: dict[str, object] = {"outcome": outcome, "candidates": report["candidates"]}
+    if report["action"] is not None:
+        detail["action"] = report["action"]
+    if outcome == "needs_reinstall":
+        # Nothing here failed, and nothing here can fix it either, so the run
+        # has to end saying so rather than reporting a healthy install.
+        return _step("native_install", "skipped", report["summary"], needs_attention=["native runtime"], **detail)
+    status = {
+        "healthy": "ok",
+        "absent": "skipped",
+        "planned": "planned",
+        "restored": "changed",
+        "refused": "error",
+    }[outcome]
+    return _step("native_install", status, report["summary"], **detail)
 
 
 def repair_onefile_leaks(
@@ -341,6 +378,7 @@ def run_repair(
     plan: list[tuple[str, Callable[[], dict[str, object]]]] = [
         ("daemon", lambda: repair_daemon(guard_home, home_dir=context.home_dir, dry_run=dry_run)),
         ("native_runtime", lambda: repair_native_runtime(guard_home, dry_run=dry_run)),
+        ("native_install", lambda: repair_native_install(dry_run=dry_run)),
         ("onefile_leaks", lambda: repair_onefile_leaks(dry_run=dry_run, guard_home=guard_home)),
         ("hooks", lambda: repair_hooks(context, store, dry_run=dry_run, harness=harness)),
         ("package_shims", lambda: repair_package_shims(context, dry_run=dry_run)),
@@ -385,7 +423,12 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
         mark = _MARKS.get(str(item["status"]), str(item["status"]))
         lines.append(f"  [{mark}] {item['title']}: {item['summary']}")
     if status == "partial":
-        lines.append("Some steps failed. Re-run `hol-guard repair`; if it persists, run `hol-guard doctor --json`.")
+        # A run is partial either because a step failed or because one finished
+        # and left something only the user can do. Telling the second case to
+        # re-run repair sends the user in a circle, so the attention line below
+        # is the whole closing message there.
+        if any(str(item["status"]) == "error" for item in steps):
+            lines.append("Some steps failed. Re-run `hol-guard repair`; if it persists, run `hol-guard doctor --json`.")
     elif status == "needs_repair":
         lines.append("Run `hol-guard repair` to apply these fixes.")
     elif status == "repaired":
@@ -393,7 +436,7 @@ def format_repair_summary(steps: list[dict[str, object]], *, status: str, dry_ru
     else:
         lines.append("Nothing needed repair.")
     if any(_step_needs_attention(item) for item in steps):
-        lines.append("Some apps still need attention. See the hooks step above.")
+        lines.append("Some steps still need attention; see the ones marked above.")
     return "\n".join(lines)
 
 
@@ -415,6 +458,7 @@ __all__ = [
     "repair_command_queue",
     "repair_daemon",
     "repair_hooks",
+    "repair_native_install",
     "repair_native_runtime",
     "repair_onefile_leaks",
     "repair_package_shims",
