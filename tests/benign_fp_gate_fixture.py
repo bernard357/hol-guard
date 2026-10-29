@@ -320,6 +320,12 @@ def build_fixture(root: Path) -> BenignFixture:
     # The live Gauntlet's token-handling sources (redirect route, link worker, HMAC helper).
     for relative, text in TOKEN_SOURCES.items():
         _write(worktree / relative, text)
+    # The test beside that source: a project file whose name reads like a
+    # credential, named by the runner a session runs over it.
+    _write(
+        worktree / "portal" / "src" / "lib" / "attribution-token.test.ts",
+        "import { expect, test } from 'vitest';\n\ntest('signs', () => expect(1).toBe(1));\n",
+    )
     # The live Gauntlet's sign-in folder and the held data files beside it, in a repository of their own.
     build_feature_app(home, os.environ.get("PATH", ""))
     # The live Gauntlet's clone with local configuration files beside its code.

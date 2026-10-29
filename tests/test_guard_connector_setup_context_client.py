@@ -433,6 +433,9 @@ class _ApprovalStore:
     def get_approval_request(self, request_id: str) -> dict[str, object]:
         return self.rows[request_id]
 
+    def queue_review_approval_request(self, request: object, now: str, **_options: object) -> dict[str, object]:
+        return self.get_approval_request(self.add_approval_request(request, now))  # type: ignore[arg-type]
+
 
 def _native_request(harness: str, payload: dict[str, object], review: dict[str, object], **_k: object) -> dict:
     """The resident's ``review_request`` answer, reduced to what these tests read."""

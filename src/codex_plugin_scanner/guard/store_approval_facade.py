@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sqlite3
 
 # ruff: noqa: F403,F405
 from .native_approval_queue_identity import UNAVAILABLE as APPROVAL_QUEUE_IDENTITY_UNAVAILABLE
@@ -12,6 +14,7 @@ from .native_approval_queue_identity import ApprovalQueueIdentityUnavailableErro
 from .native_consumer_artifact_project import NativeConsumerProjectError
 from .native_guard_store import NativeGuardStoreUnavailable
 from .native_signal_projection import NativeSignalProjectionUnavailableError
+from .store_approval_queries import _with_approval_hints
 from .store_base import *
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,47 +53,82 @@ class StoreApprovalsMixin:
             )
         )
 
-    def add_approval_request(
-        self,
-        request: GuardApprovalRequest,
-        now: str,
-        *,
-        prompt_shown: bool | None = None,
-        claude_review: dict[str, object] | None = None,
-    ) -> str:
+    def add_approval_request(self, request: GuardApprovalRequest, now: str, *, prompt_shown: bool | None = None) -> str:
         # The resident backfills legacy queue rows, derives the canonical
         # surfaces and queue identity, deduplicates and binds the outbox event
         # in one transaction. With ``prompt_shown`` set, a newly queued request
         # also gets its ``approval.created`` (and, when prompted,
-        # ``ask_once_shown``) event there. With ``claude_review`` set, the
-        # resident also builds and signs the Claude permission notice for a
-        # newly queued request, best effort. Its silence keeps the projection
+        # ``ask_once_shown``) event there. Its silence keeps the projection
         # owner's error.
-        args: dict[str, object] = {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown}
-        if claude_review is not None:
+        return self._queue_approval_request(
+            "add_approval_request", {"request": request.to_dict(), "now": now, "prompt_shown": prompt_shown}
+        )
+
+    def queue_review_approval_request(
+        self,
+        request: GuardApprovalRequest,
+        now: str,
+        *,
+        silent: bool = False,
+        claude_review: dict[str, object] | None = None,
+        codex_live_wait: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        """Queue a native review and answer the row it was stored as.
+
+        The resident reads the row back in the queue write's own transaction,
+        so the hook pays one round trip instead of a write and a read. A
+        resident that predates the read-back, or could not read the row,
+        answers the request id alone and the row is read separately.
+
+        ``codex_live_wait`` (``metadata_json`` and ``workspace``) links the
+        waiting Codex hook's operation before the request and seeds its
+        resume record after it, in the same write. A wait the resident could
+        not link or seed leaves the request a manual retry.
+        """
+        method = "add_approval_request"
+        args: dict[str, object] = {"request": request.to_dict(), "now": now}
+        if codex_live_wait is not None:
+            args["codex_live_wait"] = codex_live_wait
+        if silent:
+            # A review the agent never sees: its ``approval.created`` event is
+            # written in the same transaction, best effort, without marking a
+            # prompt as shown; the resident names the code of a failed event.
+            method, args["daemon"] = "add_silent_native_review_approval_request", True
+        elif claude_review is not None:
+            # The resident also builds and signs the Claude permission notice
+            # for a newly queued request, best effort. The key rides in the
+            # top-level args the request digest leaves out.
+            method = "add_claude_approval_request"
             args["claude_review"] = claude_review["review"]
             args["integrity_key_b64"] = claude_review["integrity_key_b64"]
             args["integrity_key_id"] = claude_review["integrity_key_id"]
-        return self._queue_approval_request(
-            "add_approval_request" if claude_review is None else "add_claude_approval_request", args
-        )
-
-    def add_silent_native_review_approval_request(self, request: GuardApprovalRequest, now: str) -> str:
-        # A review the agent never sees: the resident queues it and writes its
-        # ``approval.created`` event, without marking a prompt as shown, in the
-        # same transaction. The event stays best effort: the resident names
-        # the failure code when it could not write it.
-        queued = self._native_queue_call(
-            "add_silent_native_review_approval_request",
-            {"request": request.to_dict(), "now": now, "daemon": True},
-        )
+        try:
+            # `Path.resolve` of a relative config path starts from this process's directory.
+            cwd: str | None = os.getcwd()
+        except OSError:
+            cwd = None
+        queued = self._native_queue_call(method, {**args, "return_row": True, "cwd": cwd})
+        if isinstance(queued, str) and queued:
+            # A resident that predates the read-back answers the id alone.
+            queued = {"request_id": queued}
         if not isinstance(queued, dict) or not isinstance(queued.get("request_id"), str) or not queued["request_id"]:
             raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
-        request_id: str = queued["request_id"]
-        event_error = queued.get("event_error")
-        if event_error is not None:
-            _LOGGER.warning("Silent review inbox row saved without approval.created (%s)", event_error)
-        return request_id
+        if queued.get("event_error") is not None:
+            _LOGGER.warning("Silent review inbox row saved without approval.created (%s)", queued["event_error"])
+        if codex_live_wait is not None and queued.get("live_wait") != "seeded":
+            _LOGGER.warning("Codex live wait not resumable for %s (%s)", queued["request_id"], queued.get("live_wait"))
+        if "row" not in queued:
+            return self._read_back_queued_request(queued["request_id"])
+        row = queued["row"]
+        return _with_approval_hints(row) if isinstance(row, dict) else None
+
+    def _read_back_queued_request(self, request_id: str) -> dict[str, object] | None:
+        # The write has committed. A failed read answers no row rather than
+        # an error a caller could take for a failed write and queue again.
+        try:
+            return self.get_approval_request(request_id)
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+            return None
 
     def _queue_approval_request(self, method: str, args: dict[str, object]) -> str:
         request_id = self._native_queue_call(method, args)

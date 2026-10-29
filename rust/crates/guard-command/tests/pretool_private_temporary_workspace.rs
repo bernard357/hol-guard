@@ -120,6 +120,53 @@ fn a_dependency_link_into_a_temporary_worktree_is_quiet() {
     }
 }
 
+/// `$TMPDIR` ends in `/` on macOS, so `git worktree add "$TMPDIR/<name>"`
+/// reaches Guard as `/var/folders/<a>/<b>/T//<name>`. The repeated separator
+/// names the same destination as a single one, so the checkout and the reads
+/// in it stay as quiet as they are with one separator. A leading `//` is no
+/// spelling of the temporary directory and keeps its review.
+#[test]
+fn a_worktree_add_into_the_expanded_temporary_directory_is_quiet() {
+    let session = crate::pretool_git_session_ops::session("temp-worktree-separator");
+    let temporary = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    assert!(temporary.starts_with("/private/var/folders"));
+    let alias = std::path::Path::new("/var").join(temporary.strip_prefix("/private/var").unwrap());
+    let alias = alias.display();
+    let name = format!(
+        "guard-temp-add-{}-{}",
+        std::process::id(),
+        crate::unique_nanos::unique_nanos()
+    );
+    let _cleanup = Cleanup(temporary.join(&name));
+    for destination in [format!("{alias}//{name}"), format!("{alias}/{name}")] {
+        for command in [
+            format!("git worktree add --detach {destination} HEAD"),
+            format!(
+                "git worktree add --detach {destination} HEAD && cd {destination} && git status --short"
+            ),
+        ] {
+            let result = session.evaluate_at(&command, &session.primary);
+            assert_eq!(
+                result.minimum_action, "allow",
+                "{command}: {}",
+                result.reason_code
+            );
+        }
+    }
+    for command in [
+        format!("git worktree add --detach /{alias}/{name} HEAD"),
+        format!("git worktree add --detach {alias}//{name}/ HEAD"),
+    ] {
+        assert_ne!(
+            session
+                .evaluate_at(&command, &session.primary)
+                .minimum_action,
+            "allow",
+            "{command}"
+        );
+    }
+}
+
 struct Cleanup(std::path::PathBuf);
 
 impl Drop for Cleanup {

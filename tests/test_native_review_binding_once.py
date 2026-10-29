@@ -51,3 +51,43 @@ def test_native_review_asks_the_resident_for_the_review_binding_once(
     )
     assert response["policy_action"] == "review"
     assert len(bindings) == 1
+
+
+def test_native_review_queues_and_reads_its_row_in_one_resident_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    """The queue write answers the stored row; the hook reads nothing back separately."""
+    workspace = _wrangler_workspace(tmp_path, monkeypatch)
+    result, receipt = _verdict()
+    worker, store = _hook_worker(tmp_path, monkeypatch, result, receipt)
+    native_store_call = store._native_store_call
+    calls: list[tuple[str, object]] = []
+
+    def record(method: str, args: dict[str, object]) -> object:
+        calls.append((method, args.get("return_row")))
+        return native_store_call(method, args)
+
+    monkeypatch.setattr(store, "_native_store_call", record)
+    response = worker.review_http_payload(
+        payload={
+            "hook_event_name": "PreToolUse",
+            "session_id": "row-once",
+            "tool_use_id": "tool-row-once",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npx wrangler --version"},
+            "cwd": str(workspace),
+        },
+        params={},
+        default_harness=_HARNESS,
+        home_dir=tmp_path / "home",
+        guard_home=tmp_path / "guard-home",
+        workspace=workspace,
+    )
+    assert response["policy_action"] == "review"
+    queued = [method for method, return_row in calls if return_row is True]
+    assert len(queued) == 1
+    assert queued[0] in {"add_approval_request", "add_claude_approval_request"}
+    assert "get_approval_request" not in [method for method, _ in calls]
+    stored = store.get_approval_request(str(response["approval_request_id"]))
+    assert stored is not None
+    assert stored["request_id"] == response["approval_request_id"]

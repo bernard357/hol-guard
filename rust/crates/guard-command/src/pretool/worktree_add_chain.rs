@@ -175,9 +175,7 @@ fn prove(
     {
         return false;
     }
-    // A second `ln` to the same path would follow the first link and write
-    // into the directory it points at.
-    let mut linked_paths = Vec::new();
+    let mut links = Vec::new();
     (first..segments.len()).all(|index| {
         let joined = super::separator_between(model, index - 1, index);
         if !joined
@@ -217,12 +215,10 @@ fn prove(
                 deadline,
                 execution_environment,
             )
-            .is_some_and(|path| {
-                let key = path.to_string_lossy().to_ascii_lowercase();
-                let fresh = !linked_paths.contains(&key);
-                linked_paths.push(key);
-                fresh
-            });
+            .is_some_and(|link| super::links::record_link(&mut links, link));
+        }
+        if super::links::listing_through_links(segment, &links, &destination, context) {
+            return true;
         }
         routed_read(
             model,

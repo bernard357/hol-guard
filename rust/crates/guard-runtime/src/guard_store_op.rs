@@ -27,6 +27,7 @@ use crate::guard_store_approval_page_reads as approval_pages;
 use crate::guard_store_approval_queue::queue_blocked_approvals;
 use crate::guard_store_approval_queue_result as queue_result;
 use crate::guard_store_approval_reads as approval_reads;
+use crate::guard_store_approval_reads::with_stored_row as stored_row;
 use crate::guard_store_approval_resolve::{
     resolve_approval_request, resolve_harness_native_approval_request,
     resolve_matching_duplicate_requests,
@@ -71,6 +72,7 @@ use crate::guard_store_outbox_recover::recover_sequences;
 use crate::guard_store_outbox_requeue::{repair_rejected_correlation, requeue_method};
 use crate::guard_store_policy_source_context::policy_source_contexts;
 use crate::guard_store_policy_upsert::upsert_policy;
+use crate::guard_store_queue_live_wait::queue_with_live_wait;
 use crate::guard_store_receipt_reads as receipt_reads;
 use crate::guard_store_receipt_rollups as receipt_rollups;
 use crate::guard_store_receipt_writes as receipt_writes;
@@ -592,18 +594,23 @@ fn dispatch(
         "consume_native_review_approval" => native_review_consume::consume(connection, args),
         "matching_native_review_block" => native_review_consume::matching_block(connection, args),
         "settle_native_review_reuse" => native_review_consume::settle(connection, args),
-        "add_approval_request" => add_approval_request(connection, source, args),
+        "add_approval_request" => queue_with_live_wait(connection, args, |args| {
+            add_approval_request(connection, source, args)
+        })
+        .and_then(|written| stored_row(connection, guard_home, args, owner, written)),
         "queue_blocked_approvals" => queue_blocked_approvals(connection, source, args),
         "add_native_review_approval_request" => {
             add_native_review_approval_request(connection, source, args)
         }
         "add_silent_native_review_approval_request" => {
             add_silent_native_review_approval_request(connection, source, args)
+                .and_then(|written| stored_row(connection, guard_home, args, owner, written))
         }
         "add_claude_native_review_approval_request" => {
             add_claude_native_review_approval_request(connection, source, args)
         }
-        "add_claude_approval_request" => add_claude_approval_request(connection, source, args),
+        "add_claude_approval_request" => add_claude_approval_request(connection, source, args)
+            .and_then(|written| stored_row(connection, guard_home, args, owner, written)),
         "workflow_capability_plan" => wfcap::plan(connection, args),
         "workflow_capability_commit" => wfcap::commit(connection, args),
         "record_local_cli_observation" => local_cli::record_observation(connection, args),

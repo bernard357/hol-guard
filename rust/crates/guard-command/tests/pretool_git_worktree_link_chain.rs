@@ -158,6 +158,46 @@ fn other_links_after_a_worktree_add_stay_reviewed() {
     }
 }
 
+/// A listing through a link the same command just made reads the directory
+/// the link points at, which exists now, so it is screened there:
+/// `ls -d <checkout>/node_modules/.bin/vitest` confirms the shared launcher.
+/// Any other name in the new checkout is not there yet, and a listing before
+/// the link, a recursive one or another read through it keeps its review.
+#[test]
+fn a_listing_through_the_new_link_is_allowed() {
+    let (_cleanup, home, repository) = repository("listing");
+    let shims = repository.join("node_modules/.bin");
+    directory(&shims);
+    std::os::unix::fs::symlink("../vitest", shims.join("vitest")).unwrap();
+    let app = repository.display();
+    let checkout = home.join("org/app-x");
+    let checkout = checkout.display();
+    let add = format!("git worktree add {checkout} -b br-x origin/main 2>&1 | tail -1");
+    let link = format!("ln -s {app}/node_modules {checkout}/node_modules");
+    for tail in [
+        format!("ls -d {checkout}/node_modules/.bin/vitest"),
+        format!("ls -la {checkout}/node_modules/.bin"),
+        format!("ls {checkout}/node_modules"),
+        "ls -d ../app-x/node_modules/.bin/vitest".to_owned(),
+    ] {
+        assert_allowed(&home, &repository, &format!("{add} && {link} && {tail}"));
+    }
+    for tail in [
+        format!("ls -R {checkout}/node_modules"),
+        format!("ls -d {checkout}/dashboard/.cache"),
+        format!("ls -d {checkout}/node_modules/.bin/vitest {checkout}/.git"),
+        format!("cat {checkout}/node_modules/.bin/vitest"),
+        format!("ls -d {checkout}/node_modules/.bin/vitest > {checkout}/listing.txt"),
+    ] {
+        assert_reviewed(&home, &repository, &format!("{add} && {link} && {tail}"));
+    }
+    assert_reviewed(
+        &home,
+        &repository,
+        &format!("{add} && ls -d {checkout}/node_modules/.bin/vitest && {link}"),
+    );
+}
+
 /// The commit is read whole whatever directory the command runs in: from a
 /// subdirectory, a tracked link or directory at the checkout root is still
 /// seen as taken.

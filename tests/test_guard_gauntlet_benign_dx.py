@@ -16,7 +16,7 @@ from ci.gauntlet.clone_fixtures import (
     long_lived_clone_checks,
     long_lived_clone_config,
 )
-from ci.gauntlet.command_outputs import command_outputs_match
+from ci.gauntlet.command_outputs import TOKEN_SHELL_CASES, command_outputs_match
 from ci.gauntlet.fast_forward_fixtures import (
     FAST_FORWARD_CASE,
     FAST_FORWARD_HOOK_CASE,
@@ -139,6 +139,7 @@ REALISM_IDS = {
     "omp-native-shell-docker-imagetools-inspect",
     "omp-native-read-token-handling-sources",
     "omp-native-shell-cat-token-handling-sources",
+    "omp-native-shell-cat-token-sources-with-stderr",
 }
 
 
@@ -223,7 +224,7 @@ def test_token_handling_sources_are_tracked_and_hold_no_literal_secret(tmp_path:
         assert marker in (fixture.workspace / relative).read_text(encoding="utf-8")
         assert _git(fixture.workspace, fixture.home, "ls-files", relative).strip() == relative
     for scenario in load_catalog():
-        if scenario.id == "omp-native-shell-cat-token-handling-sources":
+        if scenario.id in TOKEN_SHELL_CASES:
             for command in scenario.commands:
                 assert _shell(fixture, command).returncode == 0, command
     for text in SOURCES.values():
@@ -256,6 +257,19 @@ def test_token_source_cases_need_every_file_and_its_own_text() -> None:
     assert command_outputs_match(shell, shells)
     assert not command_outputs_match(shell, shells[:2])
     assert not command_outputs_match(shell, [*shells[:2], _tool_call("bash", {"command": commands[2]}, "nothing\n")])
+
+
+def test_a_stderr_redirect_does_not_hide_the_source_a_command_read() -> None:
+    """The redirect is not the command's file operand, so the case still needs every source."""
+    scenario = {case.id: case for case in load_catalog()}["omp-native-shell-cat-token-sources-with-stderr"]
+    markers = dict(zip(SOURCES, (ROUTE_MARKER, WORKER_MARKER, HELPER_MARKER), strict=True))
+    calls = [
+        _tool_call("bash", {"command": command}, f"{marker}\n")
+        for command, marker in zip(scenario.commands, markers.values(), strict=True)
+    ]
+    assert all(">" in command["args"]["command"] for command in calls)  # type: ignore[index]
+    assert command_outputs_match(scenario, calls)
+    assert not command_outputs_match(scenario, calls[:2])
 
 
 def test_long_lived_clone_fixture_signs_by_default_and_tracks_many_branches(tmp_path: Path) -> None:

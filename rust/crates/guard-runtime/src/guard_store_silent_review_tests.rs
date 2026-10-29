@@ -26,12 +26,21 @@ fn write(home: &std::path::Path, source: &str, scenario: &Value, daemon: bool) -
     if daemon {
         args.insert("daemon".to_owned(), Value::Bool(true));
     }
+    call(
+        home,
+        source,
+        "add_silent_native_review_approval_request",
+        args,
+    )
+}
+
+fn call(home: &std::path::Path, source: &str, method: &str, args: Map<String, Value>) -> Value {
     let request = GuardStoreRequestV1 {
         schema: GUARD_STORE_REQUEST_SCHEMA.to_owned(),
         request_id: "vector".to_owned(),
         store_path: home.join("guard.db").to_string_lossy().into_owned(),
         guard_home: home.to_string_lossy().into_owned(),
-        method: "add_silent_native_review_approval_request".to_owned(),
+        method: method.to_owned(),
         source: source.to_owned(),
         busy_timeout_ms: 5000,
         args,
@@ -293,5 +302,121 @@ fn the_daemon_keeps_a_review_when_the_event_insert_fails() {
         "queued, no event"
     );
     drop(connection);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+fn scenario_named<'a>(vectors: &'a Value, name: &str) -> &'a Value {
+    vectors["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == name)
+        .unwrap()
+}
+
+#[test]
+fn a_queue_write_answers_the_row_it_stored_when_asked() {
+    // The hook queues a review and reads it back in one resident call; the
+    // row is the one a separate `get_approval_request` reads afterwards.
+    let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+    let source = vectors["source"].as_str().unwrap();
+    let scenario = scenario_named(&vectors, "dedupe_keeps_stored_fields");
+    for (method, daemon) in [
+        ("add_silent_native_review_approval_request", true),
+        ("add_approval_request", false),
+    ] {
+        let home = temp_home(&format!("stored-row-{method}"));
+        seed(&home.join("guard.db"), &vectors, scenario);
+        let mut args = Map::new();
+        args.insert("request".to_owned(), scenario["request"].clone());
+        args.insert("now".to_owned(), scenario["now"].clone());
+        args.insert("return_row".to_owned(), Value::Bool(true));
+        if daemon {
+            args.insert("daemon".to_owned(), Value::Bool(true));
+        }
+        let reply = call(&home, source, method, args);
+        assert_eq!(reply["status"], "ok", "{method}: {reply}");
+        let payload = &reply["payload"];
+        assert_eq!(
+            payload["request_id"], scenario["result"],
+            "{method}: {reply}"
+        );
+        assert!(payload.get("row_error").is_none(), "{method}: {reply}");
+        let read = call(
+            &home,
+            source,
+            "get_approval_request",
+            Map::from_iter([
+                ("request_id".to_owned(), scenario["result"].clone()),
+                ("derive_scope".to_owned(), Value::Bool(true)),
+            ]),
+        );
+        assert_eq!(read["status"], "ok", "{method}: {read}");
+        assert!(read["payload"].is_object(), "{method}: {read}");
+        assert_eq!(payload["row"], read["payload"], "{method}: same row");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[test]
+fn a_row_that_cannot_be_read_back_keeps_the_queued_review() {
+    // The read-back is answered as `row_error`; it never undoes the write.
+    let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+    let source = vectors["source"].as_str().unwrap();
+    let scenario = scenario_named(&vectors, "dedupe_keeps_stored_fields");
+    let home = temp_home("stored-row-unreadable");
+    let db = home.join("guard.db");
+    seed(&db, &vectors, scenario);
+    Connection::open(&db)
+        .unwrap()
+        .execute("update approval_requests set created_at = x'00'", [])
+        .unwrap();
+    let mut args = Map::new();
+    args.insert("request".to_owned(), scenario["request"].clone());
+    args.insert("now".to_owned(), scenario["now"].clone());
+    args.insert("daemon".to_owned(), Value::Bool(true));
+    args.insert("return_row".to_owned(), Value::Bool(true));
+    let reply = call(
+        &home,
+        source,
+        "add_silent_native_review_approval_request",
+        args,
+    );
+    assert_eq!(reply["status"], "ok", "{reply}");
+    let payload = &reply["payload"];
+    assert_eq!(payload["request_id"], "r-old", "{reply}");
+    assert_eq!(
+        payload["row_error"], "native_guard_store_invalid",
+        "{reply}"
+    );
+    assert!(payload.get("row").is_none(), "{reply}");
+    let (name, count, _) = queued_and_events(&Connection::open(&db).unwrap());
+    assert_eq!((name.as_str(), count), ("NewBash", 2), "queued");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_malformed_return_row_flag_rolls_the_write_back() {
+    let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+    let source = vectors["source"].as_str().unwrap();
+    let scenario = scenario_named(&vectors, "dedupe_keeps_stored_fields");
+    let home = temp_home("stored-row-malformed");
+    let db = home.join("guard.db");
+    seed(&db, &vectors, scenario);
+    let mut args = Map::new();
+    args.insert("request".to_owned(), scenario["request"].clone());
+    args.insert("now".to_owned(), scenario["now"].clone());
+    args.insert("return_row".to_owned(), json!("yes"));
+    let reply = call(&home, source, "add_approval_request", args);
+    assert_eq!(reply["status"], "error", "{reply}");
+    let before = expected(&scenario["before"], "stored-row-malformed");
+    assert_eq!(
+        unchanged(&tables(
+            &Connection::open(&db).unwrap(),
+            "stored-row-malformed"
+        )),
+        unchanged(&before),
+        "rolled back"
+    );
     let _ = std::fs::remove_dir_all(&home);
 }
