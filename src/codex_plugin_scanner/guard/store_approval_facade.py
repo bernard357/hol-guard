@@ -109,7 +109,8 @@ class StoreApprovalsMixin:
             cwd = None
         queued = self._native_queue_call(method, {**args, "return_row": True, "cwd": cwd})
         if isinstance(queued, str) and queued:
-            return self._read_back_queued_request(queued)
+            # A resident that predates the read-back answers the id alone.
+            queued = {"request_id": queued}
         if not isinstance(queued, dict) or not isinstance(queued.get("request_id"), str) or not queued["request_id"]:
             raise NativeSignalProjectionUnavailableError("native_guard_store_approval_request_invalid")
         if queued.get("event_error") is not None:

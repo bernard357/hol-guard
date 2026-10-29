@@ -17,6 +17,7 @@ use crate::guard_store_db::{StoreError, StoreResult};
 use crate::guard_store_sessions::link_codex_live_wait;
 
 const INVALID: StoreError = StoreError::Invalid("native_guard_store_args_invalid");
+const UNSEEDED: StoreError = StoreError::Invalid("native_guard_store_live_wait_unseeded");
 
 /// Runs `write` for the request in `args`, linking and seeding the Codex live
 /// wait in `codex_live_wait` around it.
@@ -42,8 +43,15 @@ pub(crate) fn queue_with_live_wait(
     // An error rolls the whole store call back; a request the write declines
     // to store rolls back its link here.
     connection.execute_batch("savepoint live_wait_queue")?;
-    let linked = savepoint(connection, || link(connection, wait, request_id, now));
-    let written = if linked.is_ok() {
+    // Only a Codex approval can be resumed; any other request is queued as
+    // it came and its wait is not linked.
+    let codex = request.get("harness").and_then(Value::as_str) == Some("codex");
+    let linked = if codex {
+        savepoint(connection, || link(connection, wait, request_id, now))
+    } else {
+        Err(INVALID)
+    };
+    let written = if linked.is_ok() || !codex {
         write(args)?
     } else {
         let mut request = request.clone();
@@ -69,21 +77,25 @@ pub(crate) fn queue_with_live_wait(
         .unwrap_or_default()
         .to_owned();
     let outcome = linked.and_then(|()| {
+        // A retry of a still-pending action folds into the existing row. The
+        // link made for the unused id is dropped, and the bridge now waiting
+        // is the retry's, so that row's operation is pointed at it before the
+        // record is seeded.
+        if stored_id != request_id {
+            savepoint(connection, || discard(connection, request_id))?;
+        }
         savepoint(connection, || {
-            // A retry of a still-pending action folds into the existing row.
-            // The bridge now waiting is the retry's, so that row's operation
-            // is pointed at it before the record is seeded.
             if stored_id != request_id {
                 link(connection, wait, &stored_id, now)?;
             }
-            seed(
+            let seeded = seed(
                 connection,
                 &Call {
                     request_id: &stored_id,
                     now,
                 },
-            )
-            .map(|_| ())
+            )?;
+            seeded.map(|_| ()).ok_or(UNSEEDED)
         })
     });
     let status = match outcome {
@@ -104,6 +116,16 @@ fn link(
     link_args.insert("request_id".to_owned(), Value::from(request_id));
     link_args.insert("now".to_owned(), Value::from(now));
     link_codex_live_wait(connection, &Args(&link_args)).map(|_| ())
+}
+
+fn discard(connection: &Connection, request_id: &str) -> StoreResult<()> {
+    let id = format!("codex-hook-{request_id}");
+    connection.execute(
+        "delete from guard_operations where operation_id = ?1",
+        [&id],
+    )?;
+    connection.execute("delete from guard_sessions where session_id = ?1", [&id])?;
+    Ok(())
 }
 
 fn savepoint(connection: &Connection, work: impl FnOnce() -> StoreResult<()>) -> StoreResult<()> {

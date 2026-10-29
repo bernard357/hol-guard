@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
+
+import pytest
 
 from codex_plugin_scanner.guard.daemon import hook_native_review_approval
 from codex_plugin_scanner.guard.store_approval_facade import StoreApprovalsMixin
@@ -202,6 +205,22 @@ def test_a_failed_read_back_never_queues_the_review_again() -> None:
     assert hook_native_review_approval._persist_review(persist, _Request(), "now", notice) is None  # type: ignore[arg-type]
     assert [method for method, _ in store.calls] == ["add_claude_approval_request"]
     assert store.reads == ["req-1"]
+
+
+def test_an_unseeded_codex_live_wait_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    # An older resident ignores the wait and answers the id alone.
+    wait = {"metadata_json": "{}", "workspace": None}
+    for reply in ("req-1", {"request_id": "req-1", "live_wait": "native_guard_store_invalid", "row": {}}):
+        store = _RowStore(reply)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            store.queue_review_approval_request(_Request(), "now", codex_live_wait=wait)  # type: ignore[arg-type]
+        assert "Codex live wait not resumable for req-1" in caplog.text, reply
+    store = _RowStore({"request_id": "req-1", "live_wait": "seeded", "row": {}})
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        store.queue_review_approval_request(_Request(), "now", codex_live_wait=wait)  # type: ignore[arg-type]
+    assert "Codex live wait" not in caplog.text
 
 
 def test_a_queue_write_without_a_request_id_is_refused() -> None:

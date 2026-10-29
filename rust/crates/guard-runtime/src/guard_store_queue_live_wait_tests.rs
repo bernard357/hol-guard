@@ -21,6 +21,15 @@ fn scenario<'a>(vectors: &'a Value, name: &str) -> &'a Value {
 
 /// Seeds a guard home for `name` and queues its request with `live_wait`.
 fn queue(tag: &str, name: &str, live_wait: Option<Value>) -> (Value, Connection) {
+    queue_as(tag, name, live_wait, None)
+}
+
+fn queue_as(
+    tag: &str,
+    name: &str,
+    live_wait: Option<Value>,
+    harness: Option<&str>,
+) -> (Value, Connection) {
     let vectors: Value = serde_json::from_str(VECTORS).unwrap();
     let scenario = scenario(&vectors, name);
     let home = temp_home(tag);
@@ -33,7 +42,11 @@ fn queue(tag: &str, name: &str, live_wait: Option<Value>) -> (Value, Connection)
     }
     insert_rows(&connection, "approval_requests", &scenario["rows"]);
     let mut args = Map::new();
-    args.insert("request".to_owned(), scenario["request"].clone());
+    let mut request = scenario["request"].clone();
+    if let Some(harness) = harness {
+        request["harness"] = Value::from(harness);
+    }
+    args.insert("request".to_owned(), request);
     args.insert("now".to_owned(), scenario["now"].clone());
     if let Some(live_wait) = live_wait {
         args.insert("codex_live_wait".to_owned(), live_wait);
@@ -67,6 +80,16 @@ fn operation_requests(connection: &Connection, operation_id: &str) -> Option<Str
             |row| row.get(0),
         )
         .optional()
+        .unwrap()
+}
+
+fn sessions(connection: &Connection, session_id: &str) -> i64 {
+    connection
+        .query_row(
+            "select count(*) from guard_sessions where session_id = ?",
+            [session_id],
+            |row| row.get(0),
+        )
         .unwrap()
 }
 
@@ -140,6 +163,25 @@ fn a_folded_retry_points_the_stored_request_at_the_waiting_hook() {
         resume(&connection, "r-old").map(|(operation, _, status)| (operation, status)),
         Some(("codex-hook-r-old".to_owned(), "pending".to_owned()))
     );
+    assert_eq!(operation_requests(&connection, "codex-hook-r-new"), None);
+    assert_eq!(sessions(&connection, "codex-hook-r-new"), 0);
+}
+
+#[test]
+fn a_wait_on_another_harness_is_not_linked() {
+    let (reply, connection) = queue_as(
+        "live-wait-other-harness",
+        "fresh_native_review",
+        Some(wait()),
+        Some("claude-code"),
+    );
+    assert_eq!(reply["status"], "ok", "{reply}");
+    let payload = &reply["payload"];
+    assert_eq!(payload["request_id"], "r-new", "{reply}");
+    assert_ne!(payload["live_wait"], "seeded", "{reply}");
+    assert_eq!(operation_requests(&connection, "codex-hook-r-new"), None);
+    assert_eq!(sessions(&connection, "codex-hook-r-new"), 0);
+    assert_eq!(resume(&connection, "r-new"), None);
 }
 
 #[test]
