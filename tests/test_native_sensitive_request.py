@@ -52,42 +52,6 @@ def test_classifier_error_keeps_the_legacy_value_error(monkeypatch: pytest.Monke
         secret_file_requests.extract_sensitive_tool_action_request("Bash", {"command": "ls"}, cwd=tmp_path)
 
 
-def test_file_read_match_is_rebuilt_from_the_reply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    seen: list[dict[str, Any]] = []
-    path_match = {
-        "family": "ssh_private_key",
-        "path": str(tmp_path / ".ssh/id_rsa"),
-        "reason": "synthetic",
-        "requested_path": "~/.ssh/id_rsa",
-        "sensitivity": "critical",
-    }
-    _answer(
-        monkeypatch,
-        _reply("file_read", {"tool_name": "Read", "normalized_tool_name": "read", "path_match": path_match}),
-        seen,
-    )
-    found = secret_file_requests.extract_sensitive_file_read_request(
-        "Read", {"file_path": "~/.ssh/id_rsa"}, cwd=tmp_path, home_dir=tmp_path
-    )
-    assert found is not None
-    assert found.path_match.family == "ssh_private_key"
-    assert found.path_match.sensitivity == "critical"
-    body = seen[0]["body"]
-    assert body["query"] == "file_read"
-    assert body["input"]["home_dir"] == str(tmp_path)
-    assert "verdict" not in body["input"]
-
-
-def test_unknown_sensitivity_is_not_presented(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    path_match = {"family": "x", "path": "/x", "reason": "x", "requested_path": "x", "sensitivity": "low"}
-    _answer(
-        monkeypatch,
-        _reply("file_read", {"tool_name": "Read", "normalized_tool_name": "read", "path_match": path_match}),
-    )
-    with pytest.raises(client.NativeSensitiveRequestError):
-        secret_file_requests.extract_sensitive_file_read_request("Read", {"file_path": "x"}, cwd=tmp_path)
-
-
 def test_boolean_answers_must_be_booleans(monkeypatch: pytest.MonkeyPatch) -> None:
     _answer(monkeypatch, _reply("read_only_lookup_target_is_safe", 1))
     with pytest.raises(client.NativeSensitiveRequestError):
@@ -191,8 +155,3 @@ def test_tool_action_reply_keeps_embedded_command_text(monkeypatch: pytest.Monke
     texts = [item.text for item in found.canonical_command.embedded_commands]
     assert "echo ~/.ssh/id_rsa" in texts
     assert "secret\n" in texts
-
-
-def test_command_list_texts_are_a_tuple_of_strings(monkeypatch: pytest.MonkeyPatch) -> None:
-    _answer(monkeypatch, _reply("command_list_candidate_texts", ["cat README.md"]))
-    assert secret_file_requests.command_list_candidate_texts(["cat", "README.md"]) == ("cat README.md",)

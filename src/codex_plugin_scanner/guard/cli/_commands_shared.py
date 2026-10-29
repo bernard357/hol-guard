@@ -164,12 +164,6 @@ from ..runtime.runner import (
 )
 from ..runtime.secret_file_requests import (
     build_tool_action_request_artifact,
-    extract_sensitive_file_read_request,
-    extract_sensitive_file_read_request_artifact,
-    extract_sensitive_file_read_request_artifact_from_action,
-    extract_sensitive_file_read_request_from_action,
-    extract_sensitive_file_write_request,
-    extract_sensitive_file_write_request_artifact,
     extract_sensitive_tool_action_request,
 )
 from ..runtime.secret_sensitivity import (
