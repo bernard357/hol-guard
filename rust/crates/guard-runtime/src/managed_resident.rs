@@ -35,6 +35,8 @@ mod managed_resident_transport;
 mod managed_resident_windows;
 #[path = "managed_resident_owner_lock.rs"]
 mod owner_lock;
+#[path = "managed_resident_prewarm.rs"]
+mod prewarm_lane;
 pub(crate) use owner_lock::ManagedOwnerLock;
 #[path = "managed_resident_exit.rs"]
 mod exit_record;
@@ -59,6 +61,13 @@ use crate::resident_state::{
 
 pub(crate) fn client_stream(state_base: &Path) -> Result<(), String> {
     client_stream::run(state_base)
+}
+
+/// Start this runtime's resident, if no client is already holding one, and
+/// keep it up for a bounded window so a session's first hook does not pay
+/// for the start. `managed_resident_prewarm.rs` has the whole contract.
+pub(crate) fn prewarm(state_base: &Path) -> Result<(), String> {
+    prewarm_lane::run(state_base)
 }
 
 const MANAGED_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
