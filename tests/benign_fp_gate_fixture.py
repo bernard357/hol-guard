@@ -140,6 +140,10 @@ class BenignFixture:
             "${PORTAL_WEB_HEAD}": head_commit(self.org),
             "${TMP_ORG}": str(self.tmp_org),
             "${USER_TMP_WORKTREE}": str(self.user_tmp_worktree),
+            # A linked worktree of the home sibling checkout in the same directory, and
+            # the same path as `$TMPDIR` spells it on macOS, through the `/var` root link.
+            "${USER_TMP_SIBLING}": str(self.user_tmp_worktree.parent / "sibling"),
+            "${USER_TMP_SIBLING_LINK}": str(_root_link_spelling(self.user_tmp_worktree.parent / "sibling")),
             "${TMP_ORG_WT}": str(self.tmp_org.parent / "app-followup"),
             "${TMP_REMOTE}": str(self.tmp_org.parent / "remote" / "app.git"),
             # The live Gauntlet's fixture root and its fresh scratch leaf directly in /tmp.
@@ -184,6 +188,12 @@ class BenignFixture:
 def _system_tmp() -> str:
     """Use /tmp itself where it exists, the place real agents create scratch directories."""
     return "/tmp" if Path("/tmp").is_dir() else tempfile.gettempdir()
+
+
+def _root_link_spelling(path: Path) -> Path:
+    """`path` written through the macOS `/var` root link, as `$TMPDIR` names it; unchanged elsewhere."""
+    private_var = Path("/private/var")
+    return Path("/var") / path.relative_to(private_var) if path.is_relative_to(private_var) else path
 
 
 def build_fixture(root: Path) -> BenignFixture:
@@ -376,6 +386,15 @@ def build_fixture(root: Path) -> BenignFixture:
     _git(parent, "worktree", "add", "--quiet", "-b", "user-tmp-feature", str(user_tmp_worktree), home=home)
     # A hidden tool directory inside it, which never takes a dependency link.
     (user_tmp_worktree / ".cache").mkdir()
+    # A linked worktree of the home sibling checkout beside it, freshly added:
+    # a package in a subfolder that builds with its own script and nothing
+    # installed, and a plugin manifest in a hidden folder.
+    user_tmp_sibling = user_tmp_worktree.parent / "sibling"
+    _git(home / "other-project", "worktree", "add", "--quiet", "-b", "user-tmp-sibling", str(user_tmp_sibling), home=home)
+    scripts = {"build": "node scripts/build.mjs", "test": "node --test"}
+    _write(user_tmp_sibling / "dashboard" / "package.json", json.dumps({"private": True, "scripts": scripts}) + "\n")
+    _write(user_tmp_sibling / "dashboard" / "scripts" / "build.mjs", "console.log('built');\n")
+    _write(user_tmp_sibling / "plugins" / "app" / ".codex-plugin" / "plugin.json", '{"author": "Example"}\n')
 
     # Tracked gitlink plus a filter attribute: must remain reviewable.
     gitlink_repo.mkdir(parents=True)

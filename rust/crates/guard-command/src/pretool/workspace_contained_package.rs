@@ -118,7 +118,7 @@ fn entered(directory: &Path, target: &str, workspace: &Path) -> Option<PathBuf> 
     super::cd::below(target, workspace).then(|| {
         let path = Path::new(target);
         if path.is_absolute() {
-            path.to_owned()
+            super::cd::canonical_below(path, workspace)
         } else {
             directory.join(path)
         }

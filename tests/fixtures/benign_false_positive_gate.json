@@ -18938,6 +18938,150 @@
       "expect": "not_allow"
     },
     {
+      "id": "user-tmp-sibling-subfolder-build",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING}/dashboard && bun run build 2>&1 | tail -20"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "user-tmp-sibling-link-subfolder-build",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING_LINK}/dashboard && bun run build"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "user-tmp-sibling-link-subfolder-test-tail",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING_LINK}/dashboard && npm run test 2>&1 | tail -5"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "user-tmp-sibling-link-local-commit",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING_LINK} && git add -A && git commit -m \"fix: align spacing\""
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "user-tmp-sibling-link-manifest-sed",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sed -i '' 's/Example/Sample/g' ${USER_TMP_SIBLING_LINK}/plugins/app/.codex-plugin/plugin.json"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "user-tmp-sibling-manifest-perl",
+      "fix_area": "git-sibling-worktree",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "perl -pi -e 's/Example/Sample/g' ${USER_TMP_SIBLING}/plugins/app/.codex-plugin/plugin.json"
+      },
+      "cwd": "parent",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-user-tmp-sibling-link-subfolder-add",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING_LINK}/dashboard && bun add left-pad"
+      },
+      "cwd": "parent",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-user-tmp-sibling-link-push",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${USER_TMP_SIBLING_LINK} && git push origin HEAD"
+      },
+      "cwd": "parent",
+      "expect": "not_allow"
+    },
+    {
+      "id": "neg-user-tmp-sibling-manifest-and-checkout-sed",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "sed -i '' 's/Example/Sample/g' ${USER_TMP_SIBLING}/plugins/app/.codex-plugin/plugin.json ${PARENT}/README.md"
+      },
+      "cwd": "parent",
+      "expect": "not_allow"
+    },
+    {
       "id": "session-gh-api-short-jq-tag-sha",
       "fix_area": "gh",
       "harnesses": [

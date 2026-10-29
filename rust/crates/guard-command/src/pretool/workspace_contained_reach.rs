@@ -447,7 +447,7 @@ fn outside_from(value: &str, name: &str, workspace: &Path, below: usize) -> bool
 /// On macOS `/tmp` and `/var` are fixed root links into `/private`, so
 /// `$TMPDIR` spells a worktree there as `/var/folders/…` while its canonical
 /// workspace is `/private/var/folders/…`.
-fn through_root_link(path: &Path, workspace: &Path) -> bool {
+pub(super) fn through_root_link(path: &Path, workspace: &Path) -> bool {
     cfg!(target_os = "macos")
         && (path.starts_with("/var") || path.starts_with("/tmp"))
         && !path
