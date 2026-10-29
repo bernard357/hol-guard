@@ -17,14 +17,16 @@
 //!
 //! A plain relayed MCP call's record is never paged: the page's cursor passes
 //! over it, and once the daemon acknowledges that cursor the resident writes
-//! the call's receipt itself (see [`crate::mcp_relay_receipt`]).
+//! the call's receipt itself (see [`crate::mcp_relay_receipt`]). A receipt the
+//! store cannot take goes back on the queue as an ordinary record, so the
+//! daemon records it as it did before.
 
 use crate::hook_direct_counters::DirectHookCounters;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const HOOK_DIRECT_EVIDENCE_FEATURE: &str = "hook-direct-evidence-v1";
@@ -77,6 +79,25 @@ struct QueueState {
     acked_through: u64,
 }
 
+impl QueueState {
+    /// Queue one encoded record, or hand it back when the queue is full.
+    fn push(&mut self, record: Value, bytes: usize, native: bool) -> Result<(), Value> {
+        if self.records.len() >= MAX_QUEUED_RECORDS || self.bytes + bytes > MAX_QUEUED_BYTES {
+            return Err(record);
+        }
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.bytes += bytes;
+        self.records.push_back(QueuedRecord {
+            seq,
+            bytes,
+            record,
+            native,
+        });
+        Ok(())
+    }
+}
+
 impl Default for QueueState {
     fn default() -> Self {
         Self {
@@ -90,8 +111,33 @@ impl Default for QueueState {
 
 pub(crate) struct DirectEvidenceQueue {
     epoch: String,
-    state: Mutex<QueueState>,
+    state: Arc<Mutex<QueueState>>,
     counters: DirectHookCounters,
+}
+
+/// Returns acknowledged records whose receipts the resident could not write
+/// to their queue, as records the daemon drains and records itself.
+#[derive(Clone)]
+pub(crate) struct Unwritten(Arc<Mutex<QueueState>>);
+
+impl Unwritten {
+    pub(crate) fn requeue(&self, records: Vec<Value>) {
+        if records.is_empty() {
+            return;
+        }
+        let Ok(mut state) = self.0.lock() else {
+            return;
+        };
+        for record in records {
+            let Ok(encoded) = serde_json::to_vec(&record) else {
+                continue;
+            };
+            if state.push(record, encoded.len(), false).is_err() {
+                // A full queue refuses them, as it refuses a new record.
+                break;
+            }
+        }
+    }
 }
 
 impl Default for DirectEvidenceQueue {
@@ -107,7 +153,7 @@ impl Default for DirectEvidenceQueue {
                 std::process::id(),
                 QUEUES.fetch_add(1, Ordering::Relaxed)
             ),
-            state: Mutex::new(QueueState::default()),
+            state: Arc::new(Mutex::new(QueueState::default())),
             counters: DirectHookCounters::default(),
         }
     }
@@ -149,20 +195,13 @@ impl DirectEvidenceQueue {
         let Ok(mut state) = self.state.lock() else {
             return Err(record);
         };
-        if state.records.len() >= MAX_QUEUED_RECORDS || state.bytes + bytes > MAX_QUEUED_BYTES {
-            return Err(record);
-        }
-        let seq = state.next_seq;
-        state.next_seq = state.next_seq.saturating_add(1);
-        state.bytes += bytes;
         let native = crate::mcp_relay_receipt::is_plain(&record);
-        state.records.push_back(QueuedRecord {
-            seq,
-            bytes,
-            record,
-            native,
-        });
-        Ok(())
+        state.push(record, bytes, native)
+    }
+
+    /// Where the resident returns receipts it could not write.
+    pub(crate) fn unwritten(&self) -> Unwritten {
+        Unwritten(Arc::clone(&self.state))
     }
 
     /// Acknowledge records the daemon already has, then copy the next page.
@@ -249,7 +288,11 @@ pub(crate) fn drain(
         request.ack_epoch.as_deref(),
         max_records,
     );
-    crate::mcp_relay_receipt::write_detached(&request.guard_home, peeked.settled);
+    crate::mcp_relay_receipt::write_detached(
+        &request.guard_home,
+        peeked.settled,
+        queue.unwritten(),
+    );
     serde_json::to_vec(&json!({
         "schema": DRAIN_RESULT_SCHEMA,
         "epoch": queue.epoch,

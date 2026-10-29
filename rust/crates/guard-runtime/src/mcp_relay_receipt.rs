@@ -14,11 +14,12 @@
 //! the daemon's policy, a safe-alternative block adds an inbox row and an ask
 //! block raises the desktop notice and the approval center.
 //!
-//! As in the Python drain, a record the resident cannot compose or store is
-//! dropped, never guessed.
+//! As in the Python drain, a record the resident cannot compose is dropped,
+//! never guessed. One the store cannot take goes back to the queue as an
+//! ordinary record, so the daemon records it, retrying as it always has.
 
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use guard_command::mcp_runtime_evidence::ArgumentEntry;
@@ -76,51 +77,78 @@ pub(crate) fn is_plain(record: &Value) -> bool {
 }
 
 /// Write the receipts of acknowledged plain records off the drain's thread,
-/// so the page the daemon waits for is not held behind the store.
-pub(crate) fn write_detached(guard_home: &str, records: Vec<Value>) {
+/// so the page the daemon waits for is not held behind the store. Records the
+/// store cannot take go to `unwritten`.
+pub(crate) fn write_detached(
+    guard_home: &str,
+    records: Vec<Value>,
+    unwritten: crate::hook_direct_evidence::Unwritten,
+) {
     if records.is_empty() {
         return;
     }
     let home = guard_home.to_owned();
+    let slot = Arc::new(Mutex::new(Some(records)));
+    let job = Arc::clone(&slot);
+    let requeue = unwritten.clone();
     let spawned = std::thread::Builder::new()
         .name("guard-mcp-relay-receipts".to_owned())
-        .spawn(move || write(&home, &records));
-    if let Err(error) = spawned {
-        // The closure is dropped with the error; the records go with it, as
-        // a record the drain cannot write is dropped.
-        drop(error);
+        .spawn(move || {
+            let records = take(&job);
+            requeue.requeue(write(&home, records));
+        });
+    if spawned.is_err() {
+        // No writer thread: the daemon records them.
+        unwritten.requeue(take(&slot));
     }
 }
 
-/// Write each record's receipt under one storage gate hold, and count the
-/// receipts written. A home without a store has nothing to record into.
-pub(crate) fn write(guard_home: &str, records: &[Value]) -> usize {
-    let home = Path::new(guard_home);
-    if !home.join(STORE_FILE_NAME).is_file() {
-        return 0;
-    }
-    let composed: Vec<Map<String, Value>> = records
-        .iter()
-        .filter_map(|record| compose(guard_home, record, &Stamp::fresh()?))
+fn take(slot: &Mutex<Option<Vec<Value>>>) -> Vec<Value> {
+    slot.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .unwrap_or_default()
+}
+
+/// Write each record's receipt under one storage gate hold, and return the
+/// plain records the store did not take: a home without a store, a gate that
+/// stayed closed, or a write that failed. Records that are not plain are
+/// dropped.
+pub(crate) fn write(guard_home: &str, records: Vec<Value>) -> Vec<Value> {
+    let composed: Vec<(Value, Map<String, Value>)> = records
+        .into_iter()
+        .filter_map(|record| {
+            let args = compose(guard_home, &record, &Stamp::fresh()?)?;
+            Some((record, args))
+        })
         .collect();
     if composed.is_empty() {
-        return 0;
+        return Vec::new();
+    }
+    let home = Path::new(guard_home);
+    if !home.join(STORE_FILE_NAME).is_file() {
+        return records_of(composed);
     }
     let _writer = WRITER.lock().unwrap_or_else(PoisonError::into_inner);
     let timeout_ms = sqlite_timeout_ms();
-    let written = {
+    let unwritten = {
         let Ok(_gate) = hold_storage_gate(home, Duration::from_millis(timeout_ms.into())) else {
-            return 0;
+            return records_of(composed);
         };
         let busy_timeout_ms = u64::from(timeout_ms).clamp(1, MAX_BUSY_TIMEOUT_MS);
         composed
             .into_iter()
-            .map(|args| store(guard_home, busy_timeout_ms, args))
-            .filter(|stored| *stored)
-            .count()
+            .filter_map(|(record, args)| {
+                (!store(guard_home, busy_timeout_ms, args)).then_some(record)
+            })
+            .collect()
     };
     repair_store_permissions(home);
-    written
+    unwritten
+}
+
+fn records_of(composed: Vec<(Value, Map<String, Value>)>) -> Vec<Value> {
+    composed.into_iter().map(|(record, _)| record).collect()
 }
 
 fn store(guard_home: &str, busy_timeout_ms: u64, args: Map<String, Value>) -> bool {

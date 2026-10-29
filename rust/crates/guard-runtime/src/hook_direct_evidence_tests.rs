@@ -195,3 +195,42 @@ fn a_record_the_resident_cannot_write_is_still_paged() {
     let page = drained(&queue, None, None);
     assert_eq!(page["records"], json!([remembered]));
 }
+
+#[test]
+fn a_receipt_the_resident_could_not_write_is_paged_to_the_daemon() {
+    let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    assert!(queue.offer(plain.clone()));
+    let page = queue.acknowledge_and_peek(None, Some(&queue.epoch), 3);
+    assert!(page.records.is_empty());
+    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 3);
+    assert_eq!(page.settled, [plain.clone()]);
+    queue.unwritten().requeue(page.settled);
+    let page = queue.acknowledge_and_peek(page.through, Some(&queue.epoch), 3);
+    assert_eq!(page.records, [plain]);
+    assert!(page.settled.is_empty());
+}
+
+#[test]
+fn a_drain_with_no_store_hands_the_receipt_back_to_the_daemon() {
+    let plain = crate::mcp_relay_receipt::tests::record("forward", "policy", "allow");
+    let queue = DirectEvidenceQueue::default();
+    assert!(queue.offer(plain.clone()));
+    let first = drained(&queue, None, None);
+    assert_eq!(first["records"], json!([]));
+    drained(&queue, None, first["through"].as_u64());
+    // The writer thread finds no store under the request's home.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let page = queue.acknowledge_and_peek(None, Some(&queue.epoch), 3);
+        if !page.records.is_empty() {
+            assert_eq!(page.records, [plain]);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "receipt never handed back"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}

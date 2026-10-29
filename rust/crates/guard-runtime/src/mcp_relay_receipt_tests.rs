@@ -258,13 +258,13 @@ fn records_the_daemon_owns_are_not_plain() {
 }
 
 #[test]
-fn a_home_without_a_store_writes_nothing() {
+fn a_home_without_a_store_hands_the_record_back() {
     let home = temp_home("relay-receipt-no-store");
-    let written = write(
+    let unwritten = write(
         home.to_str().unwrap(),
-        &[record("forward", "policy", "allow")],
+        vec![record("forward", "policy", "allow")],
     );
-    assert_eq!(written, 0);
+    assert_eq!(unwritten, [record("forward", "policy", "allow")]);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -274,15 +274,15 @@ fn plain_records_land_in_the_store() {
     let home = temp_home("relay-receipt-store");
     build_database(&home.join("guard.db"), &receipts, &inventory);
     let before = count(&home, "runtime_receipts");
-    let written = write(
+    let unwritten = write(
         home.to_str().unwrap(),
-        &[
+        vec![
             record("forward", "policy", "allow"),
             record("block", "inline-denied", "review"),
             record("remember", "policy", "allow"),
         ],
     );
-    assert_eq!(written, 2);
+    assert!(unwritten.is_empty(), "{unwritten:?}");
     assert_eq!(count(&home, "runtime_receipts"), before + 2);
     assert_eq!(count(&home, "guard_events"), 2);
     let _ = std::fs::remove_dir_all(&home);
