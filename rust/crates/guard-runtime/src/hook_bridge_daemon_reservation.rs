@@ -71,10 +71,14 @@ pub(super) fn reserve(guard_home: Option<&Path>) -> Option<Reserved> {
         return None;
     }
     // Taking an expired reservation over is a remove and a create, so two
-    // hooks can race here. The one whose exclusive create wins owns the
-    // start and the other waits, which is the outcome a lock around the
-    // whole check would give, without a lock to be stranded by a hook the
-    // harness kills.
+    // hooks that both find the same expired marker can end up owning a
+    // start each: either one may remove what the other just created. That
+    // costs a second start command, which is what every hook did before
+    // this reservation existed and what the daemon's own owner lock already
+    // settles; it never costs a start, since the hook that loses the race
+    // still holds a reservation and still runs the command. The alternative,
+    // a lock held across the check, buys that narrow window at the price of
+    // a hook the harness kills stranding every later one.
     let _ = fs::remove_file(&marker);
     match claim(&marker) {
         Ok(()) => Some(held(marker)),
@@ -120,7 +124,17 @@ fn expired(marker: &Path) -> bool {
     else {
         return true;
     };
-    claimed_at.elapsed().is_ok_and(|age| age >= START_TIMEOUT)
+    // A marker dated ahead of the clock has no readable age: `elapsed` fails
+    // for as long as the clock stays behind it. A successful start leaves its
+    // marker in place, so a backward step after one — an NTP correction, a VM
+    // resume, a home written on a host whose clock runs ahead — would
+    // otherwise hold every later hook off the start indefinitely, and each of
+    // them would wait out a daemon nobody is bringing up. An age that cannot
+    // be read is expired, whichever way it cannot be read.
+    match claimed_at.elapsed() {
+        Ok(age) => age >= START_TIMEOUT,
+        Err(_) => true,
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +206,26 @@ mod tests {
         reserve(None).expect("no home reserves nothing and starts");
         reserve(Some(Path::new("relative"))).expect("a relative home reserves nothing and starts");
         assert!(!Path::new("relative").exists());
+    }
+
+    #[test]
+    fn a_reservation_dated_ahead_of_the_clock_is_taken_over() {
+        let home = home();
+        reserve(Some(home.path())).expect("the first hook owns the start");
+        let marker = home.path().join(RESERVATION_FILE);
+        // What a backward clock step after a successful start leaves behind.
+        let file = OpenOptions::new().write(true).open(&marker).unwrap();
+        file.set_times(
+            FileTimes::new().set_modified(SystemTime::now() + Duration::from_secs(3600)),
+        )
+        .unwrap();
+        let taken = reserve(Some(home.path()))
+            .expect("a reservation with no readable age bounds nothing and is taken over");
+        assert!(
+            reserve(Some(home.path())).is_none(),
+            "the hook that took it over now owns the start"
+        );
+        taken.release();
     }
 
     #[cfg(unix)]
