@@ -266,8 +266,8 @@ pub(super) fn node_script(arguments: &[String], cwd: &str, ctx: &Ctx) -> Proof<V
     // A heap-size or diagnostics-only `NODE_OPTIONS` loads nothing.
     if LOADER_ENVIRONMENT.iter().any(|name| {
         ctx.env.get(*name).is_some_and(|value| {
-            !value.is_empty()
-                && !(*name == "NODE_OPTIONS" && guard_contracts::node_options_inert(value))
+            let inert = *name == "NODE_OPTIONS" && guard_contracts::node_options_inert(value);
+            !(value.is_empty() || inert)
         })
     }) {
         return Err(MUTABLE_LAUNCHER);
