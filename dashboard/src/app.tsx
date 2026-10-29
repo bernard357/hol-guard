@@ -914,6 +914,18 @@ export function App() {
       });
   }, []);
 
+  // The supply-chain pages read only the runtime snapshot, with receipts for
+  // Feed health. Their Retry must not wait on the approval queue, or a queue
+  // failure would keep them behind the error state after Guard is back.
+  const refreshHubRuntime = useCallback(async () => {
+    try {
+      const snapshot = await fetchRuntimeSnapshot({ includeItems: false, includeReceipts: true });
+      setRuntime({ kind: "ready", snapshot });
+    } catch (error: unknown) {
+      setRuntime({ kind: "error", message: error instanceof Error ? error.message : "Unable to reach Guard." });
+    }
+  }, []);
+
   const handleRepair = useCallback(async () => {
     await repairApprovalCenter();
     await new Promise<void>((resolve) => setTimeout(resolve, 1200));
@@ -1129,7 +1141,7 @@ export function App() {
           runtime={runtime}
           loading={<LazyFallback />}
           onReconnectSession={handleReconnectSession}
-          onRefreshRuntime={async () => { await refreshStateAfterAction(); }}
+          onRefreshRuntime={refreshHubRuntime}
           onOpenInbox={handleOpenInbox}
           onOpenSettings={handleOpenSettings}
         >

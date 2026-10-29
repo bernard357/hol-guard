@@ -45,5 +45,14 @@ const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const slot = app.slice(app.indexOf("supplyChainHubContent={"), app.indexOf("policyContent={policyContent}"));
 assert(slot.includes("<RuntimeGate"), "the supply-chain hub renders through RuntimeGate");
 assert(!/:\s*null\s*}/.test(slot), "the supply-chain hub never falls back to an empty slot");
+// Retry reloads the snapshot alone, with receipts, so neither a failing approval
+// queue nor a receipt-less snapshot follows Guard coming back.
+assert(slot.includes("onRefreshRuntime={refreshHubRuntime}"), "hub Retry reloads only the runtime snapshot");
+const hubRefresh = app.slice(app.indexOf("const refreshHubRuntime"), app.indexOf("const handleRepair"));
+assert(
+  hubRefresh.includes("fetchRuntimeSnapshot({ includeItems: false, includeReceipts: true })"),
+  "hub Retry keeps the receipts Feed health shows",
+);
+assert(!hubRefresh.includes("fetchInboxState"), "hub Retry does not depend on the approval queue");
 
 console.log("supply-chain-hub-offline.test.tsx: all assertions passed");

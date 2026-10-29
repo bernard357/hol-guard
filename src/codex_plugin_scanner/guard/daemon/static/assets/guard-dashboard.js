@@ -38043,6 +38043,14 @@ function App() {
       setRequests({ kind: "error", message });
     });
   }, []);
+  const refreshHubRuntime = reactExports.useCallback(async () => {
+    try {
+      const snapshot = await fetchRuntimeSnapshot({ includeItems: false, includeReceipts: true });
+      setRuntime({ kind: "ready", snapshot });
+    } catch (error) {
+      setRuntime({ kind: "error", message: error instanceof Error ? error.message : "Unable to reach Guard." });
+    }
+  }, []);
   const handleRepair = reactExports.useCallback(async () => {
     await repairApprovalCenter();
     await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -38222,9 +38230,7 @@ function App() {
             runtime,
             loading: /* @__PURE__ */ jsxRuntimeExports.jsx(LazyFallback, {}),
             onReconnectSession: handleReconnectSession,
-            onRefreshRuntime: async () => {
-              await refreshStateAfterAction();
-            },
+            onRefreshRuntime: refreshHubRuntime,
             onOpenInbox: handleOpenInbox,
             onOpenSettings: handleOpenSettings,
             children: (snapshot) => /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.Suspense, { fallback: /* @__PURE__ */ jsxRuntimeExports.jsx(LazyFallback, {}), children: /* @__PURE__ */ jsxRuntimeExports.jsx(
