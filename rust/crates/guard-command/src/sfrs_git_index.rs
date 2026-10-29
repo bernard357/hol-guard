@@ -107,7 +107,7 @@ fn git_cached_diff_segment_is_safe(
     let Some(operands) = git_diff_operands(tokens) else {
         return false;
     };
-    if !cached_diff_operands_are_safe(&operands, ctx) {
+    if !cached_diff_operands_are_safe(&operands, segment.effective_cwd.as_deref(), ctx) {
         return false;
     }
     let mut synthetic = segment.clone();

@@ -111,7 +111,12 @@ pub(crate) fn run(function: &str, args: &[Value]) -> Option<Value> {
                 command_has_execution_routed_git_cached_diff(&chain).into()
             }
         }
-        "git_index_operands_safe" => cached_diff_operands_are_safe(&strings(&args[0]), &ctx).into(),
+        "git_index_operands_safe" => cached_diff_operands_are_safe(
+            &strings(&args[0]),
+            args.get(1).and_then(|value| value.as_str()).map(Path::new),
+            &ctx,
+        )
+        .into(),
         "git_index_rg_args" => {
             let host = Host {
                 ripgrep_config: args[1].as_bool().expect("flag"),
