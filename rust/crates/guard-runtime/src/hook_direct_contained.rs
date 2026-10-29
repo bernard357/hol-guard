@@ -214,7 +214,7 @@ fn native_shape(response: &Value, original: &Map<String, Value>, workspace: &str
     };
     text("reason_code") == Some(WORKSPACE_REASON)
         && text("required_execution_profile") == Some(WORKSPACE_PROFILE)
-        && !host_split(response)
+        && !host_split(response.get("reason"))
         && !original.contains_key("cwd")
         && (!command.trim_start().starts_with("cd") || inner_directory_change(command, workspace))
         && (!PACKAGE_DIRECTORY_FLAGS

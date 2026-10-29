@@ -19,9 +19,10 @@ pub(crate) const PUBLISH_REASON: &str = concat!(
     "scratch $HOME.",
 );
 
-/// Whether `receipt` names a chain whose host step this sink cannot run.
-pub(crate) fn host_split(receipt: &Value) -> bool {
-    let reason = receipt.get("reason").and_then(Value::as_str);
+/// Whether a receipt's `reason` names a chain whose host step this sink
+/// cannot run.
+pub(crate) fn host_split(reason: Option<&Value>) -> bool {
+    let reason = reason.and_then(Value::as_str);
     reason == Some(PUBLISH_REASON)
         || reason == Some(guard_command::pretool::CONTAINED_WORKTREE_ADD_REASON)
 }

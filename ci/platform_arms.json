@@ -163,6 +163,14 @@
    "body": "c1b28980b610"
   },
   {
+   "verdict": "windows-unsupported",
+   "note": "Off Unix the chain keeps the review it already had: the sink that runs the proven `git worktree add` on the host before the checks exists only on macOS and Linux, so a split here would route the command to a refusal. Fails closed, and one reason Windows still prompts for checks in a new linked worktree.",
+   "file": "rust/crates/guard-command/src/pretool/contained_worktree_add.rs",
+   "item": "fn rejudge -- cfg! expression",
+   "cfg": "unix",
+   "body": "37388282ea80"
+  },
+  {
    "verdict": "other-platform",
    "note": "Windows resolves a sibling repository root in its own arm above (PR #5399), so this stub is now reached only on a platform Guard does not ship for. Returning `None` there leaves such a command reviewed, which is the honest answer where there is no containment sink at all.",
    "file": "rust/crates/guard-command/src/pretool/contained_wrapper.rs",

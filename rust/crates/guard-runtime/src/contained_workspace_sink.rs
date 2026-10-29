@@ -38,7 +38,9 @@ use runner::{bootstrap_init, Launch, PrivateRoot};
 use snapshot::read_request;
 
 pub(crate) use process::launch;
-pub(crate) use split::{host_split, PUBLISH_REASON};
+pub(crate) use split::host_split;
+#[cfg(test)]
+pub(crate) use split::PUBLISH_REASON;
 
 pub(crate) const SINK_COMMAND: &str = "contained-workspace-sink";
 pub(crate) const LAUNCH_COMMAND: &str = "contained-workspace-launch";
@@ -215,7 +217,7 @@ fn sink(arguments: &Arguments, signals: &process::Signals) -> Outcome<i32> {
     let receipt = authority
         .authorize(&payload)
         .ok_or_else(Failure::unauthorized)?;
-    if !receipt_matches(&receipt) || host_split(&receipt) {
+    if !receipt_matches(&receipt) || host_split(receipt.get("reason")) {
         return Err(Failure::unauthorized());
     }
     run_workspace_contained(&payload, &workspace, &authority, &receipt, signals)
@@ -323,7 +325,7 @@ fn run_workspace_contained(
             Failure::invalid("Guard could not re-authorize this workspace sandbox execution.")
         })?;
     if second.get("command_binding_digest") != first_receipt.get("command_binding_digest")
-        || host_split(&second)
+        || host_split(second.get("reason"))
     {
         return Err(Failure::invalid(
             "The command evidence changed before launch.",
