@@ -256,7 +256,10 @@ pub(crate) fn cached_diff_operands_are_safe(
         if paths.len() > 16 || paths.iter().any(|path| path.starts_with('-')) {
             return false;
         }
-        if !paths.iter().all(|path| operand_is_a_present_path(path, cwd)) {
+        if !paths
+            .iter()
+            .all(|path| operand_is_a_present_path(path, cwd))
+        {
             return false;
         }
         return ctx.host.cached_diff_pathspecs(&paths);
