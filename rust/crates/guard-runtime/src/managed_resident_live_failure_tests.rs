@@ -369,7 +369,9 @@ fn a_resident_that_never_answers_the_handshake_does_not_spend_the_request_budget
                         .set_read_timeout(Some(Duration::from_secs(4)))
                         .unwrap();
                     let mut nonce = [0; crate::AUTH_NONCE_BYTES];
-                    let _ = stream.read_exact(&mut nonce);
+                    stream
+                        .read_exact(&mut nonce)
+                        .expect("a probe reached the peer without a nonce");
                     accepted.push(stream);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
