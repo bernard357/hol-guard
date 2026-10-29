@@ -7729,6 +7729,38 @@
       "expect": "allow"
     },
     {
+      "id": "gauntlet-sibling-bun-jest-entry-config",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bun ${HOME}/other-project/node_modules/jest/bin/jest.js --config ${HOME}/other-project/jest.config.js"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "session-bun-sibling-checkout-jest-entry-tail",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${WORKTREE} && bun ${HOME}/other-project/node_modules/jest/bin/jest.js --config ${HOME}/other-project/jest.config.js 2>&1 | tail -8"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
       "id": "gauntlet-sibling-ls-missing-github-workflows",
       "fix_area": "shell",
       "harnesses": [
