@@ -60,9 +60,10 @@ pub(crate) fn encode(
 }
 
 /// Queue a direct answer's `evidence` for the drain, recording its receipt
-/// first when a writer already runs for `guard_home`. The record then carries
-/// `receipt_recorded`; without such a writer it goes as before and the drain
-/// submits the receipt itself, which starts the writer. False when the queue
+/// first when a writer already runs for `guard_home`. The record carries
+/// `receipt_recorded` only when that writer accepted the receipt; otherwise it
+/// goes as before and the drain submits the receipt itself, which starts the
+/// writer when none runs. False when the queue
 /// cannot hold the record: nothing was queued or recorded, so the daemon
 /// answering the hook records it once.
 pub(crate) fn offer_direct(
@@ -74,24 +75,14 @@ pub(crate) fn offer_direct(
         return queue.offer(evidence);
     };
     let mut pending = Some(evidence);
-    if let Some(marked) = pending.as_mut() {
-        marked[DIRECT_RECEIPT_RECORDED] = Value::Bool(true);
-    }
-    let queued = writer_op::record_direct_receipt(guard_home, &receipt, || {
-        pending
-            .take()
-            .map_or(Err(Value::Null), |record| queue.try_offer(record))
+    let queued = writer_op::record_direct_receipt(guard_home, &receipt, |record_receipt| {
+        pending.take().is_some_and(|record| {
+            queue
+                .try_offer_recorded(record, DIRECT_RECEIPT_RECORDED, record_receipt)
+                .is_ok()
+        })
     });
-    match (queued, pending) {
-        (Some(queued), _) => queued.is_ok(),
-        (None, Some(mut unmarked)) => {
-            if let Some(fields) = unmarked.as_object_mut() {
-                fields.remove(DIRECT_RECEIPT_RECORDED);
-            }
-            queue.offer(unmarked)
-        }
-        (None, None) => false,
-    }
+    queued.unwrap_or_else(|| pending.is_some_and(|record| queue.offer(record)))
 }
 
 #[cfg(test)]

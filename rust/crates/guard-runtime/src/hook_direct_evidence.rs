@@ -73,6 +73,26 @@ impl Default for QueueState {
     }
 }
 
+impl QueueState {
+    fn holds(&self, bytes: usize) -> bool {
+        self.records.len() < MAX_QUEUED_RECORDS && self.bytes + bytes <= MAX_QUEUED_BYTES
+    }
+
+    fn push(&mut self, record: Value, bytes: usize) {
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.bytes += bytes;
+        self.records.push_back(QueuedRecord { seq, bytes, record });
+    }
+}
+
+fn unmarked(mut record: Value, marker: &str) -> Value {
+    if let Some(fields) = record.as_object_mut() {
+        fields.remove(marker);
+    }
+    record
+}
+
 pub(crate) struct DirectEvidenceQueue {
     epoch: String,
     state: Mutex<QueueState>,
@@ -134,13 +154,49 @@ impl DirectEvidenceQueue {
         let Ok(mut state) = self.state.lock() else {
             return Err(record);
         };
-        if state.records.len() >= MAX_QUEUED_RECORDS || state.bytes + bytes > MAX_QUEUED_BYTES {
+        if !state.holds(bytes) {
             return Err(record);
         }
-        let seq = state.next_seq;
-        state.next_seq = state.next_seq.saturating_add(1);
-        state.bytes += bytes;
-        state.records.push_back(QueuedRecord { seq, bytes, record });
+        state.push(record, bytes);
+        Ok(())
+    }
+
+    /// Queue one record, marking it with `marker` when `record_receipt`
+    /// records its receipt first; hand it back when the queue cannot hold it.
+    ///
+    /// The room check, the receipt and the push share one lock, so a receipt
+    /// is recorded only for a record the queue takes. The record goes
+    /// unmarked when the receipt is refused or the marked record would not
+    /// fit; the drain then submits the receipt, which the writer dedupes.
+    pub(crate) fn try_offer_recorded(
+        &self,
+        mut record: Value,
+        marker: &str,
+        record_receipt: impl FnOnce() -> bool,
+    ) -> Result<(), Value> {
+        let Ok(encoded) = serde_json::to_vec(&record) else {
+            return Err(record);
+        };
+        let bytes = encoded.len();
+        if bytes > MAX_RECORD_BYTES {
+            return Err(record);
+        }
+        let Some(fields) = record.as_object_mut() else {
+            return Err(record);
+        };
+        fields.insert(marker.to_owned(), Value::Bool(true));
+        let marked_bytes = serde_json::to_vec(&record).map_or(usize::MAX, |encoded| encoded.len());
+        let Ok(mut state) = self.state.lock() else {
+            return Err(unmarked(record, marker));
+        };
+        if !state.holds(bytes) {
+            return Err(unmarked(record, marker));
+        }
+        if marked_bytes <= MAX_RECORD_BYTES && state.holds(marked_bytes) && record_receipt() {
+            state.push(record, marked_bytes);
+        } else {
+            state.push(unmarked(record, marker), bytes);
+        }
         Ok(())
     }
 

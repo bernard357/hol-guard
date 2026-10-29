@@ -372,26 +372,23 @@ pub(crate) fn record_edge_receipt<E>(
     .flatten()
 }
 
-/// Queue a direct answer's evidence with `queue`, then its `receipt` with
-/// the live writer for `guard_home`, holding that writer the whole time.
+/// Queue a direct answer's evidence with `queue`, which may first record its
+/// `receipt` with the live writer for `guard_home` through the function it is
+/// handed, holding that writer the whole time.
 ///
 /// The drain submits a record's command activity to this writer through the
 /// same slot, so the activity cannot reach the writer before the receipt it
-/// cites. Once `queue` succeeds the receipt is submitted whatever the writer
-/// answers: a writer that refuses it would refuse the drain's submission of
-/// the same receipt too. `None` means `queue` did not run, because no live
-/// writer is free to take the receipt, which then stays with the drain.
-pub(crate) fn record_direct_receipt<T, E>(
+/// cites. The handed function says whether the writer accepted the receipt;
+/// a record queued after a refusal must leave the receipt to the drain.
+/// `None` means `queue` did not run, because no live writer is free to take
+/// the receipt, which then stays with the drain.
+pub(crate) fn record_direct_receipt<T>(
     guard_home: &Path,
     receipt: &Map<String, Value>,
-    queue: impl FnOnce() -> Result<T, E>,
-) -> Option<Result<T, E>> {
+    queue: impl FnOnce(&dyn Fn() -> bool) -> T,
+) -> Option<T> {
     with_live(guard_home, |resident| {
-        let queued = queue();
-        if queued.is_ok() {
-            let _ = resident.writer.submit_native_decision_receipt(receipt);
-        }
-        queued
+        queue(&|| resident.writer.submit_native_decision_receipt(receipt))
     })
 }
 
