@@ -122,7 +122,12 @@ pub(crate) fn rejudge(
     context: PathContext<'_>,
     evaluate: impl Fn(&Value) -> PreToolResultV1,
 ) -> PreToolResultV1 {
-    if raw.minimum_action != "review" || raw.action.sensitive_target || !characterised(&raw) {
+    // The sink that runs the add on the host exists only on macOS and Linux.
+    if !cfg!(unix)
+        || raw.minimum_action != "review"
+        || raw.action.sensitive_target
+        || !characterised(&raw)
+    {
         return raw;
     }
     let Some(command) = super::super::extract_generic_signals(payload)
