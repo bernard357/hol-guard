@@ -470,7 +470,6 @@
     "src/codex_plugin_scanner/guard/native_restricted_linux.py",
     "src/codex_plugin_scanner/guard/native_bash_protocol.py",
     "src/codex_plugin_scanner/guard/native_bash_ack.py",
-    "src/codex_plugin_scanner/guard/native_bash_reply.py",
     "src/codex_plugin_scanner/guard/native_bash_review_preflight.py",
     "src/codex_plugin_scanner/guard/native_inventory_url_redaction.py",
     "src/codex_plugin_scanner/guard/native_contained_wrapper_plan.py",
