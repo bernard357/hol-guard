@@ -60,9 +60,7 @@ def test_repairing_an_install_twice_changes_nothing_the_second_time(
     assert _mode(target) == restored
 
 
-def test_a_dry_run_names_the_repair_without_touching_the_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_dry_run_names_the_repair_without_touching_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = _bundled(tmp_path, monkeypatch, 0o644)
 
     report = repair_native_runtime_install(dry_run=True)

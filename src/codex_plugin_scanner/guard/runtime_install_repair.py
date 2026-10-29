@@ -53,7 +53,9 @@ _REFUSED = (
     "Guard could not restore the execute permission on its own bundled native runtime. The file "
     "system is read-only, or the file is no longer owned by this account."
 )
-_REFUSED_ACTION = "Reinstall hol-guard as the account that runs it, without `sudo`: `uv tool install --force hol-guard`."
+_REFUSED_ACTION = (
+    "Reinstall hol-guard as the account that runs it, without `sudo`: `uv tool install --force hol-guard`."
+)
 _HEALTHY = "The native runtime install is in a state Guard can launch."
 
 
