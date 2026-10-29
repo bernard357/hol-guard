@@ -21301,7 +21301,7 @@
       ],
       "tool": "shell",
       "tool_input": {
-        "command": "for s in \"a; rm -rf b\"; do echo $s; done"
+        "command": "for s in \"a; rm -rf b\"; do echo \"$s\"; done"
       },
       "cwd": "worktree",
       "expect": "not_allow"

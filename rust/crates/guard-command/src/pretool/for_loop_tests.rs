@@ -148,8 +148,12 @@ fn unsupported_loops_fall_back_to_review() {
         "for x in \"a b\" *.ts; do echo \"$x\"; done",
         // Quotes protect the separators, not the operators: writing the word
         // out would spell a command the loop never ran.
-        "for s in \"a; rm -rf b\"; do echo $s; done",
-        "for s in \"a | tee out\"; do echo $s; done",
+        "for s in \"a; rm -rf b\"; do echo \"$s\"; done",
+        "for s in \"a | tee out\"; do echo \"$s\"; done",
+        // Quotes beside a reference are not quotes around it: this word closes
+        // one quoted run and opens another around an expansion the shell still
+        // splits into fields of its own.
+        "for s in \"a b\"; do echo \"x\"$s\"y\"; done",
         "for f in 'src/*.ts'; do echo $f; done",
         // A glob glued into a larger word writes out a pattern the loop never
         // expanded, so the names the loop's own pattern matches are never
