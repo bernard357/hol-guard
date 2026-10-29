@@ -76,7 +76,7 @@ that were never merged; it is historical, not a working branch.
 - [x] NRH-T050 implement deterministic fail-safe behavior for every hook when daemon is unavailable — `hook_bridge_fallback.rs` settles the hook and records the hand-off with harness and fixed reason only;
 - [ ] NRH-T051 allow only authenticated current emergency-safe profile during daemon failure;
 - [ ] NRH-T052 add bounded daemon restart reservation and preserve approval/receipt/activity ordering;
-- [ ] NRH-T053 add panic/kill/hang/stale endpoint/port/socket/binary/manifest/policy/disk/permission/crash-loop tests — stale endpoint, owner lock, retry and live failure cases exist (`managed_resident_live_failure_tests.rs`, `managed_resident_owner_lock_tests.rs`, `resident_state_discovery_tests.rs`), and the crash-loop case landed with T049 in `resident_restart_budget_flood_tests.rs`; panic, kill, hang, port, socket, binary, manifest, policy, disk and permission are open;
+- [ ] NRH-T053 add panic/kill/hang/stale endpoint/port/socket/binary/manifest/policy/disk/permission/crash-loop tests — stale endpoint, owner lock, retry and live failure cases exist (`managed_resident_live_failure_tests.rs`, `managed_resident_owner_lock_tests.rs`, `resident_state_discovery_tests.rs`), the crash-loop case landed with T049 in `resident_restart_budget_flood_tests.rs`, and the dead-port and silent-handshake cases are in `managed_resident_live_failure_tests.rs`; panic, kill, unix socket, binary, manifest, policy, disk and permission are open;
 - [ ] NRH-T054 add privacy-safe aggregate lifecycle journal and critical health state — `resident_failure_log.rs` records failures; an aggregate lifecycle journal does not exist.
 
 ## PR 4: Cross-platform installed-wheel and resource gates
