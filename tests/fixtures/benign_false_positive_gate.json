@@ -10299,6 +10299,57 @@
       "expect": "allow"
     },
     {
+      "id": "session-runner-head-bytes-after-grep",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "bunx vitest run app.test.tsx 2>&1 | grep -o \"CITE_HTML.*\" | head -c 1500"
+      },
+      "cwd": "home_project",
+      "expect": "allow",
+      "requires_sandbox": true
+    },
+    {
+      "id": "session-runner-tail-bytes",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run 2>&1 | tail -c 2000"
+      },
+      "cwd": "home_project",
+      "expect": "allow",
+      "requires_sandbox": true
+    },
+    {
+      "id": "session-runner-head-bytes-attached",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "npx vitest run 2>&1 | head -c2000"
+      },
+      "cwd": "home_project",
+      "expect": "allow",
+      "requires_sandbox": true
+    },
+    {
       "id": "session-npm-test-tail",
       "fix_area": "shell",
       "harnesses": [
@@ -11170,6 +11221,38 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "session-linked-modules-bun-vite-entry",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${WORKTREE}/dashboard && bun node_modules/vite/bin/vite.js build 2>&1 | tail -12"
+      },
+      "cwd": "worktree",
+      "expect": "allow"
+    },
+    {
+      "id": "neg-linked-modules-bun-install-package",
+      "fix_area": "negative",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": "cd ${WORKTREE}/dashboard && bun install vite@5.0.0"
+      },
+      "cwd": "worktree",
+      "expect": "not_allow"
     },
     {
       "id": "session-linked-modules-vitest-file",
@@ -20294,6 +20377,23 @@
       },
       "cwd": "worktree",
       "expect": "allow"
+    },
+    {
+      "id": "toolchain-venv-pytest-head-bytes",
+      "fix_area": "shell",
+      "harnesses": [
+        "codex",
+        "zcode",
+        "claude-code",
+        "omp"
+      ],
+      "tool": "shell",
+      "tool_input": {
+        "command": ".venv/bin/pytest -q 2>&1 | head -c 400"
+      },
+      "cwd": "worktree",
+      "expect": "allow",
+      "requires_sandbox": true
     },
     {
       "id": "toolchain-venv-python-module-pytest",

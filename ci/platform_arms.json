@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "comment": "Every non-Unix behaviour arm in rust/crates/*/src — `#[cfg(..)]` attribute or `cfg!(..)` expression — with the verdict a reviewer gave it. scripts/ci/platform_arm_inventory.py keeps this list honest.",
+ "comment": "Every non-Unix behaviour arm in rust/crates/*/src \u2014 `#[cfg(..)]` attribute or `cfg!(..)` expression \u2014 with the verdict a reviewer gave it. scripts/ci/platform_arm_inventory.py keeps this list honest.",
  "arms": [
   {
    "file": "rust/crates/guard-command/src/adapters/hook/hook_adapter_paths.rs",
@@ -1201,6 +1201,14 @@
    "note": "Windows takes its own `#[cfg(windows)]` arm in this file; this one covers platforms Guard does not ship for.",
    "cfg": "all(not(unix), not(windows))",
    "body": "3775a2c942d0"
+  },
+  {
+   "verdict": "windows-permissive",
+   "note": "Unix names the installed file by device and inode, which change whenever a different file is put behind the path. Windows has no comparable identifier in `std::fs::Metadata`, so the arm uses length and modification time, which an installed build moves together. It is permissive rather than equivalent: a replacement whose length and modification time both match the file it replaced reads as the same file, and the prewarm goes on renewing the replaced runtime's lease until its window ends. The cost of that gap is bounded and is not a protection one -- the hold is an optimisation, so at worst a new runtime waits up to `PREWARM_HOLD` before it can retire the old resident, and the next hook spawns against the installed runtime either way. `the_hold_ends_when_a_new_runtime_is_installed_over_this_one` runs on every platform and proves the arm off Unix: it renames a second file over the watched path and requires the hold to end.",
+   "file": "rust/crates/guard-runtime/src/managed_resident_prewarm.rs",
+   "item": "fn executable_identity -- non-Unix block",
+   "cfg": "not(unix)",
+   "body": "4cb3973546d8"
   },
   {
    "file": "rust/crates/guard-runtime/src/managed_resident_stop.rs",

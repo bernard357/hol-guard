@@ -118,6 +118,11 @@ class GateCase:
 def _expand() -> list[GateCase]:
     expanded: list[GateCase] = []
     for entry in _DOCUMENT["cases"]:
+        # A case the workspace sandbox is the only allow route for measures the
+        # host's sandbox, not Guard, where the host has none. macOS CI runs the
+        # same gate, so the case still guards the decision it was written for.
+        if entry.get("requires_sandbox") and not _SANDBOX_HOST:
+            continue
         for harness in entry["harnesses"]:
             expanded.append(
                 GateCase(

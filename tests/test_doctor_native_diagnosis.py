@@ -284,3 +284,86 @@ def test_a_binary_this_account_cannot_read_is_not_called_present(
 
 def test_the_unavailable_table_answers_every_state_a_candidate_can_have() -> None:
     assert set(diagnosis_module._UNAVAILABLE) == set(diagnosis_module._UNAVAILABLE_ORDER)
+
+
+def test_a_paused_restart_is_explained_when_the_installed_files_are_perfect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _candidates(monkeypatch, _plant(tmp_path, "hol-guard-runtime", 0o755))
+
+    result = native_runtime_diagnosis("native_ready", available=True, restart_paced=True)
+
+    assert result is not None
+    assert "fail closed" in result["summary"]
+    assert "hol-guard repair" in result["action"]
+
+
+def test_the_install_fault_a_crash_loop_grew_out_of_outranks_the_pause_it_caused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reinstalling clears both; telling the reader to wait out a pause clears neither."""
+
+    _candidates(monkeypatch, tmp_path / "missing")
+
+    result = native_runtime_diagnosis("native_status_probe_skipped", available=False, restart_paced=True)
+
+    assert result is not None
+    assert "no native runtime binary" in result["summary"]
+
+
+def test_a_reason_code_the_runtime_reports_for_itself_explains_the_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The budget is read passively, so the runtime's own refusal has to be explained too."""
+
+    _candidates(monkeypatch, _plant(tmp_path, "hol-guard-runtime", 0o755))
+
+    result = native_runtime_diagnosis("native_resident_restart_circuit_open", available=True)
+
+    assert result is not None
+    assert "hol-guard repair" in result["action"]
+
+
+@pytest.mark.parametrize(
+    ("restart", "expected"),
+    [
+        (
+            {"paced": True, "attempts": 3, "retry_in_seconds": 12.4},
+            "  Restarts on this account: paused (3 recorded in this window); the next one is allowed in 12.4s",
+        ),
+        (
+            {"paced": False, "attempts": 1, "retry_in_seconds": 0.0},
+            "  Restarts on this account: not paused (1 recorded in this window)",
+        ),
+    ],
+    ids=["paused", "clean"],
+)
+def test_runtime_status_prints_what_the_shared_restart_budget_says(restart: dict[str, object], expected: str) -> None:
+    section = {
+        "availability": {
+            "mode": "auto",
+            "available": True,
+            "compatible": True,
+            "reason_code": "native_ready",
+            "evaluation_verified": False,
+        },
+        "resident": {"live": False, "owner_lock_held": False, "generations": 0},
+        "restart": restart,
+    }
+
+    assert expected in render_runtime_status(section).splitlines()
+
+
+def test_runtime_status_says_nothing_about_restarts_when_no_budget_was_read() -> None:
+    section = {
+        "availability": {
+            "mode": "auto",
+            "available": True,
+            "compatible": True,
+            "reason_code": "native_ready",
+            "evaluation_verified": False,
+        },
+        "resident": {"live": False, "owner_lock_held": False, "generations": 0},
+    }
+
+    assert "Restarts on this account" not in render_runtime_status(section)

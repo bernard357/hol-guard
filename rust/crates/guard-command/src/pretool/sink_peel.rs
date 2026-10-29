@@ -447,8 +447,15 @@ fn filter_chain(tokens: &[Token]) -> Result<Vec<Vec<String>>, &'static str> {
             None => ("", &[] as &[String]),
         };
         if matches!(program, "head" | "tail") {
-            if let Some(count) = bounded_count(arguments) {
-                chain.push(vec![program.to_owned(), count.to_string()]);
+            if let Some((count, bytes)) = output_filters::head_tail_bound(arguments) {
+                // A byte bound carries its flag, so the sink that applies the
+                // stage reads which unit the count is in. A line bound keeps
+                // the two-word spelling the sink has always read.
+                chain.push(if bytes {
+                    vec![program.to_owned(), "-c".to_owned(), count.to_string()]
+                } else {
+                    vec![program.to_owned(), count.to_string()]
+                });
                 continue;
             }
         }
@@ -462,19 +469,6 @@ fn filter_chain(tokens: &[Token]) -> Result<Vec<Vec<String>>, &'static str> {
         return Err("unsupported output filter");
     }
     Ok(chain)
-}
-
-/// The line count of a `head`/`tail` stage: `-N` or `-n N`.
-fn bounded_count(values: &[String]) -> Option<u32> {
-    let digits = match values {
-        [single] => single.strip_prefix('-')?,
-        [flag, count] if flag == "-n" => count.as_str(),
-        _ => return None,
-    };
-    if !output_filters::bounded_count(digits) {
-        return None;
-    }
-    digits.parse().ok()
 }
 
 /// `bun --cwd <dir> build` as `bun build` in `<dir>`, as native authority
@@ -583,9 +577,10 @@ fn lexical(path: &Path) -> PathBuf {
 
 /// `a && b && c` of plain words, rejoined, or `None` for any other shape.
 ///
-/// Each command may bound its own output with one `| head -N` or `| tail -N`,
-/// optionally after `2>&1`. The filter stays in the rejoined text, where the
-/// sandbox's shell applies it to that command alone, as the issued text did.
+/// Each command may bound its own output with one `| head` or `| tail` of a
+/// line or byte count, optionally after `2>&1`. The filter stays in the
+/// rejoined text, where the sandbox's shell applies it to that command alone,
+/// as the issued text did.
 fn joined_list(tokens: &[Token]) -> Option<String> {
     let mut commands = Vec::new();
     for command in tokens.split(|token| operator(token) == Some("&&")) {
@@ -623,8 +618,9 @@ fn joined_list(tokens: &[Token]) -> Option<String> {
                 return None;
             }
             let arguments: Vec<String> = arguments.iter().map(|token| token.0.clone()).collect();
-            let count = bounded_count(&arguments)?;
-            text.push_str(&format!(" | {program} -n {count}"));
+            let (count, bytes) = output_filters::head_tail_bound(&arguments)?;
+            let unit = if bytes { "-c" } else { "-n" };
+            text.push_str(&format!(" | {program} {unit} {count}"));
         }
         commands.push(text);
     }

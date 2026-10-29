@@ -430,6 +430,19 @@ pub(super) fn health(scope: &Path) -> Result<Option<LifecycleHealth>, String> {
     }))
 }
 
+/// How this install's managed resident has behaved over the last day, in the
+/// counts this module keeps. `None` means this runtime has no history here
+/// yet, which is what a fresh install and an install that has not run for a
+/// day both look like.
+///
+/// This is the whole-install entry point, resolving the scope the way every
+/// other managed-resident caller does; `health` takes a scope already in hand.
+pub(crate) fn lifecycle_health(state_base: &Path) -> Result<Option<LifecycleHealth>, String> {
+    let digest = super::runtime_digest()?;
+    let scope = super::state_scope(state_base, &digest)?;
+    health(&scope)
+}
+
 #[cfg(test)]
 #[path = "resident_lifecycle_journal_tests.rs"]
 mod tests;

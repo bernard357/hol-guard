@@ -35,6 +35,8 @@ mod managed_resident_transport;
 mod managed_resident_windows;
 #[path = "managed_resident_owner_lock.rs"]
 mod owner_lock;
+#[path = "managed_resident_prewarm.rs"]
+mod prewarm_lane;
 pub(crate) use owner_lock::ManagedOwnerLock;
 #[path = "managed_resident_exit.rs"]
 mod exit_record;
@@ -46,7 +48,7 @@ mod private_file;
 mod requested_stop;
 #[path = "resident_failure_log.rs"]
 mod resident_failure_log;
-pub(crate) use lifecycle_journal::LifecycleHealth;
+pub(crate) use lifecycle_journal::{lifecycle_health, LifecycleHealth};
 #[path = "resident_state_retirement.rs"]
 mod resident_state_retirement;
 #[path = "resident_restart_budget.rs"]
@@ -62,6 +64,13 @@ use crate::resident_state::{
 
 pub(crate) fn client_stream(state_base: &Path) -> Result<(), String> {
     client_stream::run(state_base)
+}
+
+/// Start this runtime's resident, if no client is already holding one, and
+/// keep it up for a bounded window so a session's first hook does not pay
+/// for the start. `managed_resident_prewarm.rs` has the whole contract.
+pub(crate) fn prewarm(state_base: &Path) -> Result<(), String> {
+    prewarm_lane::run(state_base)
 }
 
 const MANAGED_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -223,16 +232,6 @@ pub(crate) fn reset_restart_budget(state_base: &Path) -> Result<(), String> {
     let digest = runtime_digest()?;
     let scope = state_scope(state_base, &digest)?;
     restart_budget::clear(&scope)
-}
-
-/// How this install's managed resident has behaved over the last day, in the
-/// counts the journal keeps. `None` means this runtime has no history here
-/// yet, which is what a fresh install and an install that has not run for a
-/// day both look like.
-pub(crate) fn lifecycle_health(state_base: &Path) -> Result<Option<LifecycleHealth>, String> {
-    let digest = runtime_digest()?;
-    let scope = state_scope(state_base, &digest)?;
-    lifecycle_journal::health(&scope)
 }
 
 pub(crate) fn serve_managed(

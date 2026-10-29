@@ -29,6 +29,8 @@ use super::super::contained_wrapper::{contained_core, package_dir};
 use super::super::executable_basename;
 use super::super::PathContext;
 
+#[path = "bun_package_entry.rs"]
+mod bun_package_entry;
 #[path = "package_script_vite.rs"]
 mod package_script_vite;
 
@@ -44,6 +46,9 @@ pub(in crate::pretool) fn contained_test_reason(
     model: &CanonicalCommandV1,
     context: PathContext<'_>,
 ) -> Option<&'static str> {
+    // `bun node_modules/<package>/<entry>` is the run `node` names.
+    let spelled = bun_package_entry::node_spelling(model);
+    let model = spelled.as_ref().unwrap_or(model);
     if let Some(reason) = super::readonly_test_reason(model) {
         return resolved(model, reason, context.cwd.map(PathBuf::from), context);
     }

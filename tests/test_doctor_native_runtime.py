@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -339,3 +341,238 @@ def test_a_busy_owner_is_not_claimed_when_a_reused_pid_is_the_only_evidence(
 
     assert result["reason_code"] == "native_resident_owner_busy"
     assert presence["live"] is False
+
+
+def _plant_budget(guard_home: Path, runtime_sha256: str, **fields: object) -> Path:
+    scope = guard_home / "native-runtime" / f"resident-v3-{runtime_sha256[:16]}"
+    scope.mkdir(parents=True, exist_ok=True)
+    budget: dict[str, object] = {
+        "schema": "hol-guard-resident-restart-budget.v1",
+        "window_start_ms": int(time.time() * 1000),
+        "attempts": 3,
+        "circuit_until_ms": 0,
+        "backoff_steps": 1,
+    }
+    budget.update(fields)
+    path = scope / "restart-budget.json"
+    path.write_text(json.dumps(budget), encoding="utf-8")
+    return path
+
+
+def _section_with_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    from codex_plugin_scanner.guard.cli import doctor_native_runtime
+
+    monkeypatch.setattr(native_runtime, "native_runtime_status", lambda: _status_for("a" * 64))
+    monkeypatch.setattr(doctor_native_runtime, "_passive_runtime_sha256", lambda: "a" * 64)
+    return doctor_native_runtime.native_runtime_section(tmp_path)
+
+
+def test_a_paused_restart_budget_is_reported_as_a_fault_on_a_healthy_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The install is perfect and nothing can start, which is exactly the case a file scan misses."""
+
+    _plant_budget(tmp_path, "a" * 64, circuit_until_ms=int(time.time() * 1000) + 5_000)
+
+    section = _section_with_budget(tmp_path, monkeypatch)
+
+    assert section["availability"]["available"] is True
+    assert section["restart"]["paced"] is True
+    assert section["restart"]["attempts"] == 3
+    assert 0 < section["restart"]["retry_in_seconds"] <= 5
+    assert "restarts of it are paused" in section["diagnosis"]["summary"]
+    assert "hol-guard repair" in section["diagnosis"]["action"]
+
+
+def test_a_budget_whose_pause_has_passed_reports_no_fault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _plant_budget(tmp_path, "a" * 64, circuit_until_ms=int(time.time() * 1000) - 5_000)
+
+    section = _section_with_budget(tmp_path, monkeypatch)
+
+    assert section["restart"] == {"paced": False, "attempts": 3, "retry_in_seconds": 0.0}
+    assert "diagnosis" not in section
+
+
+def test_a_home_that_never_restarted_a_resident_says_nothing_about_restarts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section = _section_with_budget(tmp_path, monkeypatch)
+
+    assert "restart" not in section
+    assert "diagnosis" not in section
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"schema": "hol-guard-resident-restart-budget.v2"},
+        {"attempts": True},
+        {"attempts": -1},
+        {"attempts": "3"},
+        {"circuit_until_ms": "later"},
+        {"circuit_until_ms": -1},
+    ],
+    ids=["schema", "boolean-attempts", "negative-attempts", "string-attempts", "string-pause", "negative-pause"],
+)
+def test_a_file_this_runtime_did_not_write_is_not_read_as_a_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fields: dict[str, object]
+) -> None:
+    """Reporting a pause from a damaged or forged file would be a fault nobody can clear."""
+
+    _plant_budget(tmp_path, "a" * 64, **fields)
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+def test_an_unreadable_budget_is_not_read_as_a_pause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _plant_budget(tmp_path, "a" * 64)
+    path.write_text("{ not json", encoding="utf-8")
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+def test_a_pause_longer_than_the_runtime_ever_writes_is_reported_at_that_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backoff tops out at 30s, so a file claiming a year is reported as the bound, not the year."""
+
+    _plant_budget(tmp_path, "a" * 64, circuit_until_ms=int(time.time() * 1000) + 86_400_000)
+
+    assert _section_with_budget(tmp_path, monkeypatch)["restart"]["retry_in_seconds"] == 30.0
+
+
+def test_a_budget_for_another_runtime_build_is_not_this_runtime_s_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _plant_budget(tmp_path, "b" * 64, circuit_until_ms=int(time.time() * 1000) + 5_000)
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+def test_the_restart_block_carries_no_path_or_runtime_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _plant_budget(tmp_path, "a" * 64, circuit_until_ms=int(time.time() * 1000) + 5_000)
+
+    encoded = json.dumps(_section_with_budget(tmp_path, monkeypatch)["restart"])
+
+    assert str(tmp_path) not in encoded
+    assert "a" * 16 not in encoded
+
+
+def test_attempts_from_a_closed_window_do_not_count_against_the_next_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime clears the counter once its rolling window expires."""
+
+    _plant_budget(tmp_path, "a" * 64, window_start_ms=int(time.time() * 1000) - 120_000)
+
+    assert _section_with_budget(tmp_path, monkeypatch)["restart"] == {
+        "paced": False,
+        "attempts": 0,
+        "retry_in_seconds": 0.0,
+    }
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"attempts": 2**32},
+        {"circuit_until_ms": 2**64},
+        {"window_start_ms": 10**30},
+        {"attempts": True},
+        {"circuit_until_ms": "soon"},
+        {"window_start_ms": None},
+        {"attempts": -1},
+    ],
+    ids=[
+        "attempts-past-u32",
+        "deadline-past-u64",
+        "window-past-u64",
+        "attempts-boolean",
+        "deadline-text",
+        "window-missing",
+        "attempts-negative",
+    ],
+)
+def test_a_counter_the_runtime_could_not_have_written_is_not_read_as_a_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fields: dict[str, object]
+) -> None:
+    """A damaged or forged number is absence, not a report and never arithmetic."""
+
+    _plant_budget(tmp_path, "a" * 64, **fields)
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+def test_a_pause_running_beside_a_live_resident_is_not_diagnosed_as_a_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime arms the next pause on the spawn it allows, so both are true at once."""
+
+    from codex_plugin_scanner.guard import native_resident_watchdog
+
+    resident = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    resident.mkdir(parents=True)
+    marker = "linux:111"
+    state = {"runtime_sha256": "a" * 64, "process_id": os.getpid(), "process_start_marker": marker}
+    (resident / "generation-1.json").write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(native_resident_watchdog, "process_start_token", lambda pid: marker)
+    _plant_budget(tmp_path, "a" * 64, circuit_until_ms=int(time.time() * 1000) + 5_000)
+
+    with without_command_probes():
+        section = _section_with_budget(tmp_path, monkeypatch)
+
+    assert section["resident"]["live"] is True
+    assert section["restart"]["paced"] is True
+    assert "diagnosis" not in section
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a platform with FIFOs")
+def test_a_fifo_left_where_the_budget_belongs_never_blocks_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader that blocks here would hang doctor on a writer that never comes."""
+
+    scope = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    scope.mkdir(parents=True)
+    os.mkfifo(scope / "restart-budget.json")
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="needs a platform that refuses to follow links")
+def test_a_symlink_left_where_the_budget_belongs_is_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resident state is not a trust boundary a report may be redirected through."""
+
+    elsewhere = _plant_budget(tmp_path, "b" * 64, circuit_until_ms=int(time.time() * 1000) + 5_000)
+    scope = tmp_path / "native-runtime" / "resident-v3-aaaaaaaaaaaaaaaa"
+    scope.mkdir(parents=True)
+    (scope / "restart-budget.json").symlink_to(elsewhere)
+
+    assert "restart" not in _section_with_budget(tmp_path, monkeypatch)
+
+
+def test_the_budget_contract_this_report_mirrors_matches_the_runtime_s_own() -> None:
+    """The runtime owns this file's shape; a report that reads it must not drift.
+
+    Doctor reads the budget rather than asking the runtime for it because the
+    pause exists precisely when the runtime will not start. That leaves the
+    schema string, the rolling window and the backoff bound mirrored in Python,
+    so this pins each one to the Rust constant it copies.
+    """
+
+    source = Path(__file__).resolve().parents[1] / "rust/crates/guard-runtime/src/resident_restart_budget.rs"
+    rust = source.read_text(encoding="utf-8")
+
+    for constant, mirrored in (
+        ("RESTART_WINDOW_MS: u64", doctor_native_runtime._RESTART_WINDOW_MS),
+        ("RESTART_BACKOFF_MAX_MS: u64", int(doctor_native_runtime._MAX_RETRY_SECONDS * 1000)),
+    ):
+        match = re.search(rf"const {re.escape(constant)} = ([0-9_]+);", rust)
+        assert match is not None, f"{constant} is no longer declared the way this test reads it"
+        assert int(match.group(1).replace("_", "")) == mirrored, f"{constant} moved away from its Python mirror"
+
+    schema = re.search(r'const BUDGET_SCHEMA: &str = "([^"]+)";', rust)
+    assert schema is not None, "BUDGET_SCHEMA is no longer declared the way this test reads it"
+    assert schema.group(1) == doctor_native_runtime._RESTART_BUDGET_SCHEMA
