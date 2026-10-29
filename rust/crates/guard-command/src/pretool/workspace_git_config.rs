@@ -288,15 +288,14 @@ fn deny_linked(denials: &mut Vec<PathBuf>, path: PathBuf, workspace: &Path) -> O
 }
 
 /// `path` with each `..` applied after following any link the path so far
-/// names, as Git does. `None` when that link cannot be resolved.
+/// names, as Git does. `None` when that link cannot be resolved, or when the
+/// path so far does not exist: the sandbox could create it as a link first.
 fn physical(path: &Path) -> Option<PathBuf> {
     let mut result = PathBuf::new();
     for component in path.components() {
         match component {
             Component::ParentDir => {
-                if result.symlink_metadata().is_ok() {
-                    result = result.canonicalize().ok()?;
-                }
+                result = result.canonicalize().ok()?;
                 result.pop();
             }
             Component::CurDir => {}
