@@ -34,6 +34,10 @@
     {
       "name": "report",
       "state": "review"
+    },
+    {
+      "name": "other",
+      "state": "review"
     }
   ],
   "referenceUrls": [
@@ -45,6 +49,6 @@
   "saferAlternatives": [
     "Both tools open the store writable and ensure its schema, so a call can create the database file (search and report are not guaranteed read-only); point the server at a pre-built index whose path is safe to create or touch.",
     "search returns the indexed chunk text and metadata (not just match IDs) and report returns the database path and the indexed source paths, so enable only over a corpus whose contents and file layout are safe to disclose to the agent and model.",
-    "Embedding is local and offline with the default backend; keep the index on the default (or another local) embedder, because the opt-in Bedrock backend sends each search query's text to AWS."
+    "Embedding runs locally by default, but the default model downloads on first use if uncached (pre-cache for offline); the opt-in Bedrock backend instead sends each search query's text to AWS."
   ]
 }
