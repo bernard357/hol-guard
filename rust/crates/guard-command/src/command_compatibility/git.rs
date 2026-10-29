@@ -97,46 +97,82 @@ fn bounded_inspection(arguments: &[String]) -> bool {
             && crate::pretool::git_side_record_reads::read_form(command, rest))
 }
 
+/// An option of a staged-index diff that only shapes what the command prints.
+fn bounded_cached_diff_option(option: &str) -> bool {
+    matches!(
+        option,
+        "--cached"
+            | "--staged"
+            | "HEAD"
+            | "--check"
+            | "--stat"
+            | "--numstat"
+            | "--shortstat"
+            | "--summary"
+            | "--name-only"
+            | "--name-status"
+            | "--patch"
+            | "-p"
+            | "--quiet"
+            | "--exit-code"
+            | "--no-color"
+            | "--color=never"
+            | "--no-ext-diff"
+            | "--no-textconv"
+    ) || option
+        .strip_prefix("-U")
+        .or_else(|| option.strip_prefix("--unified="))
+        .is_some_and(|lines| {
+            !lines.is_empty() && lines.len() <= 6 && lines.bytes().all(|b| b.is_ascii_digit())
+        })
+}
+
+/// An operand that git reads as a pathspec rather than as a revision. A `:`
+/// prefix (`:!vendor`, `:^docs`) can only be a pathspec, because a ref name
+/// cannot carry a colon. Anything else has to name an entry that is already
+/// there, which is the only way git itself tells a path from a revision:
+/// `git diff --cached origin/main` compares against a branch and keeps the
+/// index owner, while `git diff --cached web/package.json` narrows the same
+/// staged read the `--` form already admits. Without a known working
+/// directory nothing can be shown present, so the operand is not bounded.
+fn bounded_cached_diff_pathspec(operand: &str, cwd: Option<&str>) -> bool {
+    if operand.is_empty() || operand.starts_with('-') {
+        return false;
+    }
+    if operand.starts_with(':') {
+        return true;
+    }
+    // `symlink_metadata` rather than `exists`: a broken symlink is still an
+    // entry git sees, and any other error (an unreadable parent) refuses.
+    cwd.is_some_and(|cwd| {
+        std::path::Path::new(cwd)
+            .join(operand)
+            .symlink_metadata()
+            .is_ok()
+    })
+}
+
 /// A staged-index diff that prints to stdout like `git diff HEAD`, which the
 /// ordinary diff proof already admits. The staged content is no more private
 /// than the working tree beside it, so the shared read proof (configuration
 /// probe, textconv and sensitive-pathspec screens) decides it. Forms that
 /// write a file or compare against another revision keep the index owner.
-fn bounded_cached_diff(arguments: &[String]) -> bool {
-    arguments
+///
+/// Trailing pathspecs are read the same way whether or not a `--` separates
+/// them, so the bare form is bounded on the same terms: every argument up to
+/// the first operand has to shape the output, and every operand from there on
+/// has to be a present in-tree pathspec. `cwd` is where the segment's native
+/// proofs ran, which is the directory git resolves those operands against.
+fn bounded_cached_diff(arguments: &[String], cwd: Option<&str>) -> bool {
+    let operands: Vec<&String> = arguments
         .iter()
         .take_while(|argument| argument.as_str() != "--")
-        .all(|argument| {
-            let option = argument.as_str();
-            matches!(
-                option,
-                "--cached"
-                    | "--staged"
-                    | "HEAD"
-                    | "--check"
-                    | "--stat"
-                    | "--numstat"
-                    | "--shortstat"
-                    | "--summary"
-                    | "--name-only"
-                    | "--name-status"
-                    | "--patch"
-                    | "-p"
-                    | "--quiet"
-                    | "--exit-code"
-                    | "--no-color"
-                    | "--color=never"
-                    | "--no-ext-diff"
-                    | "--no-textconv"
-            ) || option
-                .strip_prefix("-U")
-                .or_else(|| option.strip_prefix("--unified="))
-                .is_some_and(|lines| {
-                    !lines.is_empty()
-                        && lines.len() <= 6
-                        && lines.bytes().all(|b| b.is_ascii_digit())
-                })
-        })
+        .skip_while(|argument| bounded_cached_diff_option(argument))
+        .collect();
+    operands.len() <= 16
+        && operands
+            .iter()
+            .all(|operand| bounded_cached_diff_pathspec(operand, cwd))
 }
 
 fn read_only_plumbing(arguments: &[String]) -> bool {
@@ -497,7 +533,8 @@ pub(super) fn observe_with_contexts(
             .iter()
             .take_while(|argument| argument.as_str() != "--")
             .any(|argument| matches!(argument.as_str(), "--cached" | "--staged"))
-        && !inspection.is_some_and(|remaining| bounded_cached_diff(&remaining[1..]))
+        && !inspection
+            .is_some_and(|remaining| bounded_cached_diff(&remaining[1..], proof_context.cwd))
     {
         result.rule("command.git.index-inspection", index, true);
     }
