@@ -91,6 +91,10 @@ def test_status_sees_a_resident_this_process_never_started(
     assert code == 0
     assert resident_payload["live"] is True
     assert resident_payload["generations"] == 1
+    # A live resident is read from its state files alone. Asking it how it is
+    # doing means reading the runtime's feature list, which runs the binary;
+    # this command says it starts nothing, so it does not ask.
+    assert "serving" not in resident_payload
 
 
 def test_status_text_scopes_the_counters_to_this_command(

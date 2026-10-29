@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from codex_plugin_scanner.guard import native_resident_health as transport
+from codex_plugin_scanner.guard.adapters.diagnostic_probes import without_command_probes
 from codex_plugin_scanner.guard.cli import doctor_native_runtime as doctor
 
 
@@ -186,6 +187,28 @@ def test_doctor_never_starts_a_resident_that_is_not_already_serving(
     monkeypatch.setattr(doctor, "_passive_runtime_sha256", lambda: "0" * 64)
 
     section = doctor.native_runtime_section(tmp_path)
+
+    resident = section["resident"]
+    assert isinstance(resident, dict)
+    assert "serving" not in resident
+
+
+def test_a_read_only_caller_never_asks_the_resident(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reading the feature list runs the binary, which a passive report forbids."""
+
+    def health(**_: Any) -> dict[str, Any]:
+        raise AssertionError("a passive report must not run the runtime")
+
+    monkeypatch.setattr(transport, "native_resident_health", health)
+    monkeypatch.setattr(
+        doctor,
+        "native_resident_presence",
+        lambda *_: {"live": True, "owner_lock_held": False, "generations": 1},
+    )
+    monkeypatch.setattr(doctor, "_passive_runtime_sha256", lambda: "0" * 64)
+
+    with without_command_probes():
+        section = doctor.native_runtime_section(tmp_path)
 
     resident = section["resident"]
     assert isinstance(resident, dict)
