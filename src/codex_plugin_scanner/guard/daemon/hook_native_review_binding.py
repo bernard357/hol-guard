@@ -52,7 +52,7 @@ def native_review_policy_binding(
     }
 
 
-def native_review_matching_allow(
+def native_review_settle(
     store: object,
     *,
     harness: str,
@@ -61,70 +61,31 @@ def native_review_matching_allow(
     launch_target: str,
     workspace: Path | None,
     identity: str | None,
-) -> bool:
-    return _native_review_matching_decision(
-        store,
-        method="consume_native_review_approval",
-        harness=harness,
-        artifact_id=artifact_id,
-        tool_name=tool_name,
-        launch_target=launch_target,
-        workspace=workspace,
-        identity=identity,
-    )
+    spend: bool,
+) -> str | None:
+    """Settle a retry in one resident transaction.
 
+    ``"blocked"`` when the user chose Keep blocked for it, ``"allowed"`` when
+    ``spend`` spent an approve-once, else ``None``.
+    """
 
-def native_review_matching_block(
-    store: object,
-    *,
-    harness: str,
-    artifact_id: str,
-    tool_name: str,
-    launch_target: str,
-    workspace: Path | None,
-    identity: str | None,
-) -> bool:
-    return _native_review_matching_decision(
-        store,
-        method="matching_native_review_block",
-        harness=harness,
-        artifact_id=artifact_id,
-        tool_name=tool_name,
-        launch_target=launch_target,
-        workspace=workspace,
-        identity=identity,
-    )
-
-
-def _native_review_matching_decision(
-    store: object,
-    *,
-    method: str,
-    harness: str,
-    artifact_id: str,
-    tool_name: str,
-    launch_target: str,
-    workspace: Path | None,
-    identity: str | None,
-) -> bool:
-    consume = getattr(store, method, None)
-    if not callable(consume) or identity is None or not launch_target:
-        return False
+    settle = getattr(store, "settle_native_review_reuse", None)
+    if not callable(settle) or identity is None or not launch_target:
+        return None
     try:
-        return (
-            consume(
-                harness=harness,
-                artifact_id=artifact_id,
-                artifact_name=tool_name,
-                artifact_hash=identity,
-                launch_target=launch_target,
-                workspace=str(workspace) if workspace is not None else None,
-                now=datetime.now(tz=timezone.utc).isoformat(),
-            )
-            is True
+        settled = settle(
+            harness=harness,
+            artifact_id=artifact_id,
+            artifact_name=tool_name,
+            artifact_hash=identity,
+            launch_target=launch_target,
+            workspace=str(workspace) if workspace is not None else None,
+            now=datetime.now(tz=timezone.utc).isoformat(),
+            spend=spend,
         )
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
-        return False
+        return None
+    return settled if settled in ("blocked", "allowed") else None
 
 
 def native_review_claimed_allow(

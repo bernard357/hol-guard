@@ -385,16 +385,46 @@ def test_the_waiting_operation_exists_before_the_request_can_be_approved(
     assert linked_at_persist == [True]
 
 
+def test_the_waiting_session_and_operation_are_linked_in_one_store_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
+) -> None:
+    workspace = _workspace(tmp_path)
+    worker, store = _hook_worker(tmp_path, monkeypatch)
+    native_store_call = store._native_store_call
+    linking: list[str] = []
+
+    def record(method: str, args: dict[str, object]) -> object:
+        if method in {"link_codex_live_wait", "upsert_guard_session", "upsert_guard_operation"}:
+            linking.append(method)
+        return native_store_call(method, args)
+
+    monkeypatch.setattr(store, "_native_store_call", record)
+    request_id = _review(worker, tmp_path, workspace, _live_wait())["approval_request_id"]
+    assert isinstance(request_id, str)
+    assert linking == ["link_codex_live_wait"]
+    session = store.get_guard_session(f"codex-hook-{request_id}")
+    assert session is not None
+    assert (session["harness"], session["status"], session["capabilities"]) == (
+        "codex",
+        "waiting_on_approval",
+        ["approval-resolution"],
+    )
+    operation = store.get_guard_operation_for_approval_request(request_id)
+    assert operation is not None
+    assert operation["session_id"] == session["session_id"]
+    assert operation["metadata"]["codex_hook_waits_for_browser_approval"] is True
+
+
 def test_a_wait_that_cannot_be_linked_is_queued_as_a_manual_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_context_digest: Path
 ) -> None:
     workspace = _workspace(tmp_path)
     worker, store = _hook_worker(tmp_path, monkeypatch)
 
-    def fail(**_kwargs: object) -> dict[str, object]:
+    def fail(**_kwargs: object) -> None:
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(store, "upsert_guard_operation", fail)
+    monkeypatch.setattr(store, "link_codex_live_wait", fail)
     review = _review(worker, tmp_path, workspace, _live_wait())
     request_id = review["approval_request_id"]
     assert isinstance(request_id, str)

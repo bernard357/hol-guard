@@ -22,7 +22,6 @@ def queue_bound_bash_review(
     errors: TextIO,
 ) -> None:
     from ..daemon.hook_native_review_approval import queue_native_pre_tool_review
-    from ..daemon.native_review_records import record_silent_native_review_event
     from ..native_decision_receipt import edge_receipt
 
     review = prepared["review"]
@@ -44,10 +43,10 @@ def queue_bound_bash_review(
         exact_token=str(prepared["artifact_hash"]),
         review_binding=str(prepared["artifact_hash"]),
         bound_bash=prepared,
+        silent=True,
     )
     if queued is None:
         raise NativeBashError("native_bash_review_queue_unavailable")
-    record_silent_native_review_event(store, queued)
     url = queued.get("approval_url")
     if not isinstance(url, str) or not url:
         raise NativeBashError("native_bash_review_queue_unavailable")
