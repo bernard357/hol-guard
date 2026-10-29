@@ -77,6 +77,30 @@ fn present_pathspec_operands_do_not_raise_the_index_owner() {
 }
 
 #[test]
+fn a_routed_staged_read_proves_its_operands_where_git_enters() {
+    let worktree = tempfile::tempdir().unwrap();
+    // A `-C` route is only admitted into a checkout, so the working directory
+    // has to look like one.
+    std::fs::create_dir_all(worktree.path().join(".git")).unwrap();
+    std::fs::create_dir_all(worktree.path().join("web")).unwrap();
+    std::fs::write(worktree.path().join("web/report.json"), "{}").unwrap();
+    std::fs::create_dir_all(worktree.path().join("release")).unwrap();
+
+    let owns_index = |command: &str| {
+        observations_in(command, worktree.path())
+            .rule_matches
+            .iter()
+            .any(|item| item.rule_id == "command.git.index-inspection")
+    };
+    // `report.json` is in the directory git enters, so the route reads the
+    // index it proved.
+    assert!(!owns_index("git -C web diff --cached report.json"));
+    // `release` is only beside the shell's own working directory. In `web` git
+    // reads it as a revision and diffs the index against it.
+    assert!(owns_index("git -C web diff --cached release"));
+}
+
+#[test]
 fn fixed_read_only_inspections_do_not_invent_unrelated_git_owners() {
     for command in [
         "git rev-parse --show-toplevel",

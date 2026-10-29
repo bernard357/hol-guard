@@ -6,7 +6,7 @@
 
 use crate::codex_output_env::Ctx;
 use crate::sfrs_shell_tokens::shell_segment_primary_command;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const CONTROL_PREFIXES: [&str; 6] = ["!", "elif", "else", "fi", "if", "then"];
 const GIT_GLOBAL_FLAG_OPTIONS: [&str; 6] = [
@@ -224,6 +224,27 @@ fn operand_is_a_present_path(operand: &str, cwd: Option<&Path>) -> bool {
     // `symlink_metadata` rather than `exists`: a broken symlink is still an
     // entry git sees, and any other error (an unreadable parent) refuses.
     cwd.join(operand).symlink_metadata().is_ok()
+}
+
+/// The directory git resolves a bare operand against. A leading `-C <dir>`
+/// route moves it there, so an operand that is present beside the shell's own
+/// working directory proves nothing about the repository git actually reads;
+/// a relative route needs that working directory to resolve at all.
+pub(crate) fn cached_diff_operand_directory(
+    tokens: &[String],
+    cwd: Option<&Path>,
+) -> Option<PathBuf> {
+    let route = stripped_git_args(tokens)
+        .filter(|args| args.first().map(String::as_str) == Some("-C"))
+        .and_then(|args| args.get(1).cloned());
+    let Some(route) = route else {
+        return cwd.map(Path::to_path_buf);
+    };
+    let route = PathBuf::from(route);
+    if route.is_absolute() {
+        return Some(route);
+    }
+    cwd.map(|cwd| cwd.join(route))
 }
 
 /// `_cached_diff_operands_are_safe`.

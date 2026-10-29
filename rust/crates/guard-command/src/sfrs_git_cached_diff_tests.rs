@@ -1,7 +1,7 @@
 //! Operand safety for a staged diff written without the `--` separator.
 
 use crate::codex_output_env::{Ctx, GitCheck, InspectionHost};
-use crate::sfrs_git_cached_diff::cached_diff_operands_are_safe;
+use crate::sfrs_git_cached_diff::{cached_diff_operand_directory, cached_diff_operands_are_safe};
 use guard_contracts::CompoundGitSegmentV1;
 use std::path::{Path, PathBuf};
 
@@ -131,4 +131,40 @@ fn the_pathspec_count_stays_bounded() {
     let ctx = Ctx::new(&host, "/", "/");
     let cwd = Some(workspace.path());
     assert!(!cached_diff_operands_are_safe(&operands, cwd, &ctx));
+}
+
+#[test]
+fn a_routed_read_resolves_its_operands_where_git_enters() {
+    let workspace = Workspace::new("routed");
+    let outer = workspace.path();
+    let inner = outer.join("inner");
+    // `release` lives inside the directory `-C` enters, not beside the shell's
+    // own working directory, where git would read the same word as a revision.
+    std::fs::create_dir_all(inner.join("release")).expect("route target");
+    let routed = |route: &str| {
+        ["git", "-C", route, "diff", "--cached", "release"]
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect::<Vec<String>>()
+    };
+
+    assert_eq!(
+        cached_diff_operand_directory(&routed("inner"), Some(outer)),
+        Some(inner.clone())
+    );
+    assert_eq!(
+        cached_diff_operand_directory(&routed(&inner.to_string_lossy()), Some(outer)),
+        Some(inner.clone())
+    );
+    let unrouted: Vec<String> = ["git", "diff", "--cached", "release"]
+        .iter()
+        .map(|item| (*item).to_owned())
+        .collect();
+    assert_eq!(
+        cached_diff_operand_directory(&unrouted, Some(outer)),
+        Some(outer.to_path_buf())
+    );
+
+    assert!(safe_in(Some(&inner), &["--cached", "release"]));
+    assert!(!safe_in(Some(outer), &["--cached", "release"]));
 }
