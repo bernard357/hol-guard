@@ -303,25 +303,32 @@ def bundled_runtime_without_execute_bit() -> Path | None:
 def native_install_file_state() -> tuple[CandidateState, NativeRuntimeDiagnosis | None]:
     """What the installed runtime files show on their own, without running them.
 
-    This is the half of ``native_runtime_diagnosis`` that needs no reason code:
-    the worst state any candidate is in, by the same order that answers an
-    unavailable runtime, paired with the explanation for it. ``present`` is
-    returned with no diagnosis, because whether a trusted binary then starts is
-    a question only launching it answers and nothing here launches anything.
-    ``absent`` is returned with its diagnosis so the caller can decide what an
-    install carrying no runtime at all means for it.
+    This is the half of ``native_runtime_diagnosis`` that needs no reason code,
+    answered the way selection answers it. Selection walks the candidates in
+    order and takes the first one it accepts, so one candidate in a state Guard
+    accepts is a working install however broken the ones beside it are: an
+    override pointing at a file this account does not own does not make the
+    bundled runtime underneath it need reinstalling. ``present`` is returned
+    with no diagnosis, because whether a trusted binary then starts is a
+    question only launching it answers and nothing here launches anything.
+
+    Only when no candidate is in that state does this fall back to the worst
+    fault among them, by the same order that answers an unavailable runtime,
+    paired with the explanation for it. ``absent`` is returned with its
+    diagnosis so the caller can decide what an install carrying no runtime at
+    all means for it.
     """
 
     rows = _candidate_rows()
     candidates = [row for _, row in rows]
     states = {candidate["state"] for candidate in candidates}
+    if "present" in states:
+        return "present", None
     state: CandidateState = "absent"
     for candidate_state in _UNAVAILABLE_ORDER:
         if candidate_state in states:
             state = candidate_state
             break
-    if state == "present":
-        return state, None
     summary, action = _UNAVAILABLE[state]
     return state, {"summary": summary, "action": action, "candidates": candidates}
 

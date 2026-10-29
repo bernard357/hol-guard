@@ -56,7 +56,11 @@ _REFUSED = (
 _REFUSED_ACTION = (
     "Reinstall hol-guard as the account that runs it, without `sudo`: `uv tool install --force hol-guard`."
 )
-_HEALTHY = "The native runtime install is in a state Guard can launch."
+_HEALTHY = (
+    "Guard's native runtime is installed where Guard looks for it, owned by this account, and "
+    "carries the execute bit. Nothing here launched it: `hol-guard doctor --native` is the check "
+    "that starts the runtime and confirms it matches the manifest it shipped with."
+)
 
 
 def _is_executable(path: Path) -> bool:

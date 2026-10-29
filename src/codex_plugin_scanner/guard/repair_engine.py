@@ -142,16 +142,18 @@ def repair_native_install(*, dry_run: bool) -> dict[str, object]:
     detail: dict[str, object] = {"outcome": outcome, "candidates": report["candidates"]}
     if report["action"] is not None:
         detail["action"] = report["action"]
-    if outcome == "needs_reinstall":
-        # Nothing here failed, and nothing here can fix it either, so the run
-        # has to end saying so rather than reporting a healthy install.
+    if outcome in ("needs_reinstall", "refused"):
+        # Nothing here failed, and nothing here can fix either of them: a
+        # reinstall is the user's to run, and an execute bit this account was
+        # refused will be refused the same way next time. Both end the run
+        # saying so, rather than reporting a healthy install or sending the
+        # user back to a repair that cannot change the answer.
         return _step("native_install", "skipped", report["summary"], needs_attention=["native runtime"], **detail)
     status = {
         "healthy": "ok",
         "absent": "skipped",
         "planned": "planned",
         "restored": "changed",
-        "refused": "error",
     }[outcome]
     return _step("native_install", status, report["summary"], **detail)
 

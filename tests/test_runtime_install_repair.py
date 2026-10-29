@@ -156,3 +156,48 @@ def test_a_source_install_with_no_runtime_does_not_make_the_run_unfinished(
     assert step["status"] == "skipped"
     assert "needs_attention" not in step or step["needs_attention"] == []
     assert report["status"] == "healthy"
+
+
+def test_a_refused_bit_does_not_send_the_user_back_to_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _bundled(tmp_path, monkeypatch, 0o644)
+    monkeypatch.setattr(native_runtime, "_trusted_owner_and_mode", lambda metadata, path: False)
+
+    step = repair_engine.repair_native_install(dry_run=False)
+    report = repair_engine.build_report([step], dry_run=False)
+
+    # A refusal comes from the filesystem or from who owns the file, and the
+    # next run meets the same answer. Reporting it as a failed step would close
+    # the run by telling the user to run repair again, which is a circle.
+    assert step["outcome"] == "refused"
+    assert step["status"] == "skipped"
+    assert step["needs_attention"] == ["native runtime"]
+    assert report["status"] == "partial"
+    assert "without `sudo`" in str(step["action"])
+    assert "Re-run" not in str(report["summary"])
+
+
+def test_a_broken_override_does_not_condemn_a_working_bundled_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundled = _bundled(tmp_path, monkeypatch, 0o755)
+    override = tmp_path / "override"
+    override.mkdir()
+    pointed_at = override / "hol-guard-runtime"
+    pointed_at.write_bytes(b"#!/bin/sh\nexit 0\n")
+    pointed_at.chmod(0o777)
+    monkeypatch.setenv("HOL_GUARD_NATIVE_BINARY", str(pointed_at))
+    # Selection walks these in order and takes the first it accepts, so the
+    # world-writable override is skipped and the bundled copy is what runs.
+    monkeypatch.setattr(native_runtime, "_runtime_candidates", lambda: (pointed_at, bundled))
+
+    report = repair_native_runtime_install(dry_run=False)
+    step = repair_engine.repair_native_install(dry_run=False)
+
+    assert report["outcome"] == "healthy"
+    assert {row["slot"]: row["state"] for row in report["candidates"]} == {
+        "override": "untrusted_owner_or_mode",
+        "bundled": "present",
+    }
+    # The fault beside it is still reported; it is just not a reason to tell
+    # the user their install needs replacing.
+    assert step["status"] == "ok"
