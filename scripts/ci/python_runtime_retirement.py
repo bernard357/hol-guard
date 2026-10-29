@@ -14,6 +14,11 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 from scripts.ci.python_capability_cleanup_analysis import ImportGraphAnalysis, production_importers
 
 _SOURCE_ROOTS = ("src", "tests", "ci", "scripts")
@@ -254,6 +259,75 @@ def validate_retired_artifacts(contract: Mapping[str, object], artifacts: Sequen
                 _check_retired_body_content(name, data, bodies)
 
 
+def _entry_point_targets(root: Path) -> list[tuple[str, str, str]]:
+    """Every declared console script and entry point, as (name, module, attribute)."""
+    manifest = root / "pyproject.toml"
+    if not manifest.is_file():
+        return []
+    project = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project")
+    if not isinstance(project, Mapping):
+        return []
+    declared: list[tuple[str, object]] = []
+    scripts = project.get("scripts")
+    if isinstance(scripts, Mapping):
+        declared.extend(scripts.items())
+    groups = project.get("entry-points")
+    if isinstance(groups, Mapping):
+        for group, members in groups.items():
+            if isinstance(members, Mapping):
+                declared.extend((f"{group}:{member}", target) for member, target in members.items())
+    targets: list[tuple[str, str, str]] = []
+    for name, target in declared:
+        module, separator, attribute = target.partition(":") if isinstance(target, str) else ("", "", "")
+        if not separator or not module.strip() or not attribute.strip():
+            raise RuntimeError(f"entry point has no module:attribute target: {name}: {target!r}")
+        targets.append((str(name), module.strip(), attribute.strip()))
+    return targets
+
+
+def _module_source(root: Path, module: str) -> Path | None:
+    parts = module.split(".")
+    for directory in _SOURCE_ROOTS:
+        base = root.joinpath(directory, *parts)
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _module_level_names(source: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            names.update(alias.asname or alias.name.partition(".")[0] for alias in node.names)
+        elif isinstance(node, ast.Assign):
+            names.update(target.id for target in node.targets if isinstance(target, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
+def validate_entry_point_targets(root: Path, retired_modules: set[str]) -> None:
+    """Reject an entry point a retirement left pointing at nothing.
+
+    A console script names its module in a string, so no import graph reaches
+    it and no retired-import check sees it. A deletion that takes the module,
+    or only the function the script names, therefore ships a wheel whose
+    command fails at launch instead of reddening a gate here.
+    """
+    for name, module, attribute in _entry_point_targets(root):
+        if module in retired_modules:
+            raise RuntimeError(f"entry point targets a retired module: {name}: {module}")
+        source = _module_source(root, module)
+        if source is None:
+            raise RuntimeError(f"entry point targets a module that does not exist: {name}: {module}")
+        root_attribute = attribute.partition(".")[0]
+        if root_attribute not in _module_level_names(source.read_text(encoding="utf-8")):
+            raise RuntimeError(f"entry point targets a missing attribute: {name}: {module}:{attribute}")
+
+
 def validate_retired_modules(
     root: Path,
     contract: Mapping[str, object],
@@ -263,6 +337,7 @@ def validate_retired_modules(
 ) -> list[dict[str, object]]:
     records = _records(contract)
     validate_retired_bodies(root, contract)
+    validate_entry_point_targets(root, {str(record["module"]) for record in records})
     retired_tests = contract.get("retired_test_paths", [])
     if not isinstance(retired_tests, list):
         raise RuntimeError("retired_test_paths must be a list")

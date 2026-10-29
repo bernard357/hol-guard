@@ -229,3 +229,45 @@ def test_retirement_checks_tar_link_name_and_target(
         archive.addfile(entry)
     with pytest.raises(RuntimeError, match="package artifact contains retired module"):
         check(retired_repository, (artifact,))
+
+
+def _declare_entry_point(root: Path, target: str, *, group: str | None = None) -> None:
+    (root / "src/example/live_cli.py").write_text("def main() -> int:\n    return 0\n", encoding="utf-8")
+    table = f'[project.entry-points."{group}"]\n' if group else "[project.scripts]\n"
+    manifest = f'[project]\nname = "example"\n{table}example = "{target}"\n'
+    (root / "pyproject.toml").write_text(manifest, encoding="utf-8")
+
+
+def test_entry_point_passes_when_its_module_and_attribute_survive(
+    retired_repository: tuple[Path, dict[str, object]],
+) -> None:
+    root, _ = retired_repository
+    _declare_entry_point(root, "example.live_cli:main")
+    assert len(check(retired_repository)) == 1
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        ("example.old_runtime:main", "retired module"),
+        ("example.absent_cli:main", "module that does not exist"),
+        ("example.live_cli:absent", "missing attribute"),
+        ("example.live_cli", "no module:attribute target"),
+    ],
+)
+def test_entry_point_must_resolve_after_a_retirement(
+    retired_repository: tuple[Path, dict[str, object]], target: str, message: str
+) -> None:
+    root, _ = retired_repository
+    _declare_entry_point(root, target)
+    with pytest.raises(RuntimeError, match=message):
+        check(retired_repository)
+
+
+def test_entry_point_group_members_are_screened_like_console_scripts(
+    retired_repository: tuple[Path, dict[str, object]],
+) -> None:
+    root, _ = retired_repository
+    _declare_entry_point(root, "example.old_runtime:main", group="guard.plugins")
+    with pytest.raises(RuntimeError, match="retired module"):
+        check(retired_repository)
