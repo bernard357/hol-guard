@@ -729,3 +729,66 @@ fn a_paused_codex_review_links_the_wait_its_bridge_holds_open() {
         std::fs::remove_dir_all(home).unwrap();
     }
 }
+
+/// Cursor's bridge signs a loopback link it reproduces with the daemon auth
+/// token, so its paused review is queued whether or not the home holds one; a
+/// link the bridge cannot reproduce stays with the daemon once a token exists.
+#[cfg(unix)]
+#[test]
+fn a_paused_cursor_review_queues_unless_its_bridge_cannot_render_the_link() {
+    for (tag, origin, token_file, queues) in [
+        ("cursor-signed-link", "http://127.0.0.1:4781", true, true),
+        ("cursor-no-token", "http://127.0.0.1:4781", false, true),
+        (
+            "cursor-unreproducible-link",
+            "HTTP://127.0.0.1:4781",
+            true,
+            false,
+        ),
+        (
+            "cursor-unreproducible-no-token",
+            "HTTP://127.0.0.1:4781",
+            false,
+            true,
+        ),
+    ] {
+        let home = store_home(tag, SILENT_VECTORS);
+        if token_file {
+            std::fs::write(home.join("daemon-auth-token"), b"token").unwrap();
+        }
+        let guard_home = home.to_string_lossy().into_owned();
+        let mut binding = ask_binding();
+        binding.review.approval_center_origin = Some(origin.to_owned());
+        let workspace = super::super::tests::workspace(tag);
+        let (_, _, _, exact) = super::super::tests::bound_query(&binding, &workspace);
+        let payload = json!({"tool_name": "Read", "tool_input": {"file_path": "/work/.npmrc"}});
+        let payload = payload.as_object().unwrap();
+        let fixture = super::super::tests::vectors();
+        let context = Context {
+            harness: "cursor",
+            payload,
+            recorded_payload: payload,
+            workspace: &workspace,
+            home_dir: fixture["home_dir"].as_str().unwrap(),
+            guard_home: &guard_home,
+            binding: &binding,
+            hint: None,
+        };
+        let result = json!({"decision": "deny", "policy_action": "review", "minimum_action": "review",
+                           "reason": "Review this read.", "reason_code": "native_review"});
+        let answered = answer(
+            &context,
+            result.as_object().unwrap(),
+            None,
+            &exact,
+            &Ok("exact-token".to_owned()),
+        );
+        if queues {
+            let (response, _) = answered.expect("the resident pauses the review");
+            assert_eq!(response["prompted"], true, "{tag}");
+        } else {
+            assert_eq!(answered.err(), Some(HookDirectDefer::ReviewQueue), "{tag}");
+        }
+        std::fs::remove_dir_all(home).unwrap();
+    }
+}

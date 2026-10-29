@@ -35,14 +35,15 @@
 //! A package review is queued only when `native_package_review_response`
 //! provably leaves it to the queue (`hook_direct_review_package.rs`).
 //!
-//! A paused Cursor review is queued only when its link reaches the agent
-//! unchanged: Cursor's hook client signs a loopback link itself, and only
-//! when its interpreter can import Guard (`_cursor_reason`).
+//! A paused Cursor review is queued only when Cursor's native bridge renders
+//! its link itself: the bridge signs a loopback link it reproduces with the
+//! daemon auth token, and fails closed on one it cannot reproduce.
 //!
 //! Every other shape defers, so the daemon still answers the hook: a missing
 //! fact, a package review the daemon may settle, a Claude Code notice the
-//! bound key cannot sign, a Cursor pause whose link its client may sign, and
-//! any request or write the resident could not reproduce.
+//! bound key cannot sign, a Cursor pause whose link its bridge cannot
+//! reproduce once a daemon auth token exists, and any request or write the
+//! resident could not reproduce.
 
 use super::consume::{repair_store_permissions, storage_gate};
 use super::review_request::{build, ExactKeys, RequestInput};
@@ -140,11 +141,11 @@ pub(super) fn answer(
         .and_then(Value::as_str)
         .ok_or(HookDirectDefer::ReviewQueue)?
         .to_owned();
-    // Cursor's hook client signs a loopback link with Guard's Python only
-    // when it can import it, which its bridge cannot know; such a pause stays
-    // with the daemon so the bridge never has to hand a queued hook back.
+    // Cursor's bridge signs a loopback link it reproduces with the daemon auth
+    // token; a link it cannot reproduce stays with the daemon, so the bridge
+    // never fails closed on a review it queued.
     if canonical_harness(context.harness) == CURSOR
-        && !crate::native_review_link::review_url_stays_unsigned(
+        && !crate::native_review_link::bridge_renders_review_url(
             &approval_url,
             Path::new(context.guard_home),
         )

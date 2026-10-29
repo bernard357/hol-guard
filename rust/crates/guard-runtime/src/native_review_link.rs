@@ -199,14 +199,12 @@ fn with_review_url(
     Some(format!("{stripped} {OPEN_GUARD} {live_url}."))
 }
 
-/// Whether `live_approval_review_url(url, guard_home=...)`
-/// (`approval_hook_copy.py`) hands `url` back unchanged, whether or not the
-/// caller can import Guard: `guard_home` holds no daemon auth token file, so
-/// none is ever loaded, or `url` is a link this module reproduces whose host
-/// `is_loopback_approval_url` rejects. A token file that exists counts as a
-/// token, however it reads.
-pub(crate) fn review_url_stays_unsigned(url: &str, guard_home: &std::path::Path) -> bool {
-    if approval_link(url).is_some_and(|link| !link.loopback) {
+/// Whether a native hook bridge shows `url` as `live_review_url` renders it:
+/// a link this module reproduces, which it signs or keeps, or any link when
+/// `guard_home` holds no daemon auth token file, so none is ever loaded. A
+/// token file that exists counts as a token, however it reads.
+pub(crate) fn bridge_renders_review_url(url: &str, guard_home: &std::path::Path) -> bool {
+    if approval_link(url).is_some() {
         return true;
     }
     matches!(
