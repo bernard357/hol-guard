@@ -30,7 +30,7 @@ The `off` and `shadow` values this ADR first described are retired. They stay
 accepted so an existing install keeps starting, but they select nothing: each
 resolves to the product default and logs `native_mode_legacy_value_ignored`
 once. Neither a Python rollback nor a local disablement exists, because both
-would reinstate the Python authority this boundary removed. Diagnostic
-comparison against the Python reference is selected by
-`HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface. See ADR
-0010 for the release-gate decision.
+would reinstate the Python authority this boundary removed.
+`HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface turns on
+bounded transport and timeout diagnostics; it starts no Python evaluator and
+compares no decisions. See ADR 0010 for the release-gate decision.

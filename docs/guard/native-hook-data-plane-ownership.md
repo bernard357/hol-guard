@@ -94,9 +94,9 @@ Python semantic evaluator, content scanner, or decision cache. Supported
 `force`; native failure is fail-closed. `HOL_GUARD_NATIVE=off` and
 `HOL_GUARD_NATIVE=shadow` are retired values: both resolve to the product
 default and warn once, so neither disables native authority nor restores the
-Python one. Diagnostic comparison is permitted only when
-`HOL_GUARD_NATIVE_DIAGNOSTIC=1` is present on a declared non-production
-surface.
+Python one. `HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production
+surface adds bounded transport and timeout diagnostics; no flag runs a second
+evaluator or compares its verdict with the native one.
 
 `HOL_GUARD_PYTHON_ORACLE` is retired. It is listed under
 `dependency_delta.removed_runtime_flags` in

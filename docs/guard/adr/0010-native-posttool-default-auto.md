@@ -24,8 +24,9 @@ would mean running supported review with no semantic authority at all, and
 honoring `shadow` would mean keeping a Python evaluator alive to compare
 against. `force` requires native even for developer overrides. Invalid or empty
 values resolve to the product default instead of silently disabling Rust.
-Diagnostic comparison is selected by `HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a
-declared non-production surface.
+`HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface adds
+bounded transport and timeout diagnostics to that path; it evaluates nothing
+and compares nothing.
 
 ## Evidence
 

@@ -8,7 +8,7 @@ Make the bundled Rust runtime a cross-platform, low-latency safety kernel for ca
 
 The native kernel must reliably pause or block secret exfiltration, prompt injection, broad deletion, destructive production database or infrastructure actions, supply-chain compromise, and Guard tampering. Routine reads, tests, builds, linting, bounded workspace edits, and exact low-impact cleanup must remain quiet and autonomous.
 
-Eligible PostToolUse and supported PreToolUse review use the verified bundled Rust runtime in `auto` mode by default. Python remains the control plane and explicit differential-test oracle; it is never a production semantic fallback. There is no local switch that turns native authority off: `HOL_GUARD_NATIVE` accepts `auto` and `force`, and the retired `off` and `shadow` values are accepted for existing installs, warned about once and ignored. Diagnostic comparison against the Python reference is selected by `HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface, not by a mode.
+Eligible PostToolUse and supported PreToolUse review use the verified bundled Rust runtime in `auto` mode by default. Python remains the control plane and explicit differential-test oracle; it is never a production semantic fallback. There is no local switch that turns native authority off: `HOL_GUARD_NATIVE` accepts `auto` and `force`, and the retired `off` and `shadow` values are accepted for existing installs, warned about once and ignored. `HOL_GUARD_NATIVE_DIAGNOSTIC=1` on a declared non-production surface turns on bounded transport and timeout diagnostics; it starts no Python evaluator and compares no decisions. The differential-test oracle is a test fixture, not a runtime surface a flag can reach.
 
 ## Security invariants
 
