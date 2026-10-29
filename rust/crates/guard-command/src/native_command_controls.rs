@@ -467,7 +467,8 @@ impl CompiledNativeCommandControls {
         // ungranted rule.
         covered.extend(self.github_granted_segments(permission_observations));
         // A `cd` into the checkout a `git worktree add` of this command
-        // creates is covered when the Git and GitHub steps after it are.
+        // creates, and the `head`/`tail`/`wc` stages after it, are covered
+        // when the Git and GitHub steps after it are.
         covered.extend(crate::pretool::entered_checkouts(
             command,
             context,
