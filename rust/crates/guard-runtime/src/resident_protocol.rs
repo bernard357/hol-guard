@@ -111,6 +111,9 @@ pub(crate) fn capabilities() -> RuntimeCapabilitiesV1 {
         "hook-harness-response-v1".into(),
         // The edge checks its own result and receipt before it answers.
         "edge-self-check-v1".into(),
+        // The edge answers with the request id the envelope carried, on the
+        // result and on the receipt alike.
+        crate::edge::REQUEST_BINDING_FEATURE.into(),
         // The edge mediates a Pi or Oh My Pi `PostToolUse` against the managed
         // structured-output policy the envelope carries.
         "edge-structured-output-v1".into(),

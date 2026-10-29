@@ -23,6 +23,7 @@ use edge_identity::{
 };
 pub(crate) use edge_identity::{
     policy_generation_matches, review_anchor_digest, stable_policy_identity,
+    REQUEST_BINDING_FEATURE,
 };
 #[path = "edge_containment.rs"]
 mod edge_containment;
@@ -492,3 +493,7 @@ pub(crate) fn evaluate_envelope_with_snapshot(
 #[cfg(test)]
 #[path = "edge_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "edge_request_binding_tests.rs"]
+mod request_binding_tests;

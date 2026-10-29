@@ -7,6 +7,11 @@ pub(super) const MAX_HARNESS_BYTES: usize = 64;
 pub(super) const MAX_EVENT_BYTES: usize = 64;
 pub(super) const MAX_PATH_BYTES: usize = 32 * 1024;
 
+/// The edge echoes the envelope's request id verbatim on the result and on
+/// the receipt, so a caller that mints an id can tell this request's answer
+/// from another request's. A caller sees the guarantee through this feature.
+pub(crate) const REQUEST_BINDING_FEATURE: &str = "edge-request-binding-v1";
+
 pub(super) fn request_id_is_safe(value: &str) -> bool {
     let opaque_token = !value.is_empty()
         && value.len() <= 256

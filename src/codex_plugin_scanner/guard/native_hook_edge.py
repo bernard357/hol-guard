@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -50,6 +51,9 @@ _REVIEW_EVIDENCE_KEYS = frozenset({"policy_binding_valid", "binding", "token", "
 # response runs the call in the sink, `kept` that the receipt stands.
 CONTAINMENT_REWRITE_FEATURE = "edge-containment-rewrite-v1"
 _CONTAINMENT_REWRITES = frozenset({"routed", "kept"})
+# The resident echoes the envelope's request id verbatim and stamps the same
+# id on the receipt, so an id minted here names one request and no other.
+_REQUEST_BINDING_FEATURE = "edge-request-binding-v1"
 
 
 def _capture_deadline(deadline: float | None) -> tuple[float, int]:
@@ -282,6 +286,14 @@ def review_raw_hook_native(
         or not required_features <= set(status.capabilities.features)
     ):
         return record_native_hook_result("native_fail_safe", None)
+    # Bind this call's answer to this call. Without an id of its own a review
+    # can only trust the stream it borrowed to have carried one request at a
+    # time; with one, an answer naming a different request -- or naming none --
+    # is a desynchronised stream rather than this review's verdict. The id is
+    # transport identity: nothing here reads or recomputes the verdict.
+    bound_request_id = request_id
+    if bound_request_id is None and _REQUEST_BINDING_FEATURE in status.capabilities.features:
+        bound_request_id = uuid.uuid4().hex
     deadline_monotonic, deadline_budget_ms = _capture_deadline(deadline)
     if policy_snapshot is None:
         return record_native_hook_result("native_fail_safe", None)
@@ -312,7 +324,7 @@ def review_raw_hook_native(
         deadline_budget_ms=deadline_budget_ms,
         snapshot=snapshot,
         execution_context_supported="git-execution-context-v1" in status.capabilities.features,
-        request_id=request_id,
+        request_id=bound_request_id,
         recording_only=observe_mode,
         local_cli_rules=local_cli_rules,
         observe_local_cli=observe_local_cli and _LOCAL_CLI_OBSERVATION_FEATURE in status.capabilities.features,
@@ -350,7 +362,10 @@ def review_raw_hook_native(
         decoded = _decode_edge(response_payload)
     except (UnicodeDecodeError, json.JSONDecodeError):
         decoded = None
-    if decoded is None or (request_id is not None and decoded["receipt"]["request_id"] != request_id):
+    if decoded is None or (
+        bound_request_id is not None
+        and (decoded.get("request_id") != bound_request_id or decoded["receipt"]["request_id"] != bound_request_id)
+    ):
         native_record_resident_failure(
             status.identity.sha256,
             guard_home,
