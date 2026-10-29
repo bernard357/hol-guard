@@ -394,6 +394,7 @@ fn method_kind(method: &str) -> Option<Kind> {
         | "oldest_approval_request_created_at" => Kind::Snapshot,
         "workflow_capability_commit" => Kind::Write,
         "consume_native_review_approval"
+        | "settle_native_review_reuse"
         | "resolve_matching_approval_requests"
         | "resolve_approval_request"
         | "resolve_one_request_only"
@@ -585,6 +586,7 @@ fn dispatch(
         "list_cached_advisories" => advisory_cache::list(connection, args),
         "consume_native_review_approval" => native_review_consume::consume(connection, args),
         "matching_native_review_block" => native_review_consume::matching_block(connection, args),
+        "settle_native_review_reuse" => native_review_consume::settle(connection, args),
         "add_approval_request" => add_approval_request(connection, source, args),
         "queue_blocked_approvals" => queue_blocked_approvals(connection, source, args),
         "add_native_review_approval_request" => {

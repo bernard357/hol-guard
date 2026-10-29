@@ -472,7 +472,7 @@
         "allow",
         "block"
       ],
-      "note": "Blocks while the review is pending, and allows only on the two saved-approval matches native_review_matching_allow finds in the store."
+      "note": "Blocks while the review is pending, and allows only on the two saved-approval matches native_review_settle finds in the store."
     },
     {
       "file": "src/codex_plugin_scanner/guard/daemon/hook_native_saved_approval.py",

@@ -721,7 +721,7 @@ def test_saved_block_wins_over_a_pending_once_approval(
     assert token is not None
     _save(store, token, "block")
     monkeypatch.setattr(hook_native_review_approval, "native_review_claimed_allow", lambda *_a, **_k: True)
-    monkeypatch.setattr(hook_native_review_approval, "native_review_matching_allow", lambda *_a, **_k: True)
+    monkeypatch.setattr(hook_native_review_approval, "native_review_settle", lambda *_a, **_k: "allowed")
     result, receipt = _verdict()
     review = {
         "harness": _HARNESS,

@@ -25,9 +25,8 @@ from .hook_native_exact_action import review_evidence_parts
 from .hook_native_package_review import native_package_review_response
 from .hook_native_review_binding import (
     native_review_claimed_allow,
-    native_review_matching_allow,
-    native_review_matching_block,
     native_review_policy_binding,
+    native_review_settle,
 )
 from .hook_native_saved_approval import native_saved_decision_response
 from .hook_request_parsing import native_review_launch_target as _native_review_launch_target
@@ -110,7 +109,9 @@ def pause_native_pre_tool_for_approval(
         return saved
     if custom is not None:
         return custom
-    if native_review_matching_block(
+    # Without a claimed cloud allow to check in between, the block check and
+    # the approve-once spend run in one resident transaction.
+    reuse = native_review_settle(
         store,
         harness=harness,
         tool_name=tool_name,
@@ -118,7 +119,9 @@ def pause_native_pre_tool_for_approval(
         launch_target=launch_target,
         workspace=workspace,
         identity=identity,
-    ):
+        spend=claim_saved_approval and claimed_saved_allow_hash is None,
+    )
+    if reuse == "blocked":
         blocked = dict(native_result)
         blocked.update(
             decision="deny",
@@ -148,14 +151,20 @@ def pause_native_pre_tool_for_approval(
         allowed["minimum_action"] = "allow"
         allowed["policy_action"] = "allow"
         return render_accepted_allow(harness, allowed, guard_home=guard_home, deadline=deadline)
-    if claim_saved_approval and native_review_matching_allow(
-        store,
-        harness=harness,
-        tool_name=tool_name,
-        artifact_id=_native_review_artifact_id(harness, tool_name),
-        launch_target=launch_target,
-        workspace=workspace,
-        identity=identity,
+    if reuse == "allowed" or (
+        claim_saved_approval
+        and claimed_saved_allow_hash is not None
+        and native_review_settle(
+            store,
+            harness=harness,
+            tool_name=tool_name,
+            artifact_id=_native_review_artifact_id(harness, tool_name),
+            launch_target=launch_target,
+            workspace=workspace,
+            identity=identity,
+            spend=True,
+        )
+        == "allowed"
     ):
         allowed = dict(native_result)
         allowed["decision"] = "allow"
