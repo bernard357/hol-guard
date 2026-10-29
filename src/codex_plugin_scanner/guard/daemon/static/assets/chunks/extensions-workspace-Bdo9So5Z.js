@@ -4871,6 +4871,26 @@ function AddCustomExtensionWorkspace(props) {
     }
   );
 }
+function createListingSequence() {
+  let generation = 0;
+  let latest = Promise.resolve(true);
+  return {
+    /**
+     * Starts a request. `applied` says whether its result put a listing on
+     * screen; `listed` resolves once the newest request has settled, with
+     * whether that one did.
+     */
+    start(request2, applied) {
+      generation += 1;
+      const mine = generation;
+      const isCurrent = () => generation === mine;
+      const result = request2(isCurrent);
+      const listed = result.then((value) => isCurrent() ? applied(value) : latest);
+      latest = listed;
+      return { result, isCurrent, listed };
+    }
+  };
+}
 async function fetchLocalCliDiscover() {
   const response = await fetchLocalCliApi("/v1/local-clis/discover", {
     method: "POST",
@@ -4905,51 +4925,55 @@ function useLocalCliCatalog() {
   const [discoveryNotice, setDiscoveryNotice] = reactExports.useState(null);
   const [discovering, setDiscovering] = reactExports.useState(false);
   const [catalogReady, setCatalogReady] = reactExports.useState(false);
-  const loadGeneration = reactExports.useRef(0);
+  const sequence = reactExports.useRef(createListingSequence());
   const publicationPoll = reactExports.useRef({ revision: -1, attempts: 0 });
-  const load = reactExports.useCallback(async (preserveDiscoveryNotice = false) => {
-    const generation = loadGeneration.current + 1;
-    loadGeneration.current = generation;
-    try {
-      const next = await fetchLocalCliList();
-      if (loadGeneration.current !== generation) return true;
-      setData(next);
-      setError(null);
-      if (!preserveDiscoveryNotice) setDiscoveryNotice(null);
-      return true;
-    } catch (caught) {
-      if (loadGeneration.current !== generation) return true;
-      setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
-      return false;
-    }
-  }, []);
-  const discover = reactExports.useCallback(async () => {
-    const generation = loadGeneration.current + 1;
-    loadGeneration.current = generation;
-    setDiscovering(true);
-    setCatalogReady(false);
-    try {
-      const next = await fetchLocalCliDiscover();
-      if (loadGeneration.current !== generation) return "superseded";
-      setData(next);
-      setError(null);
-      setDiscoveryNotice(discoveryIssueMessage(next.discovery_issue));
-      return next.discovery_issue ? "partial" : "refreshed";
-    } catch (error2) {
+  const load = reactExports.useCallback((preserveDiscoveryNotice = false) => {
+    const { listed } = sequence.current.start(async (isCurrent) => {
       try {
         const next = await fetchLocalCliList();
-        if (loadGeneration.current !== generation) return "superseded";
+        if (!isCurrent()) return false;
         setData(next);
         setError(null);
-        setDiscoveryNotice(error2 instanceof Error ? error2.message : "Guard could not refresh custom extensions.");
-        return "partial";
+        if (!preserveDiscoveryNotice) setDiscoveryNotice(null);
+        return true;
       } catch (caught) {
-        if (loadGeneration.current !== generation) return "superseded";
+        if (!isCurrent()) return false;
         setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
-        return "partial";
+        return false;
       }
+    }, (applied) => applied);
+    return listed;
+  }, []);
+  const discover = reactExports.useCallback(async () => {
+    setDiscovering(true);
+    setCatalogReady(false);
+    const { result, isCurrent } = sequence.current.start(async (isCurrent2) => {
+      try {
+        const next = await fetchLocalCliDiscover();
+        if (!isCurrent2()) return { outcome: "superseded", applied: false };
+        setData(next);
+        setError(null);
+        setDiscoveryNotice(discoveryIssueMessage(next.discovery_issue));
+        return { outcome: next.discovery_issue ? "partial" : "refreshed", applied: true };
+      } catch (error2) {
+        try {
+          const next = await fetchLocalCliList();
+          if (!isCurrent2()) return { outcome: "superseded", applied: false };
+          setData(next);
+          setError(null);
+          setDiscoveryNotice(error2 instanceof Error ? error2.message : "Guard could not refresh custom extensions.");
+          return { outcome: "partial", applied: true };
+        } catch (caught) {
+          if (!isCurrent2()) return { outcome: "superseded", applied: false };
+          setError(caught instanceof Error ? caught.message : "Guard could not load custom extensions.");
+          return { outcome: "partial", applied: false };
+        }
+      }
+    }, ({ applied }) => applied);
+    try {
+      return (await result).outcome;
     } finally {
-      if (loadGeneration.current === generation) {
+      if (isCurrent()) {
         setDiscovering(false);
         setCatalogReady(true);
       }
