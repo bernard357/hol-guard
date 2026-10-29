@@ -94,6 +94,37 @@ fn oversized_request_is_rejected_before_parsing() {
     );
 }
 
+#[test]
+fn raw_observed_choices_have_their_own_budget() {
+    let head = json!({"schema": SCHEMA, "op": "compose", "configs": [base()]}).to_string();
+    let head = head.strip_suffix('}').unwrap();
+    // Configuration that fills its whole budget, then more observed allows
+    // than the composed policy can hold.
+    let padding = " ".repeat(CONFIG_BUDGET_BYTES as usize - head.len() - 1);
+    let observed: Map<String, Value> = (0..20_000)
+        .map(|index| (format!("codex:mcp__server__tool_{index}"), json!("allow")))
+        .collect();
+    let tail = json!({"mcp_tool_actions": observed}).to_string();
+    let request = format!("{head}{padding},\"observed\":{tail}}}");
+    assert!(request.len() as u64 > CONFIG_BUDGET_BYTES);
+    let response: Value =
+        serde_json::from_slice(&run_command(request.as_bytes()).unwrap()).unwrap();
+    assert_eq!(response["ok"], json!(true), "{response}");
+    assert_eq!(
+        response["policy"]["mcp_tool_actions"]
+            .as_object()
+            .unwrap()
+            .len(),
+        guard_policy_snapshot::POLICY_SNAPSHOT_MAX_MCP_TOOL_ACTIONS
+    );
+    // Without an overlay the configuration keeps its original limit.
+    let alone = format!("{head}{padding}  }}");
+    assert_eq!(
+        run_command(alone.as_bytes()).unwrap_err(),
+        "policy_effective_request_too_large"
+    );
+}
+
 fn compose_with(configured: Value, observed: Value) -> Value {
     let mut config = base();
     config["mcp_tool_actions"] = configured;

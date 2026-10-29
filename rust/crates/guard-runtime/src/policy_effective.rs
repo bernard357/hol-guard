@@ -17,7 +17,14 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 const SCHEMA: &str = "guard-effective-policy.v1";
-const MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
+/// Home and workspace configuration fields.
+const CONFIG_BUDGET_BYTES: u64 = 4 * 1024 * 1024;
+/// The stored MCP choices arrive raw and are bounded only after parsing. Each
+/// map reaches the publisher in one resident response, so the overlay gets
+/// room for two of them on top of the configuration budget instead of
+/// competing with it.
+const OBSERVED_BUDGET_BYTES: u64 = 2 * guard_contracts::MAX_NATIVE_RESPONSE_BYTES as u64;
+const MAX_REQUEST_BYTES: u64 = CONFIG_BUDGET_BYTES + OBSERVED_BUDGET_BYTES;
 const POLICY_INVALID: &str = "native_policy_snapshot_policy_invalid";
 const CATALOG_INVALID: &str = "native_provider_catalog_hash_invalid";
 const POSTURES: [&str; 3] = ["watch", "protected", "extra_careful"];
@@ -441,6 +448,10 @@ pub(crate) fn run_command(reader: impl Read) -> Result<Vec<u8>, String> {
 fn evaluate(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let request: Request =
         serde_json::from_slice(bytes).map_err(|_| "policy_effective_request_invalid".to_owned())?;
+    // Only an observed overlay may use the extra room.
+    if request.observed.is_none() && bytes.len() as u64 > CONFIG_BUDGET_BYTES {
+        return Err("policy_effective_request_too_large".to_owned());
+    }
     // A rejected policy is data, not a crash: the caller maps the reason.
     let response = match run(request) {
         Ok(policy) => json!({"ok": true, "policy": policy}),
