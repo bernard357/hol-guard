@@ -404,7 +404,7 @@ def _native_review_artifact_id(harness: str, tool_name: str) -> str:
     return f"{harness}:native-pretool:{tool_name}"
 
 
-def _claude_notice_key(store: object, deadline: float | None) -> dict[str, object] | None:
+def _claude_notice_key(store: object, deadline: float | None) -> dict[str, str] | None:
     """The integrity key a prompted Claude review's notice is signed with, or ``None``.
 
     The notice is best effort, as the retired Python notice was: without an

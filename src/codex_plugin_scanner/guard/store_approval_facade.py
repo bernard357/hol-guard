@@ -71,7 +71,7 @@ class StoreApprovalsMixin:
         *,
         extension_allow_hint: dict[str, object] | None = None,
         silent: bool = False,
-        claude_key: dict[str, object] | None = None,
+        claude_key: dict[str, str] | None = None,
         codex_live_wait: dict[str, object] | None = None,
     ) -> dict[str, object] | None:
         """Queue a paused native review and answer the row it was stored as.
