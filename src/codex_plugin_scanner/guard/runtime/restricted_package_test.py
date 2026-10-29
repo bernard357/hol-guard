@@ -42,10 +42,14 @@ def _leaves_the_workspace(argument: str) -> bool:
     yargs-parser takes a value joined with ``=``, attached straight to a short
     alias (``-c/etc/jest.config.js``), or spelled as inline JSON
     (``--config '{"setupFiles":["/tmp/x.js"]}'``), so the argument is screened
-    whole and in pieces rather than as one path.
+    whole and in pieces rather than as one path. Short aliases also group, and
+    yargs-parser hands the rest of a group to whichever letter a non-word
+    character follows, so ``-ic/etc/jest.config.js`` is ``--runInBand --config
+    /etc/jest.config.js``. Every tail of the group is screened, since which
+    letter takes the value is yargs-parser's to decide.
     """
-    attached = argument[2:] if argument.startswith("-") and not argument.startswith("--") else ""
-    pieces = [argument, attached]
+    group = argument[1:] if argument.startswith("-") and not argument.startswith("--") else ""
+    pieces = [argument, *(group[index:] for index in range(1, len(group)))]
     piece = ""
     for character in argument:
         if character.isspace() or character in _PIECE_DELIMITERS:

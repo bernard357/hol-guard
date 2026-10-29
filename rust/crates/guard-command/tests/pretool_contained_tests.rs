@@ -431,8 +431,10 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             // crawler; neither asks the run to keep watching.
             "npx jest -w 2 __tests__/one.test.ts",
             "npx jest --watchman",
-            // A short alias carrying a value inside the workspace still runs.
+            // A short alias carrying a value inside the workspace still runs,
+            // grouped with another short flag as well as on its own.
             "npx jest -cjest.config.ci.js",
+            "npx jest -icjest.config.ci.js",
             "npx jest -w2 __tests__/one.test.ts",
         ] {
             let result = classify(harness, command);
@@ -461,6 +463,12 @@ fn jest_runs_share_the_read_only_node_test_profile() {
             "npx jest -c/tmp/jest.outside.config.js",
             "npx jest -c../outside/jest.config.js",
             "npx jest -c~/elsewhere/jest.config.js",
+            // yargs-parser walks a short group a letter at a time and gives
+            // the rest of it to the letter a non-word character follows, so
+            // `-ic/tmp/...` is `--runInBand --config /tmp/...`.
+            "npx jest -ic/tmp/jest.outside.config.js",
+            "npx jest -ic../outside/jest.config.js",
+            "npx jest -ic~/elsewhere/jest.config.js",
             "npx jest --config '{\"setupFiles\":[\"/tmp/outside-setup.js\"]}'",
             "npx jest --moduleNameMapper '{\"app\":\"../outside/app.js\"}'",
             "jest --watchAll",

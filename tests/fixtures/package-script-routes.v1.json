@@ -542,6 +542,33 @@
       "reason": "native_package_test_readonly_containment_required"
     },
     {
+      "name": "jest-grouped-outside-config",
+      "scripts": {
+        "test": "jest -ic/tmp/jest.outside.config.js"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": null
+    },
+    {
+      "name": "jest-grouped-climbing-config",
+      "scripts": {
+        "test": "jest -ic../outside/jest.config.js"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": null
+    },
+    {
+      "name": "jest-grouped-inside-config",
+      "scripts": {
+        "test": "jest -icjest.config.ci.js"
+      },
+      "command": "pnpm test",
+      "entries": [],
+      "reason": "native_package_test_readonly_containment_required"
+    },
+    {
       "name": "pretest",
       "scripts": {
         "test": "node --test",

@@ -316,15 +316,20 @@ pub(crate) fn jest_reads_its_own_workspace(arguments: &[String]) -> bool {
 /// reads its options through yargs-parser, which takes a value joined with
 /// `=`, attached straight to a short alias (`-c/etc/jest.config.js`), or
 /// spelled as inline JSON (`--config '{"setupFiles":["/tmp/x.js"]}'`), so the
-/// argument is screened whole and in pieces rather than as one path.
+/// argument is screened whole and in pieces rather than as one path. Short
+/// aliases also group: yargs-parser walks the group a letter at a time and
+/// hands the rest of it to whichever letter a non-word character follows, so
+/// `-ic/etc/jest.config.js` is `--runInBand --config /etc/jest.config.js`.
+/// Which letter takes the value is yargs-parser's to decide, so every tail of
+/// the group is screened rather than only the one after the first letter.
 fn leaves_the_workspace(argument: &str) -> bool {
-    let attached = argument
+    let group = argument
         .strip_prefix('-')
         .filter(|rest| !rest.starts_with('-'))
-        .and_then(|rest| rest.get(1..))
         .unwrap_or_default();
-    [argument, attached]
-        .into_iter()
+    let tails = group.char_indices().skip(1).map(|(index, _)| &group[index..]);
+    std::iter::once(argument)
+        .chain(tails)
         .chain(argument.split(|character: char| {
             character.is_whitespace() || "\"',:;=[]{}".contains(character)
         }))
